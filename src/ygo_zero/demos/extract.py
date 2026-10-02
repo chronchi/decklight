@@ -427,10 +427,13 @@ def _resolve_nicknames(
     mapping = resolve_many_in_pool(names, need, pool, complete_fn=complete_fn)
     fixed = {n: c for n, c in mapping.items() if c is not None}
     global_fixed: dict[str, tuple[int, str]] = {}
+    # Tiebreak context for ambiguous nicknames: the guide's resolved names
+    # plus the pool deck's names (the pool already unions both).
+    context_names = names.candidate_names(pool)
     for n in need:
         if n in fixed:
             continue
-        hit = resolve_global_unique(names, n)
+        hit = resolve_global_unique(names, n, context_names)
         if hit is not None:
             global_fixed[n] = hit
     if global_fixed:

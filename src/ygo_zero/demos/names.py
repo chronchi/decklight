@@ -17,7 +17,7 @@ import json
 import logging
 import re
 import sqlite3
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from functools import cache
 from pathlib import Path
 
@@ -200,9 +200,13 @@ def resolve_many_in_pool(
 # nickname resolves to card X iff every one of its word tokens matches a token
 # of X's name (exact, or 1 edit apart for tokens of length >= 4, so the guide's
 # "Ecclessia" still matches "ecclesia") and exactly one distinct card *name*
-# matches. Ambiguous nicknames stay unresolved — never guess. Pure function of
-# its arguments (the generic vocabulary cache is thread-safe); safe to call
-# from extract.py's section thread pool.
+# matches. Ambiguous nicknames stay unresolved unless `context_names` (full
+# card names resolved for the same guide plus the pool deck's names) breaks
+# the tie: each candidate scores one point per non-nickname token found in the
+# context's archetype tokens, and only a single top scorer with score > 0
+# resolves. Never guesses otherwise. Pure function of its arguments (the
+# generic/archetype caches are thread-safe); safe to call from extract.py's
+# section thread pool.
 
 
 def _word_tokens(name: str) -> list[str]:
@@ -259,13 +263,18 @@ def is_generic_nickname(name: str) -> bool:
     return bool(toks) and all(t in _generic_vocab() for t in toks)
 
 
-def resolve_global_unique(names: CardNames, nickname: str) -> tuple[int, str] | None:
+def resolve_global_unique(
+    names: CardNames,
+    nickname: str,
+    context_names: Iterable[str] | None = None,
+) -> tuple[int, str] | None:
     """Map `nickname` to (code, full name) via a unique token-subset match over the DB.
 
     Every nickname token must occur in the card name (exact, or 1 edit apart when
     both tokens have length >= 4 so short tokens like "n"/"tss" stay exact-only),
     and exactly one distinct card name may match (alt-print codes of one name
-    count as one). Returns None for generic-only nicknames and ambiguous ones.
+    count as one). Returns None for generic-only nicknames and ambiguous ones,
+    unless `context_names` breaks the tie (see below).
     """
     toks = _word_tokens(nickname)
     if not toks or is_generic_nickname(nickname):
@@ -282,7 +291,79 @@ def resolve_global_unique(names: CardNames, nickname: str) -> tuple[int, str] | 
         if ok:
             matched.setdefault(full, []).append(code)
     if len(matched) != 1:
-        return None
-    full = next(iter(matched))
+        if len(matched) > 1 and context_names is not None:
+            winner = _break_tie(matched, toks, context_names)
+            if winner is None:
+                return None
+            full = winner
+        else:
+            return None
+    else:
+        full = next(iter(matched))
     best = sorted(matched[full], key=lambda c: (names.alias.get(c, 0) != 0, c))
     return best[0], full
+
+
+@cache
+def _archetype_token_seqs() -> tuple[tuple[str, ...], ...]:
+    """Tokenized archetype phrases from generic.py (thread-safe via cache)."""
+    from ygo_zero.demos import generic as _g
+
+    return tuple(tuple(_word_tokens(a)) for a in _g.archetypes() if _word_tokens(a))
+
+
+def _contains_seq(haystack: list[str], needle: tuple[str, ...]) -> bool:
+    n = len(needle)
+    if n == 0 or n > len(haystack):
+        return False
+    if n == 1:
+        return needle[0] in haystack
+    return any(tuple(haystack[i : i + n]) == needle for i in range(len(haystack) - n + 1))
+
+
+def _context_archetype_tokens(context_names: Iterable[str]) -> set[str]:
+    """Word tokens of the archetype phrases found in `context_names`.
+
+    Each context name contributes the tokens of every archetype phrase it
+    contains (contiguous token-subsequence match, so punctuation like
+    "Koa'ki Meiru" still matches). Pure function of its arguments.
+    """
+    out: set[str] = set()
+    seqs = _archetype_token_seqs()
+    for ctx in context_names:
+        ctoks = _word_tokens(ctx)
+        if not ctoks:
+            continue
+        for seq in seqs:
+            if _contains_seq(ctoks, seq):
+                out.update(seq)
+    return out
+
+
+def _token_matches(nick_tok: str, cand_tok: str) -> bool:
+    return nick_tok == cand_tok or (
+        len(nick_tok) >= 4 and len(cand_tok) >= 4 and _edits_within_one(nick_tok, cand_tok)
+    )
+
+
+def _break_tie(
+    matched: dict[str, list[int]], nick_toks: list[str], context_names: Iterable[str]
+) -> str | None:
+    """Resolve an ambiguous nickname via guide context; None when still tied.
+
+    Each candidate scores one point per non-nickname token found in the
+    context's archetype tokens. Returns the single top scorer only when its
+    score is > 0 and strictly greater than the runner-up. Deterministic:
+    ties are detected on scores, never on iteration order.
+    """
+    ctx_tokens = _context_archetype_tokens(context_names)
+    if not ctx_tokens:
+        return None
+    scored: list[tuple[int, str]] = []
+    for full in matched:
+        rest = [u for u in _word_tokens(full) if not any(_token_matches(t, u) for t in nick_toks)]
+        scored.append((sum(1 for u in rest if u in ctx_tokens), full))
+    scored.sort(key=lambda s: (-s[0], s[1]))
+    if scored[0][0] > 0 and scored[0][0] > scored[1][0]:
+        return scored[0][1]
+    return None
