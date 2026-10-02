@@ -17,7 +17,7 @@ from itertools import pairwise
 from pathlib import Path
 
 from ygo_zero.demos import llm as _llm
-from ygo_zero.demos.names import CardNames, resolve_many_in_pool
+from ygo_zero.demos.names import CardNames, resolve_global_unique, resolve_many_in_pool
 from ygo_zero.demos.schema import ACTIONS, ComboLine
 
 logger = logging.getLogger(__name__)
@@ -358,6 +358,13 @@ def extract_lines(
                     line.going = "second"
                 elif "going first" in t:
                     line.going = "first"
+            if not line.steps:
+                # The verifier rejects 0-step lines as vacuous; drop them here.
+                # idx is still consumed so surviving lines keep stable ids (with
+                # gaps where dropped lines were).
+                logger.info("extract_lines: dropping 0-step line %r from %s", line.title, guide_path.name)
+                idx += 1
+                continue
             _fill_codes(line, names)
             if decklist_codes is not None:
                 outside = sorted(
@@ -383,12 +390,20 @@ def _resolve_nicknames(
     names: CardNames,
     complete_fn: Callable[..., str],
 ) -> None:
-    """One batched LLM call mapping a guide's unresolved nicknames into the pool.
+    """One batched LLM call mapping a guide's unresolved nicknames into the pool,
+    then a deterministic whole-DB fallback for what the pool cannot map.
 
     Pool = the deck's decklist codes ∪ the guide's own decklist (if any) ∪
     the guide's already-resolved codes. Only exact candidate strings from the
     LLM are accepted (`resolve_many_in_pool` enforces that). Patched codes
     are removed from each line's `unresolved_names`.
+
+    Fallback (`resolve_global_unique`, no LLM calls): a still-unresolved
+    nickname that uniquely matches one card name in the whole DB is patched
+    the same way, and — because it is by definition outside the pool deck —
+    appended to the line's `requires` (with a `global_fallback:` note tag) so
+    the verifier's augmented-deck pass adds it to the deck. Ambiguous or
+    generic nicknames stay unresolved.
     """
     need = sorted({n for line in lines for n in line.unresolved_names if n})
     if not need:
@@ -411,11 +426,36 @@ def _resolve_nicknames(
         return
     mapping = resolve_many_in_pool(names, need, pool, complete_fn=complete_fn)
     fixed = {n: c for n, c in mapping.items() if c is not None}
-    if not fixed:
+    global_fixed: dict[str, tuple[int, str]] = {}
+    for n in need:
+        if n in fixed:
+            continue
+        hit = resolve_global_unique(names, n)
+        if hit is not None:
+            global_fixed[n] = hit
+    if global_fixed:
+        logger.info(
+            "extract_lines: global fallback resolved %d nicknames: %s",
+            len(global_fixed),
+            sorted(global_fixed),
+        )
+    if not fixed and not global_fixed:
         return
+    all_fixed = {**fixed, **{n: c for n, (c, _) in global_fixed.items()}}
     for line in lines:
-        _patch_codes(line, fixed)
-        line.unresolved_names = [n for n in line.unresolved_names if n not in fixed]
+        had = set(line.unresolved_names)
+        _patch_codes(line, all_fixed)
+        line.unresolved_names = [n for n in line.unresolved_names if n not in all_fixed]
+        for n in sorted(had):
+            if n not in global_fixed:
+                continue
+            code, full = global_fixed[n]
+            tag = f"global_fallback: {n}->{full}"
+            line.notes = f"{line.notes} | {tag}" if line.notes else tag
+            if code in line.hand_codes or code in line.requires_codes:
+                continue
+            line.requires.append(full)
+            line.requires_codes.append(code)
 
 
 def _patch_codes(line: ComboLine, fixed: dict[str, int]) -> None:

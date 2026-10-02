@@ -18,6 +18,7 @@ import logging
 import re
 import sqlite3
 from collections.abc import Callable
+from functools import cache
 from pathlib import Path
 
 from ygo_zero.engine.resources import default_cdbs
@@ -191,3 +192,97 @@ def resolve_many_in_pool(
             code = name_to_code.get(full)
             result[nick] = code if code in pool_codes else None
     return result
+
+
+# --- Deterministic global fallback (no LLM) ----------------------------------
+# Nicknames the pool cannot map (e.g. Dogmatika-engine cards named in a Mikanko
+# guide but absent from the pool deck): match against the whole card DB. A
+# nickname resolves to card X iff every one of its word tokens matches a token
+# of X's name (exact, or 1 edit apart for tokens of length >= 4, so the guide's
+# "Ecclessia" still matches "ecclesia") and exactly one distinct card *name*
+# matches. Ambiguous nicknames stay unresolved — never guess. Pure function of
+# its arguments (the generic vocabulary cache is thread-safe); safe to call
+# from extract.py's section thread pool.
+
+
+def _word_tokens(name: str) -> list[str]:
+    """Whitespace-agnostic word tokens (split before normalize strips separators)."""
+    n = name.lower()
+    n = n.replace("’", "'").replace("‘", "'").replace("–", "-").replace("—", "-")
+    return re.findall(r"[a-z0-9]+", n)
+
+
+def _edits_within_one(a: str, b: str) -> bool:
+    """True iff Levenshtein(a, b) <= 1 (early exit; tokens are short)."""
+    if a == b:
+        return True
+    la, lb = len(a), len(b)
+    if abs(la - lb) > 1:
+        return False
+    if la > lb:
+        a, b = b, a
+        la, lb = lb, la
+    # now la <= lb <= la + 1
+    i = j = edits = 0
+    while i < la and j < lb:
+        if a[i] == b[j]:
+            i += 1
+            j += 1
+        else:
+            edits += 1
+            if edits > 1:
+                return False
+            if la == lb:
+                i += 1
+                j += 1  # substitution
+            else:
+                j += 1  # insertion in b
+    return edits + (la - i) + (lb - j) <= 1
+
+
+@cache
+def _generic_vocab() -> frozenset[str]:
+    """Generic words (attributes, type words, archetype words) from generic.py's tables."""
+    from ygo_zero.demos import generic as _g
+
+    words: set[str] = set(_g._ATTRS)
+    for pat, _ in _g._TYPE_WORDS:
+        words.update(re.findall(r"[a-z]+", pat))
+    for arch in _g.archetypes():
+        words.update(re.findall(r"[a-z0-9]+", arch))
+    return frozenset(words)
+
+
+def is_generic_nickname(name: str) -> bool:
+    """True when `name` consists only of generic words ("Mikanko", "Light", ...)."""
+    toks = _word_tokens(name)
+    return bool(toks) and all(t in _generic_vocab() for t in toks)
+
+
+def resolve_global_unique(names: CardNames, nickname: str) -> tuple[int, str] | None:
+    """Map `nickname` to (code, full name) via a unique token-subset match over the DB.
+
+    Every nickname token must occur in the card name (exact, or 1 edit apart when
+    both tokens have length >= 4 so short tokens like "n"/"tss" stay exact-only),
+    and exactly one distinct card name may match (alt-print codes of one name
+    count as one). Returns None for generic-only nicknames and ambiguous ones.
+    """
+    toks = _word_tokens(nickname)
+    if not toks or is_generic_nickname(nickname):
+        return None
+    matched: dict[str, list[int]] = {}
+    for code, full in names.names.items():
+        ctoks = _word_tokens(full)
+        ok = True
+        for t in toks:
+            if any(t == u or (len(t) >= 4 and len(u) >= 4 and _edits_within_one(t, u)) for u in ctoks):
+                continue
+            ok = False
+            break
+        if ok:
+            matched.setdefault(full, []).append(code)
+    if len(matched) != 1:
+        return None
+    full = next(iter(matched))
+    best = sorted(matched[full], key=lambda c: (names.alias.get(c, 0) != 0, c))
+    return best[0], full

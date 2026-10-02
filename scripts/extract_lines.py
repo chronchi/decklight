@@ -67,6 +67,8 @@ def summarize(deck: str, per_source: dict[str, list]) -> None:
             unresolved.update(line.unresolved_names)
     pct = 100 * resolved / grand_names if grand_names else 0.0
     print(f"  names: {resolved}/{grand_names} resolved ({pct:.1f}%)")
+    fallback = sum(line.notes.count("global_fallback:") for v in per_source.values() for line in v)
+    print(f"  resolved via global fallback: {fallback}")
     print("  top unresolved:")
     for name, n in unresolved.most_common(20):
         print(f"    {n}x {name}")
