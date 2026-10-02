@@ -6,9 +6,29 @@
 #include <sstream>
 #include <stdexcept>
 
+#include "lauxlib.h"
+#include "lua.h"
 #include "ygoenv.h"
 
 namespace ygo {
+
+// Precompile a script with the core's own Lua build (same liblua.a, so the bytecode format matches) and keep
+// debug info, so errors still name the file and line. The core loads it with luaL_loadbuffer (mode "bt").
+// Parsing ~700 KB of system/proc scripts was most of the cost of creating a duel (NOTEBOOK 2026-10-01).
+static std::string compile_lua(const std::string& src, const std::string& name) {
+  lua_State* L = luaL_newstate();
+  std::string out;
+  if (luaL_loadbuffer(L, src.data(), src.size(), name.c_str()) == LUA_OK) {
+    lua_dump(
+        L, [](lua_State*, const void* p, size_t n, void* ud) {
+          static_cast<std::string*>(ud)->append(static_cast<const char*>(p), n);
+          return 0;
+        },
+        &out, 0);
+  }
+  lua_close(L);
+  return out.empty() ? src : out;  // on a syntax error keep the source: the core reports it as usual
+}
 
 void Engine::add_card(CardData cd) {
   if (cd.setcodes.empty() || cd.setcodes.back() != 0) cd.setcodes.push_back(0);
@@ -33,9 +53,10 @@ const std::string* Engine::script(const std::string& name) {
   if (!f) return nullptr;
   std::ostringstream ss;
   ss << f.rdbuf();
+  std::string code = precompile ? compile_lua(ss.str(), name) : ss.str();
   std::unique_lock lock(mu_);
   auto& slot = cache_[name];
-  if (!slot) slot = std::make_unique<std::string>(ss.str());
+  if (!slot) slot = std::make_unique<std::string>(std::move(code));
   return slot.get();
 }
 
@@ -112,6 +133,19 @@ Duel::Duel(Engine& engine, const DuelConfig& config) : engine(engine), config(co
   add_cards(0, LOCATION_EXTRA, config.extra0);
   add_cards(1, LOCATION_DECK, config.main1);
   add_cards(1, LOCATION_EXTRA, config.extra1);
+  for (const auto& pl : config.setup) {
+    uint32_t pos;
+    switch (pl.location) {
+      case LOCATION_HAND: pos = POS_FACEDOWN; break;
+      case LOCATION_MZONE: pos = POS_FACEUP_ATTACK; break;
+      case LOCATION_SZONE: pos = POS_FACEDOWN; break;
+      case LOCATION_GRAVE: case LOCATION_REMOVED: pos = POS_FACEUP; break;
+      default: throw std::invalid_argument("cannot place a card in location " + std::to_string(pl.location));
+    }
+    if (pl.position) pos = pl.position;
+    OCG_NewCardInfo info{pl.team, 0, pl.code, pl.team, pl.location, pl.sequence, pos};
+    OCG_DuelNewCard(handle_, &info);
+  }
   OCG_StartDuel(handle_);
 }
 

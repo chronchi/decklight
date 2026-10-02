@@ -14,7 +14,7 @@ import ctypes
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Protocol, Self
+from typing import NamedTuple, Protocol, Self
 
 from ygo_zero.engine import constants as C
 from ygo_zero.engine import messages as M
@@ -31,6 +31,25 @@ class DeckLike(Protocol):
     extra: Sequence[int]
 
 
+class Placement(NamedTuple):
+    """A card put in place before the duel starts (puzzle start). `team` owns and controls it."""
+
+    team: int
+    code: int
+    location: int  # one LOCATION_* (not DECK/EXTRA: those come from the decks)
+    sequence: int = 0  # zone for MZONE/SZONE; list position elsewhere (appended in order)
+    position: int = 0  # 0 = the default for the location (DEFAULT_POSITION)
+
+
+DEFAULT_POSITION = {
+    C.LOCATION_HAND: C.POS_FACEDOWN,
+    C.LOCATION_MZONE: C.POS_FACEUP_ATTACK,
+    C.LOCATION_SZONE: C.POS_FACEDOWN,
+    C.LOCATION_GRAVE: C.POS_FACEUP,
+    C.LOCATION_REMOVED: C.POS_FACEUP,
+}
+
+
 @dataclass(frozen=True)
 class DuelConfig:
     deck0: DeckLike  # team 0 moves first
@@ -40,6 +59,9 @@ class DuelConfig:
     lp: int = 8000
     hand: int = 5
     draw: int = 1
+    # Puzzle start: cards placed before the start (use hand=0 to skip the opening draw). The deck is
+    # still shuffled by the seed, so a puzzle's hidden information is sampled by varying the seed.
+    setup: tuple[Placement, ...] = ()
 
 
 class InvalidResponse(RuntimeError):
@@ -172,6 +194,8 @@ class Duel:
         for team, deck in ((0, config.deck0), (1, config.deck1)):
             self._add_cards(team, C.LOCATION_DECK, deck.main)
             self._add_cards(team, C.LOCATION_EXTRA, deck.extra)
+        for pl in config.setup:
+            self._place(pl)
         lib.OCG_StartDuel(self._handle)
 
     # --- callbacks / setup ---
@@ -195,6 +219,15 @@ class Duel:
         for seq, code in enumerate(codes):
             info.code, info.seq = code, seq
             self.engine.lib.OCG_DuelNewCard(self._handle, ctypes.byref(info))
+
+    def _place(self, pl: Placement) -> None:
+        if pl.location not in DEFAULT_POSITION:
+            raise ValueError(f"cannot place a card in location {pl.location:#x}")
+        info = api.OCG_NewCardInfo()
+        info.team = info.con = pl.team
+        info.duelist, info.code, info.loc, info.seq = 0, pl.code, pl.location, pl.sequence
+        info.pos = pl.position or DEFAULT_POSITION[pl.location]
+        self.engine.lib.OCG_DuelNewCard(self._handle, ctypes.byref(info))
 
     # --- stepping ---
 

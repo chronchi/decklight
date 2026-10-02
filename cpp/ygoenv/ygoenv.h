@@ -44,6 +44,7 @@ class Engine {
   std::unordered_map<uint32_t, CardData> cards;
   std::vector<uint32_t> sorted_codes;  // for the ANNOUNCE_CARD fallback
   std::unordered_map<std::string, std::string> script_paths;
+  bool precompile = true;  // cache scripts as Lua bytecode
 
   void add_card(CardData cd);
   void finalize();  // call once after all add_card
@@ -55,11 +56,17 @@ class Engine {
   std::unordered_map<std::string, std::unique_ptr<std::string>> cache_;
 };
 
+struct Placement {  // puzzle start, see duel.py Placement
+  uint8_t team;
+  uint32_t code, location, sequence, position;
+};
+
 struct DuelConfig {
   std::vector<uint32_t> main0, extra0, main1, extra1;
   uint64_t seed = 0;
   uint64_t flags = DUEL_MODE_MR5 | DUEL_TCG_SEGOC_NONPUBLIC;
   uint32_t lp = 8000, hand = 5, draw = 1;
+  std::vector<Placement> setup;
 };
 
 struct CardState {

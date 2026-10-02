@@ -60,16 +60,19 @@ PYBIND11_MODULE(_ygoenv, m) {
            })
       .def("set_scripts", [](Engine& e, std::unordered_map<std::string, std::string> paths) { e.script_paths = std::move(paths); })
       .def("finalize", &Engine::finalize)
+      .def_readwrite("precompile", &Engine::precompile)
       .def_property_readonly("num_cards", [](Engine& e) { return e.cards.size(); });
 
   py::class_<DuelConfig>(m, "DuelConfig")
       .def(py::init([](std::vector<uint32_t> main0, std::vector<uint32_t> extra0, std::vector<uint32_t> main1,
                        std::vector<uint32_t> extra1, uint64_t seed, uint64_t flags, uint32_t lp, uint32_t hand,
-                       uint32_t draw) {
-             return DuelConfig{std::move(main0), std::move(extra0), std::move(main1), std::move(extra1), seed, flags, lp, hand, draw};
+                       uint32_t draw, std::vector<std::tuple<uint8_t, uint32_t, uint32_t, uint32_t, uint32_t>> setup) {
+             DuelConfig c{std::move(main0), std::move(extra0), std::move(main1), std::move(extra1), seed, flags, lp, hand, draw, {}};
+             for (auto& [team, code, loc, seq, pos] : setup) c.setup.push_back({team, code, loc, seq, pos});
+             return c;
            }),
            py::arg("main0"), py::arg("extra0"), py::arg("main1"), py::arg("extra1"), py::arg("seed"), py::arg("flags"),
-           py::arg("lp"), py::arg("hand"), py::arg("draw"));
+           py::arg("lp"), py::arg("hand"), py::arg("draw"), py::arg("setup") = std::vector<std::tuple<uint8_t, uint32_t, uint32_t, uint32_t, uint32_t>>{});
 
   py::class_<Env>(m, "Env")
       .def(py::init<Engine&, DuelConfig, bool>(), py::keep_alive<1, 2>(), py::arg("engine"), py::arg("config"),
