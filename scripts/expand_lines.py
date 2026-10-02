@@ -12,16 +12,49 @@ turn 1 other seeds alone would not (the own deck is an unordered multiset in the
 import argparse
 import dataclasses
 import json
+import os
 import random
 import time
 from collections import Counter
+from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 
 from ygo_zero.decks import Deck
 from ygo_zero.demos.dataset import load_records
 from ygo_zero.demos.schema import ComboLine
-from ygo_zero.demos.verify import verify_line
+from ygo_zero.demos.verify import Verdict, verify_line
 from ygo_zero.engine.duel import Engine
+
+
+def default_jobs() -> int:
+    """Default worker count: up to 4 procs (verify is CPU-bound; more thrash)."""
+    return max(1, min(4, os.cpu_count() or 1))
+
+
+_WORKER_ENGINE: Engine | None = None
+
+
+def _worker_init() -> None:
+    """Build one Engine per worker process (Engine is not picklable/thread-safe)."""
+    global _WORKER_ENGINE
+    _WORKER_ENGINE = Engine()
+
+
+def _expand_job(job: tuple) -> Verdict:
+    """Picklable work item: (var_json, main, extra, seed, budget) -> Verdict."""
+    var_json, main, extra, seed, budget = job
+    engine = _WORKER_ENGINE or Engine()
+    var = ComboLine.from_json(var_json)
+    deck = Deck(tuple(main), tuple(extra))
+    return verify_line(engine, var, deck, seed=seed, budget=budget)
+
+
+def map_ordered(fn, items: list, jobs: int, initializer=None):
+    """Run fn over items, returning results in input order (identical to serial)."""
+    if jobs <= 1 or not items:
+        return [fn(x) for x in items]
+    with ProcessPoolExecutor(max_workers=jobs, initializer=initializer) as ex:
+        return list(ex.map(fn, items))
 
 
 def main() -> None:
@@ -33,6 +66,12 @@ def main() -> None:
     ap.add_argument("--budget", type=int, default=3000)
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--out", type=Path, default=Path("data/demos/expanded"))
+    ap.add_argument(
+        "--jobs",
+        type=int,
+        default=default_jobs(),
+        help="worker processes over hand variants (default: %(default)s)",
+    )
     args = ap.parse_args()
 
     engine = Engine()
@@ -61,7 +100,8 @@ def main() -> None:
         my_main, my_extra = c[f"deck{me}_main"], c[f"deck{me}_extra"]
         full_main = list(my_main) + hand  # the record's deck excludes the placed hand
         deck = Deck(tuple(full_main), tuple(my_extra))
-        out_records = []
+        # Deal all variants serially (rng order identical to --jobs 1), then verify.
+        variants: list = []
         for v in range(args.variants):
             pool = list(my_main)
             rng.shuffle(pool)
@@ -69,7 +109,19 @@ def main() -> None:
             var = dataclasses.replace(
                 line, id=f"{base_id}#h{v}", hand=line.hand + [str(x) for x in extra], hand_codes=hand + extra
             )
-            verdict = verify_line(engine, var, deck, seed=c["seed"], budget=args.budget)
+            variants.append((var, extra))
+        if args.jobs <= 1:
+            verdicts = [
+                verify_line(engine, var, deck, seed=c["seed"], budget=args.budget) for var, _ in variants
+            ]
+        else:
+            items = [
+                (var.to_json(), tuple(full_main), tuple(my_extra), c["seed"], args.budget)
+                for var, _ in variants
+            ]
+            verdicts = map_ordered(_expand_job, items, args.jobs, initializer=_worker_init)
+        out_records = []
+        for (var, extra), verdict in zip(variants, verdicts):
             kept[verdict.reason] += 1
             if not verdict.ok:
                 continue

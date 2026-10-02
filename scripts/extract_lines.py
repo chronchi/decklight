@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import glob
 import json
+import threading
 from collections import Counter
 from pathlib import Path
 
@@ -99,10 +100,13 @@ def main() -> None:
     print(f"decklist {args.ydk}: {len(decklist)} codes")
 
     calls = [0]
+    calls_lock = threading.Lock()  # extract.py issues section calls from a thread pool
 
     def counting_complete(prompt: str, **kw) -> str:
-        calls[0] += 1
-        if calls[0] > args.max_calls:
+        with calls_lock:
+            calls[0] += 1
+            over = calls[0] > args.max_calls
+        if over:
             raise RuntimeError(f"LLM call budget ({args.max_calls}) exceeded")
         return _llm.complete(prompt, **kw)
 

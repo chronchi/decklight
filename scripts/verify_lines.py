@@ -12,18 +12,51 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from collections import Counter
+from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 
 from ygo_zero.decks import Deck, load_ydk
 from ygo_zero.demos.schema import ComboLine
-from ygo_zero.demos.verify import Verdict, make_config, verify_line
+from ygo_zero.demos.verify import Verdict, going_second, make_config, verify_line
 from ygo_zero.engine import constants as C
 from ygo_zero.engine.duel import Engine
 
 ROOT = Path(__file__).resolve().parents[1]
 
 _EXTRA = C.TYPE_FUSION | C.TYPE_SYNCHRO | C.TYPE_XYZ | C.TYPE_LINK
+
+
+def default_jobs() -> int:
+    """Default worker count: up to 4 procs (verify is CPU-bound; more thrash)."""
+    return max(1, min(4, os.cpu_count() or 1))
+
+
+_WORKER_ENGINE: Engine | None = None
+
+
+def _worker_init() -> None:
+    """Build one Engine per worker process (Engine is not picklable/thread-safe)."""
+    global _WORKER_ENGINE
+    _WORKER_ENGINE = Engine()
+
+
+def _verify_job(job: tuple) -> Verdict:
+    """Picklable work item: (line_json, main, extra, side, name, seed, budget) -> Verdict."""
+    line_json, main, extra, side, name, seed, budget = job
+    engine = _WORKER_ENGINE or Engine()
+    line = ComboLine.from_json(line_json)
+    deck = Deck(tuple(main), tuple(extra), tuple(side), name)
+    return verify_line(engine, line, deck, seed=seed, budget=budget)
+
+
+def map_ordered(fn, items: list, jobs: int, initializer=None):
+    """Run fn over items, returning results in input order (identical to serial)."""
+    if jobs <= 1 or not items:
+        return [fn(x) for x in items]
+    with ProcessPoolExecutor(max_workers=jobs, initializer=initializer) as ex:
+        return list(ex.map(fn, items))
 
 
 def default_pool_ydk(deck: str) -> Path | None:
@@ -62,15 +95,34 @@ def verify_all(
     tag: str,
     deck_source: str = "",
     budget_long: int | None = None,
+    jobs: int = 1,
 ) -> tuple[list[dict], dict[str, Verdict]]:
     """Verify every line under every seed; print per-line results; return ok records + reps.
 
     Lines with more than 8 steps use budget_long when given (long lines need more search nodes).
+    With jobs > 1, (line, seed) pairs verify in worker processes (one Engine each);
+    results are regrouped in serial order so output is identical to jobs=1.
     """
-    records, reps = [], {}
+    main_t, extra_t, side_t = tuple(deck.main), tuple(deck.extra), tuple(deck.side)
+    items: list[tuple] = []
     for line in lines:
         b = budget_long if budget_long and len(line.steps) > 8 else budget
-        verdicts = [(s, verify_line(engine, line, deck, seed=s, budget=b)) for s in seeds]
+        for s in seeds:
+            items.append((line.to_json(), main_t, extra_t, side_t, deck.name, s, b))
+    if jobs <= 1:
+        # serial path reuses the caller's engine directly (same order as the job list)
+        flat = []
+        for line in lines:
+            b = budget_long if budget_long and len(line.steps) > 8 else budget
+            for s in seeds:
+                flat.append(verify_line(engine, line, deck, seed=s, budget=b))
+    else:
+        flat = map_ordered(_verify_job, items, jobs, initializer=_worker_init)
+    records, reps = [], {}
+    pos = 0
+    for line in lines:
+        verdicts = [(seeds[i], flat[pos + i]) for i in range(len(seeds))]
+        pos += len(seeds)
         ok = [(s, v) for s, v in verdicts if v.ok]
         rep = ok[0][1] if ok else verdicts[0][1]
         rep.deck_source = deck_source or tag.lstrip("+") or "fixture"
@@ -88,6 +140,7 @@ def verify_all(
             records.append(
                 {
                     "line_id": line.id,
+                    "me": 1 if going_second(line) else 0,
                     "source_url": line.source_url,
                     "deck": line.deck + tag,
                     "deck_source": v0.deck_source,
@@ -152,6 +205,12 @@ def main() -> None:
         help="per-guide decklists dir (<dir>/<deck>/<source>.json); each line is verified "
         "against its own source's decklist when present, else the --ydk fixture",
     )
+    ap.add_argument(
+        "--jobs",
+        type=int,
+        default=default_jobs(),
+        help="worker processes over (line, seed) pairs (default: %(default)s)",
+    )
     args = ap.parse_args()
 
     engine = Engine()
@@ -196,7 +255,9 @@ def main() -> None:
         gd, glines = groups[key]
         tag = "" if key == "fixture" else "+guide"
         print(f"-- deck group {key} ({len(glines)} lines) --")
-        recs, greps = verify_all(engine, gd, glines, args.seeds, args.budget, tag, key, args.budget_long)
+        recs, greps = verify_all(
+            engine, gd, glines, args.seeds, args.budget, tag, key, args.budget_long, args.jobs
+        )
         records += recs
         reps.update(greps)
         for line in glines:
@@ -221,6 +282,7 @@ def main() -> None:
                 tag,
                 base_key + "+augmented",
                 args.budget_long,
+                args.jobs,
             )
             aug_records += recs
             reps[line.id + "+augmented"] = areps[line.id]

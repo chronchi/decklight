@@ -12,6 +12,7 @@ import json
 import logging
 import re
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 from itertools import pairwise
 from pathlib import Path
 
@@ -20,6 +21,43 @@ from ygo_zero.demos.names import CardNames, resolve_many_in_pool
 from ygo_zero.demos.schema import ACTIONS, ComboLine
 
 logger = logging.getLogger(__name__)
+
+# Independent per-section LLM calls for one guide run concurrently.
+EXTRACT_WORKERS = 6
+
+
+def _complete_sections(
+    complete_fn: Callable[..., str],
+    prompts: list[str],
+    max_workers: int = EXTRACT_WORKERS,
+) -> list[str | BaseException]:
+    """Complete section prompts concurrently, results in input (serial) order.
+
+    The full prompt list is built before anything is submitted, so a caller
+    that budgets calls (scripts/extract_lines.py --max-calls) sees exactly
+    the same call count as the serial version. Per-section failures are
+    returned in place so one bad section never kills the file.
+    """
+    if complete_fn is _llm.complete:
+        return _llm.complete_many(prompts, system=SYSTEM, max_workers=max_workers, return_exceptions=True)
+    if len(prompts) <= 1 or max_workers <= 1:
+        out: list[str | BaseException] = []
+        for p in prompts:
+            try:
+                out.append(complete_fn(p, system=SYSTEM))
+            except Exception as e:  # noqa: BLE001 - isolated per section, as in serial
+                out.append(e)
+        return out
+    with ThreadPoolExecutor(max_workers=min(max_workers, len(prompts))) as ex:
+        futs = [ex.submit(complete_fn, p, system=SYSTEM) for p in prompts]
+        res: list[str | BaseException] = []
+        for f in futs:
+            try:
+                res.append(f.result())
+            except Exception as e:  # noqa: BLE001 - isolated per section, as in serial
+                res.append(e)
+        return res
+
 
 SYSTEM = (
     "You are a Yu-Gi-Oh! combo analyst. Extract every distinct combo route "
@@ -292,13 +330,14 @@ def extract_lines(
     names = names if names is not None else CardNames()
     complete_fn = complete_fn if complete_fn is not None else _llm.complete
     fmt = detect_format(raw)
+    sections = split_sections(body)
+    prompts = [_prompt(title, chunk, deck) for title, chunk in sections]
+    responses = _complete_sections(complete_fn, prompts)
     lines: list[ComboLine] = []
     idx = 0
-    for title, chunk in split_sections(body):
-        try:
-            response = complete_fn(_prompt(title, chunk, deck), system=SYSTEM)
-        except Exception as e:  # noqa: BLE001 - one bad section must not kill the file
-            logger.warning("extract_lines: skipping section %r: %s", title, e)
+    for (title, chunk), response in zip(sections, responses):
+        if isinstance(response, BaseException):
+            logger.warning("extract_lines: skipping section %r: %s", title, response)
             continue
         for d in _parse_json(response):
             try:
