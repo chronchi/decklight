@@ -399,6 +399,10 @@ def _search(
     # anchor was taken: a summon step's result also counts if it left the deck during the step and moved on
     # ("Special Summon Saji from the Deck, then Tribute it" never shows Saji on the field).
     fhist: list[tuple[tuple[int, ...], ...]] = []
+    # (was_boundary, kind, code) of each choice, aligned with `choices`: mid-action prompts (zone, target, material)
+    # look identical whether they belong to an activation or a Set, so the visited key carries the actions taken
+    # since the last open-state decision.
+    taken: list[tuple[bool, int, int]] = []
     start: list[int | None] = [None] * n
     nodes = 0
     post_count = 0
@@ -423,6 +427,9 @@ def _search(
 
     def take(idx: int, lab: str) -> None:
         nonlocal nodes, obs
+        row = obs["actions"][idx]
+        g = obs["global"]
+        taken.append((int(g[21]) in _COMMAND_MSGS and int(g[20]) == 0, int(row[0]), int(row[2])))
         choices.append(idx)
         labels.append(lab)
         nodes += 1
@@ -438,6 +445,7 @@ def _search(
         del choices[depth:]
         del labels[depth:]
         del fhist[depth:]
+        del taken[depth:]
         for i in range(n):
             if start[i] is not None and start[i] >= depth:
                 start[i] = None
@@ -475,7 +483,19 @@ def _search(
             cur[1],
             cur[2],
             tuple((k, c) for _, k, c in options()),
+            pending(),
         )
+
+    def pending() -> tuple:
+        """The open-state action (kind, code) whose prompts we are in; () at an open state. Only the starting action:
+        the later picks of one action usually converge, and merging them keeps the search small."""
+        g = obs["global"]
+        if int(g[21]) in _COMMAND_MSGS and int(g[20]) == 0:
+            return ()
+        for was_boundary, k, c in reversed(taken):
+            if was_boundary:
+                return (k, c)
+        return ()
 
     def pool(si: int) -> Counter:
         """Where step si's results must be: on my field for summon/set steps, else anywhere out of the deck."""

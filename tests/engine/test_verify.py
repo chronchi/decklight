@@ -246,3 +246,21 @@ def test_summon_then_tribute_in_one_step_counts(engine):
     v = verify_line(engine, _line([pre_prep], steps, []), deck, seed=0, budget=2000)
     assert v.ok, v.detail
     assert "carried" not in v.detail and "implicit=[]" in v.detail, v.detail  # Saji counted within step 1
+
+
+def test_set_after_a_quick_play_was_offered_in_the_chain_window(engine):
+    """Regression (Sky Striker, 2026-10-02): after setting Droplet, the chain window offers to activate Cosmic Cyclone,
+    which also anchors the next step ("set Cosmic"). That branch fails at a zone prompt that looks the same as the zone
+    prompt of the real Set, so the visited key pruned the correct branch (no_anchor@2). The key now carries the
+    pending open-state action."""
+    from pathlib import Path
+
+    from ygo_zero.decks import load_ydk
+
+    droplet, cosmic, imperm, raigeki, thrust = 24299458, 8267140, 10045474, 12580477, 35269904
+    deck = load_ydk(Path(__file__).resolve().parents[2] / "decks" / "pool" / "sky-striker.ydk")
+    steps = [_step(i, "set_spelltrap", c) for i, c in enumerate((droplet, cosmic, imperm))]
+    v = verify_line(
+        engine, _line([droplet, cosmic, imperm, raigeki, thrust], steps, []), deck, seed=0, budget=500
+    )
+    assert v.ok, v.detail
