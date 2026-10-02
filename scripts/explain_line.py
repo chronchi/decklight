@@ -33,7 +33,8 @@ def main() -> None:
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--budget", type=int, default=2000)
     args = ap.parse_args()
-    raw = next(json.loads(x) for x in open(args.lines) if json.loads(x)["id"] == args.id)
+    with open(args.lines) as f:
+        raw = next(d for d in map(json.loads, f) if d["id"] == args.id)
     line = ComboLine.from_json(raw)
     deck = load_ydk(args.ydk or Path("decks/pool") / f"{line.deck}.ydk")
     engine, names = Engine(), card_names()

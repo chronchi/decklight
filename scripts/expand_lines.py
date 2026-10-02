@@ -1,0 +1,99 @@
+"""ADR 0002 stage 4: expand verified lines over different opening hands.
+
+For each verified record, deal K hand variants: the line's own hand + random other cards from the same deck up to
+`--hand-size`, then re-verify the line from scratch (the search re-derives every choice). Only variants that
+verify are kept, tagged `variant` in their line_id. Different hands give genuinely different observations; on
+turn 1 other seeds alone would not (the own deck is an unordered multiset in the obs).
+
+    uv run python scripts/expand_lines.py --verified data/demos/verified --lines-dir data/demos/lines \
+        --variants 8 --out data/demos/expanded
+"""
+
+import argparse
+import dataclasses
+import json
+import random
+import time
+from collections import Counter
+from pathlib import Path
+
+from ygo_zero.decks import Deck
+from ygo_zero.demos.dataset import load_records
+from ygo_zero.demos.schema import ComboLine
+from ygo_zero.demos.verify import make_config, verify_line
+from ygo_zero.engine.duel import Engine
+
+
+def main() -> None:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--verified", type=Path, default=Path("data/demos/verified"))
+    ap.add_argument("--lines-dir", type=Path, default=Path("data/demos/lines"))
+    ap.add_argument("--variants", type=int, default=8)
+    ap.add_argument("--hand-size", type=int, default=5)
+    ap.add_argument("--budget", type=int, default=3000)
+    ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--out", type=Path, default=Path("data/demos/expanded"))
+    args = ap.parse_args()
+
+    engine = Engine()
+    lines = {}
+    for f in args.lines_dir.glob("*.jsonl"):
+        for raw in f.read_text().splitlines():
+            if raw.strip():
+                d = json.loads(raw)
+                lines[d["id"]] = d
+    args.out.mkdir(parents=True, exist_ok=True)
+    for old in args.out.glob("*.jsonl"):  # each run rewrites the expansion from scratch
+        old.unlink()
+    rng = random.Random(args.seed)
+    kept = Counter()
+    t0 = time.time()
+    for rec in load_records(args.verified):
+        base_id = rec["line_id"].split("+")[0]
+        if base_id not in lines:
+            print(f"{rec['line_id']}: source line not found, skipped")
+            continue
+        line = ComboLine.from_json(lines[base_id])
+        c = rec["config"]
+        hand = [p[1] for p in c["setup"] if p[2] == 2]  # LOCATION_HAND
+        full_main = list(c["deck0_main"]) + hand  # the record's deck excludes the placed hand
+        deck = Deck(tuple(full_main), tuple(c["deck0_extra"]))
+        out_records = []
+        for v in range(args.variants):
+            pool = list(c["deck0_main"])
+            rng.shuffle(pool)
+            extra = pool[: max(0, args.hand_size - len(hand))]
+            var = dataclasses.replace(
+                line, id=f"{base_id}#h{v}", hand=line.hand + [str(x) for x in extra], hand_codes=hand + extra
+            )
+            verdict = verify_line(engine, var, deck, seed=c["seed"], budget=args.budget)
+            kept[verdict.reason] += 1
+            if not verdict.ok:
+                continue
+            cfg = make_config(var, deck, c["seed"])
+            out_records.append({
+                **{k: rec[k] for k in ("source_url", "deck", "end_board", "end_board_codes") if k in rec},
+                "line_id": var.id,
+                "variant_of": rec["line_id"],
+                "config": {
+                    "deck0_main": list(cfg.deck0.main), "deck0_extra": list(cfg.deck0.extra),
+                    "deck1_main": list(cfg.deck1.main), "deck1_extra": list(cfg.deck1.extra),
+                    "seed": cfg.seed, "hand": cfg.hand, "draw": cfg.draw,
+                    "setup": [[p.team, p.code, p.location, p.sequence] for p in cfg.setup],
+                },
+                "auto_single": True,
+                "choices": verdict.choices,
+                "labels": verdict.labels,
+                "skipped_steps": list(verdict.skipped_steps or []),
+                "executed_steps": verdict.executed_steps,
+                "inferred_frac": verdict.inferred_frac,
+                "extra_hand": extra,
+            })  # fmt: skip
+        with open(args.out / f"{rec['deck']}.jsonl", "a") as f:
+            f.writelines(json.dumps(r) + "\n" for r in out_records)
+        print(f"{rec['line_id']}: {len(out_records)}/{args.variants} hand variants verify", flush=True)
+    print(f"verdicts: {dict(kept)}; {time.time() - t0:.0f}s")
+
+
+if __name__ == "__main__":
+    main()
