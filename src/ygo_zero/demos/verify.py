@@ -395,6 +395,11 @@ def _search(
     obs = env.reset()
     choices: list[int] = []
     labels: list[str] = []
+    # My (hand, field, other) after each choice (aligned with `choices`), and the depth at which each step's
+    # anchor was taken: a summon step's result also counts if it left the deck during the step and moved on
+    # ("Special Summon Saji from the Deck, then Tribute it" never shows Saji on the field).
+    fhist: list[tuple[tuple[int, ...], ...]] = []
+    start: list[int | None] = [None] * n
     nodes = 0
     post_count = 0
     visited: set = set()
@@ -426,11 +431,16 @@ def _search(
         obs = env.step(idx)
         if obs is not None:
             snap()
+        fhist.append(tuple(cur))
 
     def restore(depth: int) -> None:
         nonlocal obs, env
         del choices[depth:]
         del labels[depth:]
+        del fhist[depth:]
+        for i in range(n):
+            if start[i] is not None and start[i] >= depth:
+                start[i] = None
         env = CppEnv(engine, config)
         obs = env.reset()
         for i in choices:
@@ -470,7 +480,18 @@ def _search(
     def pool(si: int) -> Counter:
         """Where step si's results must be: on my field for summon/set steps, else anywhere out of the deck."""
         if steps[si].action in _ON_FIELD:
-            return Counter(cur[1])
+            have = Counter(cur[1])
+            if start[si] is not None:
+                want = set(res[si])
+                # Copies that newly left the deck for GY/banished/material during the step were summoned and
+                # moved on. Copies that left the hand (discards, costs) or the field (a resolved spell) do not.
+                h0, f0, o0 = fhist[start[si] - 1] if start[si] > 0 else fhist0
+                for c in want:
+                    left = max(0, h0.count(c) - cur[0].count(c)) + max(0, f0.count(c) - cur[1].count(c))
+                    gone = cur[2].count(c) - o0.count(c) - left
+                    if gone > 0:
+                        have[c] = max(have[c], cur[1].count(c) + gone)
+            return have
         return Counter(cur[0] + cur[1] + cur[2])
 
     def results_out(si: int) -> bool:
@@ -647,6 +668,7 @@ def _search(
                 if not _anchor(si + 1, steps, k, c):
                     continue
                 miss = missing_of(si)
+                start[si + 1] = depth
                 take(idx, "stated")
                 anchored[si + 1] = True
                 if miss:
@@ -668,6 +690,8 @@ def _search(
             extra = between and idx not in anch_idx and kc[idx][0] not in _MOVERS
             if extra and (extras >= MAX_EXTRA_ACTIONS or kc[idx][1] not in later[si]):
                 continue  # not part of the line: don't explore the whole game tree
+            if idx in anch_idx and not at:
+                start[si] = depth
             take(idx, lab)
             if idx in anch_idx:
                 anchored[si] = True
@@ -677,6 +701,7 @@ def _search(
         return False
 
     snap()
+    fhist0 = tuple(cur)
     try:
         found = dfs(0, False, None, None)
     except _Budget:

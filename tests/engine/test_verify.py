@@ -224,3 +224,25 @@ def test_going_second_line_faces_a_board_and_attacks(engine, decks):
     assert v.ok, v.detail
     assert any(p.team == 0 and p.location != 2 for p in v.config.setup)  # opponent board placed
     assert all(p.team == 1 for p in v.config.setup if p.location == 2)  # my hand is player 1's
+
+
+def test_summon_then_tribute_in_one_step_counts(engine):
+    """Regression (Mitsurugi, 2026-10-02): "reveal Habakiri; Special Summon Saji from the Deck, then Tribute it" never
+    shows Saji on the field. Saji leaving the deck for the GY during the step means it was summoned; before the fix the
+    step's result was carried forward with a baseline it could never meet, which blocked the mid-chain transition to
+    Prayers (no_anchor@3 on the full line; on this prefix the search only got around it via a carry)."""
+    from pathlib import Path
+
+    from ygo_zero.decks import load_ydk
+
+    pre_prep, habakiri, saji, prayers, aramasa = 13048472, 13332685, 18176525, 45171524, 40543231
+    deck = load_ydk(Path(__file__).resolve().parents[2] / "decks" / "pool" / "mitsurugi.ydk")
+    steps = [
+        _step(0, "activate", pre_prep, results=[habakiri]),
+        _step(1, "special_summon", habakiri, results=[saji]),
+        _step(2, "activate", saji, results=[prayers]),
+        _step(3, "activate", prayers, results=[aramasa]),
+    ]
+    v = verify_line(engine, _line([pre_prep], steps, []), deck, seed=0, budget=2000)
+    assert v.ok, v.detail
+    assert "carried" not in v.detail and "implicit=[]" in v.detail, v.detail  # Saji counted within step 1
