@@ -73,3 +73,27 @@ suggested_notebook: |
     working session (≈ $X/h, so even 8 idle hours ≈ $X), push code deltas with tar/rsync (seconds), run sweeps
     there, pull `data/demos/` back, destroy it at the end (launcher `--keep` mode + `--cleanup`; TODO).
   - Also cache the built `.venv` + `build/` on the box between pushes, so only changed Python files move.
+
+## Model choice: cost vs latency vs quality (benchmarked 2026-10-02, `scripts/bench_llm.py`)
+
+OpenCode Go ($X/month) limits are **monthly dollar budgets per model** (5 h window = 20%, week = 50%): muse $X/month
+(~45k requests per 5 h), deepseek-v4.1-flash $X (~26k / 5 h; off-peak price, **doubled** Mon–Fri 01–04 and 06–10 UTC),
+longcat-2.5-preview-free unlimited and not counted (limited-time preview). Our whole usage in 14 days: $X notional
+($X of it muse). **Cost is not a constraint for any of them; latency and quality are.**
+
+| model | short answer (~2.3k chars) | long answer (~8–10k chars) | quality on our extraction prompts |
+|---|---|---|---|
+| muse-spark-1.3 | 26–30 s | 67–87 s | **4/4 correct** |
+| deepseek-v4.1-flash | **10–12 s** | 89 s | 3/5: twice silently returned `{"lines": []}` on the harder section |
+| longcat-2.5-free | 20–30 s (one outlier 345 s) | n/a | 2/4: **always** `{"lines": []}` on the harder section |
+
+Parallel calls work for all three (4 muse calls: 85 s wall vs ~4× serial). Latency scales with **output length**,
+so the fast models only win on short answers, and their failure mode (an empty, valid-looking answer) silently
+drops data.
+
+Decision:
+- **Extraction and anything where missing data is costly: muse, with 4–8 concurrent calls** (the real speed lever).
+- **Short, checkable outputs** (classification/tags, yes/no, nickname → one of N candidates): deepseek-v4.1-flash
+  off-peak with validation; retry on muse when the answer is empty/invalid.
+- LongCat: only for throwaway or easily verified tasks (free, but slow and unreliable on our prompts).
+- Agentic coding (briefs): muse.

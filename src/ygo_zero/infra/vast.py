@@ -14,6 +14,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
 LEDGER = ROOT / "data" / "vast_ledger.jsonl"
+BAD_MACHINES = ROOT / "data" / "vast_bad_machines.json"  # machine_id -> reason; skipped by find_offer
 LABEL_PREFIX = "ygo-zero-"
 REMOTE_DIR = "/workspace/ygo-zero"
 SSH_OPTS = ["-o", "StrictHostKeyChecking=no", "-o", "UserKnownHostsFile=/dev/null", "-o", "LogLevel=ERROR",
@@ -35,7 +36,12 @@ def cli(*args: str, raw: bool = True, timeout: int = 120):
     out = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, check=False)
     if out.returncode != 0:
         raise VastError(f"{' '.join(cmd)}: {out.stderr.strip() or out.stdout.strip()}")
-    return json.loads(out.stdout) if raw else out.stdout
+    if not raw:
+        return out.stdout
+    try:
+        return json.loads(out.stdout)
+    except json.JSONDecodeError:
+        return {"error": True, "msg": out.stdout.strip()[:300]}
 
 
 def credit() -> float:
@@ -79,6 +85,7 @@ class JobSpec:
     gpu: bool = True
     extra_query: str = ""
     setup: str = "bash scripts/vast_setup.sh"
+    data_paths: tuple[str, ...] = ()  # extra repo paths to ship despite EXCLUDES (e.g. "data/demos/lines")
 
 
 @dataclass
@@ -94,13 +101,30 @@ class JobResult:
     error: str = ""
 
 
-def find_offer(spec: JobSpec, exclude_machines: set[int] = frozenset()) -> dict:
+def load_bad_machines() -> dict[str, str]:
+    return json.loads(BAD_MACHINES.read_text()) if BAD_MACHINES.exists() else {}
+
+
+def mark_bad_machine(machine_id, reason: str) -> None:
+    bad = load_bad_machines()
+    bad[str(machine_id)] = f"{time.strftime('%Y-%m-%d')}: {reason}"[:200]
+    BAD_MACHINES.parent.mkdir(parents=True, exist_ok=True)
+    BAD_MACHINES.write_text(json.dumps(bad, indent=1))
+
+
+def find_offer(
+    spec: JobSpec, exclude_machines: set[int] = frozenset(), exclude_offers: set[int] = frozenset()
+) -> dict:
     q = (f"reliability>0.98 rentable=true verified=true disk_space>={spec.disk_gb} inet_down>=200 "
          f"cpu_cores_effective>={spec.min_cpus} dph<={spec.max_dph}")  # fmt: skip
-    q += f" num_gpus=1 gpu_ram>={spec.min_gpu_ram_gb}" if spec.gpu else ""
+    q += f" num_gpus=1 gpu_ram>={spec.min_gpu_ram_gb}" if spec.gpu else " num_gpus=0"
     q += f" {spec.extra_query}" if spec.extra_query else ""
     offers = [
-        o for o in cli("search", "offers", q, "-o", "dph") if o.get("machine_id") not in exclude_machines
+        o
+        for o in cli("search", "offers", q, "-o", "dph")
+        if o.get("machine_id") not in exclude_machines
+        and str(o.get("machine_id")) not in load_bad_machines()
+        and o["id"] not in exclude_offers
     ]
     if not offers:
         raise VastError(f"no offer matches: {q}")
@@ -159,11 +183,60 @@ def ssh(host: str, port: int, command: str, timeout_s: float | None = None, log:
             return 124
 
 
-def push_code(host: str, port: int) -> None:
+def run_detached(host: str, port: int, name: str, job: str, cap: int, log: Path, poll_s: int = 30) -> int:
+    """Start the job with nohup on the box and poll for its exit-code file with short ssh calls, so a dropped
+    connection (seen 2026-10-02: "closed by remote host" mid-setup) does not kill or lose the job."""
+    rdir = f"{REMOTE_DIR}/runs/{name}"
+    start = (
+        f"mkdir -p {rdir} && test ! -e {rdir}/STARTED && touch {rdir}/STARTED && "
+        f"setsid nohup bash -c {shlex.quote(f'timeout {cap} bash -lc {shlex.quote(job)}; echo $? > {rdir}/EXIT')}"
+        f" > {rdir}/job.log 2>&1 < /dev/null & disown; echo started"
+    )
+    # Judge by the marker, not ssh's exit code: some hosts return 255 when the session closes (2026-10-02).
+    for _ in range(3):
+        try:
+            out = subprocess.run(
+                ["ssh", "-n", *SSH_OPTS, "-p", str(port), f"root@{host}", start],
+                capture_output=True, text=True, timeout=60, check=False,
+            )  # fmt: skip
+        except subprocess.TimeoutExpired:
+            continue
+        with open(log, "a") as f:
+            f.write(out.stdout + out.stderr)
+        if "started" in out.stdout:
+            break
+        probe = subprocess.run(
+            ["ssh", "-n", *SSH_OPTS, "-p", str(port), f"root@{host}", f"test -e {rdir}/STARTED && echo yes"],
+            capture_output=True, text=True, timeout=60, check=False,
+        )  # fmt: skip
+        if "yes" in probe.stdout:
+            break  # the first attempt did start it (its ssh just did not return cleanly)
+        time.sleep(10)
+    else:
+        raise VastError("could not start the job on the instance")
+    deadline = time.time() + cap + 300
+    while time.time() < deadline:
+        time.sleep(poll_s)
+        try:
+            out = subprocess.run(
+                ["ssh", *SSH_OPTS, "-p", str(port), f"root@{host}", f"cat {rdir}/EXIT 2>/dev/null"],
+                capture_output=True, text=True, timeout=60, check=False,
+            )  # fmt: skip
+        except subprocess.TimeoutExpired:
+            continue  # transient: keep polling until the deadline
+        if out.returncode == 0 and out.stdout.strip():
+            return int(out.stdout.strip())
+    return 124
+
+
+def push_code(host: str, port: int, data_paths: tuple[str, ...] = ()) -> None:
     excl = " ".join(f"--exclude={shlex.quote(e)}" for e in EXCLUDES)
     remote = f"mkdir -p {REMOTE_DIR} && tar xzf - -C {REMOTE_DIR}"
-    pipe = f"tar czf - {excl} -C {shlex.quote(str(ROOT))} . | ssh {' '.join(SSH_OPTS)} -p {port} root@{host} {shlex.quote(remote)}"
-    subprocess.run(pipe, shell=True, check=True)
+    ssh = f"ssh {' '.join(SSH_OPTS)} -p {port} root@{host} {shlex.quote(remote)}"
+    subprocess.run(f"tar czf - {excl} -C {shlex.quote(str(ROOT))} . | {ssh}", shell=True, check=True)
+    if data_paths:  # shipped separately: EXCLUDES drops data/ from the code tarball
+        paths = " ".join(shlex.quote(p) for p in data_paths)
+        subprocess.run(f"tar czf - -C {shlex.quote(str(ROOT))} {paths} | {ssh}", shell=True, check=True)
 
 
 def pull_results(host: str, port: int, name: str) -> Path:
@@ -173,6 +246,25 @@ def pull_results(host: str, port: int, name: str) -> Path:
     pipe = f"ssh {' '.join(SSH_OPTS)} -p {port} root@{host} {shlex.quote(remote)} | tar xzf - -C {shlex.quote(str(dest))}"
     subprocess.run(pipe, shell=True, check=False)
     return dest
+
+
+def _rentable_offer(spec: JobSpec, bad_machines: set[int], tries: int = 10) -> dict:
+    """Cheapest offer that can actually be rented: listings can be stale (CLI answers `no_such_ask` with exit 0
+    and an error object, seen 2026-10-02 on CPU-only offers). Creates the instance; the result is in `_created`."""
+    stale: set[int] = set()
+    for _ in range(tries):
+        offer = find_offer(spec, bad_machines, stale)
+        worst = offer["dph_total"] * (spec.hours_cap + 0.25)
+        if worst > credit() - 0.25:
+            raise VastError(f"worst-case ${worst:.2f} exceeds credit - reserve")
+        out = cli("create", "instance", str(offer["id"]), "--image", spec.image, "--disk", str(spec.disk_gb),
+                  "--ssh", "--direct", "--label", LABEL_PREFIX + spec.name)  # fmt: skip
+        if isinstance(out, dict) and out.get("new_contract"):
+            offer["_created"] = out
+            return offer
+        print(f"offer {offer['id']} not rentable: {out}", flush=True)
+        stale.add(offer["id"])
+    raise VastError(f"no rentable offer after {tries} tries")
 
 
 def _destroy_retrying(instance_id: int) -> None:
@@ -200,18 +292,12 @@ def run_job(spec: JobSpec, reserve: float = 0.25, max_hosts: int = 3) -> JobResu
     t0 = time.time()
     try:
         for _ in range(max_hosts):
-            offer = find_offer(spec, bad_machines)
+            offer = _rentable_offer(spec, bad_machines)
             res.offer = {
                 k: offer.get(k)
                 for k in ("id", "machine_id", "gpu_name", "dph_total", "cpu_cores_effective", "geolocation")
             }
-            worst = offer["dph_total"] * (spec.hours_cap + 0.25)  # + boot/pull margin
-            if worst > res.credit_before - reserve:
-                raise VastError(
-                    f"worst-case ${worst:.2f} exceeds credit ${res.credit_before:.2f} - reserve ${reserve}"
-                )
-            out = cli("create", "instance", str(offer["id"]), "--image", spec.image, "--disk", str(spec.disk_gb),
-                      "--ssh", "--direct", "--label", LABEL_PREFIX + spec.name)  # fmt: skip
+            out = offer.pop("_created")  # worst-case cost was checked before creating
             res.instance_id = int(out["new_contract"])
             created.append((res.instance_id, offer["dph_total"], time.time()))
             print(f"instance {res.instance_id}: {res.offer}", flush=True)
@@ -220,19 +306,26 @@ def run_job(spec: JobSpec, reserve: float = 0.25, max_hosts: int = 3) -> JobResu
                 break
             except HostFailed as e:
                 print(f"host failed, trying another machine: {e}", flush=True)
+                mark_bad_machine(offer.get("machine_id"), str(e))
                 _destroy_retrying(res.instance_id)
                 bad_machines.add(offer.get("machine_id"))
         else:
             raise VastError(f"{max_hosts} hosts failed to start the container")
         print(f"ready after {time.time() - t0:.0f}s; pushing code", flush=True)
-        push_code(host, port)
+        for attempt in range(3):
+            try:
+                push_code(host, port, spec.data_paths)
+                break
+            except subprocess.CalledProcessError:
+                if attempt == 2:
+                    mark_bad_machine(res.offer.get("machine_id"), "ssh transfers keep failing (exit 255)")
+                    raise
+                time.sleep(10)
         cap = int(spec.hours_cap * 3600 - (time.time() - t0))
         if cap < 60:
             raise VastError("time cap used up before the job could start")
         job = f"export PATH=$HOME/.local/bin:$PATH && cd {REMOTE_DIR} && ({spec.setup}) && ({spec.command})"
-        rlog = f"{REMOTE_DIR}/runs/{spec.name}/job.log"
-        full = f"mkdir -p {REMOTE_DIR}/runs/{spec.name} && timeout {cap} bash -lc {shlex.quote(job)} > {rlog} 2>&1"
-        res.exit_code = ssh(host, port, full, timeout_s=cap + 120, log=log)
+        res.exit_code = run_detached(host, port, spec.name, job, cap, log)
         print(f"job finished (exit {res.exit_code}) after {time.time() - t0:.0f}s; pulling", flush=True)
         pull_results(host, port, spec.name)
     except Exception as e:  # recorded, then re-raised after cleanup

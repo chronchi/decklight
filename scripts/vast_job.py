@@ -18,11 +18,20 @@ def main() -> None:
     ap.add_argument("--min-cpus", type=int, default=8)
     ap.add_argument("--no-gpu", action="store_true")
     ap.add_argument("--cleanup", action="store_true")
+    ap.add_argument("--data", nargs="*", default=[], help="repo paths under data/ to ship with the code")
     args = ap.parse_args()
     if args.cleanup:
         print("destroyed:", vast.destroy_strays())
         return
-    spec = vast.JobSpec(args.name, args.cmd, args.hours, args.max_dph, args.min_cpus, gpu=not args.no_gpu)
+    spec = vast.JobSpec(
+        args.name,
+        args.cmd,
+        args.hours,
+        args.max_dph,
+        args.min_cpus,
+        gpu=not args.no_gpu,
+        data_paths=tuple(args.data),
+    )
     res = vast.run_job(spec)
     print(res)
 

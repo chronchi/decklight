@@ -38,6 +38,7 @@ def fake(monkeypatch, tmp_path):
     f = FakeVast()
     monkeypatch.setattr(vast, "cli", f)
     monkeypatch.setattr(vast, "LEDGER", tmp_path / "ledger.jsonl")
+    monkeypatch.setattr(vast, "BAD_MACHINES", tmp_path / "bad.json")
     monkeypatch.setattr(vast, "ROOT", tmp_path)
     monkeypatch.setattr(vast.time, "sleep", lambda s: None)
     return f
