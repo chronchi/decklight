@@ -197,3 +197,16 @@ def test_inference_stops_at_search_and_ignores_fusion():
     fused = _line([], [_step(0, "fusion_summon", BLUE_EYES), _step(1, "activate", BLUE_EYES)], [])
     assert infer_hand_codes(fused) == []
     assert effective_hand_codes(fused) == ([], False)
+
+
+def test_summon_step_needs_its_result_on_the_field(engine, decks):
+    """Regression (Salamangreat Foxy, 2026-10-02): a summon step whose result is merely out of the deck (here a
+    spell that went to the GY after activating) must not count as executed."""
+    deck = decks["BlueEyes"]
+    line = _line(
+        [SAGE, MELODY, BLUE_EYES],
+        [_step(0, "normal_summon", SAGE), _step(1, "special_summon", MELODY)],
+        [SAGE],
+    )
+    v = verify_line(engine, line, deck, seed=0, budget=300)
+    assert not v.ok, v.detail

@@ -23,6 +23,13 @@ from ygo_zero.engine.duel import DuelConfig, Engine, Placement
 _LOC_MZONE, _LOC_SZONE = 3, 4
 _MOVERS = (Kind.TO_BATTLE, Kind.TO_MAIN2, Kind.TO_END)
 _DEMOTED = frozenset({Kind.TO_BATTLE, Kind.TO_MAIN2, Kind.TO_END, Kind.CANCEL})
+# Unstated main-phase actions allowed between steps, per line (each must use a card the line mentions later).
+MAX_EXTRA_ACTIONS = 1
+# Steps whose results must end up on my field (a "summoned" card that is still in the GY was not summoned).
+_ON_FIELD = frozenset({
+    "normal_summon", "set_monster", "special_summon", "link_summon", "synchro_summon", "xyz_summon",
+    "fusion_summon", "ritual_summon", "set_spelltrap",
+})  # fmt: skip
 
 POST_CAP = 300  # extra decisions after the last step before giving up
 
@@ -181,10 +188,12 @@ def _anchor(step_i: int, steps: list, kind: int, code: int) -> bool:
     a = s.action
     if a == "normal_summon":
         return kind == Kind.SUMMON and code == card
+    # Guides describe many effects by their outcome ("Roar sets itself from the GY"): a set step is also
+    # anchored by an activation of the same card.
     if a == "set_monster":
-        return kind == Kind.MSET and code == card
+        return kind in (Kind.MSET, Kind.ACTIVATE, Kind.YES) and code == card
     if a == "set_spelltrap":
-        return kind == Kind.SSET and code == card
+        return kind in (Kind.SSET, Kind.ACTIVATE, Kind.YES) and code == card
     if a == "activate":
         return kind in (Kind.ACTIVATE, Kind.YES) and code == card
     if a == "special_summon":
@@ -264,6 +273,7 @@ def _search(
         sets.append(codes)
         res.append([c for c in s.results_codes if c is not None])
         skippable.append(not res[-1] and not any(s.materials_codes + s.targets_codes))
+    later = [set().union(*sets[i:]) for i in range(n)]  # cards mentioned from step i on
     endset = {c for c in line.end_board_codes if c is not None}
     end_unres = sum(1 for c in line.end_board_codes if c is None)
 
@@ -278,7 +288,7 @@ def _search(
     skipped: list[int] = []
     implicit: list[int] = []  # steps the engine executed without asking (forced triggers)
     cur = [(), (), ()]  # my (hand, field, other) code tuples at the current obs
-    best = [-1, []]  # deepest terminal [step_idx, field codes]
+    best = [-1, [], []]  # deepest point reached: [step_idx, field codes, choices to get there]
     done: dict = {}
     carry_log: list[tuple[int, list[int]]] = []  # (from_step, missing codes) carried on this path
 
@@ -288,7 +298,9 @@ def _search(
         code, loc = mine[:, 0], mine[:, 1]
         cur[0] = tuple(sorted(code[loc == 2].tolist()))
         cur[1] = tuple(sorted(code[(loc == _LOC_MZONE) | (loc == _LOC_SZONE)].tolist()))
-        cur[2] = tuple(sorted(code[(loc >= 5)].tolist()))
+        # out of the deck but not hand/field: GY (5), banished (6), xyz material (8). NOT the Extra Deck (7):
+        # an Extra Deck card has not "arrived" anywhere.
+        cur[2] = tuple(sorted(code[(loc == 5) | (loc == 6) | (loc == 8)].tolist()))
 
     def take(idx: int, lab: str) -> None:
         nonlocal nodes, obs
@@ -334,29 +346,42 @@ def _search(
             tuple((k, c) for _, k, c in options()),
         )
 
+    def pool(si: int) -> Counter:
+        """Where step si's results must be: on my field for summon/set steps, else anywhere out of the deck."""
+        if steps[si].action in _ON_FIELD:
+            return Counter(cur[1])
+        return Counter(cur[0] + cur[1] + cur[2])
+
     def results_out(si: int) -> bool:
-        # `cur` holds only out-of-deck locations (hand, field, GY/banished/extra/overlay).
-        have = Counter(cur[0] + cur[1] + cur[2])
+        have = pool(si)
         return all(have[c] >= k for c, k in Counter(res[si]).items())
 
     def some_arrived(si: int) -> bool:
         if not res[si]:
             return False
-        have = Counter(cur[0] + cur[1] + cur[2])
+        have = pool(si)
         return any(have[c] > 0 for c in res[si])
 
     def missing_of(si: int) -> list[int]:
-        have = Counter(cur[0] + cur[1] + cur[2])
+        have = pool(si)
         miss: list[int] = []
         for c, k in Counter(res[si]).items():
             miss.extend([c] * max(0, k - have[c]))
         return miss
 
-    def carried_out(ccodes: list[int] | tuple[int, ...] | None) -> bool:
+    def make_carry(miss: list[int]) -> tuple[tuple[int, int], ...]:
+        """Carried results with a baseline: off-field copies already out now don't count later (a card that
+        stayed in the GY was never summoned), but ones that newly arrive there do (used as material)."""
+        off = Counter(cur[0] + cur[2])
+        return tuple((c, off[c]) for c in miss)
+
+    def carried_out(ccodes) -> bool:
         if not ccodes:
             return True
-        have = Counter(cur[0] + cur[1] + cur[2])
-        return all(have[c] >= k for c, k in Counter(ccodes).items())
+        field, off = Counter(cur[1]), Counter(cur[0] + cur[2])
+        need = Counter(c for c, _ in ccodes)
+        base = {c: b for c, b in ccodes}
+        return all(field[c] + max(0, off[c] - base[c]) >= k for c, k in need.items())
 
     def end_ok() -> bool:
         if not endset:
@@ -395,7 +420,7 @@ def _search(
 
     def dead(si: int) -> bool:
         if si > best[0]:
-            best[0], best[1] = si, list(cur[1])
+            best[0], best[1], best[2] = si, list(cur[1]), list(choices)
         return False
 
     def order(si: int, at: bool, boundary: bool, anchors: list, stated: set) -> list[tuple[int, str]]:
@@ -437,7 +462,7 @@ def _search(
             restore(depth)
         return False
 
-    def dfs(si: int, at: bool, cfrom: int | None, ccodes: list[int] | None) -> bool:
+    def dfs(si: int, at: bool, cfrom: int | None, ccodes, extras: int = 0) -> bool:
         while obs is not None and env.player == 1:  # opponent has no cards: take option 0
             take(0, "auto")
         if obs is None or int(obs["global"][2]) > 1:
@@ -455,6 +480,7 @@ def _search(
             return succeed() if si >= n and end_ok() else dead(si)
         if si >= n:
             return post()
+        dead(si)  # remember the deepest step reached (and the path), for --explain
         boundary = int(obs["global"][21]) == C.MSG_SELECT_IDLECMD and int(obs["global"][20]) == 0
         if boundary and at:  # step ends: its results must be out of the deck
             if cfrom is not None and not carried_out(ccodes):
@@ -465,12 +491,12 @@ def _search(
                 if res[si] and some_arrived(si) and si + 1 < n:
                     miss = missing_of(si)
                     carry_log.append((si, list(miss)))
-                    if dfs(si + 1, False, si, miss):
+                    if dfs(si + 1, False, si, make_carry(miss), extras):
                         return True
                     carry_log.pop()
                 return False
-            return dfs(si + 1, False, None, None)
-        key = statekey(si, at, cfrom, tuple(ccodes) if ccodes else None)
+            return dfs(si + 1, False, None, None, extras)
+        key = (statekey(si, at, cfrom, tuple(ccodes) if ccodes else None), extras)
         if key in visited:
             return False
         visited.add(key)
@@ -490,7 +516,7 @@ def _search(
             and results_out(si)
         ):
             implicit.append(si)
-            if dfs(si + 1, False, cfrom, ccodes):
+            if dfs(si + 1, False, cfrom, ccodes, extras):
                 return True
             implicit.pop()
         # Mid-chain transition: inside step si, an option that anchors step si+1 (e.g. a summon trigger
@@ -504,22 +530,27 @@ def _search(
                 anchored[si + 1] = True
                 if miss:
                     carry_log.append((si, list(miss)))
-                if dfs(si + 1, True, si if miss else None, miss or None):
+                if dfs(si + 1, True, si if miss else None, make_carry(miss) if miss else None, extras):
                     return True
                 if miss:
                     carry_log.pop()
                 restore(depth)
         if not at and boundary and not anchors and skippable[si]:
             skipped.append(si)  # conditional step (e.g. removal vs an empty board): skip it
-            if dfs(si + 1, False, cfrom, ccodes):
+            if dfs(si + 1, False, cfrom, ccodes, extras):
                 return True
             skipped.pop()
         anch_idx = {i for i, _, _ in anchors}
+        between = not at and boundary  # a full main-phase decision before step si starts
+        kc = {i: (k, c) for i, k, c in opts}
         for idx, lab in cands:
+            extra = between and idx not in anch_idx and kc[idx][0] not in _MOVERS
+            if extra and (extras >= MAX_EXTRA_ACTIONS or kc[idx][1] not in later[si]):
+                continue  # not part of the line: don't explore the whole game tree
             take(idx, lab)
             if idx in anch_idx:
                 anchored[si] = True
-            if dfs(si, at or idx in anch_idx, cfrom, ccodes):
+            if dfs(si, at or idx in anch_idx, cfrom, ccodes, extras + extra):
                 return True
             restore(depth)
         return False
@@ -534,8 +565,8 @@ def _search(
             line.id,
             False,
             "budget",
-            list(choices),
-            list(labels),
+            list(best[2]),
+            [],
             seed,
             nodes,
             best[1],
@@ -572,7 +603,7 @@ def _search(
             line.id,
             False,
             f"no_anchor@{k}",
-            [],
+            list(best[2]),
             [],
             seed,
             nodes,
@@ -588,7 +619,7 @@ def _search(
         line.id,
         False,
         "end_board_mismatch",
-        [],
+        list(best[2]),
         [],
         seed,
         nodes,
