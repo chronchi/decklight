@@ -108,7 +108,24 @@ def find_offer(spec: JobSpec, exclude_machines: set[int] = frozenset()) -> dict:
 
 
 def _ssh_target(inst: dict) -> tuple[str, int]:
-    return inst["ssh_host"], int(inst["ssh_port"])
+    try:
+        return inst["public_ipaddr"], int(inst["ports"]["22/tcp"][0]["HostPort"])
+    except (KeyError, TypeError, IndexError, ValueError):
+        return inst["ssh_host"], int(inst["ssh_port"])
+
+
+def disable_auto_tmux(host: str, port: int) -> None:
+    try:
+        subprocess.run(
+            ["ssh", "-tt", *SSH_OPTS, "-p", str(port), f"root@{host}"],
+            input="touch ~/.no_auto_tmux; tmux kill-server; exit\n",
+            text=True,
+            capture_output=True,
+            timeout=30,
+            check=False,
+        )
+    except subprocess.TimeoutExpired:
+        pass
 
 
 def wait_ready(instance_id: int, timeout_s: int = 900) -> tuple[str, int]:
@@ -121,6 +138,7 @@ def wait_ready(instance_id: int, timeout_s: int = 900) -> tuple[str, int]:
             raise HostFailed(f"instance {instance_id}: {msg.strip()[:300]}")
         if inst.get("actual_status") == "running" and inst.get("ssh_host"):
             host, port = _ssh_target(inst)
+            disable_auto_tmux(host, port)
             ok = subprocess.run(
                 ["ssh", *SSH_OPTS, "-p", str(port), f"root@{host}", "true"], capture_output=True, check=False
             )
@@ -211,7 +229,7 @@ def run_job(spec: JobSpec, reserve: float = 0.25, max_hosts: int = 3) -> JobResu
         cap = int(spec.hours_cap * 3600 - (time.time() - t0))
         if cap < 60:
             raise VastError("time cap used up before the job could start")
-        job = f"cd {REMOTE_DIR} && ({spec.setup}) && ({spec.command})"
+        job = f"export PATH=$HOME/.local/bin:$PATH && cd {REMOTE_DIR} && ({spec.setup}) && ({spec.command})"
         rlog = f"{REMOTE_DIR}/runs/{spec.name}/job.log"
         full = f"mkdir -p {REMOTE_DIR}/runs/{spec.name} && timeout {cap} bash -lc {shlex.quote(job)} > {rlog} 2>&1"
         res.exit_code = ssh(host, port, full, timeout_s=cap + 120, log=log)

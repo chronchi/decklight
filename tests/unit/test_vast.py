@@ -62,3 +62,15 @@ def test_refuses_when_worst_case_exceeds_credit(fake):
     with pytest.raises(vast.VastError, match="worst-case"):
         vast.run_job(vast.JobSpec("t", "true", hours_cap=200))
     assert not [c for c in fake.calls if c[:2] == ("create", "instance")]
+
+
+def test_ssh_target_prefers_direct():
+    direct = {
+        "public_ipaddr": "1.2.3.4",
+        "ports": {"22/tcp": [{"HostPort": "51234"}]},
+        "ssh_host": "ssh9.vast.ai",
+        "ssh_port": "12345",
+    }
+    assert vast._ssh_target(direct) == ("1.2.3.4", 51234)
+    proxy = {"ssh_host": "ssh9.vast.ai", "ssh_port": "12345"}
+    assert vast._ssh_target(proxy) == ("ssh9.vast.ai", 12345)
