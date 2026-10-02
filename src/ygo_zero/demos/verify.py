@@ -565,8 +565,34 @@ def _search(
             best[0], best[1], best[2] = si, list(cur[1]), list(choices)
         return False
 
+    def interchangeable() -> set[int]:
+        """Options that only repeat an earlier one: picking another copy of the same card from the deck, hand or
+        Extra Deck, or another main-monster / S/T zone while no Link monster (arrows) is on my field. Trying them
+        after a failure only costs replays, since the visited-state key cannot tell them apart anyway."""
+        m = int(obs["action_mask"].sum())
+        a = obs["actions"][:m]
+        links = any((cd := engine.cards.get(c)) is not None and cd.type & C.TYPE_LINK for c in cur[1])
+        seen: set = set()
+        drop: set[int] = set()
+        for i in range(m):
+            k, loc = int(a[i, 0]), int(a[i, 7])
+            if k == Kind.SELECT and loc in (1, 2, 7):
+                key = (k, *(int(x) for x in a[i, 2:10]))
+            elif k == Kind.PLACE and not links:
+                z = int(a[i, 5])
+                key = (k, "mz" if z <= 4 else "sz" if 8 <= z <= 12 else z)
+            else:
+                continue
+            if key in seen:
+                drop.add(i)
+            else:
+                seen.add(key)
+        return drop
+
     def order(si: int, at: bool, boundary: bool, anchors: list, stated: set) -> list[tuple[int, str]]:
-        opts = options()
+        dup = interchangeable()
+        opts = [o for o in options() if o[0] not in dup]
+        anchors = [x for x in anchors if x[0] not in dup]
         anch = {i for i, _, _ in anchors}
         stated_rest = [
             (i, "stated") for i, k, c in opts if i not in anch and c in stated and k not in _DEMOTED
