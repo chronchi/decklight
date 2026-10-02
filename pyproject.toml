@@ -20,3 +20,8 @@ line-length = 110
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = [
+    "unit: fast, no built artifacts",
+    "engine: needs build/core/libocgcore.so",
+    "gpu: vast only",
+]
