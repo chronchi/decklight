@@ -188,10 +188,9 @@ def _anchor(step_i: int, steps: list, kind: int, code: int) -> bool:
     if a == "activate":
         return kind in (Kind.ACTIVATE, Kind.YES) and code == card
     if a == "special_summon":
-        return (
-            (kind == Kind.SPSUMMON and code == card)
-            or kind == Kind.ACTIVATE
-            or (kind == Kind.YES and code == card)
+        named = {card} | {c for c in s.materials_codes + s.targets_codes if c is not None}
+        return (kind == Kind.SPSUMMON and code == card) or (
+            kind in (Kind.ACTIVATE, Kind.YES) and code in named
         )
     if a in ("link_summon", "synchro_summon", "xyz_summon"):
         return (kind == Kind.SPSUMMON and code == card) or (kind == Kind.YES and code == card)
@@ -277,6 +276,7 @@ def _search(
     visited: set = set()
     anchored = [False] * n
     skipped: list[int] = []
+    implicit: list[int] = []  # steps the engine executed without asking (forced triggers)
     cur = [(), (), ()]  # my (hand, field, other) code tuples at the current obs
     best = [-1, []]  # deepest terminal [step_idx, field codes]
     done: dict = {}
@@ -384,7 +384,7 @@ def _search(
             seed,
             nodes,
             sorted(cur[1]),
-            f"{n}/{n} steps; skipped={skipped}; {carried}{hand}{stats()}; nodes={nodes}; "
+            f"{n}/{n} steps; skipped={skipped}; implicit={implicit}; {carried}{hand}{stats()}; nodes={nodes}; "
             f"unresolved_endboard={end_unres}",
             list(skipped),
             executed_steps=exe,
@@ -478,6 +478,37 @@ def _search(
         anchors = [(i, k, c) for i, k, c in opts if _anchor(si, steps, k, c)]
         cands = order(si, at, boundary, anchors, sets[si])
         depth = len(choices)
+        # A step the engine already performed without asking (forced / already-resolved trigger of a card
+        # involved in the previous step): its results are out, so it counts as executed.
+        if (
+            not at
+            and boundary
+            and not anchors
+            and res[si]
+            and si > 0
+            and steps[si].card_code in sets[si - 1]
+            and results_out(si)
+        ):
+            implicit.append(si)
+            if dfs(si + 1, False, cfrom, ccodes):
+                return True
+            implicit.pop()
+        # Mid-chain transition: inside step si, an option that anchors step si+1 (e.g. a summon trigger
+        # offered as yes/no) closes step si; whatever si's results still miss is carried to si+1's end.
+        if at and not boundary and si + 1 < n and (cfrom is None or carried_out(ccodes)):
+            for idx, k, c in opts:
+                if not _anchor(si + 1, steps, k, c):
+                    continue
+                miss = missing_of(si)
+                take(idx, "stated")
+                anchored[si + 1] = True
+                if miss:
+                    carry_log.append((si, list(miss)))
+                if dfs(si + 1, True, si if miss else None, miss or None):
+                    return True
+                if miss:
+                    carry_log.pop()
+                restore(depth)
         if not at and boundary and not anchors and skippable[si]:
             skipped.append(si)  # conditional step (e.g. removal vs an empty board): skip it
             if dfs(si + 1, False, cfrom, ccodes):
