@@ -587,7 +587,7 @@ def _search(
 
     def interchangeable() -> set[int]:
         """Options that only repeat an earlier one: picking another copy of the same card from the deck, hand or
-        Extra Deck, or another main-monster / S/T zone while no Link monster (arrows) is on my field. Trying them
+        Extra Deck, or another non-center main-monster / S/T zone while no Link monster (arrows) is on my field. Trying them
         after a failure only costs replays, since the visited-state key cannot tell them apart anyway."""
         m = int(obs["action_mask"].sum())
         a = obs["actions"][:m]
@@ -600,7 +600,8 @@ def _search(
                 key = (k, *(int(x) for x in a[i, 2:10]))
             elif k == Kind.PLACE and not links:
                 z = int(a[i, 5])
-                key = (k, "mz" if z <= 4 else "sz" if 8 <= z <= 12 else z)
+                # The center zone (2) stays distinct: some decks key effects on it (Elfnote).
+                key = (k, "mz" if z <= 4 and z != 2 else "sz" if 8 <= z <= 12 else z)
             else:
                 continue
             if key in seen:
