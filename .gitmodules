@@ -1,0 +1,12 @@
+[submodule "third_party/ygopro-core"]
+	path = third_party/ygopro-core
+	url = https://github.com/edo9300/ygopro-core.git
+	shallow = true
+[submodule "third_party/CardScripts"]
+	path = third_party/CardScripts
+	url = https://github.com/ProjectIgnis/CardScripts.git
+	shallow = true
+[submodule "third_party/BabelCDB"]
+	path = third_party/BabelCDB
+	url = https://github.com/ProjectIgnis/BabelCDB.git
+	shallow = true
