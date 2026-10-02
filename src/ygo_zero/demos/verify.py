@@ -38,6 +38,8 @@ class Verdict:
     nodes: int  # decisions explored
     end_field_codes: list[int]  # my MZONE + SZONE codes at the end
     detail: str
+    skipped_steps: list[int] | None = None  # conditional steps skipped (anchor never legal, no results)
+    deck_source: str = ""  # which deck verified against ("fixture" | "guide:<source>" | ...; set by caller)
 
 
 def make_config(line: ComboLine, deck: Deck, seed: int = 0) -> DuelConfig:
@@ -138,13 +140,14 @@ def verify_line(engine: Engine, line: ComboLine, deck: Deck, seed: int = 0, budg
             0,
             [],
             "going second or battle step: needs opponent interaction",
+            [],
         )
     bad = _unresolved(line)
     if bad:
-        return Verdict(line.id, False, "unresolved", [], [], seed, 0, [], f"unresolved names: {bad[:8]}")
+        return Verdict(line.id, False, "unresolved", [], [], seed, 0, [], f"unresolved names: {bad[:8]}", [])
     miss = _missing(line, deck)
     if miss:
-        return Verdict(line.id, False, "missing_card", [], [], seed, 0, [], miss)
+        return Verdict(line.id, False, "missing_card", [], [], seed, 0, [], miss, [])
     return _search(engine, make_config(line, deck, seed), line, seed, budget)
 
 
@@ -252,6 +255,7 @@ def _search(engine: Engine, config: DuelConfig, line: ComboLine, seed: int, budg
             nodes,
             sorted(cur[1]),
             f"{n}/{n} steps; skipped={skipped}; {stats()}; nodes={nodes}; unresolved_endboard={end_unres}",
+            list(skipped),
         )
         return True
 
@@ -354,6 +358,7 @@ def _search(engine: Engine, config: DuelConfig, line: ComboLine, seed: int, budg
             nodes,
             best[1],
             f"node budget {budget} exhausted; {stats()}; skipped={skipped}",
+            list(skipped),
         )
     if found:
         return done["v"]
@@ -370,6 +375,7 @@ def _search(engine: Engine, config: DuelConfig, line: ComboLine, seed: int, budg
             best[1],
             f"anchor for step {k} ({steps[k].action} {steps[k].card}) never legal; "
             f"{stats()}; skipped={skipped}",
+            list(skipped),
         )
     return Verdict(
         line.id,
@@ -382,4 +388,5 @@ def _search(engine: Engine, config: DuelConfig, line: ComboLine, seed: int, budg
         best[1],
         f"all steps executed but end board missing; {stats()}; skipped={skipped}; "
         f"unresolved_endboard={end_unres}",
+        list(skipped),
     )

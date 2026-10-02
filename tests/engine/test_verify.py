@@ -60,6 +60,7 @@ def test_normal_summon_line_verifies_and_replays(engine, decks):
     v = verify_line(engine, line, deck, seed=0)
     assert v.ok, v.detail
     assert v.reason == "ok" and v.labels[0] == "stated"
+    assert v.skipped_steps == [] and v.deck_source == ""
     assert _my_field(engine, make_config(line, deck, 0), v.choices) == sorted(v.end_field_codes)
 
 

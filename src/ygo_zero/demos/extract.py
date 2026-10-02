@@ -16,7 +16,7 @@ from itertools import pairwise
 from pathlib import Path
 
 from ygo_zero.demos import llm as _llm
-from ygo_zero.demos.names import CardNames
+from ygo_zero.demos.names import CardNames, resolve_many_in_pool
 from ygo_zero.demos.schema import ACTIONS, ComboLine
 
 logger = logging.getLogger(__name__)
@@ -78,6 +78,114 @@ def split_sections(body: str) -> list[tuple[str, str]]:
     return final
 
 
+# --- Guide decklists (regex, no LLM) -------------------------------------------
+# Guides sometimes print their own decklist (Game8 icon rows, "3x Name" runs,
+# "- Name x3" bullets). When found it grounds verification better than our
+# fixtures, so extract it into data/demos/decklists/<deck>/<source>.json.
+
+_DECK_SECTION_RE = re.compile(r"(?i)^(?:#{1,4}\s*)?(main deck|extra deck|side deck)\b(.*)$")
+_EXTRA_PREFIX_RE = re.compile(r"(?i)^(EXTRA|SIDE)\s*:\s*(.*)$")
+_ICON_ALTS_RE = re.compile(r"!\[([^\]]+)\]")
+_QTY_TRAIL_RE = re.compile(r"\*{0,2}[xX](\d+)\*{0,2}\s*$")
+_LEAD_QTY_RE = re.compile(r"^\s*(?:[-•]\s*)?(\d+)\s*[xX]\s+(.+?)\s*$")
+
+
+def _decklist_entry(line: str) -> tuple[str, int] | None:
+    """Parse one decklist line into (card name, count)."""
+    s = line.strip()
+    if not s:
+        return None
+    # Game8 icon rows: [![Name Icon](...)](url)**xN**
+    alts = _ICON_ALTS_RE.findall(s)
+    q = _QTY_TRAIL_RE.search(s)
+    if alts and q:
+        name = alts[-1]
+        name = re.sub(r"\s+Icon\s*$", "", name).strip()
+        return (name, int(q.group(1))) if name else None
+    # "- Name xN" bullets (also catches a trailing **xN** without icons)
+    if q:
+        body = _QTY_TRAIL_RE.sub("", s).strip()
+        body = re.sub(r"^[-•]\s*", "", body).strip()
+        # skip prose lines ("...the Deck...") — bullets with 'xN' suffix only
+        if body and not re.search(r"[.!?]\s", body) and len(body) <= 60:
+            return (body, int(q.group(1)))
+        return None
+    # "Nx Name" runs (ygoprodeck inline lists, bullets); skip bare numbers/prose
+    m = _LEAD_QTY_RE.match(s)
+    if m:
+        count, rest = int(m.group(1)), m.group(2).strip().rstrip(",;")
+        rest = re.sub(r"\s*\(see page.*$", "", rest).strip()
+        if 1 <= count <= 3 and rest and len(rest) <= 60 and not re.search(r"[.!?]\s", rest):
+            # avoid combo prose ("2x [[Spirit Dragon]] to Special Summon...")
+            if re.search(r"\bto\b\s+\w+\s+\w+$", rest):
+                return None
+            return (rest, count)
+    return None
+
+
+def extract_guide_decklist(text: str, names: CardNames) -> dict | None:
+    """Extract a {main, extra, unresolved} decklist from guide text, if any.
+
+    Only lines inside Main/Extra Deck sections are considered (so combo prose
+    like "Special Summon 2x ..." is never picked up). Returns None when no
+    usable decklist is found. Codes are expanded by count (3x = 3 entries).
+    """
+    main: list[int] = []
+    extra: list[int] = []
+    unresolved: list[str] = []
+    section: str | None = None
+    seen_sections = 0
+    for raw in text.splitlines():
+        line = raw.strip()
+        ms = _DECK_SECTION_RE.match(line)
+        if ms:
+            kind, tail = ms.group(1).lower(), ms.group(2).strip()
+            section = "extra" if kind.startswith("extra") else "main" if kind.startswith("main") else None
+            seen_sections += 1
+            # "MAIN DECK (45, ...): 3x A, 3x B, ..." — inline list on the heading
+            tail = re.sub(r"^[\s:(\[]+", "", tail)
+            if tail and section:
+                for chunk in re.split(r",\s*", tail):
+                    e = _decklist_entry(chunk)
+                    if e:
+                        _add_decklist_entry(e, names, main if section == "main" else extra, unresolved)
+            continue
+        me = _EXTRA_PREFIX_RE.match(line)
+        if me:
+            section = "extra"
+            seen_sections += 1
+            for chunk in re.split(r",\s*", me.group(2)):
+                e = _decklist_entry(chunk)
+                if e:
+                    _add_decklist_entry(e, names, extra, unresolved)
+            continue
+        if line.startswith("#"):
+            section = None
+            continue
+        if section in ("main", "extra"):
+            # inline comma runs ("3x A, 3x B, ...") as well as one-per-line
+            chunks = re.split(r",\s*", line) if re.match(r"^\s*(\d+\s*[xX]\s+|[-•]\s*)", line) else [line]
+            for chunk in chunks:
+                e = _decklist_entry(chunk)
+                if e:
+                    _add_decklist_entry(e, names, main if section == "main" else extra, unresolved)
+    if seen_sections == 0 or len(main) < 5:
+        return None
+    return {"main": main, "extra": extra, "unresolved": sorted(set(unresolved))}
+
+
+def _add_decklist_entry(
+    entry: tuple[str, int], names: CardNames, out: list[int], unresolved: list[str]
+) -> None:
+    name, count = entry
+    hit = names.resolve(name)
+    if not hit:
+        if name not in unresolved:
+            unresolved.append(name)
+        return
+    out.extend([hit[0]] * max(1, min(count, 3)))
+
+
 def detect_format(text: str) -> str:
     t = text.lower()
     md = "master duel" in t or re.search(r"(?m)^(?:format|site)\s*:.*\bmd\b", t) is not None
@@ -104,7 +212,20 @@ Extract every distinct combo route in this section as JSON:
 {{"lines": [ComboLine, ...]}}
 One object per distinct combo route (different starter or different end board = different route).
 Each ComboLine has: title, hand (starting-hand card names), requires (other cards the line needs in deck/extra), steps (ordered; each step: i (0-based), action (one of: {actions}), card, effect (free-text hint), materials, targets, results (name lists), text (original sentence)), end_board (card names on field), end_board_text, claimed_interruptions (or null), going (first|second|unknown).
+going = "first" for turn-1 setup combos (the default: the combo builds its board from its own hand with no opponent cards needed); "second" ONLY if the combo requires the opponent to already have cards on the field or a Battle Phase; otherwise "unknown". Conditional removal ("if the opponent has a monster, destroy it") does NOT make a combo going-second.
 Output card NAMES only; omit all *_codes fields (filled automatically). A step's card may be "" with action "other" for game actions without a card (e.g. "send equipped card to GY").
+
+CRITICAL — results attribution: a step's `results` = ONLY the cards that THIS step itself puts into
+the hand, field, GY or banished pile when it resolves. Cards that arrive in LATER steps (End Phase
+triggers, follow-up searches/summons) belong to those later steps — NEVER copy them into the
+current step's results. Likewise `materials` = only cards consumed AS COST/MATERIAL by this step.
+
+Few-shot examples (from a Blue-Eyes guide; note how the End Phase arrival stays in its own step):
+Guide: "Activate Sage with Eyes of Blue to send The White Stone of Ancients and itself to the Graveyard, to Special Summon Dragon Spirit of White from the Deck."
+Step: {{"i": 1, "action": "activate", "card": "Sage with Eyes of Blue", "effect": "send White Stone + itself; Special Summon Dragon Spirit of White", "materials": ["The White Stone of Ancients", "Sage with Eyes of Blue"], "targets": [], "results": ["Dragon Spirit of White"], "text": "Activate Sage with Eyes of Blue to send The White Stone of Ancients and itself to the Graveyard, to Special Summon Dragon Spirit of White from the Deck."}}
+Guide: "At the End Phase, the effect of The White Stone of Ancients will trigger, and Special Summon Blue-Eyes Jet Dragon from the Deck."
+Step: {{"i": 4, "action": "special_summon", "card": "The White Stone of Ancients", "effect": "End Phase trigger; Special Summon Jet Dragon", "materials": [], "targets": [], "results": ["Blue-Eyes Jet Dragon"], "text": "At the End Phase, the effect of The White Stone of Ancients will trigger, and Special Summon Blue-Eyes Jet Dragon from the Deck."}}
+(Wrong: putting "Blue-Eyes Jet Dragon" in the Sage step's results — it only arrives at the End Phase step.)
 JSON only, no prose."""
 
 
@@ -212,7 +333,69 @@ def extract_lines(
                     line.notes = f"{line.notes} | {extra}" if line.notes else extra
             lines.append(line)
             idx += 1
+    _resolve_nicknames(lines, raw, decklist_codes, names, complete_fn)
     return lines
+
+
+def _resolve_nicknames(
+    lines: list[ComboLine],
+    guide_text: str,
+    decklist_codes: set[int] | None,
+    names: CardNames,
+    complete_fn: Callable[..., str],
+) -> None:
+    """One batched LLM call mapping a guide's unresolved nicknames into the pool.
+
+    Pool = the deck's decklist codes ∪ the guide's own decklist (if any) ∪
+    the guide's already-resolved codes. Only exact candidate strings from the
+    LLM are accepted (`resolve_many_in_pool` enforces that). Patched codes
+    are removed from each line's `unresolved_names`.
+    """
+    need = sorted({n for line in lines for n in line.unresolved_names if n})
+    if not need:
+        return
+    pool: set[int] = set(decklist_codes) if decklist_codes else set()
+    try:
+        guide_dl = extract_guide_decklist(guide_text, names)
+    except Exception as e:  # noqa: BLE001 - decklist parse must not kill extraction
+        logger.warning("extract_lines: guide decklist parse failed: %s", e)
+        guide_dl = None
+    if guide_dl:
+        pool |= set(guide_dl["main"]) | set(guide_dl["extra"])
+    for line in lines:
+        pool |= {c for c in line.hand_codes + line.requires_codes + line.end_board_codes if c is not None}
+        for s in line.steps:
+            if s.card_code is not None:
+                pool.add(s.card_code)
+            pool |= {c for c in s.materials_codes + s.targets_codes + s.results_codes if c is not None}
+    if not pool:
+        return
+    mapping = resolve_many_in_pool(names, need, pool, complete_fn=complete_fn)
+    fixed = {n: c for n, c in mapping.items() if c is not None}
+    if not fixed:
+        return
+    for line in lines:
+        _patch_codes(line, fixed)
+        line.unresolved_names = [n for n in line.unresolved_names if n not in fixed]
+
+
+def _patch_codes(line: ComboLine, fixed: dict[str, int]) -> None:
+    """Fill None codes whose name the nickname layer resolved."""
+
+    def fix(names_list: list[str], codes_list: list[int | None]) -> None:
+        for j, (n, c) in enumerate(zip(names_list, codes_list)):
+            if c is None and n in fixed:
+                codes_list[j] = fixed[n]
+
+    fix(line.hand, line.hand_codes)
+    fix(line.requires, line.requires_codes)
+    fix(line.end_board, line.end_board_codes)
+    for s in line.steps:
+        if s.card_code is None and s.card in fixed:
+            s.card_code = fixed[s.card]
+        fix(s.materials, s.materials_codes)
+        fix(s.targets, s.targets_codes)
+        fix(s.results, s.results_codes)
 
 
 def step_card_sequence(line: ComboLine) -> list[str]:

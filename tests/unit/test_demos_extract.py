@@ -1,7 +1,12 @@
 import json
 
-from ygo_zero.demos.extract import extract_lines, sequence_overlap, split_sections
-from ygo_zero.demos.names import CardNames, normalize
+from ygo_zero.demos.extract import (
+    extract_guide_decklist,
+    extract_lines,
+    sequence_overlap,
+    split_sections,
+)
+from ygo_zero.demos.names import CardNames, normalize, resolve_many_in_pool
 from ygo_zero.demos.schema import ComboLine, Step
 
 NAMES = CardNames()
@@ -131,3 +136,114 @@ def test_split_sections():
 def test_sequence_overlap():
     assert sequence_overlap(["a", "b", "b"], ["b", "b", "c"]) == 4 / 6
     assert sequence_overlap([], ["a"]) == 0.0
+
+
+ALUBER = 62962630  # Aluber the Jester of Despia
+BRANDED_FUSION = 44362883
+
+
+def _pool() -> set[int]:
+    return {ALUBER, BRANDED_FUSION, 89631139}
+
+
+def _nick_stub(prompt, system=None, **kw):
+    assert "CANDIDATES" in prompt
+    return json.dumps(
+        {
+            "Aluber": "Aluber the Jester of Despia",
+            "Mirrorjade": "Not A Real Card Xyz",  # not an exact candidate -> rejected
+            "Nope": None,
+        }
+    )
+
+
+def test_resolve_many_in_pool_accepts_only_exact_candidates():
+    out = resolve_many_in_pool(NAMES, ["Aluber", "Mirrorjade", "Nope"], _pool(), _nick_stub)
+    assert out["Aluber"] == ALUBER
+    assert out["Mirrorjade"] is None
+    assert out["Nope"] is None
+
+
+def test_resolve_many_in_pool_plain_hits_need_no_llm():
+    def boom(prompt, system=None, **kw):
+        raise AssertionError("LLM must not be called")
+
+    out = resolve_many_in_pool(NAMES, ["Branded Fusion"], _pool(), boom)
+    assert out == {"Branded Fusion": BRANDED_FUSION}
+
+
+def test_resolve_many_in_pool_llm_failure_maps_none():
+    def fail(prompt, system=None, **kw):
+        raise RuntimeError("net down")
+
+    out = resolve_many_in_pool(NAMES, ["Aluber"], _pool(), fail)
+    assert out == {"Aluber": None}
+
+
+def test_resolve_in_pool_plain_and_nickname():
+    assert NAMES.resolve_in_pool("Branded Fusion", _pool()) == BRANDED_FUSION
+    assert NAMES.resolve_in_pool("Aluber", _pool(), complete_fn=_nick_stub) == ALUBER
+    assert NAMES.resolve_in_pool("Not A Real Card Xyz", _pool(), complete_fn=_nick_stub) is None
+
+
+def test_extract_applies_nickname_layer(tmp_path):
+    guide = tmp_path / "g.txt"
+    guide.write_text("COMBO 1: Aluber opener\nNormal Summon Aluber, activate Branded Fusion.\n")
+
+    def complete(prompt, system=None, **kw):
+        if "CANDIDATES" in prompt:  # nickname batch call
+            return json.dumps({"Aluber": "Aluber the Jester of Despia"})
+        return json.dumps(
+            {
+                "lines": [
+                    {
+                        "title": "Aluber opener",
+                        "hand": ["Aluber", "Branded Fusion"],
+                        "steps": [
+                            {
+                                "i": 0,
+                                "action": "normal_summon",
+                                "card": "Aluber",
+                                "text": "Normal Summon Aluber.",
+                            }
+                        ],
+                        "going": "first",
+                    }
+                ]
+            }
+        )
+
+    lines = extract_lines(guide, "branded", _pool(), names=NAMES, complete_fn=complete)
+    assert len(lines) == 1
+    line = lines[0]
+    assert line.hand_codes == [ALUBER, BRANDED_FUSION]
+    assert line.steps[0].card_code == ALUBER
+    assert line.unresolved_names == []
+
+
+def test_extract_guide_decklist_inline_and_bullets():
+    text = (
+        "MAIN DECK (6, from history):\n"
+        "3x Blue-Eyes White Dragon, 2x Sage with Eyes of Blue, 1x Maiden of White,\n"
+        "### Extra Deck\n"
+        "- Blue-Eyes Spirit Dragon x2\n"
+        "- Neo Blue-Eyes Ultimate Dragon x1\n"
+    )
+    dl = extract_guide_decklist(text, NAMES)
+    assert dl is not None
+    assert sorted(dl["main"]) == sorted(
+        [89631139] * 3 + [8240199] * 2 + [NAMES.resolve("Maiden of White")[0]]
+    )
+    spirit = NAMES.resolve("Blue-Eyes Spirit Dragon")[0]
+    neo = NAMES.resolve("Neo Blue-Eyes Ultimate Dragon")[0]
+    assert sorted(dl["extra"]) == sorted([spirit] * 2 + [neo])
+    assert dl["unresolved"] == []
+
+
+def test_extract_guide_decklist_ignores_combo_prose():
+    text = (
+        "COMBO 1: opener\n"
+        "Special Summon 2x Blue-Eyes Ultimate Spirit Dragon from your Extra Deck.\n"
+        "Normal Summon Sage, go nuts.\n"
+    )
+    assert extract_guide_decklist(text, NAMES) is None

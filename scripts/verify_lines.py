@@ -43,7 +43,13 @@ def stats(v: Verdict) -> str:
 
 
 def verify_all(
-    engine: Engine, deck: Deck, lines: list[ComboLine], seeds: list[int], budget: int, tag: str
+    engine: Engine,
+    deck: Deck,
+    lines: list[ComboLine],
+    seeds: list[int],
+    budget: int,
+    tag: str,
+    deck_source: str = "",
 ) -> tuple[list[dict], dict[str, Verdict]]:
     """Verify every line under every seed; print per-line results; return ok records + reps."""
     records, reps = [], {}
@@ -51,10 +57,11 @@ def verify_all(
         verdicts = [(s, verify_line(engine, line, deck, seed=s, budget=budget)) for s in seeds]
         ok = [(s, v) for s, v in verdicts if v.ok]
         rep = ok[0][1] if ok else verdicts[0][1]
+        rep.deck_source = deck_source or tag.lstrip("+") or "fixture"
         reps[line.id] = rep
         print(
             f"{line.id}{tag}: {rep.reason} steps={len(line.steps)} nodes={rep.nodes} "
-            f"{stats(rep)} seeds_ok={[s for s, _ in ok]}"
+            f"{stats(rep)} seeds_ok={[s for s, _ in ok]} skipped={rep.skipped_steps} deck={rep.deck_source}"
         )
         print(f"    {rep.detail}")
         if ok:
@@ -65,6 +72,7 @@ def verify_all(
                     "line_id": line.id,
                     "source_url": line.source_url,
                     "deck": line.deck + tag,
+                    "deck_source": v0.deck_source,
                     "config": {
                         "deck0_main": list(cfg.deck0.main),
                         "deck0_extra": list(cfg.deck0.extra),
@@ -78,12 +86,25 @@ def verify_all(
                     "auto_single": True,
                     "choices": v0.choices,
                     "labels": v0.labels,
+                    "skipped_steps": list(v0.skipped_steps or []),
                     "end_board": line.end_board,
                     "end_board_codes": line.end_board_codes,
                     "seeds_ok": [s for s, _ in ok],
                 }
             )
     return records, reps
+
+
+def deck_from_guide_json(engine: Engine, data: dict, name: str) -> Deck:
+    """Build a Deck from a guide-decklist JSON (re-split by card type)."""
+    main, extra = [], []
+    for c in list(data.get("main", [])) + list(data.get("extra", [])):
+        cd = engine.cards.get(int(c))
+        if cd is not None and cd.type & _EXTRA:
+            extra.append(int(c))
+        else:
+            main.append(int(c))
+    return Deck(tuple(main), tuple(extra), (), name)
 
 
 def main() -> None:
@@ -93,6 +114,12 @@ def main() -> None:
     ap.add_argument("--seeds", nargs="*", type=int, default=[0])
     ap.add_argument("--out", required=True)
     ap.add_argument("--budget", type=int, default=2000)
+    ap.add_argument(
+        "--deck-from-guides",
+        default=None,
+        help="per-guide decklists dir (<dir>/<deck>/<source>.json); each line is verified "
+        "against its own source's decklist when present, else the --ydk fixture",
+    )
     args = ap.parse_args()
 
     engine = Engine()
@@ -101,17 +128,51 @@ def main() -> None:
         ComboLine.from_json(json.loads(s)) for s in Path(args.lines).read_text().splitlines() if s.strip()
     ]
 
-    print(f"== {args.lines} vs {args.ydk} (seeds={args.seeds}) ==")
-    records, reps = verify_all(engine, deck, lines, args.seeds, args.budget, "")
+    # group lines by deck: guide decklist when available, else the fixture
+    groups: dict[str, tuple[Deck, list]] = {}
+
+    def group_for(line: ComboLine) -> tuple[str, Deck]:
+        if args.deck_from_guides:
+            stem = Path(line.source_file).stem
+            jp = Path(args.deck_from_guides) / line.deck / f"{stem}.json"
+            if jp.is_file():
+                gd = deck_from_guide_json(engine, json.loads(jp.read_text()), f"{line.deck}+guide:{stem}")
+                return f"guide:{stem}", gd
+        return "fixture", deck
+
+    for line in lines:
+        key, gd = group_for(line)
+        if key not in groups:
+            groups[key] = (gd, [])
+        groups[key][1].append(line)
+
+    print(f"== {args.lines} vs {args.ydk} (seeds={args.seeds}) deck_groups={sorted(groups)} ==")
+    records: list[dict] = []
+    reps: dict[str, Verdict] = {}
+    base_of: dict[str, str] = {}  # line_id -> group key (for the augmented fallback source)
+    for key in sorted(groups):
+        gd, glines = groups[key]
+        tag = "" if key == "fixture" else "+guide"
+        print(f"-- deck group {key} ({len(glines)} lines) --")
+        recs, greps = verify_all(engine, gd, glines, args.seeds, args.budget, tag, key)
+        records += recs
+        reps.update(greps)
+        for line in glines:
+            base_of[line.id] = key
 
     verified = {r["line_id"] for r in records}
     aug_lines = [line for line in lines if line.id not in verified and reps[line.id].reason == "missing_card"]
     aug_records: list[dict] = []
     if aug_lines:
         print(f"== augmented deck ({len(aug_lines)} lines with missing_card) ==")
-        adecks = {line.id: augmented(engine, deck, line) for line in aug_lines}
         for line in aug_lines:
-            recs, areps = verify_all(engine, adecks[line.id], [line], args.seeds, args.budget, "+augmented")
+            base_key = base_of[line.id]
+            base_deck = groups[base_key][0]
+            adeck = augmented(engine, base_deck, line)
+            tag = "+augmented" if base_key == "fixture" else "+guide+augmented"
+            recs, areps = verify_all(
+                engine, adeck, [line], args.seeds, args.budget, tag, base_key + "+augmented"
+            )
             aug_records += recs
             reps[line.id + "+augmented"] = areps[line.id]
 
@@ -124,9 +185,9 @@ def main() -> None:
     ok_aug = {r["line_id"] for r in aug_records}
     for line in lines:
         if line.id in verified:
-            totals["ok"] += 1
+            totals[f"ok[{base_of[line.id]}]"] += 1
         elif line.id in ok_aug:
-            totals["ok[augmented]"] += 1
+            totals[f"ok[{base_of[line.id]}+augmented]"] += 1
         else:
             totals[reps[line.id].reason] += 1
     print("totals:", dict(totals))

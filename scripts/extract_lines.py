@@ -14,7 +14,12 @@ from collections import Counter
 from pathlib import Path
 
 from ygo_zero.demos import llm as _llm
-from ygo_zero.demos.extract import extract_lines, sequence_overlap, step_card_sequence
+from ygo_zero.demos.extract import (
+    extract_guide_decklist,
+    extract_lines,
+    sequence_overlap,
+    step_card_sequence,
+)
 from ygo_zero.demos.names import CardNames
 
 
@@ -75,6 +80,11 @@ def main() -> None:
     ap.add_argument("--ydk", required=True)
     ap.add_argument("--out", required=True)
     ap.add_argument("--max-calls", type=int, default=60)
+    ap.add_argument(
+        "--write-decklists",
+        default=None,
+        help="write per-guide decklists to <dir>/<deck>/<source>.json when a guide has one",
+    )
     args = ap.parse_args()
 
     files: list[Path] = []
@@ -112,6 +122,13 @@ def main() -> None:
             kept.append(line)
         per_source[f.name] = kept
         all_lines.extend(kept)
+        if args.write_decklists:
+            dl = extract_guide_decklist(f.read_text(encoding="utf-8", errors="replace"), names)
+            if dl:
+                d = Path(args.write_decklists) / args.deck
+                d.mkdir(parents=True, exist_ok=True)
+                (d / f"{f.stem}.json").write_text(json.dumps(dl, indent=1))
+                print(f"  decklist {f.name}: main={len(dl['main'])} extra={len(dl['extra'])}")
     summarize(args.deck, per_source)
 
     out = Path(args.out)
