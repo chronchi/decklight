@@ -15,6 +15,9 @@ dev = [
     "ninja>=1.11",
     "pybind11>=3.1.0",
 ]
+gauntlet = [
+    "ai-edge-litert>=2.2.0",
+]
 
 [build-system]
 requires = ["hatchling"]

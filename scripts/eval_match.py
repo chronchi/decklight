@@ -11,8 +11,15 @@ from ygo_zero.decks import load_ydk
 from ygo_zero.engine.duel import Engine
 from ygo_zero.eval.match import play_match, report
 from ygo_zero.eval.policies import GreedyPolicy, RandomPolicy
+from ygo_zero.eval.ygoagent import YgoAgentPolicy
 
-POLICIES = {"random": RandomPolicy, "greedy": GreedyPolicy}
+POLICIES = {"random": RandomPolicy, "greedy": GreedyPolicy, "ygoagent": YgoAgentPolicy}
+
+
+def make_policy(name: str, seed: int):
+    if name == "ygoagent":  # (model_path, code_list_path, seed=...) — seed is third
+        return YgoAgentPolicy(seed=seed)
+    return POLICIES[name](seed)
 
 
 def main() -> None:
@@ -27,8 +34,8 @@ def main() -> None:
     decks = [load_ydk(p) for p in paths]
     pairs = [(i, j) for i in range(len(decks)) for j in range(len(decks)) if i != j]
     t0 = time.time()
-    games = play_match(Engine(), decks, POLICIES[args.a](1), POLICIES[args.b](2), pairs, range(args.seeds),
-                       num_envs=64, num_threads=args.threads)  # fmt: skip
+    games = play_match(Engine(), decks, make_policy(args.a, 1), make_policy(args.b, 2), pairs,
+                       range(args.seeds), num_envs=64, num_threads=args.threads)  # fmt: skip
     print(report(games, [p.stem for p in paths], args.a, args.b))
     print(f"{len(games)} games in {time.time() - t0:.0f}s")
 
