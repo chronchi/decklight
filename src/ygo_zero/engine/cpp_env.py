@@ -86,6 +86,15 @@ class VecEnv:
         self._v.step(actions)
         return self.buf
 
+    def set_schedule(self, games: Sequence[tuple[int, int, int]]) -> None:
+        """Evaluation mode: play exactly these (deck0 index, deck1 index, seed) games, then idle (player -1).
+        Call before `reset`. Finished episodes carry `.index` into this list."""
+        self._v.set_schedule(list(games))
+
+    @property
+    def remaining(self) -> int:
+        return self._v.remaining
+
     def pop_finished(self) -> list:
         return self._v.pop_finished()
 

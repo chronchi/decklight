@@ -113,6 +113,7 @@ PYBIND11_MODULE(_ygoenv, m) {
       .def_readonly("deck0", &Episode::deck0)
       .def_readonly("deck1", &Episode::deck1)
       .def_readonly("seed", &Episode::seed)
+      .def_readonly("index", &Episode::index)
       .def_readonly("winner", &Episode::winner)
       .def_readonly("turns", &Episode::turns)
       .def_readonly("choices", &Episode::choices);
@@ -135,6 +136,13 @@ PYBIND11_MODULE(_ygoenv, m) {
              v.step(a);
            })
       .def("pop_finished", &VecEnv::pop_finished)
+      .def("set_schedule",
+           [](VecEnv& v, const std::vector<std::tuple<int, int, uint64_t>>& games) {
+             std::vector<Episode> eps;
+             for (auto& [d0, d1, seed] : games) eps.push_back(Episode{d0, d1, seed, -1, -1, 0, {}});
+             v.set_schedule(std::move(eps));
+           })
+      .def_property_readonly("remaining", &VecEnv::remaining)
       .def_readonly("num_envs", &VecEnv::num_envs)
       .def("buffers", [](py::object self) {
         auto& v = self.cast<VecEnv&>();
@@ -152,6 +160,7 @@ PYBIND11_MODULE(_ygoenv, m) {
         d["player"] = py::array(py::dtype("int32"), {v.num_envs}, {4}, v.player.data(), self);
         d["winner"] = py::array(py::dtype("int32"), {v.num_envs}, {4}, v.winner.data(), self);
         d["done"] = py::array(py::dtype("bool"), {v.num_envs}, {1}, v.done.data(), self);
+        d["game"] = py::array(py::dtype("int64"), {v.num_envs}, {8}, v.game.data(), self);
         return d;
       });
 }

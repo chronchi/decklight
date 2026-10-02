@@ -13,9 +13,9 @@ static uint64_t splitmix(uint64_t& x) {
 }
 
 VecEnv::VecEnv(Engine& engine, std::vector<Deck> decks, int num_envs, int num_threads, uint64_t seed, bool auto_single)
-    : num_envs(num_envs), obs(num_envs), player(num_envs, 0), winner(num_envs, -1), done(num_envs, 0),
+    : num_envs(num_envs), obs(num_envs), player(num_envs, 0), winner(num_envs, -1), done(num_envs, 0), game(num_envs, -1),
       engine_(engine), decks_(std::move(decks)), auto_single_(auto_single), envs_(num_envs), rng_(num_envs),
-      current_(num_envs), errors_(num_envs) {
+      current_(num_envs), idle_(num_envs, 0), errors_(num_envs) {
   if (decks_.empty() || num_envs <= 0) throw std::invalid_argument("need decks and num_envs > 0");
   for (int i = 0; i < num_envs; ++i) {
     uint64_t s = seed ^ (0xD1B54A32D192ED03ull * (i + 1));
@@ -33,12 +33,41 @@ VecEnv::~VecEnv() {
   for (auto& w : workers_) w.join();
 }
 
+void VecEnv::set_schedule(std::vector<Episode> games) {
+  int n = static_cast<int>(decks_.size());
+  for (auto& g : games)
+    if (g.deck0 < 0 || g.deck0 >= n || g.deck1 < 0 || g.deck1 >= n) throw std::out_of_range("deck index");
+  std::lock_guard lock(mu_);
+  schedule_ = std::move(games);
+  for (size_t k = 0; k < schedule_.size(); ++k) schedule_[k].index = static_cast<int64_t>(k);
+  scheduled_ = true;
+  next_game_ = 0;
+  unfinished_ = static_cast<int64_t>(schedule_.size());
+}
+
+int64_t VecEnv::remaining() const { return unfinished_; }
+
 void VecEnv::start_episode(int i) {
   Episode& ep = current_[i];
-  int n = static_cast<int>(decks_.size());
-  ep.deck0 = static_cast<int>(splitmix(rng_[i]) % n);
-  ep.deck1 = static_cast<int>(splitmix(rng_[i]) % n);
-  ep.seed = splitmix(rng_[i]);
+  if (scheduled_) {
+    {
+      std::lock_guard lock(mu_);
+      if (next_game_ >= schedule_.size()) {
+        idle_[i] = 1;
+        game[i] = -1;
+        envs_[i].reset();
+        obs[i].clear();
+        return;
+      }
+      ep = schedule_[next_game_++];
+    }
+    game[i] = ep.index;
+  } else {
+    int n = static_cast<int>(decks_.size());
+    ep.deck0 = static_cast<int>(splitmix(rng_[i]) % n);
+    ep.deck1 = static_cast<int>(splitmix(rng_[i]) % n);
+    ep.seed = splitmix(rng_[i]);
+  }
   const Deck &a = decks_[ep.deck0], &b = decks_[ep.deck1];
   DuelConfig cfg;
   cfg.main0 = a.main;
@@ -55,7 +84,10 @@ void VecEnv::work(int i) {
     done[i] = 0;
     winner[i] = -1;
     if (resetting_) {
+      idle_[i] = 0;
       start_episode(i);
+    } else if (idle_[i]) {
+      // scheduled games exhausted: ignore the action
     } else if (!envs_[i]->step(actions_[i], obs[i])) {
       Env& env = *envs_[i];
       Episode& ep = current_[i];
@@ -67,10 +99,11 @@ void VecEnv::work(int i) {
       {
         std::lock_guard lock(mu_);
         finished_.push_back(ep);
+        --unfinished_;
       }
       start_episode(i);
     }
-    player[i] = envs_[i]->player();
+    player[i] = idle_[i] ? -1 : envs_[i]->player();
   } catch (...) {
     errors_[i] = std::current_exception();
   }

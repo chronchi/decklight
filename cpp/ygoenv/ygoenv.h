@@ -267,6 +267,7 @@ struct Deck {
 struct Episode {
   int deck0, deck1;
   uint64_t seed;
+  int64_t index = -1;  // position in the schedule (scheduled mode), else -1
   int winner, turns;
   std::vector<int> choices;
 };
@@ -280,12 +281,17 @@ class VecEnv {
   void reset();
   void step(const int32_t* actions);  // actions[num_envs]
   std::vector<Episode> pop_finished();
+  // Scheduled mode (evaluation): play exactly these (deck0, deck1, seed) games, in order, then go idle.
+  // Idle envs have player = -1 and an empty action mask, and ignore their action. Call before reset().
+  void set_schedule(std::vector<Episode> games);
+  int64_t remaining() const;  // scheduled games not finished yet
 
   const int num_envs;
   std::vector<Obs> obs;          // obs[i]: the decision now pending in env i
   std::vector<int32_t> player;   // who acts in obs[i]
   std::vector<int32_t> winner;   // after step: winner of the episode that just ended in env i, else -1
   std::vector<uint8_t> done;     // after step: env i finished an episode (obs[i] is the next one's start)
+  std::vector<int64_t> game;     // schedule index of the game now in env i (-1: idle or unscheduled)
 
  private:
   Engine& engine_;
@@ -294,6 +300,11 @@ class VecEnv {
   std::vector<std::unique_ptr<Env>> envs_;
   std::vector<uint64_t> rng_;
   std::vector<Episode> current_, finished_;
+  std::vector<Episode> schedule_;
+  bool scheduled_ = false;
+  size_t next_game_ = 0;
+  int64_t unfinished_ = 0;
+  std::vector<uint8_t> idle_;
   std::vector<std::exception_ptr> errors_;
   const int32_t* actions_ = nullptr;
   bool resetting_ = false;
