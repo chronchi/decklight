@@ -18,8 +18,9 @@ from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 
 from ygo_zero.decks import Deck, load_ydk
+from ygo_zero.demos.records import make_record
 from ygo_zero.demos.schema import ComboLine
-from ygo_zero.demos.verify import Verdict, going_second, make_config, verify_line
+from ygo_zero.demos.verify import Verdict, verify_line
 from ygo_zero.engine import constants as C
 from ygo_zero.engine.duel import Engine
 
@@ -136,36 +137,7 @@ def verify_all(
         print(f"    {rep.detail}")
         if ok:
             s0, v0 = ok[0]
-            cfg = v0.config or make_config(line, deck, s0, engine)
-            records.append(
-                {
-                    "line_id": line.id,
-                    "me": 1 if going_second(line) else 0,
-                    "source_url": line.source_url,
-                    "deck": line.deck + tag,
-                    "deck_source": v0.deck_source,
-                    "config": {
-                        "deck0_main": list(cfg.deck0.main),
-                        "deck0_extra": list(cfg.deck0.extra),
-                        "deck1_main": list(cfg.deck1.main),
-                        "deck1_extra": list(cfg.deck1.extra),
-                        "seed": s0,
-                        "hand": cfg.hand,
-                        "draw": cfg.draw,
-                        "setup": [[p.team, p.code, p.location, p.sequence] for p in cfg.setup],
-                    },
-                    "auto_single": True,
-                    "choices": v0.choices,
-                    "labels": v0.labels,
-                    "skipped_steps": list(v0.skipped_steps or []),
-                    "executed_steps": v0.executed_steps,
-                    "inferred_frac": v0.inferred_frac,
-                    "hand_inferred": v0.hand_inferred,
-                    "end_board": line.end_board,
-                    "end_board_codes": line.end_board_codes,
-                    "seeds_ok": [s for s, _ in ok],
-                }
-            )
+            records.append(make_record(engine, line, deck, v0, s0, [s for s, _ in ok], tag))
     return records, reps
 
 
