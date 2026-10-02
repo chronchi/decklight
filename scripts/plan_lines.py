@@ -111,9 +111,12 @@ def main() -> None:
     ap.add_argument("--model", default="opencode-go/muse-spark-1.3-contributor")
     ap.add_argument("--workers", type=int, default=6)
     ap.add_argument("--jobs", type=int, default=4)
-    ap.add_argument("--budget", type=int, default=2000)
-    ap.add_argument("--budget-long", type=int, default=10000)
+    ap.add_argument("--budget", type=int, default=6000)
+    ap.add_argument("--budget-long", type=int, default=15000)
     ap.add_argument("--examples", type=int, default=2)
+    ap.add_argument(
+        "--llm-timeout", type=int, default=900, help="seconds per LLM call (repair prompts are long)"
+    )
     ap.add_argument("--out-dir", default="data/demos/planned")
     args = ap.parse_args()
 
@@ -135,7 +138,12 @@ def main() -> None:
             else:
                 llm_counts["new"] += 1
         return _llm.complete_many(
-            prompts, model=args.model, system=SYSTEM, max_workers=args.workers, return_exceptions=True
+            prompts,
+            model=args.model,
+            system=SYSTEM,
+            max_workers=args.workers,
+            return_exceptions=True,
+            timeout=args.llm_timeout,
         )
 
     main_t, extra_t, side_t = tuple(deck.main), tuple(deck.extra), tuple(deck.side)
