@@ -49,3 +49,27 @@ suggested_notebook: |
 2. Parallel `verify_lines.py` / `expand_lines.py` (#1) and default to 1 seed (#2). Brief for muse: mechanical.
 3. Env checkpoints in `_search.restore` (#3). Claude: it is search code.
 4. `demo_pipeline.py` orchestrator with stage caching (#12). Muse.
+
+## Making muse and the LLM stages fast (measured 2026-10-02)
+
+- **Per-call latency:** 159 cached LLM calls: median **38 s**, mean 48 s, p90 102 s, all **serial** (`demos/llm.py`
+  spawns `opencode run --pure` per call; it also tries the HTTP endpoint first, which always fails here).
+  One deck's extraction ≈ 25 calls ≈ 15–20 min of waiting.
+  1. **Concurrency:** run calls in a thread pool (4–8 at once; each is a separate CLI process). ~5x on extraction.
+  2. **Right model per job:** muse (reasoning) only for hard parsing. Try `deepseek-v4.1-flash` for section
+     extraction and the nickname layer, and gate it on the gold set (recall must not drop) before switching.
+  3. **Fewer, bigger calls:** one call per guide (all combo sections at once) instead of one per section.
+  4. **Skip the dead HTTP attempt** (process-level flag after the first failure).
+- **Muse agent sessions** are sequential model turns of ~30–60 s each, so turns are the cost, not tokens:
+  1. Put the context in the brief (exact paths, function signatures, the command lines to run) so muse doesn't spend
+     turns exploring the repo.
+  2. One deliverable per brief; split per deck and run 2–3 sessions in parallel.
+  3. Never let muse wait on a long run (verify sweeps, expansion): it writes the command, Claude runs it.
+- **vast for CPU sweeps: latency vs throughput.** A cold job costs ~2–5 min of overhead (offer, boot, image pull, uv sync,
+  core + extension build) plus seconds of transfer, so it only pays when the laptop run would take > ~10 min.
+  Rules:
+  - Interactive debugging (one line, `explain_line.py`) and anything < 10 min: laptop, parallel (4 procs).
+  - Sweeps (all decks verify + expand, big searches): a **warm session box**. Rent one CPU box at the start of a
+    working session (≈ $X/h, so even 8 idle hours ≈ $X), push code deltas with tar/rsync (seconds), run sweeps
+    there, pull `data/demos/` back, destroy it at the end (launcher `--keep` mode + `--cleanup`; TODO).
+  - Also cache the built `.venv` + `build/` on the box between pushes, so only changed Python files move.
