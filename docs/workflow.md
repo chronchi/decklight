@@ -7,7 +7,7 @@ Measured on the session that built Phase 0 + the demo pipeline. Read this before
 | # | Bottleneck | Evidence | Fix |
 |---|---|---|---|
 | 1 | **Verification is serial and CPU-bound** | Salamangreat 8 lines × 3 seeds = 5–30 min; expansion 72 variants = 14 min; 3 of 4 cores idle | Run lines in parallel (`multiprocessing.Pool`, one process per line×seed, 4 workers on the laptop). Expected ~3x. |
-| 2 | **3 seeds per line add almost nothing** | On turn 1 the obs shows the own deck as an unordered multiset, so other seeds only change draws/random effects. They tripled verify time | Verify with 1 seed; spot-check other seeds only for lines with random effects. Diversity comes from hand variants (`expand_lines.py`), not seeds. |
+| 2 | **3 seeds triple verify time** | ~146 s per seed for Salamangreat on the laptop. CORRECTION (vast smoke 2026-10-02): seeds DO change the verdict for some lines (Salamangreat: 3 verified with seed 0 alone vs 6 with seeds 0–2), so they raise yield, not just obs diversity | Keep several seeds but run them **in parallel** (one process per line×seed), and stop at the first seed that verifies when only one record is needed. |
 | 3 | **Backtracking replays the whole prefix** | `verify._search.restore()` rebuilds the duel (~15 ms) and replays every choice on each backtrack: O(depth) per node, and long lines are 60–130 choices deep | Keep env checkpoints at step boundaries (restore from the nearest), or a small LRU of envs by prefix length. |
 | 4 | **Laptop throttles** | Same benchmark 1.3k → 0.66k steps/s after an hour; 1.3 GHz under load | Bulk verify/expand runs → vast CPU box (9+ effective cores ≈ 3x, ~$X/h). The launcher is ready (`scripts/vast_job.py`). |
 | 5 | **Muse runs that also execute long jobs** | scale-gold-decks 91 min, extract-v2 79 min, pool-decks 61 min: most of it was muse waiting on verify runs / LLM calls inside its own session | Muse produces code and artifacts; Claude launches the long runs (background, parallel). Briefs say "do not run verification for more than one line; Claude runs the full sweep". |
@@ -97,3 +97,11 @@ Decision:
   off-peak with validation; retry on muse when the answer is empty/invalid.
 - LongCat: only for throwaway or easily verified tasks (free, but slow and unreliable on our prompts).
 - Agentic coding (briefs): muse.
+
+## vast CPU box, measured (smoke 2026-10-02, Quadro P4000 host, $X/h, cgroup ≈ 17 cores of 72 Xeon E5-2686 v4)
+- Boot to ssh: 45–90 s; setup (uv + core + extension build): ~3–4 min, so a cold job has ~5 min overhead.
+- VecEnv: 1 thread 1.7k, 8 threads 8.2k, all cores 9.6k agent steps/s (laptop: 2.4k at 8 threads) → ~4×.
+- `verify_lines.py` (serial) Salamangreat seed 0: 130 s vs ~146 s per seed on the laptop. **Single-process speed is
+  about equal; the box only wins once verification is parallel.**
+- Some hosts drop ssh in the first minutes ("closed by remote host", tar exit 141/255); the launcher retries transfers
+  and runs jobs detached. Smoke attempts total ≈ $X.
