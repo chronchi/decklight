@@ -84,7 +84,7 @@ def verify_all(
         print(f"    {rep.detail}")
         if ok:
             s0, v0 = ok[0]
-            cfg = make_config(line, deck, s0)
+            cfg = v0.config or make_config(line, deck, s0, engine)
             records.append(
                 {
                     "line_id": line.id,

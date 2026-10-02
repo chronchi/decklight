@@ -10,8 +10,10 @@ internet text and training data.
 from __future__ import annotations
 
 import copy
+import json
 from collections import Counter
 from dataclasses import dataclass
+from pathlib import Path
 
 from ygo_zero.decks import Deck
 from ygo_zero.demos.generic import resolve_generic
@@ -25,6 +27,9 @@ from ygo_zero.engine.duel import DuelConfig, Engine, Placement
 _LOC_MZONE, _LOC_SZONE = 3, 4
 _MOVERS = (Kind.TO_BATTLE, Kind.TO_MAIN2, Kind.TO_END)
 _DEMOTED = frozenset({Kind.TO_BATTLE, Kind.TO_MAIN2, Kind.TO_END, Kind.CANCEL})
+_COMMAND_MSGS = (C.MSG_SELECT_IDLECMD, C.MSG_SELECT_BATTLECMD)  # step boundaries (with an empty chain)
+_PASSIVE = (Kind.PASS, Kind.NO, Kind.TO_END, Kind.FINISH, Kind.CANCEL)
+VERIFIED_DIR = Path(__file__).resolve().parents[3] / "data" / "demos" / "verified"
 # Unstated main-phase actions allowed between steps, per line (each must use a card the line mentions later).
 MAX_EXTRA_ACTIONS = 1
 # Steps whose results must end up on my field (a "summoned" card that is still in the GY was not summoned).
@@ -53,6 +58,7 @@ class Verdict:
     executed_steps: int = 0  # len(steps) - len(skipped)
     inferred_frac: float = 0.0  # inferred / agent (non-auto) choices
     hand_inferred: bool = False  # hand was empty; anchors inferred it (see infer_hand_codes)
+    config: DuelConfig | None = None  # the exact puzzle the choices replay on (store this, not a rebuilt one)
 
 
 # Steps whose anchor card must start in the hand (normal/set/activate from hand).
@@ -133,16 +139,68 @@ def quality_guard(n: int, skipped: list[int] | None, labels: list[str]) -> str |
     return None
 
 
-def make_config(line: ComboLine, deck: Deck, seed: int = 0) -> DuelConfig:
-    """Puzzle start: my hand placed, deck minus those cards, opponent = same deck, empty hand."""
+def going_second(line: ComboLine) -> bool:
+    return line.going == "second" or any(st.action == "attack" for st in line.steps)
+
+
+# Fallback opponent board when no verified line of another deck exists: two face-up Blue-Eyes.
+_FALLBACK_BOARD = (89631139, 89631139)
+
+
+def opponent_board(engine: Engine, line: ComboLine, seed: int, verified_dir: Path | None = None):
+    """(opponent Deck, placements) for a going-second line: the end board of a verified going-first line of
+    *another* deck (a realistic board to break), chosen by seed; else a fallback board."""
+    verified_dir = verified_dir or VERIFIED_DIR
+    recs = []
+    for f in sorted(verified_dir.glob("*.jsonl")) if verified_dir.exists() else []:
+        for raw in f.read_text().splitlines():
+            if raw.strip():
+                r = json.loads(raw)
+                first = any(pl[0] == 0 and pl[2] == C.LOCATION_HAND for pl in r["config"]["setup"])
+                if first and not r["deck"].startswith(line.deck):
+                    recs.append(r)
+    if recs:
+        r = recs[seed % len(recs)]
+        deck = Deck(tuple(r["config"]["deck0_main"]), tuple(r["config"]["deck0_extra"]))
+        board = [c for c in r["end_board_codes"] if c is not None]
+    else:
+        deck, board = Deck(tuple([89631139] * 3 + [8240199] * 37), ()), list(_FALLBACK_BOARD)
+    places, mz, sz = [], 0, 0
+    for code in board:
+        cd = engine.cards.get(code)
+        if cd is None:
+            continue
+        if cd.type & C.TYPE_MONSTER:
+            if mz < 5:
+                places.append(Placement(0, code, C.LOCATION_MZONE, mz, C.POS_FACEUP_ATTACK))
+                mz += 1
+        elif cd.type & C.TYPE_FIELD:
+            places.append(Placement(0, code, C.LOCATION_SZONE, 5, C.POS_FACEUP))
+        elif sz < 5:
+            pos = C.POS_FACEDOWN if cd.type & C.TYPE_TRAP else C.POS_FACEUP
+            places.append(Placement(0, code, C.LOCATION_SZONE, sz, pos))
+            sz += 1
+    return deck, tuple(places)
+
+
+def make_config(line: ComboLine, deck: Deck, seed: int = 0, engine: Engine | None = None) -> DuelConfig:
+    """Puzzle start. Going first: my hand placed, deck minus those cards, opponent = same deck, empty hand.
+    Going second (docs/line_executor.md): the opponent (player 0) starts with a board from `opponent_board`
+    and passes; I am player 1 with the line's hand and draw normally on my turn 2."""
     hand, _ = effective_hand_codes(line)
     main = list(deck.main)
     for c in hand:
         if c in main:
             main.remove(c)
-    deck0 = Deck(tuple(main), tuple(deck.extra), ())
-    setup = tuple(Placement(0, c, C.LOCATION_HAND) for c in hand)
-    return DuelConfig(deck0, deck, seed=seed, hand=0, setup=setup)
+    mine = Deck(tuple(main), tuple(deck.extra), ())
+    if not going_second(line):
+        setup = tuple(Placement(0, c, C.LOCATION_HAND) for c in hand)
+        return DuelConfig(mine, deck, seed=seed, hand=0, setup=setup)
+    if engine is None:
+        raise ValueError("a going-second line needs the engine to build the opponent board")
+    opp_deck, board = opponent_board(engine, line, seed)
+    setup = board + tuple(Placement(1, c, C.LOCATION_HAND) for c in hand)
+    return DuelConfig(opp_deck, mine, seed=seed, hand=0, setup=setup)
 
 
 def _unresolved(line: ComboLine) -> list[str]:
@@ -229,6 +287,8 @@ def _anchor(step_i: int, steps: list, kind: int, code: int) -> bool:
     if any_card and code in any_card:
         code = card  # a generic step card: any matching card anchors it
     a = s.action
+    if a == "attack":
+        return kind == Kind.ATTACK and code == card
     if a == "normal_summon":
         return kind == Kind.SUMMON and code == card
     # Guides describe many effects by their outcome ("Roar sets itself from the GY"): a set step is also
@@ -264,7 +324,7 @@ def verify_line(engine: Engine, line: ComboLine, deck: Deck, seed: int = 0, budg
     _, hand_inf = effective_hand_codes(line)
     if hand_inf and "hand_inferred" not in (line.notes or ""):
         line.notes = f"{line.notes} | hand_inferred=True" if line.notes else "hand_inferred=True"
-    if line.going == "second" or any(s.action == "attack" for s in line.steps):
+    if line.going == "first" and any(s.action == "attack" for s in line.steps):
         return Verdict(
             line.id,
             False,
@@ -274,7 +334,7 @@ def verify_line(engine: Engine, line: ComboLine, deck: Deck, seed: int = 0, budg
             seed,
             0,
             [],
-            "going second or battle step: needs opponent interaction",
+            "a going-first line cannot attack on turn 1",
             [],
             hand_inferred=hand_inf,
         )
@@ -297,7 +357,10 @@ def verify_line(engine: Engine, line: ComboLine, deck: Deck, seed: int = 0, budg
     miss = _missing(line, deck)
     if miss:
         return Verdict(line.id, False, "missing_card", [], [], seed, 0, [], miss, [], hand_inferred=hand_inf)
-    return _search(engine, make_config(line, deck, seed), line, seed, budget, hand_inferred=hand_inf)
+    config = make_config(line, deck, seed, engine)
+    v = _search(engine, config, line, seed, budget, hand_inferred=hand_inf)
+    v.config = config
+    return v
 
 
 def _search(
@@ -317,11 +380,17 @@ def _search(
         codes |= getattr(s, "any_codes", set())
         sets.append(codes)
         res.append([c for c in s.results_codes if c is not None])
-        skippable.append(not res[-1] and not any(s.materials_codes + s.targets_codes))
+        # Attacks have no listed results but are never optional: their anchor only exists in the Battle Phase,
+        # so at a main-phase boundary the skip rule would otherwise fire before the search tries TO_BATTLE.
+        skippable.append(
+            not res[-1] and not any(s.materials_codes + s.targets_codes) and s.action != "attack"
+        )
     later = [set().union(*sets[i:]) for i in range(n)]  # cards mentioned from step i on
     endset = {c for c in line.end_board_codes if c is not None}
     end_unres = sum(1 for c in line.end_board_codes if c is None)
 
+    me = 1 if going_second(line) else 0
+    my_turn = 1 + me  # going second, my turn is turn 2
     env = CppEnv(engine, config)
     obs = env.reset()
     choices: list[int] = []
@@ -339,7 +408,7 @@ def _search(
 
     def snap() -> None:
         rows = obs["cards"][obs["card_mask"]]
-        mine = rows[(rows[:, 3] ^ env.player) == 0]
+        mine = rows[(rows[:, 3] ^ env.player) == me]  # controller is relative to the player to act
         code, loc = mine[:, 0], mine[:, 1]
         cur[0] = tuple(sorted(code[loc == 2].tolist()))
         cur[1] = tuple(sorted(code[(loc == _LOC_MZONE) | (loc == _LOC_SZONE)].tolist()))
@@ -368,6 +437,13 @@ def _search(
             obs = env.step(i)
         assert obs is not None
         snap()
+
+    def passive_option() -> int:
+        """The opponent's answer: pass / no / end / finish / cancel when available, else the first option."""
+        for i, k, _ in options():
+            if k in _PASSIVE:
+                return i
+        return 0
 
     def options() -> list[tuple[int, int, int]]:
         m = int(obs["action_mask"].sum())
@@ -508,9 +584,9 @@ def _search(
         return False
 
     def dfs(si: int, at: bool, cfrom: int | None, ccodes, extras: int = 0) -> bool:
-        while obs is not None and env.player == 1:  # opponent has no cards: take option 0
-            take(0, "auto")
-        if obs is None or int(obs["global"][2]) > 1:
+        while obs is not None and env.player != me:  # the opponent never interacts: passive answers
+            take(passive_option(), "auto")
+        if obs is None or int(obs["global"][2]) > my_turn:
             # My turn is over (or the duel ended): a step whose trigger resolved as the
             # last thing still counts if its results are out of the deck.
             if at and si < n:
@@ -526,7 +602,7 @@ def _search(
         if si >= n:
             return post()
         dead(si)  # remember the deepest step reached (and the path), for --explain
-        boundary = int(obs["global"][21]) == C.MSG_SELECT_IDLECMD and int(obs["global"][20]) == 0
+        boundary = int(obs["global"][21]) in _COMMAND_MSGS and int(obs["global"][20]) == 0
         if boundary and at:  # step ends: its results must be out of the deck
             if cfrom is not None and not carried_out(ccodes):
                 return False  # the previous step's carry is still missing: fail as before

@@ -42,7 +42,7 @@ def main() -> None:
     print(f"{v.reason}: {v.detail}")
     for st in line.steps:
         print(f"  step {st.i}: {st.action} {st.card} | {st.text[:100]}")
-    config = make_config(line, deck, args.seed)
+    config = v.config or make_config(line, deck, args.seed, engine)
     env = CppEnv(engine, config)
     obs = env.reset()
     for i in v.choices:

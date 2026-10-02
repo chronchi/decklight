@@ -20,7 +20,7 @@ from pathlib import Path
 from ygo_zero.decks import Deck
 from ygo_zero.demos.dataset import load_records
 from ygo_zero.demos.schema import ComboLine
-from ygo_zero.demos.verify import make_config, verify_line
+from ygo_zero.demos.verify import verify_line
 from ygo_zero.engine.duel import Engine
 
 
@@ -55,12 +55,15 @@ def main() -> None:
             continue
         line = ComboLine.from_json(lines[base_id])
         c = rec["config"]
-        hand = [p[1] for p in c["setup"] if p[2] == 2]  # LOCATION_HAND
-        full_main = list(c["deck0_main"]) + hand  # the record's deck excludes the placed hand
-        deck = Deck(tuple(full_main), tuple(c["deck0_extra"]))
+        hands = [p for p in c["setup"] if p[2] == 2]  # LOCATION_HAND placements: whose they are tells my seat
+        me = hands[0][0] if hands else 0  # going second → team 1
+        hand = [p[1] for p in hands]
+        my_main, my_extra = c[f"deck{me}_main"], c[f"deck{me}_extra"]
+        full_main = list(my_main) + hand  # the record's deck excludes the placed hand
+        deck = Deck(tuple(full_main), tuple(my_extra))
         out_records = []
         for v in range(args.variants):
-            pool = list(c["deck0_main"])
+            pool = list(my_main)
             rng.shuffle(pool)
             extra = pool[: max(0, args.hand_size - len(hand))]
             var = dataclasses.replace(
@@ -70,7 +73,7 @@ def main() -> None:
             kept[verdict.reason] += 1
             if not verdict.ok:
                 continue
-            cfg = make_config(var, deck, c["seed"])
+            cfg = verdict.config
             out_records.append({
                 **{k: rec[k] for k in ("source_url", "deck", "end_board", "end_board_codes") if k in rec},
                 "line_id": var.id,

@@ -6,7 +6,6 @@ from ygo_zero.demos.schema import ComboLine, Step
 from ygo_zero.demos.verify import (
     effective_hand_codes,
     infer_hand_codes,
-    make_config,
     quality_guard,
     verify_line,
 )
@@ -77,7 +76,7 @@ def test_two_step_line_verifies_and_replays(engine, decks):
     assert v.skipped_steps == [] and v.deck_source == ""
     assert v.executed_steps == 2 and 0.0 <= v.inferred_frac <= 1.0
     assert not v.hand_inferred
-    assert _my_field(engine, make_config(line, deck, 0), v.choices) == sorted(v.end_field_codes)
+    assert _my_field(engine, v.config, v.choices) == sorted(v.end_field_codes)
 
 
 def test_impossible_end_board_is_rejected(engine, decks):
@@ -210,3 +209,18 @@ def test_summon_step_needs_its_result_on_the_field(engine, decks):
     )
     v = verify_line(engine, line, deck, seed=0, budget=300)
     assert not v.ok, v.detail
+
+
+def test_going_second_line_faces_a_board_and_attacks(engine, decks):
+    """Going second: the opponent starts with a board and passes; I (player 1) summon and attack on turn 2."""
+    deck = decks["BlueEyes"]
+    line = _line(
+        [SAGE],
+        [_step(0, "normal_summon", SAGE), _step(1, "attack", SAGE, results=[])],
+        [],
+        going="second",
+    )
+    v = verify_line(engine, line, deck, seed=0, budget=500)
+    assert v.ok, v.detail
+    assert any(p.team == 0 and p.location != 2 for p in v.config.setup)  # opponent board placed
+    assert all(p.team == 1 for p in v.config.setup if p.location == 2)  # my hand is player 1's
