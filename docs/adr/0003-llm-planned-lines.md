@@ -1,7 +1,7 @@
 # ADR 0003 — LLM-planned combo lines as the main demonstration source
 
-Status: **proposed**, 2026-10-02. Go-ahead from the user ("go ahead with this whole thing"). It becomes accepted (or is revised) after the
-pilot below reports.
+Status: **accepted**, 2026-10-02, after the pilot (below) passed its gate: 29/40 hands verified (72%, gate 30%).
+Go-ahead from the user ("go ahead with this whole thing"); the user also asked Claude to write lines itself.
 
 ## Context
 ADR 0002 sources lines from internet guides. After one day on 8 decks: 18 verified lines and 1,958 BC decisions.
@@ -29,3 +29,14 @@ engine search (PLAN Phase 3 track 2) to improve on planned lines.
 Blue-Eyes + Salamangreat, 20 hands each, `--repairs 2`. Measure verified/hand by attempt, decisions per line, calls and
 minutes per verified line, and the end-board strength compared with the guide lines verified on the same decks. Go: ≥30% of hands verify
 with non-trivial boards. Then scale to all pool decks and pause guide-yield work.
+
+## Pilot result (2026-10-02)
+| Deck | Verified hands (attempt 0 / 1 / 2) | Mean steps / BC decisions | LLM calls | Wall |
+|---|---|---|---|---|
+| Blue-Eyes (muse) | 18/20 (11 / 6 / 1) | 6.8 / 27.2 | 30 | 24 min |
+| Salamangreat (muse) | 11/20 (1 / 6 / 4) | 12.8 / 37.1 | 52 | 87 min |
+| Blue-Eyes (Claude, same hands) | 20/20 first try | | 0 | |
+
+Salamangreat ran on the verifier from before the option pruning and the visited-key fix (NOTEBOOK 2026-10-02), so its 10
+budget failures are re-verified later. Second source: **Claude-written lines**, the same schema, verified the same way
+(`data/demos/claude/`), on the same seed-0 hands for a direct comparison.
