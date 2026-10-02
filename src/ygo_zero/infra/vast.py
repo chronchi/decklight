@@ -46,8 +46,16 @@ def our_instances() -> list[dict]:
     return [i for i in cli("show", "instances") if (i.get("label") or "").startswith(LABEL_PREFIX)]
 
 
-def destroy(instance_id: int) -> None:
-    cli("destroy", "instance", str(instance_id), raw=False)
+def destroy(instance_id: int, verify_s: int = 60) -> None:
+    """Destroy and confirm it is gone. `-y` matters: without it the CLI asks for confirmation, reads EOF,
+    prints "Aborted." and exits 0, destroying nothing (cost us a stray instance on 2026-10-01)."""
+    cli("destroy", "instance", str(instance_id), "-y", raw=False)
+    t0 = time.time()
+    while time.time() - t0 < verify_s:
+        if all(i["id"] != instance_id for i in cli("show", "instances")):
+            return
+        time.sleep(5)
+    raise VastError(f"instance {instance_id} still listed {verify_s}s after destroy")
 
 
 def destroy_strays() -> list[int]:

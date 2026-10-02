@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Phase 0 exit job: environment report, test suite, and VecEnv throughput on the instance.
 set -uo pipefail
+export PATH="$HOME/.local/bin:$PATH"  # uv, installed by vast_setup.sh
 OUT="runs/$1"
 mkdir -p "$OUT"
 nvidia-smi > "$OUT/nvidia-smi.txt" 2>&1
