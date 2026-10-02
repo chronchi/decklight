@@ -3,6 +3,9 @@
 Usage:
     uv run python scripts/verify_lines.py --lines data/demos/lines/blue-eyes.jsonl \\
         --ydk tests/fixtures/decks/BlueEyes.ydk [--seeds 0 1 2] --out data/demos/verified/blue-eyes.jsonl
+
+    --ydk may be omitted: it then defaults to decks/pool/<line.deck>.ydk when
+    that file exists (all four demo decks have one).
 """
 
 from __future__ import annotations
@@ -18,7 +21,15 @@ from ygo_zero.demos.verify import Verdict, make_config, verify_line
 from ygo_zero.engine import constants as C
 from ygo_zero.engine.duel import Engine
 
+ROOT = Path(__file__).resolve().parents[1]
+
 _EXTRA = C.TYPE_FUSION | C.TYPE_SYNCHRO | C.TYPE_XYZ | C.TYPE_LINK
+
+
+def default_pool_ydk(deck: str) -> Path | None:
+    """Tracked current-TCG list for `deck`, if one exists (`decks/pool/<deck>.ydk`)."""
+    cand = ROOT / "decks" / "pool" / f"{deck}.ydk"
+    return cand if cand.is_file() else None
 
 
 def augmented(engine: Engine, deck: Deck, line: ComboLine) -> Deck:
@@ -120,7 +131,12 @@ def deck_from_guide_json(engine: Engine, data: dict, name: str) -> Deck:
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--lines", required=True)
-    ap.add_argument("--ydk", required=True)
+    ap.add_argument(
+        "--ydk",
+        required=False,
+        default=None,
+        help="fixture deck (default: decks/pool/<line.deck>.ydk when it exists)",
+    )
     ap.add_argument("--seeds", nargs="*", type=int, default=[0])
     ap.add_argument("--out", required=True)
     ap.add_argument("--budget", type=int, default=2000)
@@ -139,10 +155,20 @@ def main() -> None:
     args = ap.parse_args()
 
     engine = Engine()
-    deck = load_ydk(args.ydk)
     lines = [
         ComboLine.from_json(json.loads(s)) for s in Path(args.lines).read_text().splitlines() if s.strip()
     ]
+    if not lines:
+        raise SystemExit(f"no lines in {args.lines}")
+    ydk_arg = args.ydk
+    if ydk_arg is None:
+        pool = default_pool_ydk(lines[0].deck)
+        if pool is None:
+            raise SystemExit(
+                f"no --ydk given and no decks/pool/{lines[0].deck}.ydk exists; pass --ydk explicitly"
+            )
+        ydk_arg = str(pool)
+    deck = load_ydk(ydk_arg)
 
     # group lines by deck: guide decklist when available, else the fixture
     groups: dict[str, tuple[Deck, list]] = {}
@@ -162,7 +188,7 @@ def main() -> None:
             groups[key] = (gd, [])
         groups[key][1].append(line)
 
-    print(f"== {args.lines} vs {args.ydk} (seeds={args.seeds}) deck_groups={sorted(groups)} ==")
+    print(f"== {args.lines} vs {ydk_arg} (seeds={args.seeds}) deck_groups={sorted(groups)} ==")
     records: list[dict] = []
     reps: dict[str, Verdict] = {}
     base_of: dict[str, str] = {}  # line_id -> group key (for the augmented fallback source)
@@ -187,7 +213,13 @@ def main() -> None:
             adeck = augmented(engine, base_deck, line)
             tag = "+augmented" if base_key == "fixture" else "+guide+augmented"
             recs, areps = verify_all(
-                engine, adeck, [line], args.seeds, args.budget, tag, base_key + "+augmented",
+                engine,
+                adeck,
+                [line],
+                args.seeds,
+                args.budget,
+                tag,
+                base_key + "+augmented",
                 args.budget_long,
             )
             aug_records += recs

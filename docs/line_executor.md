@@ -78,3 +78,23 @@ other seeds, same hand. Keep the seeds where it still verifies.
 ## Metrics (per deck and on the gold set)
 lines in → verified %, reasons for rejection (missing_card, unresolved, no_anchor@step k, budget, end_board_mismatch,
 vacuous, too_skipped, trivial), % inferred choices per verified line, search nodes per line.
+
+## Rules added 2026-10-02 (Claude, from traced failures)
+- **Step transitions at any decision.** Inside step k, an option that anchors step k+1 (e.g. a summon trigger
+  offered as yes/no mid-chain) may close step k; k's missing results are carried to k+1's end.
+- **Implicit steps.** A step whose results already came out on their own (forced trigger of a card involved in
+  the previous step) counts as executed; listed as `implicit=[...]` in the detail.
+- **Where results must be.** Summon/set steps: on my field. Other steps: hand, field, GY, banished or overlay.
+  Never the Extra Deck (an Extra Deck card has not arrived anywhere). Carried results count if on the field or
+  newly arrived elsewhere since the carry (used as material); a card that stayed in the GY does not.
+- **Set via activation.** "X sets itself from the GY" is an activation: set steps also anchor on ACTIVATE/YES of
+  the same card. Special-summon steps anchor on activations only of cards the step names.
+- **Bounded unstated actions.** Between steps, at most `MAX_EXTRA_ACTIONS` (1) main-phase action the guide did not
+  state, and only with a card the line mentions later. Everything else is anchors, skips, implicit steps and phase moves.
+- **Generic names** (`demos/generic.py`). "a Branded Spell/Trap", "Bystial", "a FIRE monster" resolve to the
+  deck's cards matching archetype (CardScripts setcodes) + type/attribute words. Hand placeholders become the
+  first match; step cards accept any match as anchor; materials/targets add all matches to the stated set;
+  generic results and requires are dropped from the checks. Descriptions with no archetype/attribute
+  constraint ("lock monster") stay unresolved, so the line is rejected.
+- **Diagnosis.** Failed verdicts carry the path to the deepest step reached; `scripts/explain_line.py` replays it
+  and prints the zones and options at the dead end.

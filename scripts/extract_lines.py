@@ -140,9 +140,7 @@ def main() -> None:
 
     if args.gold:
         for gold_path in args.gold:
-            gold = extract_lines(
-                gold_path, args.deck, decklist, names=names, complete_fn=counting_complete
-            )
+            gold = extract_lines(gold_path, args.deck, decklist, names=names, complete_fn=counting_complete)
             print(f"== gold {Path(gold_path).name}: {len(gold)} lines ==")
             fetched_seq = [(line.id, step_card_sequence(line)) for line in all_lines]
             for g in gold:

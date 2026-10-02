@@ -9,10 +9,12 @@ internet text and training data.
 
 from __future__ import annotations
 
+import copy
 from collections import Counter
 from dataclasses import dataclass
 
 from ygo_zero.decks import Deck
+from ygo_zero.demos.generic import resolve_generic
 from ygo_zero.demos.schema import ComboLine
 from ygo_zero.engine import constants as C
 from ygo_zero.engine.actions import Kind
@@ -179,12 +181,53 @@ def _missing(line: ComboLine, deck: Deck) -> str:
     return ""
 
 
+def apply_generics(line: ComboLine, deck: Deck, cards) -> ComboLine:
+    """A copy of `line` where generic descriptions ("a Branded Spell/Trap", "Bystial") that match cards of `deck`
+    become constrained wildcards (docs/line_executor.md "Generic names"). Names that match nothing stay unresolved."""
+    line = copy.deepcopy(line)
+    deck_codes = set(deck.main) | set(deck.extra)
+    used: list[str] = []
+
+    def cands(name: str) -> list[int]:
+        return resolve_generic(name, deck_codes, cards) if name else []
+
+    for i, (n, c) in enumerate(zip(line.hand, line.hand_codes)):
+        if c is None and (cc := cands(n)):
+            line.hand_codes[i] = cc[0]  # any matching card is a legal reading; take the first
+            used.append(f"hand:{n}->{cc[0]}")
+    keep = [(n, c) for n, c in zip(line.requires, line.requires_codes) if c is not None or not cands(n)]
+    if len(keep) != len(line.requires):
+        used.append("requires: generic entries dropped")
+        line.requires, line.requires_codes = [n for n, _ in keep], [c for _, c in keep]
+    for st in line.steps:
+        st.any_codes = set()
+        if st.card_code is None and (cc := cands(st.card)):
+            st.card_code, st.card_any = cc[0], set(cc)
+            st.any_codes |= set(cc)
+            used.append(f"step{st.i}:{st.card}->{len(cc)} cards")
+        for names, codes in ((st.materials, st.materials_codes), (st.targets, st.targets_codes)):
+            for j, (n, c) in enumerate(zip(names, codes)):
+                if c is None and (cc := cands(n)):
+                    codes[j] = cc[0]
+                    st.any_codes |= set(cc)
+        keep_r = [(n, c) for n, c in zip(st.results, st.results_codes) if c is not None or not cands(n)]
+        st.results, st.results_codes = [n for n, _ in keep_r], [c for _, c in keep_r]
+    if used:
+        line.notes = (
+            f"{line.notes} | generic: {'; '.join(used)}" if line.notes else f"generic: {'; '.join(used)}"
+        )
+    return line
+
+
 def _anchor(step_i: int, steps: list, kind: int, code: int) -> bool:
     """Whether option (kind, code) starts step `step_i` (docs/line_executor.md anchor table)."""
     s = steps[step_i]
     card = s.card_code
     if card is None:
         return False
+    any_card = getattr(s, "card_any", None)
+    if any_card and code in any_card:
+        code = card  # a generic step card: any matching card anchors it
     a = s.action
     if a == "normal_summon":
         return kind == Kind.SUMMON and code == card
@@ -235,6 +278,7 @@ def verify_line(engine: Engine, line: ComboLine, deck: Deck, seed: int = 0, budg
             [],
             hand_inferred=hand_inf,
         )
+    line = apply_generics(line, deck, engine.cards)
     bad = _unresolved(line)
     if bad:
         return Verdict(
@@ -270,6 +314,7 @@ def _search(
         codes = {s.card_code} if s.card_code is not None else set()
         for cc in (s.materials_codes, s.targets_codes, s.results_codes):
             codes |= {c for c in cc if c is not None}
+        codes |= getattr(s, "any_codes", set())
         sets.append(codes)
         res.append([c for c in s.results_codes if c is not None])
         skippable.append(not res[-1] and not any(s.materials_codes + s.targets_codes))
