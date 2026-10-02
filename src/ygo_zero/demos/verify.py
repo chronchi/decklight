@@ -32,6 +32,7 @@ class Verdict:
     line_id: str
     ok: bool
     reason: str  # ok | missing_card | unresolved | out_of_scope | no_anchor@<k> | budget | end_board_mismatch
+    #            | vacuous | too_skipped | trivial
     choices: list[int]  # every index passed to env.step (replays to the final state)
     labels: list[str]  # per choice: "stated" | "inferred" | "auto"
     seed: int
@@ -40,11 +41,92 @@ class Verdict:
     detail: str
     skipped_steps: list[int] | None = None  # conditional steps skipped (anchor never legal, no results)
     deck_source: str = ""  # which deck verified against ("fixture" | "guide:<source>" | ...; set by caller)
+    executed_steps: int = 0  # len(steps) - len(skipped)
+    inferred_frac: float = 0.0  # inferred / agent (non-auto) choices
+    hand_inferred: bool = False  # hand was empty; anchors inferred it (see infer_hand_codes)
+
+
+# Steps whose anchor card must start in the hand (normal/set/activate from hand).
+_IN_HAND_ACTIONS = frozenset({"normal_summon", "set_monster", "set_spelltrap", "activate"})
+# Steps that put new cards on the field from the deck/extra (never in-hand anchors).
+_SPECIAL_ACTIONS = frozenset(
+    {
+        "special_summon",
+        "link_summon",
+        "synchro_summon",
+        "xyz_summon",
+        "fusion_summon",
+        "ritual_summon",
+    }
+)
+
+
+def _is_search_or_special(step) -> bool:
+    """A step after which later anchors may come from the deck, not the opening hand."""
+    if step.action in _SPECIAL_ACTIONS:
+        return True
+    own = step.card_code
+    return any(c is not None and c != own for c in step.results_codes)
+
+
+def infer_hand_codes(line: ComboLine) -> list[int]:
+    """Infer an opening hand for lines whose hand field is empty (MDM lazy-load loss).
+
+    Take the anchor card of each leading step that is an in-hand action
+    (normal_summon/set/activate), stopping after the first search/special effect
+    (a step whose results name a card other than its own, or any special summon):
+    later cards may have been searched, so they are not hand cards. Only cards
+    already named in the steps are used; nothing is invented. Returns [] when the
+    line has a hand or nothing can be inferred (e.g. it opens with a fusion).
+    """
+    if any(c is not None for c in line.hand_codes):
+        return []
+    out: list[int] = []
+    for s in line.steps:
+        if s.action in _IN_HAND_ACTIONS and s.card_code is not None and s.card_code not in out:
+            out.append(s.card_code)
+        if _is_search_or_special(s):
+            break
+    return out
+
+
+def effective_hand_codes(line: ComboLine) -> tuple[list[int], bool]:
+    """(hand codes to play with, whether they were inferred)."""
+    have = [c for c in line.hand_codes if c is not None]
+    if have:
+        return have, False
+    inf = infer_hand_codes(line)
+    return inf, bool(inf)
+
+
+def inferred_frac_of(labels: list[str]) -> float:
+    agent = [x for x in labels if x != "auto"]
+    if not agent:
+        return 0.0
+    return sum(1 for x in agent if x == "inferred") / len(agent)
+
+
+def quality_guard(n: int, skipped: list[int] | None, labels: list[str]) -> str | None:
+    """Reject vacuous / over-skipped / fragment lines (docs/line_executor.md).
+
+    Priority: vacuous (all steps skipped, or 0 agent choices) > too_skipped
+    (>1/3 of steps skipped) > trivial (<2 executed steps). Returns the reason
+    or None when the line passes.
+    """
+    sk = list(skipped or [])
+    agent = [x for x in labels if x != "auto"]
+    if n == 0 or (n > 0 and len(sk) >= n) or len(agent) == 0:
+        return "vacuous"
+    if len(sk) * 3 > n:
+        return "too_skipped"
+    if n - len(sk) < 2:
+        return "trivial"
+    return None
 
 
 def make_config(line: ComboLine, deck: Deck, seed: int = 0) -> DuelConfig:
     """Puzzle start: my hand placed, deck minus those cards, opponent = same deck, empty hand."""
-    hand = [c for c in line.hand_codes if c is not None]
+    hand, _ = effective_hand_codes(line)
     main = list(deck.main)
     for c in hand:
         if c in main:
@@ -71,9 +153,8 @@ def _unresolved(line: ComboLine) -> list[str]:
 
 def _missing(line: ComboLine, deck: Deck) -> str:
     main = Counter(deck.main)
-    for c in line.hand_codes:
-        if c is None:
-            continue
+    hand, _ = effective_hand_codes(line)
+    for c in hand:
         if main[c] <= 0:
             return f"hand card {c} not in deck"
         main[c] -= 1
@@ -129,6 +210,9 @@ class _Budget(Exception):
 
 def verify_line(engine: Engine, line: ComboLine, deck: Deck, seed: int = 0, budget: int = 2000) -> Verdict:
     """Execute `line` from a puzzle start; keep it only if the end board is reached."""
+    _, hand_inf = effective_hand_codes(line)
+    if hand_inf and "hand_inferred" not in (line.notes or ""):
+        line.notes = f"{line.notes} | hand_inferred=True" if line.notes else "hand_inferred=True"
     if line.going == "second" or any(s.action == "attack" for s in line.steps):
         return Verdict(
             line.id,
@@ -141,17 +225,37 @@ def verify_line(engine: Engine, line: ComboLine, deck: Deck, seed: int = 0, budg
             [],
             "going second or battle step: needs opponent interaction",
             [],
+            hand_inferred=hand_inf,
         )
     bad = _unresolved(line)
     if bad:
-        return Verdict(line.id, False, "unresolved", [], [], seed, 0, [], f"unresolved names: {bad[:8]}", [])
+        return Verdict(
+            line.id,
+            False,
+            "unresolved",
+            [],
+            [],
+            seed,
+            0,
+            [],
+            f"unresolved names: {bad[:8]}",
+            [],
+            hand_inferred=hand_inf,
+        )
     miss = _missing(line, deck)
     if miss:
-        return Verdict(line.id, False, "missing_card", [], [], seed, 0, [], miss, [])
-    return _search(engine, make_config(line, deck, seed), line, seed, budget)
+        return Verdict(line.id, False, "missing_card", [], [], seed, 0, [], miss, [], hand_inferred=hand_inf)
+    return _search(engine, make_config(line, deck, seed), line, seed, budget, hand_inferred=hand_inf)
 
 
-def _search(engine: Engine, config: DuelConfig, line: ComboLine, seed: int, budget: int) -> Verdict:
+def _search(
+    engine: Engine,
+    config: DuelConfig,
+    line: ComboLine,
+    seed: int,
+    budget: int,
+    hand_inferred: bool = False,
+) -> Verdict:
     steps, n = line.steps, len(line.steps)
     sets, res, skippable = [], [], []
     for s in steps:
@@ -176,6 +280,7 @@ def _search(engine: Engine, config: DuelConfig, line: ComboLine, seed: int, budg
     cur = [(), (), ()]  # my (hand, field, other) code tuples at the current obs
     best = [-1, []]  # deepest terminal [step_idx, field codes]
     done: dict = {}
+    carry_log: list[tuple[int, list[int]]] = []  # (from_step, missing codes) carried on this path
 
     def snap() -> None:
         rows = obs["cards"][obs["card_mask"]]
@@ -212,11 +317,13 @@ def _search(engine: Engine, config: DuelConfig, line: ComboLine, seed: int, budg
         a = obs["actions"][:m]
         return [(i, int(a[i, 0]), int(a[i, 2])) for i in range(m)]
 
-    def statekey(si: int, at: bool) -> tuple:
+    def statekey(si: int, at: bool, cfrom: int | None, ccodes: tuple[int, ...] | None) -> tuple:
         g = obs["global"]
         return (
             si,
             at,
+            cfrom,
+            ccodes,
             int(g[2]),
             int(g[3]),
             int(g[21]),
@@ -232,6 +339,25 @@ def _search(engine: Engine, config: DuelConfig, line: ComboLine, seed: int, budg
         have = Counter(cur[0] + cur[1] + cur[2])
         return all(have[c] >= k for c, k in Counter(res[si]).items())
 
+    def some_arrived(si: int) -> bool:
+        if not res[si]:
+            return False
+        have = Counter(cur[0] + cur[1] + cur[2])
+        return any(have[c] > 0 for c in res[si])
+
+    def missing_of(si: int) -> list[int]:
+        have = Counter(cur[0] + cur[1] + cur[2])
+        miss: list[int] = []
+        for c, k in Counter(res[si]).items():
+            miss.extend([c] * max(0, k - have[c]))
+        return miss
+
+    def carried_out(ccodes: list[int] | tuple[int, ...] | None) -> bool:
+        if not ccodes:
+            return True
+        have = Counter(cur[0] + cur[1] + cur[2])
+        return all(have[c] >= k for c, k in Counter(ccodes).items())
+
     def end_ok() -> bool:
         if not endset:
             return True
@@ -245,6 +371,10 @@ def _search(engine: Engine, config: DuelConfig, line: ComboLine, seed: int, budg
         return f"inferred {pct:.0f}% ({inf}/{len(mine_labs)})"
 
     def succeed() -> bool:
+        exe = n - len(skipped)
+        frac = inferred_frac_of(labels)
+        carried = f"carried={carry_log}; " if carry_log else ""
+        hand = "hand_inferred; " if hand_inferred else ""
         done["v"] = Verdict(
             line.id,
             True,
@@ -254,8 +384,12 @@ def _search(engine: Engine, config: DuelConfig, line: ComboLine, seed: int, budg
             seed,
             nodes,
             sorted(cur[1]),
-            f"{n}/{n} steps; skipped={skipped}; {stats()}; nodes={nodes}; unresolved_endboard={end_unres}",
+            f"{n}/{n} steps; skipped={skipped}; {carried}{hand}{stats()}; nodes={nodes}; "
+            f"unresolved_endboard={end_unres}",
             list(skipped),
+            executed_steps=exe,
+            inferred_frac=frac,
+            hand_inferred=hand_inferred,
         )
         return True
 
@@ -290,7 +424,7 @@ def _search(engine: Engine, config: DuelConfig, line: ComboLine, seed: int, budg
             return succeed()
         if post_count >= POST_CAP:
             return dead(n)
-        key = statekey(n, False)
+        key = statekey(n, False, None, None)
         if key in visited:
             return False
         visited.add(key)
@@ -298,28 +432,45 @@ def _search(engine: Engine, config: DuelConfig, line: ComboLine, seed: int, budg
         depth = len(choices)
         for idx, lab in order(n, False, True, [], endset):
             take(idx, lab)
-            if dfs(n, False):
+            if dfs(n, False, None, None):
                 return True
             restore(depth)
         return False
 
-    def dfs(si: int, at: bool) -> bool:
+    def dfs(si: int, at: bool, cfrom: int | None, ccodes: list[int] | None) -> bool:
         while obs is not None and env.player == 1:  # opponent has no cards: take option 0
             take(0, "auto")
         if obs is None or int(obs["global"][2]) > 1:
             # My turn is over (or the duel ended): a step whose trigger resolved as the
             # last thing still counts if its results are out of the deck.
-            if at and si < n and results_out(si):
-                si += 1
+            if at and si < n:
+                if cfrom is not None and not carried_out(ccodes):
+                    return dead(si)
+                if results_out(si):
+                    si += 1
+                else:
+                    return dead(si)
+            elif cfrom is not None and not carried_out(ccodes):
+                return dead(si)
             return succeed() if si >= n and end_ok() else dead(si)
         if si >= n:
             return post()
         boundary = int(obs["global"][21]) == C.MSG_SELECT_IDLECMD and int(obs["global"][20]) == 0
         if boundary and at:  # step ends: its results must be out of the deck
+            if cfrom is not None and not carried_out(ccodes):
+                return False  # the previous step's carry is still missing: fail as before
             if not results_out(si):
+                # De-bundle: when only some results arrived, the missing ones may be
+                # satisfied by the end of the *next* step (carried forward once).
+                if res[si] and some_arrived(si) and si + 1 < n:
+                    miss = missing_of(si)
+                    carry_log.append((si, list(miss)))
+                    if dfs(si + 1, False, si, miss):
+                        return True
+                    carry_log.pop()
                 return False
-            return dfs(si + 1, False)
-        key = statekey(si, at)
+            return dfs(si + 1, False, None, None)
+        key = statekey(si, at, cfrom, tuple(ccodes) if ccodes else None)
         if key in visited:
             return False
         visited.add(key)
@@ -329,7 +480,7 @@ def _search(engine: Engine, config: DuelConfig, line: ComboLine, seed: int, budg
         depth = len(choices)
         if not at and boundary and not anchors and skippable[si]:
             skipped.append(si)  # conditional step (e.g. removal vs an empty board): skip it
-            if dfs(si + 1, False):
+            if dfs(si + 1, False, cfrom, ccodes):
                 return True
             skipped.pop()
         anch_idx = {i for i, _, _ in anchors}
@@ -337,14 +488,14 @@ def _search(engine: Engine, config: DuelConfig, line: ComboLine, seed: int, budg
             take(idx, lab)
             if idx in anch_idx:
                 anchored[si] = True
-            if dfs(si, at or idx in anch_idx):
+            if dfs(si, at or idx in anch_idx, cfrom, ccodes):
                 return True
             restore(depth)
         return False
 
     snap()
     try:
-        found = dfs(0, False)
+        found = dfs(0, False, None, None)
     except _Budget:
         if best[0] < 0:
             best[0], best[1] = 0, list(cur[1])
@@ -359,9 +510,31 @@ def _search(engine: Engine, config: DuelConfig, line: ComboLine, seed: int, budg
             best[1],
             f"node budget {budget} exhausted; {stats()}; skipped={skipped}",
             list(skipped),
+            executed_steps=n - len(skipped),
+            inferred_frac=inferred_frac_of(labels),
+            hand_inferred=hand_inferred,
         )
     if found:
-        return done["v"]
+        v: Verdict = done["v"]
+        g = quality_guard(n, v.skipped_steps, v.labels)
+        if g is not None:
+            exe = n - len(v.skipped_steps or [])
+            return Verdict(
+                line.id,
+                False,
+                g,
+                list(v.choices),
+                list(v.labels),
+                seed,
+                v.nodes,
+                list(v.end_field_codes),
+                f"{g}: {exe}/{n} steps executed, skipped={v.skipped_steps}; {stats()}; nodes={v.nodes}",
+                list(v.skipped_steps or []),
+                executed_steps=exe,
+                inferred_frac=v.inferred_frac,
+                hand_inferred=hand_inferred,
+            )
+        return v
     k = next((i for i in range(n) if not anchored[i]), None)
     if k is not None:
         return Verdict(
@@ -376,6 +549,9 @@ def _search(engine: Engine, config: DuelConfig, line: ComboLine, seed: int, budg
             f"anchor for step {k} ({steps[k].action} {steps[k].card}) never legal; "
             f"{stats()}; skipped={skipped}",
             list(skipped),
+            executed_steps=n - len(skipped),
+            inferred_frac=inferred_frac_of(labels),
+            hand_inferred=hand_inferred,
         )
     return Verdict(
         line.id,
@@ -389,4 +565,7 @@ def _search(engine: Engine, config: DuelConfig, line: ComboLine, seed: int, budg
         f"all steps executed but end board missing; {stats()}; skipped={skipped}; "
         f"unresolved_endboard={end_unres}",
         list(skipped),
+        executed_steps=n - len(skipped),
+        inferred_frac=inferred_frac_of(labels),
+        hand_inferred=hand_inferred,
     )

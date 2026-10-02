@@ -40,11 +40,41 @@ Executed every step in order **and** at the End of the line `end_board_codes` �
 by code; Extra Monster Zone included). Unresolved names: steps whose card is unresolved make the line
 `unresolved` (rejected) in v1.
 
+## Quality guards (rejected even when the board matches)
+Executed lines are still rejected — kept out of the verified set but counted by reason — when:
+- `vacuous`: all steps were skipped, or the line used 0 agent (non-`auto`) choices. A verify that did
+  nothing proves nothing.
+- `too_skipped`: more than 1/3 of the steps were skipped (`len(skipped) * 3 > n`). Skips are only for
+  conditional steps (no results/materials/targets, anchor never legal); a line that mostly skips is a fragment.
+- `trivial`: fewer than 2 steps actually executed (`n - len(skipped) < 2`). One-step "combos" are fragments.
+Priority: `vacuous` > `too_skipped` > `trivial`. Every record carries `executed_steps` (= n − skipped) and
+`inferred_frac` (= inferred / agent choices) so later stages can filter/sort by quality.
+
+## De-bundling multi-result steps
+Extraction sometimes attributes to one step results that only arrive a step later (bundled results), which the
+old strict check pruned. When a step ends and its results check fails **but at least one expected result is
+already out**, the missing codes are carried forward once: they must all be out of the deck by the end of the
+*next* step, together with that step's own results. If they are still missing there — or if nothing had arrived
+at all — the branch fails as before. Carries are per search path (one step of grace, chainable step by step)
+and are recorded in the verdict `detail` as `carried=[(from_step, [codes]), ...]`. The last step cannot carry
+(past the line end there is no next step).
+
+## Hand recovery (MDM lazy-load loss)
+Some fetched guides (MasterDuelMeta) arrive with an empty `hand` list although the combo starts from hand cards.
+When a line has no known hand cards, the hand is inferred as the anchor cards of the leading steps that are
+in-hand actions (`normal_summon` / `set_monster` / `set_spelltrap` / `activate`), stopping **after** the first
+search/special effect (a step whose results name any card other than its own anchor, or any
+special/link/synchro/xyz/fusion/ritual summon — later anchors may have been searched, so they are not hand
+cards). Only cards already named in the steps are used; nothing is invented (one copy each, capped by what the
+deck holds via the usual `missing_card` check). Inferred hands are marked `hand_inferred=True` in the line
+`notes` and in the verified record. Lines that open with a fusion (no in-hand anchor before the special) infer
+nothing and still fail with `no_anchor@0` — they are genuine fragments.
+
 ## Output record (`data/demos/verified/<deck>.jsonl`)
 `{line_id, source_url, deck, config (decks, seed, setup), auto_single, choices: [int], labels: ["stated"|"inferred"|"auto"],
-end_board, seeds_ok: [...]}`. Expansion (stage 4): re-run the verified choice *policy* (anchors + stated picks) under
+end_board, seeds_ok: [...], skipped_steps, executed_steps, inferred_frac, hand_inferred, deck_source}`. Expansion (stage 4): re-run the verified choice *policy* (anchors + stated picks) under
 other seeds, same hand. Keep the seeds where it still verifies.
 
 ## Metrics (per deck and on the gold set)
-lines in → verified %, reasons for rejection (missing_card, unresolved, no_anchor@step k, budget, end_board_mismatch),
-% inferred choices per verified line, search nodes per line.
+lines in → verified %, reasons for rejection (missing_card, unresolved, no_anchor@step k, budget, end_board_mismatch,
+vacuous, too_skipped, trivial), % inferred choices per verified line, search nodes per line.

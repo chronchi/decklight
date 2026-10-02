@@ -60,8 +60,10 @@ def verify_all(
         rep.deck_source = deck_source or tag.lstrip("+") or "fixture"
         reps[line.id] = rep
         print(
-            f"{line.id}{tag}: {rep.reason} steps={len(line.steps)} nodes={rep.nodes} "
-            f"{stats(rep)} seeds_ok={[s for s, _ in ok]} skipped={rep.skipped_steps} deck={rep.deck_source}"
+            f"{line.id}{tag}: {rep.reason} steps={len(line.steps)} executed={rep.executed_steps} "
+            f"nodes={rep.nodes} {stats(rep)} inferred_frac={rep.inferred_frac:.2f} "
+            f"seeds_ok={[s for s, _ in ok]} skipped={rep.skipped_steps} deck={rep.deck_source} "
+            f"hand_inferred={rep.hand_inferred}"
         )
         print(f"    {rep.detail}")
         if ok:
@@ -87,6 +89,9 @@ def verify_all(
                     "choices": v0.choices,
                     "labels": v0.labels,
                     "skipped_steps": list(v0.skipped_steps or []),
+                    "executed_steps": v0.executed_steps,
+                    "inferred_frac": v0.inferred_frac,
+                    "hand_inferred": v0.hand_inferred,
                     "end_board": line.end_board,
                     "end_board_codes": line.end_board_codes,
                     "seeds_ok": [s for s, _ in ok],
