@@ -3,10 +3,18 @@ name = "ygo-zero"
 version = "0.0.1"
 description = "Learn to pilot any Yu-Gi-Oh! deck (edo9300 ocgcore)"
 requires-python = ">=3.12"
-dependencies = []
+dependencies = [
+    "numpy>=2.5.3",
+]
 
 [dependency-groups]
-dev = ["pytest>=8", "ruff>=0.6", "meson>=1.4", "ninja>=1.11"]
+dev = [
+    "pytest>=8",
+    "ruff>=0.6",
+    "meson>=1.4",
+    "ninja>=1.11",
+    "pybind11>=3.1.0",
+]
 
 [build-system]
 requires = ["hatchling"]

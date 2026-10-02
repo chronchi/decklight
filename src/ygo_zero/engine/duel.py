@@ -19,6 +19,7 @@ from typing import Protocol, Self
 from ygo_zero.engine import constants as C
 from ygo_zero.engine import messages as M
 from ygo_zero.engine import ocgapi as api
+from ygo_zero.engine import query as Q
 from ygo_zero.engine.resources import CORE_LIB, CardData, index_scripts, load_cards
 
 TCG_FLAGS = C.DUEL_MODE_MR5 | C.DUEL_TCG_SEGOC_NONPUBLIC
@@ -137,6 +138,9 @@ class Duel:
         self.winner: int | None = None  # 0/1, 2 = draw; None while running
         self.win_reason = 0
         self.turn = 0
+        self.turn_player = 0
+        self.first_player: int | None = None
+        self.phase = 0
         self._ended = False
 
         # Per-duel callbacks so script errors land in this duel's log.
@@ -213,6 +217,11 @@ class Duel:
                     raise InvalidResponse(f"rejected response {last} (step {len(self.responses)})")
                 if t == C.MSG_NEW_TURN:
                     self.turn += 1
+                    self.turn_player = raw[1] & 1
+                    if self.first_player is None:
+                        self.first_player = self.turn_player
+                elif t == C.MSG_NEW_PHASE:
+                    self.phase = M.parse_one(raw).phase
                 elif t == C.MSG_WIN:
                     win = M.parse_one(raw)
                     self.winner, self.win_reason = win.player, win.reason
@@ -241,6 +250,22 @@ class Duel:
                 return self.winner
             self.respond(agents[msg.player](msg))
         return None
+
+    # --- board queries ---
+
+    def query_location(
+        self, controller: int, location: int, flags: int = Q.CARD_FLAGS
+    ) -> list[Q.CardState | None]:
+        """Every slot of one location (None = empty zone)."""
+        info = api.OCG_QueryInfo(flags, controller, location, 0, 0)
+        length = ctypes.c_uint32()
+        ptr = self.engine.lib.OCG_DuelQueryLocation(self._handle, ctypes.byref(length), ctypes.byref(info))
+        return Q.parse_location(ctypes.string_at(ptr, length.value), controller, location)
+
+    def query_field(self) -> bytes:
+        length = ctypes.c_uint32()
+        ptr = self.engine.lib.OCG_DuelQueryField(self._handle, ctypes.byref(length))
+        return ctypes.string_at(ptr, length.value)
 
     def close(self) -> None:
         if self._handle:

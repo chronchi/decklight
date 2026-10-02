@@ -9,3 +9,4 @@ dist/
 # Large or derived artifacts live outside git (master copy on this laptop, see AGENTS.md)
 data/
 runs/
+src/ygo_zero/_ygoenv*.so
