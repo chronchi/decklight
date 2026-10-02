@@ -75,7 +75,7 @@ def summarize(deck: str, per_source: dict[str, list]) -> None:
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--guides", nargs="+", required=True, help="glob(s) for guide .txt files")
-    ap.add_argument("--gold", default=None, help="gold guide for recall comparison")
+    ap.add_argument("--gold", nargs="*", default=None, help="gold guide(s) for recall comparison")
     ap.add_argument("--deck", required=True)
     ap.add_argument("--ydk", required=True)
     ap.add_argument("--out", required=True)
@@ -139,17 +139,21 @@ def main() -> None:
     print(f"wrote {len(all_lines)} lines -> {out} ({calls[0]} LLM calls, {dupes} dupes dropped)")
 
     if args.gold:
-        gold = extract_lines(args.gold, args.deck, decklist, names=names, complete_fn=counting_complete)
-        print(f"== gold {Path(args.gold).name}: {len(gold)} lines ==")
-        fetched_seq = [(line.id, step_card_sequence(line)) for line in all_lines]
-        for g in gold:
-            gs = step_card_sequence(g)
-            best, score = None, 0.0
-            for lid, fs in fetched_seq:
-                s = sequence_overlap(gs, fs)
-                if s > score:
-                    best, score = lid, s
-            print(f"  gold '{g.title[:70]}' ({len(gs)} step cards) -> best {best} overlap {score:.2f}")
+        for gold_path in args.gold:
+            gold = extract_lines(
+                gold_path, args.deck, decklist, names=names, complete_fn=counting_complete
+            )
+            print(f"== gold {Path(gold_path).name}: {len(gold)} lines ==")
+            fetched_seq = [(line.id, step_card_sequence(line)) for line in all_lines]
+            for g in gold:
+                gs = step_card_sequence(g)
+                best, score = None, 0.0
+                for lid, fs in fetched_seq:
+                    s = sequence_overlap(gs, fs)
+                    if s > score:
+                        best, score = lid, s
+                print(f"  gold '{g.title[:70]}' ({len(gs)} step cards) -> best {best} overlap {score:.2f}")
+    print(f"total LLM calls this run: {calls[0]}")
 
 
 if __name__ == "__main__":

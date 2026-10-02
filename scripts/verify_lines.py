@@ -50,11 +50,16 @@ def verify_all(
     budget: int,
     tag: str,
     deck_source: str = "",
+    budget_long: int | None = None,
 ) -> tuple[list[dict], dict[str, Verdict]]:
-    """Verify every line under every seed; print per-line results; return ok records + reps."""
+    """Verify every line under every seed; print per-line results; return ok records + reps.
+
+    Lines with more than 8 steps use budget_long when given (long lines need more search nodes).
+    """
     records, reps = [], {}
     for line in lines:
-        verdicts = [(s, verify_line(engine, line, deck, seed=s, budget=budget)) for s in seeds]
+        b = budget_long if budget_long and len(line.steps) > 8 else budget
+        verdicts = [(s, verify_line(engine, line, deck, seed=s, budget=b)) for s in seeds]
         ok = [(s, v) for s, v in verdicts if v.ok]
         rep = ok[0][1] if ok else verdicts[0][1]
         rep.deck_source = deck_source or tag.lstrip("+") or "fixture"
@@ -120,6 +125,12 @@ def main() -> None:
     ap.add_argument("--out", required=True)
     ap.add_argument("--budget", type=int, default=2000)
     ap.add_argument(
+        "--budget-long",
+        type=int,
+        default=None,
+        help="node budget for lines with more than 8 steps (default: same as --budget)",
+    )
+    ap.add_argument(
         "--deck-from-guides",
         default=None,
         help="per-guide decklists dir (<dir>/<deck>/<source>.json); each line is verified "
@@ -159,7 +170,7 @@ def main() -> None:
         gd, glines = groups[key]
         tag = "" if key == "fixture" else "+guide"
         print(f"-- deck group {key} ({len(glines)} lines) --")
-        recs, greps = verify_all(engine, gd, glines, args.seeds, args.budget, tag, key)
+        recs, greps = verify_all(engine, gd, glines, args.seeds, args.budget, tag, key, args.budget_long)
         records += recs
         reps.update(greps)
         for line in glines:
@@ -176,7 +187,8 @@ def main() -> None:
             adeck = augmented(engine, base_deck, line)
             tag = "+augmented" if base_key == "fixture" else "+guide+augmented"
             recs, areps = verify_all(
-                engine, adeck, [line], args.seeds, args.budget, tag, base_key + "+augmented"
+                engine, adeck, [line], args.seeds, args.budget, tag, base_key + "+augmented",
+                args.budget_long,
             )
             aug_records += recs
             reps[line.id + "+augmented"] = areps[line.id]
