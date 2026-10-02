@@ -3,6 +3,11 @@
 #pragma once
 
 #include <array>
+#include <atomic>
+#include <condition_variable>
+#include <exception>
+#include <mutex>
+#include <thread>
 #include <cstdint>
 #include <functional>
 #include <memory>
@@ -239,6 +244,65 @@ class Env {
   std::set<uint32_t> known_codes(int p);
   void take(int index, bool record);
   bool settle(Obs& obs);
+};
+
+}  // namespace ygo
+
+// ---------------------------------------------------------------- batched env
+
+namespace ygo {
+
+struct Deck {
+  std::vector<uint32_t> main, extra;
+};
+
+// A finished game, enough to replay it (Env with the same config + choices).
+struct Episode {
+  int deck0, deck1;
+  uint64_t seed;
+  int winner, turns;
+  std::vector<int> choices;
+};
+
+// N envs stepped in parallel by a persistent thread pool. Finished envs restart at once with a fresh
+// (deck0, deck1, seed) drawn from a per-env splitmix64 stream, so the whole run is reproducible from `seed`.
+class VecEnv {
+ public:
+  VecEnv(Engine& engine, std::vector<Deck> decks, int num_envs, int num_threads, uint64_t seed, bool auto_single);
+  ~VecEnv();
+  void reset();
+  void step(const int32_t* actions);  // actions[num_envs]
+  std::vector<Episode> pop_finished();
+
+  const int num_envs;
+  std::vector<Obs> obs;          // obs[i]: the decision now pending in env i
+  std::vector<int32_t> player;   // who acts in obs[i]
+  std::vector<int32_t> winner;   // after step: winner of the episode that just ended in env i, else -1
+  std::vector<uint8_t> done;     // after step: env i finished an episode (obs[i] is the next one's start)
+
+ private:
+  Engine& engine_;
+  std::vector<Deck> decks_;
+  bool auto_single_;
+  std::vector<std::unique_ptr<Env>> envs_;
+  std::vector<uint64_t> rng_;
+  std::vector<Episode> current_, finished_;
+  std::vector<std::exception_ptr> errors_;
+  const int32_t* actions_ = nullptr;
+  bool resetting_ = false;
+
+  // pool
+  std::vector<std::thread> workers_;
+  std::mutex mu_;
+  std::condition_variable cv_work_, cv_done_;
+  uint64_t generation_ = 0;
+  int pending_ = 0;
+  std::atomic<int> next_{0};
+  bool stop_ = false;
+  void run_all();
+  void worker();
+  void work(int i);
+  void start_episode(int i);
 };
 
 }  // namespace ygo

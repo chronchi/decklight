@@ -8,9 +8,9 @@ ocgcore = meson.get_compiler('cpp').find_library('ocgcore', dirs : [core_build])
 pybind11_inc = run_command(py, '-c', 'import pybind11; print(pybind11.get_include())', check : true).stdout().strip()
 
 py.extension_module('_ygoenv',
-  ['engine.cpp', 'decision.cpp', 'env.cpp', 'bindings.cpp'],
+  ['engine.cpp', 'decision.cpp', 'env.cpp', 'vecenv.cpp', 'bindings.cpp'],
   cpp_args : ['-isystem', core_src, '-isystem', pybind11_inc],  # both live inside the source tree
-  dependencies : [ocgcore, py.dependency()],
+  dependencies : [ocgcore, py.dependency(), dependency('threads')],
   install_rpath : core_build,
   build_rpath : core_build,
 )

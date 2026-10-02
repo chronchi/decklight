@@ -55,3 +55,38 @@ class CppEnv:
         for i in choices:
             env.step(i)
         return env
+
+
+class VecEnv:
+    """N C++ envs stepped by a thread pool. `buf` holds zero-copy views (N, ...) that each `reset`/`step`
+    overwrites in place: the obs arrays plus `player` (to act), `done` and `winner` (episode just ended in that
+    env; its obs row already shows the next episode). Finished games: `pop_finished()` → replayable records."""
+
+    def __init__(
+        self,
+        engine: Engine,
+        decks: Sequence,
+        num_envs: int,
+        num_threads: int,
+        seed: int,
+        auto_single: bool = True,
+    ) -> None:
+        self.decks = list(decks)
+        pairs = [(list(d.main), list(d.extra)) for d in self.decks]
+        self._v = _ygoenv.VecEnv(cpp_engine(engine), pairs, num_envs, num_threads, seed, auto_single)
+        self.buf = self._v.buffers()
+        self.num_envs = num_envs
+
+    def reset(self) -> dict:
+        self._v.reset()
+        return self.buf
+
+    def step(self, actions) -> dict:
+        self._v.step(actions)
+        return self.buf
+
+    def pop_finished(self) -> list:
+        return self._v.pop_finished()
+
+    def episode_config(self, ep) -> DuelConfig:
+        return DuelConfig(self.decks[ep.deck0], self.decks[ep.deck1], seed=ep.seed)
