@@ -64,9 +64,23 @@ def destroy(instance_id: int, verify_s: int = 60) -> None:
     raise VastError(f"instance {instance_id} still listed {verify_s}s after destroy")
 
 
+ALLOWED_FILE = ROOT / "data" / "cache" / "runs" / "vast-allowed.txt"  # labels approved by the datagen driver / Claude
+STRAY_AGE_S = 4 * 3600  # older than any job cap: an allowed instance this old has lost its launcher
+
+
 def destroy_strays() -> list[int]:
-    """Destroy every instance we labelled (left over from a crashed launcher)."""
-    ids = [i["id"] for i in our_instances()]
+    """Destroy instances we labelled that no live launcher owns. Spared: the warm session box (SESSION_FILE) and
+    allowed labels younger than STRAY_AGE_S (another launcher's running job). 2026-10-03 a BC launch destroyed the
+    live session box here, so the planners crash-looped for an hour."""
+    sess = load_session()
+    keep = {sess["instance_id"]} if sess else set()
+    allowed = set(ALLOWED_FILE.read_text().split()) if ALLOWED_FILE.exists() else set()
+    now = time.time()
+    ids = []
+    for i in our_instances():
+        if i["id"] in keep or (i.get("label") in allowed and now - float(i.get("start_date") or now) < STRAY_AGE_S):
+            continue
+        ids.append(i["id"])
     for i in ids:
         destroy(i)
     return ids

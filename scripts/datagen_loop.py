@@ -356,6 +356,16 @@ class DatagenLoop:
             except (OSError, subprocess.SubprocessError) as e:
                 self.log(f"session stop failed: {e}")
             sess = None
+        if sess is not None and not self._live("session"):
+            try:
+                alive = any(i["id"] == sess["instance_id"] for i in vast.our_instances())
+            except Exception as e:  # noqa: BLE001 - vast CLI hiccup: assume alive this tick
+                self.log(f"session liveness check failed: {e}")
+                alive = True
+            if not alive:
+                self.log(f"vast session instance {sess['instance_id']} is gone: dropping {vast.SESSION_FILE.name}")
+                vast.SESSION_FILE.unlink(missing_ok=True)
+                sess = None
         if sess is not None:
             return
         if credit is None or credit < self.args.credit_floor:
