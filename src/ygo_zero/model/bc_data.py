@@ -45,7 +45,7 @@ def _shard_one(job: tuple[str, str, str]) -> tuple[str, int]:
 
     src_file, out_file, src_tag = job
     cols: dict[str, list] = {k: [] for k in OBS_KEYS}
-    action, weight, line, deck = [], [], [], []
+    action, weight, line, deck, kind = [], [], [], [], []
     for obs, a, w, meta in iter_samples(_ENGINE, Path(src_file)):
         for k in OBS_KEYS:
             cols[k].append(obs[k])
@@ -53,6 +53,7 @@ def _shard_one(job: tuple[str, str, str]) -> tuple[str, int]:
         weight.append(w)
         line.append(base_line(meta["line_id"]))
         deck.append(meta["deck"])
+        kind.append(meta.get("kind", "unknown"))
     if not action:
         return out_file, 0
     np.savez_compressed(
@@ -62,6 +63,7 @@ def _shard_one(job: tuple[str, str, str]) -> tuple[str, int]:
         weight=np.array(weight, dtype=np.float32),
         line=np.array(line),
         deck=np.array(deck),
+        kind=np.array(kind),
         src=np.array([src_tag] * len(action)),
     )
     return out_file, len(action)
@@ -84,6 +86,9 @@ def build_shards(sources: dict[str, list[Path]], out_dir: Path, jobs: int) -> in
 
 def load_shards(shard_dir: Path) -> dict[str, np.ndarray]:
     parts = [dict(np.load(p)) for p in sorted(shard_dir.glob("*.npz"))]
+    for p in parts:  # backward compat: shards written before kind tags existed
+        if "kind" not in p:
+            p["kind"] = np.array(["unknown"] * len(p["action"]))
     return {k: np.concatenate([p[k] for p in parts]) for k in parts[0]}
 
 

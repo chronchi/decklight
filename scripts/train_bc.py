@@ -43,6 +43,8 @@ def evaluate(model, data, idx, bs, device, amp):
     model.eval()
     tot = {"n": 0, "loss": 0.0, "acc": 0.0, "n_stated": 0, "acc_stated": 0.0, "chance": 0.0}
     per_deck: dict[str, list[int]] = {}
+    per_kind: dict[str, list[int]] = {}
+    has_kind = "kind" in data
     with torch.no_grad():
         for obs, act, w, j in batches(data, idx, bs, device, False, None):
             with torch.autocast(device.type, dtype=torch.bfloat16, enabled=amp):
@@ -61,6 +63,11 @@ def evaluate(model, data, idx, bs, device, amp):
                 per_deck.setdefault(str(d), [0, 0])
                 per_deck[str(d)][0] += 1
                 per_deck[str(d)][1] += int(h)
+            if has_kind:
+                for kd, h in zip(data["kind"][j], hit.tolist(), strict=True):
+                    per_kind.setdefault(str(kd), [0, 0])
+                    per_kind[str(kd)][0] += 1
+                    per_kind[str(kd)][1] += int(h)
     model.train()
     n = max(tot["n"], 1)
     return {
@@ -70,7 +77,18 @@ def evaluate(model, data, idx, bs, device, amp):
         "acc_stated": tot["acc_stated"] / max(tot["n_stated"], 1),
         "chance": tot["chance"] / n,  # expected accuracy of a uniform pick among the legal options
         "per_deck": {d: round(h / c, 4) for d, (c, h) in sorted(per_deck.items())},
+        "per_kind": {k: round(h / c, 4) for k, (c, h) in sorted(per_kind.items())},
     }
+
+
+def select_train_idx(data, masks, kinds):
+    """Index sets with optional --kinds filtering: train keeps only those kinds, val/holdout keep all."""
+    idx = {k: np.flatnonzero(m) for k, m in masks.items()}
+    if kinds is not None:
+        kind_arr = data["kind"] if "kind" in data else np.array(["unknown"] * len(data["action"]))
+        keep = np.isin(kind_arr, list(kinds))
+        idx["train"] = idx["train"][keep[idx["train"]]]
+    return idx
 
 
 def main() -> None:
@@ -91,6 +109,7 @@ def main() -> None:
     ap.add_argument("--patience", type=int, default=0)
     ap.add_argument("--card-dropout", type=float, default=0.0)
     ap.add_argument("--holdout", nargs="*", default=["kewl-tune"], help="decks never trained on")
+    ap.add_argument("--kinds", nargs="*", default=None, help="train only on these sample kinds (default: all)")
     ap.add_argument("--limit", type=int, default=None, help="use only the first N samples (smoke)")
     ap.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     ap.add_argument("--threads", type=int, default=None, help="torch CPU threads (laptop: <= 2)")
@@ -108,7 +127,7 @@ def main() -> None:
     if args.limit:
         data = {k: v[: args.limit] for k, v in data.items()}
     masks = split_masks(data, holdout_decks=tuple(args.holdout))
-    idx = {k: np.flatnonzero(m) for k, m in masks.items()}
+    idx = select_train_idx(data, masks, args.kinds)
     print({k: len(v) for k, v in idx.items()}, "decks:", sorted(set(map(str, data["deck"]))), flush=True)
 
     emb = dict(np.load(args.emb))
@@ -144,7 +163,7 @@ def main() -> None:
             sched.step()
             run["loss"] += loss.item() * len(j)
             run["n"] += len(j)
-        rec = {"epoch": ep, "time": round(time.time() - t0, 1), "train_loss": run["loss"] / max(run["n"], 1)}
+        rec = {"epoch": ep, "time": round(time.time() - t0, 1), "n_train": len(idx["train"]), "train_loss": run["loss"] / max(run["n"], 1)}
         if ep == 0:
             rec["args"] = args_rec
         for split in ("val", "holdout"):

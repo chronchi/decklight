@@ -22,6 +22,24 @@ from ygo_zero.engine.duel import DuelConfig, Engine, Placement
 LABEL_WEIGHT = {"stated": 1.0, "inferred": 0.5, "interrupt": 1.0}
 
 
+def sample_kind(source: str | Path, label: str) -> str:
+    """BC data-mix kind tag from the record file path and the sample label.
+
+    - files under `expanded*` -> line_expanded (wins over improved)
+    - files under `improved/` (not expanded) -> line_improved
+    - files under `games/` -> game_interrupt if label == "interrupt" else game_plan
+    - everything else -> line
+    """
+    parts = Path(source).parts
+    if any(p.startswith("expanded") for p in parts):
+        return "line_expanded"
+    if "improved" in parts:
+        return "line_improved"
+    if "games" in parts:
+        return "game_interrupt" if label == "interrupt" else "game_plan"
+    return "line"
+
+
 def record_config(rec: dict, seed: int | None = None) -> DuelConfig:
     """The DuelConfig stored in a verified record (optionally with another seed from `seeds_ok`)."""
     c = rec["config"]
@@ -44,16 +62,21 @@ def iter_samples(engine: Engine, path: Path) -> Iterator[tuple[dict, int, float,
 
     Only the record's own seed is replayed: `choices` come from that seed's search, and other seeds in
     `seeds_ok` were verified with their own (unstored) choices."""
-    for rec in load_records(path):
-        for seed in [rec["config"]["seed"]]:
-            env = CppEnv(engine, record_config(rec, seed), rec.get("auto_single", True))
-            obs = env.reset()
-            for k, (choice, label) in enumerate(zip(rec["choices"], rec["labels"], strict=True)):
-                if obs is None:
-                    raise ValueError(f"{rec['line_id']} seed {seed}: duel ended at choice {k}")
-                if label in LABEL_WEIGHT:
-                    # game records (ADR 0004) carry both decks and who acted; lines are named <deck>/<id>
-                    deck = rec["decks"][rec["actors"][k]] if "actors" in rec else rec["line_id"].split("/")[0]
-                    meta = {"line_id": rec["line_id"], "seed": seed, "k": k, "label": label, "deck": deck}
-                    yield {key: v.copy() for key, v in obs.items()}, choice, LABEL_WEIGHT[label], meta
-                obs = env.step(choice)
+    files = sorted(path.glob("*.jsonl")) if path.is_dir() else [path]
+    for f in files:
+        for rec in load_records(f):
+            for seed in [rec["config"]["seed"]]:
+                env = CppEnv(engine, record_config(rec, seed), rec.get("auto_single", True))
+                obs = env.reset()
+                for k, (choice, label) in enumerate(zip(rec["choices"], rec["labels"], strict=True)):
+                    if obs is None:
+                        raise ValueError(f"{rec['line_id']} seed {seed}: duel ended at choice {k}")
+                    if label in LABEL_WEIGHT:
+                        # game records (ADR 0004) carry both decks and who acted; lines are named <deck>/<id>
+                        deck = rec["decks"][rec["actors"][k]] if "actors" in rec else rec["line_id"].split("/")[0]
+                        meta = {
+                            "line_id": rec["line_id"], "seed": seed, "k": k, "label": label,
+                            "deck": deck, "kind": sample_kind(f, label),
+                        }
+                        yield {key: v.copy() for key, v in obs.items()}, choice, LABEL_WEIGHT[label], meta
+                    obs = env.step(choice)
