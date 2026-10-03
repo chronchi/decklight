@@ -16,7 +16,8 @@ uv pip install -q --reinstall torch --index-url https://download.pytorch.org/whl
   uv run --no-sync python -c "import torch; print(torch.__version__, torch.cuda.is_available())"; } > "$OUT/machine.txt" 2>&1
 T0=$SECONDS
 # 1. expansion backlog: <src>/verified/<deck>.jsonl -> <src>/expanded-<deck>/ (skipped when any <src>/expanded*/<deck>[+tag].jsonl exists)
-for v in data/demos/claude/verified/*.jsonl data/demos/planned*/verified/*.jsonl; do
+# EXPAND=0 (default since 2026-10-03): expansion runs continuously in the datagen driver; this job trains on what exists
+[ "${EXPAND:-0}" = "1" ] && for v in data/demos/claude/verified/*.jsonl data/demos/planned*/verified/*.jsonl; do
   [ -s "$v" ] || continue
   src=$(dirname "$(dirname "$v")"); deck=$(basename "$v" .jsonl); dst="$src/expanded-$deck"
   uv run --no-sync python scripts/expand_lines.py --verified "$v" --lines-dir "$src/lines" --out "$dst" --variants 8 --jobs "$J" \
