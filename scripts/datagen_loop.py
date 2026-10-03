@@ -122,10 +122,10 @@ def next_planner_seed(root: Path, deck: str) -> int:
     return best + 1
 
 
-def planner_command(deck: str, seed: int, variant: str | None) -> list[str]:
+def planner_command(deck: str, seed: int, variant: str | None, session: str = "lines") -> list[str]:
     cmd = ["uv", "run", "--no-sync", "python", "scripts/plan_lines.py",
            "--deck", deck, "--seed", str(seed), "--hands", "20", "--repairs", "2",
-           "--workers", "6", "--remote"]
+           "--workers", "6", "--remote", "--session", session]
     if variant is not None:
         cmd += ["--variant", variant]
     cmd += ["--out-dir", f"data/demos/planned-s{seed}"]
@@ -149,10 +149,10 @@ def choose_improve_job(root: Path, running: set[tuple[str, str]] = frozenset()) 
     return best
 
 
-def improve_command(src: str, deck: str) -> list[str]:
+def improve_command(src: str, deck: str, session: str = "lines") -> list[str]:
     # the quality pass keeps muse's default reasoning effort (NOTEBOOK 2026-10-03: 7/9 kept vs 2/6 at minimal)
     return ["uv", "run", "--no-sync", "python", "scripts/improve_lines.py", "--deck", deck, "--src", src,
-            "--remote", "--workers", "6"]
+            "--remote", "--workers", "6", "--session", session]
 
 
 def expander_verified_files(root: Path = ROOT) -> list[Path]:
@@ -237,10 +237,10 @@ def choose_expand_job(root: Path, running: set[str] | frozenset = frozenset()) -
     return best
 
 
-def expand_command(vf: Path, lines_dir: Path, out_dir: Path, skips: list[str]) -> list[str]:
+def expand_command(vf: Path, lines_dir: Path, out_dir: Path, skips: list[str], session: str = "lines") -> list[str]:
     return ["uv", "run", "--no-sync", "python", "scripts/expand_lines.py",
             "--verified", str(vf), "--lines-dir", str(lines_dir), "--out", str(out_dir),
-            "--variants", "8", "--skip-done", *skips, "--remote"]
+            "--variants", "8", "--skip-done", *skips, "--remote", "--session", session]
 
 
 def game_command(a: str, b: str, seed: int, variant: str | None, remote: bool = False) -> list[str]:
@@ -253,8 +253,17 @@ def game_command(a: str, b: str, seed: int, variant: str | None, remote: bool = 
     return cmd
 
 
+def session_label(name: str, hhmm: str) -> str:
+    """vast instance label suffix: lines -> verify-HHMM, games -> games-HHMM, linesK -> linesK-HHMM."""
+    return f"verify-{hhmm}" if name == "lines" else f"{name}-{hhmm}"
+
+
+def line_session_names(n: int) -> list[str]:
+    return ["lines"] + [f"lines{k}" for k in range(2, n + 1)]
+
+
 def session_command(hhmm: str, name: str = "lines") -> list[str]:
-    label = f"verify-{hhmm}" if name == "lines" else f"games-{hhmm}"
+    label = session_label(name, hhmm)
     cmd = ["uv", "run", "--no-sync", "python", "scripts/vast_session.py",
            "start", "--name", label, "--hours-cap", "4"]
     if name != "lines":
@@ -501,28 +510,40 @@ class DatagenLoop:
         if now < self.session_retry_after.get(name, 0.0):
             return
         hhmm = time.strftime("%H%M")
-        label = f"verify-{hhmm}" if name == "lines" else f"games-{hhmm}"
+        label = session_label(name, hhmm)
         self._allow(f"ygo-zero-{label}")
-        logname = f"vast-session-{hhmm}.log" if name == "lines" else f"vast-session-games-{hhmm}.log"
+        logname = f"vast-session-{hhmm}.log" if name == "lines" else f"vast-session-{name}-{hhmm}.log"
         self._launch("session", session_command(hhmm, name),
                      RUNS_CACHE / logname, desc=label, name=name)
 
+    def _line_session(self) -> str | None:
+        """The live "lines" box with the fewest remote workers (planners/improvers/expanders), or None."""
+        live = [n for n in line_session_names(self.args.line_sessions) if vast.load_session(n) is not None]
+        if not live:
+            return None
+        load = {n: 0 for n in live}
+        for c in self.children:
+            if c.kind in ("planner", "improver", "expander") and c.name in load:
+                load[c.name] += 1
+        return min(live, key=lambda n: (load[n], live.index(n)))
+
     def _ensure_planners(self) -> None:
-        if vast.load_session() is None:
-            return  # planners verify --remote on the session box
+        if self._line_session() is None:
+            return  # planners verify --remote on a lines box
         running = {c.deck for c in self._live("planner")}
         while len(self._live("planner")) < self.args.planners:
             deck = choose_planner_deck(ROOT, running)
             if deck is None:
                 return
             seed = next_planner_seed(ROOT, deck)
-            self._launch("planner", planner_command(deck, seed, self.args.variant),
+            sess = self._line_session()
+            self._launch("planner", planner_command(deck, seed, self.args.variant, sess),
                          RUNS_CACHE / f"plan-s{seed}-{deck}.log",
-                         desc=f"{deck} s{seed}", deck=deck)
+                         desc=f"{deck} s{seed} @{sess}", deck=deck, name=sess)
             running.add(deck)
 
     def _ensure_improvers(self) -> None:
-        if vast.load_session() is None:
+        if self._line_session() is None:
             return
         running = {c.deck for c in self._live("improver")}
         while len(self._live("improver")) < self.args.improvers:
@@ -530,13 +551,15 @@ class DatagenLoop:
             if job is None:
                 return
             src, deck = job
-            self._launch("improver", improve_command(src, deck),
-                         RUNS_CACHE / f"improve-{src.replace('/', '_')}-{deck}.log", desc=f"{src} {deck}", deck=job)
+            sess = self._line_session()
+            self._launch("improver", improve_command(src, deck, sess),
+                         RUNS_CACHE / f"improve-{src.replace('/', '_')}-{deck}.log", desc=f"{src} {deck} @{sess}",
+                         deck=job, name=sess)
             running.add(job)
 
     def _ensure_expanders(self) -> None:
-        if vast.load_session() is None:
-            return  # expansion verifies --remote on the session box
+        if self._line_session() is None:
+            return  # expansion verifies --remote on a lines box
         running = {c.deck for c in self._live("expander")}
         while len(self._live("expander")) < self.args.expanders:
             vf = choose_expand_job(ROOT, running)
@@ -546,9 +569,10 @@ class DatagenLoop:
             src_rel = vf_rel.parent.parent
             lines_dir, out_dir, skips = expander_target(vf_rel)
             key = str(vf_rel)
-            self._launch("expander", expand_command(vf_rel, lines_dir, out_dir, skips),
+            sess = self._line_session()
+            self._launch("expander", expand_command(vf_rel, lines_dir, out_dir, skips, sess),
                          RUNS_CACHE / f"expand-{path_to_flat(src_rel)}-{vf_rel.stem}.log",
-                         desc=f"{src_rel} {vf_rel.stem}", deck=key)
+                         desc=f"{src_rel} {vf_rel.stem} @{sess}", deck=key, name=sess)
             running.add(key)
 
     def _ensure_games(self, remote: bool = False) -> None:
@@ -660,7 +684,8 @@ class DatagenLoop:
             self.last_summary = now
         self._ensure_llm_server()
         credit = self._credit()
-        self._ensure_session(now, credit, "lines")
+        for name in line_session_names(self.args.line_sessions):
+            self._ensure_session(now, credit, name)
         games_remote = False
         if self.args.game_session:
             self._ensure_session(now, credit, "games")
@@ -690,6 +715,7 @@ def parse_args(argv: list[str] | None = None):
     ap.add_argument("--planners", type=int, default=3)
     ap.add_argument("--improvers", type=int, default=2)
     ap.add_argument("--expanders", type=int, default=1)
+    ap.add_argument("--line-sessions", type=int, default=1, help="number of warm 'lines' boxes (lines, lines2, ...)")
     ap.add_argument("--games", type=int, default=3)
     ap.add_argument("--variant", default=None,
                     help="muse reasoning effort (minimal|low|high|max; default: provider's)")
