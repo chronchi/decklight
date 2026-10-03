@@ -185,8 +185,10 @@ def play_game(
     repairs: int = 1,
     examples: dict[str, list[ComboLine]] | None = None,
     log: Callable[[str], None] = print,
+    max_seconds: float | None = None,
 ) -> dict:
-    """Play one game; deck 0 goes first. Returns the record (see module docstring)."""
+    """Play one game; deck 0 goes first. Returns the record (see module docstring). `max_seconds`: stop at the next
+    turn boundary once exceeded (the record is kept, winner None), so a slow game never loses its data to a kill."""
     (name0, deck0), (name1, deck1) = decks
     config = DuelConfig(deck0, deck1, seed=seed)
     sheets = {0: card_sheet(engine, deck0, names), 1: card_sheet(engine, deck1, names)}
@@ -277,6 +279,9 @@ def play_game(
     while obs is not None:
         turn = int(obs["global"][2])
         if turn > max_turns:
+            break
+        if max_seconds is not None and time.time() - t0 > max_seconds and turns and turn != turns[-1]:
+            log(f"  wall-time cap {max_seconds:.0f}s reached at turn {turn}")
             break
         p = env.player
         my_turn = bool(int(obs["global"][5]))
