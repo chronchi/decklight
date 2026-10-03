@@ -2,7 +2,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
-import datagen_loop as d  # noqa: E402
+import datagen_loop as d
 
 
 def test_session_names_and_labels():
