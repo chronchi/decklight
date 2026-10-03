@@ -18,6 +18,19 @@ dev = [
 gauntlet = [
     "ai-edge-litert>=2.2.0",
 ]
+# Models: card text embeddings + BC policy. CPU-only torch on the laptop (ADR 0001); vast installs a CUDA wheel over it.
+ml = [
+    "torch>=2.9",
+    "sentence-transformers>=5.1",
+]
+
+[tool.uv.sources]
+torch = { index = "pytorch-cpu" }
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
 
 [build-system]
 requires = ["hatchling"]
