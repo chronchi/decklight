@@ -375,7 +375,7 @@ def play_game(
     replanned: set[tuple[int, int]] = set()  # (turn, player) that already replanned
     tried: set[tuple[int, int]] = set()  # (turn, player) that already got a plan attempt
     t0 = time.time()
-    moves = [0, 0]  # [turn-player summons/activations so far, value at the last interrupt ask]
+    moves = [0, 0, -1]  # [turn-player summons/activations so far, value at the last ask / turn start, turn]
 
     def take(i: int, lab: str) -> None:
         nonlocal obs
@@ -396,6 +396,8 @@ def play_game(
         """The opponent's decision: deliberate LLM interruption when the window qualifies and asks
         remain, else the rule-based responder. Returns (option index, is_interrupt)."""
         nonlocal llm_calls
+        if moves[2] != turn:  # a new turn: earlier turns' actions are not something to respond to now
+            moves[1], moves[2] = moves[0], turn
         fresh = bool(o["chain_mask"].any()) or moves[0] > moves[1]  # something to respond to (not Draw/Standby)
         if interrupter is not None and fresh and interrupter.wants(o) and interrupter.can_ask(turn):
             moves[1] = moves[0]
