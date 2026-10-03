@@ -270,6 +270,10 @@ def plan_hands(
             line.id = f"{deck_name}/plan-h{k}-a{attempt}"
             line.deck = deck_name
             line.source_file = "planner"
+            # card-less narration steps ("pass", "end turn") are not actions: drop them before grounding
+            line.steps = [st for st in line.steps if st.card or st.action not in ("other", "pass")]
+            for j, st in enumerate(line.steps):
+                st.i = j
             _fill_codes(line, names)
             parsed[k] = line
             b = budget_long if len(line.steps) > 8 else budget
