@@ -55,9 +55,8 @@ def main() -> None:
     line_cov: Counter = Counter()  # verified (non-expanded) line records per deck
     games = []
     for f in sorted(DEMOS.rglob("*.jsonl")):
-        if "games_judged" in f.parts or ("lines" in f.parts and "verified" not in f.parts and "expanded" not in f.name):
-            if f.parent.name in ("lines", "report"):
-                continue
+        if "games_judged" in f.parts:
+            continue
         k = kind_of(f)
         if f.parent.name in ("lines", "report") or (k != "game" and "verified" not in f.parts
                                                     and not any(p.startswith("expanded") for p in f.parts)):
