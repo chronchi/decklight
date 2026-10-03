@@ -363,6 +363,40 @@ def verify_line(engine: Engine, line: ComboLine, deck: Deck, seed: int = 0, budg
     return v
 
 
+def plan_from_state(
+    engine: Engine,
+    config: DuelConfig,
+    prefix: list[int],
+    line: ComboLine,
+    deck: Deck,
+    budget: int = 4000,
+    responder=None,
+) -> Verdict:
+    """Execute `line` as the rest of the current turn of a running duel: `config` + `prefix` (choices so far) give the
+    state, the player to act there is `me`. `responder(obs) -> index` answers the opponent's decisions (default:
+    passive). The Verdict's choices include the prefix; `config` is set. No missing-card check: the duel's decks are
+    real (unresolved names still fail)."""
+    line = apply_generics(line, deck, engine.cards)  # deck: the acting player's (generic step cards)
+    bad = _unresolved(line)
+    if bad:
+        return Verdict(
+            line.id, False, "unresolved", [], [], config.seed, 0, [], f"unresolved names: {bad[:8]}", []
+        )
+    env = CppEnv(engine, config)
+    obs = env.reset()
+    for i in prefix:
+        obs = env.step(i)
+    if obs is None:
+        return Verdict(
+            line.id, False, "duel_over", [], [], config.seed, 0, [], "the duel ended in the prefix", []
+        )
+    v = _search(
+        engine, config, line, config.seed, budget, prefix=list(prefix), me=env.player, responder=responder
+    )
+    v.config = config
+    return v
+
+
 def _search(
     engine: Engine,
     config: DuelConfig,
@@ -370,6 +404,9 @@ def _search(
     seed: int,
     budget: int,
     hand_inferred: bool = False,
+    prefix: list[int] | None = None,
+    me: int | None = None,
+    responder=None,
 ) -> Verdict:
     steps, n = line.steps, len(line.steps)
     sets, res, skippable = [], [], []
@@ -389,12 +426,16 @@ def _search(
     endset = {c for c in line.end_board_codes if c is not None}
     end_unres = sum(1 for c in line.end_board_codes if c is None)
 
-    me = 1 if going_second(line) else 0
-    my_turn = 1 + me  # going second, my turn is turn 2
+    prefix = list(prefix or [])
+    if me is None:
+        me = 1 if going_second(line) else 0
     env = CppEnv(engine, config)
     obs = env.reset()
-    choices: list[int] = []
-    labels: list[str] = []
+    for i in prefix:  # mid-game start: the duel so far
+        obs = env.step(i)
+    my_turn = int(obs["global"][2]) if prefix else 1 + me  # puzzle going second: my turn is turn 2
+    choices: list[int] = list(prefix)
+    labels: list[str] = ["prefix"] * len(prefix)
     # My (hand, field, other) after each choice (aligned with `choices`), and the depth at which each step's
     # anchor was taken: a summon step's result also counts if it left the deck during the step and moved on
     # ("Special Summon Saji from the Deck, then Tribute it" never shows Saji on the field).
@@ -402,7 +443,7 @@ def _search(
     # (was_boundary, kind, code) of each choice, aligned with `choices`: mid-action prompts (zone, target, material)
     # look identical whether they belong to an activation or a Set, so the visited key carries the actions taken
     # since the last open-state decision.
-    taken: list[tuple[bool, int, int]] = []
+    taken: list[tuple[bool, int, int]] = [(True, 0, 0)] * len(prefix)
     start: list[int | None] = [None] * n
     nodes = 0
     post_count = 0
@@ -455,6 +496,9 @@ def _search(
             obs = env.step(i)
         assert obs is not None
         snap()
+
+    def opponent_option() -> int:
+        return responder(obs) if responder is not None else passive_option()
 
     def passive_option() -> int:
         """The opponent's answer: pass / no / end / finish / cancel when available, else the first option."""
@@ -653,7 +697,7 @@ def _search(
 
     def dfs(si: int, at: bool, cfrom: int | None, ccodes, extras: int = 0) -> bool:
         while obs is not None and env.player != me:  # the opponent never interacts: passive answers
-            take(passive_option(), "auto")
+            take(opponent_option(), "auto")
         if obs is None or int(obs["global"][2]) > my_turn:
             # My turn is over (or the duel ended): a step whose trigger resolved as the
             # last thing still counts if its results are out of the deck.
@@ -749,6 +793,8 @@ def _search(
 
     snap()
     fhist0 = tuple(cur)
+    fhist.extend([fhist0] * len(prefix))  # aligned with the prefix choices
+    fhist.extend([fhist0] * len(prefix))  # aligned with the prefix choices
     try:
         found = dfs(0, False, None, None)
     except _Budget:
