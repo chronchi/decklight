@@ -49,3 +49,85 @@
 | tri-brigade | Tri-Brigade Beast Link (Kerass, Nervall, Shuraig, Fraktall) | 2021 TCG | train | 41 | 15 | Dump Beasts with Fraktall / Tenki / Rescue Cat to swarm Link-2s into Shuraig banish plus Zoodiac Zeus, with Revolt for 2-3 interruptions on opponent turn. |
 | infernoid | Infernoid banish (Infernoid Decatron, Void Feast, Onuncu) | 2015 TCG | train | 40 | 15 | Mill with Reasoning / Monster Gate / Trooper / Raiden then banish Infernoids to swarm big levels and lock with Devyaty / Onuncu negates plus Void Feast and Void |
 | burn | Chain burn / Ojama-style FTK rogue (Ring of Destruction, Secret Barrel, Just Desserts) | 2014 TCG | train | 42 | 15 | Stall with Reaper/Marshmallon/Veiler plus One Day, feed opponent tokens with Ojama Trio/Lava Golem, then chain burn with Just Desserts, Chain Strike, Meteor and |
+| angelechy-meta1 | Angelechy | 2026-09-26 | train | 40 | 15 | Aalst WCQ Regional; Winner (ygoprodeck meta) |
+| angelechy-meta2 | Angelechy | 2026-09-26 | train | 40 | 15 | Aalst WCQ Regional; Top 8 (ygoprodeck meta) |
+| angelechy-elfnote-meta1 | Angelechy Elfnote | 2026-09-27 | train | 40 | 15 | Rende WCQ Regional; Winner (ygoprodeck meta) |
+| angelechy-elfnote-meta2 | Angelechy Elfnote | 2026-09-27 | train | 41 | 15 | The Side Deck Remote Duel WCQ Regional; Winner (ygoprodeck meta) |
+| atlantean-mermail-meta1 | Atlantean Mermail | 2026-09-12 | train | 44 | 15 | Montevideo WCQ Regional; Runner-Up (ygoprodeck meta) |
+| atlantean-mermail-meta2 | Atlantean Mermail | 2026-09-26 | train | 60 | 15 | Kissimmee WCQ Regional; Top 8 (ygoprodeck meta) |
+| azamina-light-and-darkness-ritual-meta1 | Azamina Light and Darkness Ritual | 2026-09-26 | train | 42 | 15 | Santiago WCQ Regional; Winner (ygoprodeck meta) |
+| azamina-light-and-darkness-ritual-meta2 | Azamina Light and Darkness Ritual | 2026-09-27 | train | 40 | 15 | Le Mans WCQ Regional; Top 8 (ygoprodeck meta) |
+| azamina-mitsurugi-orcust-meta1 | Azamina Mitsurugi Orcust | 2026-09-27 | train | 47 | 15 | Rende WCQ Regional; Top 8 (ygoprodeck meta) |
+| azamina-shining-sarcophagus-mitsurugi-orcust-meta1 | Azamina Shining Sarcophagus Mitsurugi Orcust | 2026-09-26 | train | 60 | 15 | Poznań WCQ Regional; Top 4 (ygoprodeck meta) |
+| azamina-white-forest-meta1 | Azamina White Forest | 2026-09-26 | train | 40 | 15 | Ballarat WCQ Regional; Top 8 (ygoprodeck meta) |
+| blitzclique-meta1 | Blitzclique | 2026-09-27 | train | 40 | 15 | Le Mans WCQ Regional; Winner (ygoprodeck meta) |
+| blitzclique-meta2 | Blitzclique | 2026-09-27 | train | 40 | 15 | Castleford WCQ Regional; Winner (ygoprodeck meta) |
+| branded-angelechy-light-and-darkness-ritual-meta1 | Branded Angelechy Light and Darkness Ritual | 2026-09-19 | train | 45 | 15 | Bilbao WCQ Regional; Top 8 (ygoprodeck meta) |
+| branded-blitzclique-meta1 | Branded Blitzclique | 2026-09-27 | train | 41 | 15 | Groningen WCQ Regional; Top 8 (ygoprodeck meta) |
+| branded-dracotail-meta1 | Branded Dracotail | 2026-09-27 | train | 40 | 15 | Castleford WCQ Regional; Top 4 (ygoprodeck meta) |
+| branded-dracotail-meta2 | Branded Dracotail | 2026-09-25 | train | 43 | 15 | Riyadh WCQ Regional; Top 8 (ygoprodeck meta) |
+| branded-light-and-darkness-ritual-meta1 | Branded Light and Darkness Ritual | 2026-09-27 | train | 44 | 15 | Foggia WCQ Regional; Winner (ygoprodeck meta) |
+| branded-light-and-darkness-ritual-meta2 | Branded Light and Darkness Ritual | 2026-09-26 | train | 40 | 15 | Ballarat WCQ Regional; Runner-Up (ygoprodeck meta) |
+| crystron-trains-meta1 | Crystron Trains | 2026-09-12 | train | 42 | 15 | Montevideo WCQ Regional; Top 8 (ygoprodeck meta) |
+| dark-magician-azamina-snake-eye-meta1 | Dark Magician Azamina Snake-Eye | 2026-09-26 | train | 40 | 15 | Poznań WCQ Regional; Runner-Up (ygoprodeck meta) |
+| dark-magician-mitsurugi-yummy-meta1 | Dark Magician Mitsurugi Yummy | 2026-09-26 | train | 60 | 15 | Caracas WCQ Regional; Top 8 (ygoprodeck meta) |
+| despia-branded-meta1 | Despia Branded | 2026-09-26 | train | 42 | 15 | Newry WCQ Regional; Winner (ygoprodeck meta) |
+| despia-branded-meta2 | Despia Branded | 2026-09-27 | train | 40 | 15 | Le Mans WCQ Regional; Top 8 (ygoprodeck meta) |
+| dogmatika-branded-light-and-darkness-ritual-meta1 | Dogmatika Branded Light and Darkness Ritual | 2026-09-26 | holdout | 60 | 15 | Buenos Aires WCQ Regional; Top 8 (ygoprodeck meta) |
+| doomz-meta1 | DoomZ | 2026-09-27 | holdout | 41 | 15 | Thessaloniki WCQ Regional; Top 4 (ygoprodeck meta) |
+| doomz-meta2 | DoomZ | 2026-09-26 | holdout | 40 | 15 | Poznań WCQ Regional; Top 8 (ygoprodeck meta) |
+| dracotail-despia-branded-meta1 | Dracotail Despia Branded | 2026-09-27 | train | 42 | 15 | Rome WCQ Regional; Top 4 (ygoprodeck meta) |
+| elfnote-meta1 | Elfnote | 2026-09-27 | train | 40 | 15 | Rome WCQ Regional; Winner (ygoprodeck meta) |
+| elfnote-meta2 | Elfnote | 2026-09-26 | train | 40 | 15 | Bloomington WCQ Regional; Winner (ygoprodeck meta) |
+| elfnote-mitsurugi-synchron-meta1 | Elfnote Mitsurugi Synchron | 2026-09-27 | train | 60 | 15 | Groningen WCQ Regional; Top 8 (ygoprodeck meta) |
+| exosister-meta1 | Exosister | 2026-09-27 | train | 40 | 15 | Arapiraca WCQ Regional; Top 4 (ygoprodeck meta) |
+| fiendsmith-elfnote-meta1 | Fiendsmith Elfnote | 2026-09-27 | train | 40 | 15 | Thessaloniki WCQ Regional; Runner-Up (ygoprodeck meta) |
+| fiendsmith-elfnote-meta2 | Fiendsmith Elfnote | 2026-09-26 | train | 41 | 15 | Avrillé WCQ Regional; Top 8 (ygoprodeck meta) |
+| fiendsmith-light-and-darkness-ritual-meta1 | Fiendsmith Light and Darkness Ritual | 2026-09-27 | holdout | 41 | 15 | Rende WCQ Regional; Top 8 (ygoprodeck meta) |
+| fiendsmith-sacred-beasts-meta1 | Fiendsmith Sacred Beasts | 2026-09-26 | holdout | 40 | 15 | Caracas WCQ Regional; Top 4 (ygoprodeck meta) |
+| ignister-maliss-meta1 | @Ignister Maliss | 2026-09-27 | holdout | 40 | 15 | Cannington WCQ Regional; Winner (ygoprodeck meta) |
+| ignister-maliss-meta2 | @Ignister Maliss | 2026-09-27 | holdout | 40 | 15 | Arapiraca WCQ Regional; Winner (ygoprodeck meta) |
+| invoked-meta1 | Invoked | 2026-09-27 | train | 40 | 15 | Thessaloniki WCQ Regional; Winner (ygoprodeck meta) |
+| invoked-meta2 | Invoked | 2026-09-26 | train | 40 | 15 | Catskill WCQ Regional; Winner (ygoprodeck meta) |
+| invoked-dracotail-meta1 | Invoked Dracotail | 2026-09-26 | train | 40 | 15 | Santiago WCQ Regional; Top 8 (ygoprodeck meta) |
+| kewl-tune-meta1 | Kewl Tune | 2026-09-19 | train | 40 | 15 | YCS Paris; Top 8 (ygoprodeck meta) |
+| light-and-darkness-ritual-sacred-beasts-meta1 | Light and Darkness Ritual Sacred Beasts | 2026-09-26 | train | 47 | 15 | Duluth WCQ Regional; Top 8 (ygoprodeck meta) |
+| lunalight-meta1 | Lunalight | 2026-09-27 | train | 41 | 15 | Footscray WCQ Regional; Winner (ygoprodeck meta) |
+| lunalight-meta2 | Lunalight | 2026-09-27 | train | 42 | 15 | Chelmsford WCQ Regional; Top 8 (ygoprodeck meta) |
+| magistus-fairy-tail-meta1 | Magistus Fairy Tail | 2026-09-27 | holdout | 43 | 15 | Arapiraca WCQ Regional; Top 8 (ygoprodeck meta) |
+| magistus-invoked-fairy-tail-meta1 | Magistus Invoked Fairy Tail | 2026-09-26 | train | 43 | 15 | Cosne-Cours-sur-Loire WCQ Regional; Runner-Up (ygoprodeck meta) |
+| magistus-invoked-fairy-tail-meta2 | Magistus Invoked Fairy Tail | 2026-09-26 | train | 43 | 15 | Avrillé WCQ Regional; Top 4 (ygoprodeck meta) |
+| megalith-ryzeal-mitsurugi-meta1 | Megalith Ryzeal Mitsurugi | 2026-09-26 | train | 50 | 15 | Campinas WCQ Regional; Top 4 (ygoprodeck meta) |
+| melodious-meta1 | Melodious | 2026-09-26 | train | 40 | 15 | Ballarat WCQ Regional; Top 4 (ygoprodeck meta) |
+| memento-meta1 | Memento | 2026-09-27 | train | 41 | 15 | Footscray WCQ Regional; Top 4 (ygoprodeck meta) |
+| memento-meta2 | Memento | 2026-09-26 | train | 44 | 15 | Folkestone WCQ Regional; Top 8 (ygoprodeck meta) |
+| mitsurugi-meta1 | Mitsurugi | 2026-09-26 | train | 40 | 15 | Kissimmee WCQ Regional; Runner-Up (ygoprodeck meta) |
+| mitsurugi-meta2 | Mitsurugi | 2026-09-26 | train | 41 | 15 | Santiago WCQ Regional; Runner-Up (ygoprodeck meta) |
+| mitsurugi-clown-crew-meta1 | Mitsurugi Clown Crew | 2026-09-27 | train | 44 | 15 | Cannington WCQ Regional; Top 8 (ygoprodeck meta) |
+| mitsurugi-light-and-darkness-ritual-orcust-meta1 | Mitsurugi Light and Darkness Ritual Orcust | 2026-09-19 | train | 46 | 15 | YCS Paris; Top 64 (ygoprodeck meta) |
+| mitsurugi-magnet-warrior-meta1 | Mitsurugi Magnet Warrior | 2026-09-20 | train | 46 | 15 | Saskatoon WCQ Regional; Top 4 (ygoprodeck meta) |
+| mitsurugi-orcust-phantom-knights-meta1 | Mitsurugi Orcust Phantom Knights | 2026-09-19 | train | 60 | 15 | Auckland WCQ Regional; Runner-Up (ygoprodeck meta) |
+| mitsurugi-yummy-light-and-darkness-ritual-meta1 | Mitsurugi Yummy Light and Darkness Ritual | 2026-09-26 | train | 55 | 15 | Buenos Aires WCQ Regional; Top 8 (ygoprodeck meta) |
+| odion-meta1 | Odion | 2026-09-20 | train | 40 | 15 | Rochester WCQ Regional; Runner-Up (ygoprodeck meta) |
+| onomat-constellar-tellarknights-meta1 | Onomat Constellar Tellarknights | 2026-09-27 | train | 41 | 15 | Thessaloniki WCQ Regional; Top 8 (ygoprodeck meta) |
+| onomat-ryzeal-meta1 | Onomat Ryzeal | 2026-09-26 | train | 41 | 15 | Newry WCQ Regional; Top 4 (ygoprodeck meta) |
+| orcust-meta1 | Orcust | 2026-09-27 | train | 40 | 15 | Rende WCQ Regional; Top 4 (ygoprodeck meta) |
+| orcust-meta2 | Orcust | 2026-09-26 | train | 40 | 15 | Newry WCQ Regional; Top 4 (ygoprodeck meta) |
+| power-patron-meta1 | Power Patron | 2026-09-26 | train | 47 | 15 | Folkestone WCQ Regional; Top 8 (ygoprodeck meta) |
+| power-patron-artmage-meta1 | Power Patron Artmage | 2026-09-26 | train | 41 | 15 | Campinas WCQ Regional; Winner (ygoprodeck meta) |
+| power-patron-artmage-meta2 | Power Patron Artmage | 2026-09-26 | train | 42 | 15 | Ioannina WCQ Regional; Winner (ygoprodeck meta) |
+| r-b-meta1 | R.B. | 2026-09-25 | train | 42 | 15 | Riyadh WCQ Regional; Winner (ygoprodeck meta) |
+| radiant-typhoon-meta1 | Radiant Typhoon | 2026-09-26 | train | 42 | 15 | Campinas WCQ Regional; Top 4 (ygoprodeck meta) |
+| radiant-typhoon-meta2 | Radiant Typhoon | 2026-09-19 | train | 40 | 15 | Olathe WCQ Regional; Top 4 (ygoprodeck meta) |
+| regenesis-meta1 | Regenesis | 2026-09-27 | train | 40 | 15 | Cannington WCQ Regional; Top 8 (ygoprodeck meta) |
+| ryzeal-mitsurugi-meta1 | Ryzeal Mitsurugi | 2026-09-26 | train | 42 | 15 | Caracas WCQ Regional; Top 8 (ygoprodeck meta) |
+| sacred-beasts-meta1 | Sacred Beasts | 2026-09-27 | train | 42 | 15 | Arapiraca WCQ Regional; Top 8 (ygoprodeck meta) |
+| sacred-beasts-meta2 | Sacred Beasts | 2026-09-27 | train | 40 | 15 | Donnezac WCQ Regional; Top 8 (ygoprodeck meta) |
+| sky-striker-meta1 | Sky Striker | 2026-09-26 | train | 40 | 15 | Caracas WCQ Regional; Top 4 (ygoprodeck meta) |
+| sky-striker-meta2 | Sky Striker | 2026-09-27 | train | 40 | 15 | Thessaloniki WCQ Regional; Top 8 (ygoprodeck meta) |
+| sky-striker-r-b-meta1 | Sky Striker R.B. | 2026-09-26 | train | 42 | 15 | Buenos Aires WCQ Regional; Winner (ygoprodeck meta) |
+| synchron-elfnote-meta1 | Synchron Elfnote | 2026-09-26 | train | 40 | 15 | Poznań WCQ Regional; Winner (ygoprodeck meta) |
+| synchron-elfnote-meta2 | Synchron Elfnote | 2026-09-27 | train | 42 | 15 | Cannington WCQ Regional; Top 4 (ygoprodeck meta) |
+| synchron-kewl-tune-meta1 | Synchron Kewl Tune | 2026-09-19 | train | 40 | 15 | YCS Paris; Top 32 (ygoprodeck meta) |
+| trains-meta1 | Trains | 2026-09-26 | train | 40 | 15 | Newry WCQ Regional; Top 8 (ygoprodeck meta) |
+| trains-meta2 | Trains | 2026-09-19 | train | 40 | 15 | YCS Paris; Top 16 (ygoprodeck meta) |

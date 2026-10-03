@@ -118,6 +118,36 @@ def suggest(names: CardNames, bad: str, k: int = 4) -> list[str]:
     return [n for _, n in sorted(scored)[:k]]
 
 
+def validate_codes(
+    main: list[int], extra: list[int], engine: Engine, names: CardNames, min_extra: int = 5
+) -> list[str]:
+    """Validate resolved passcode lists: engine DB + official scripts, alias-grouped ≤3, sizes.
+
+    Shared by build_decks (name resolution drops unknown cards first, so `main`/`extra`
+    hold only resolved codes) and fetch_meta_decks (passcodes straight from YGOPRODeck).
+    `min_extra` is 5 for muse-built lists; meta fetches pass 0 (real lists set the size).
+    """
+    problems: list[str] = []
+    per_card: Counter = Counter()
+    for code in (*main, *extra):
+        canon = names.alias.get(code, 0) or code
+        per_card[canon] += 1
+        if engine.cards.get(code) is None:
+            problems.append(f"{code}: missing from the engine card DB")
+        elif not (SCRIPTS / f"c{code}.lua").exists() and not (SCRIPTS / f"c{canon}.lua").exists():
+            problems.append(f"{names.names.get(code, code)}: no engine script for it (replace it)")
+    for canon, n in per_card.items():
+        if n > 3:
+            problems.append(f"{names.names.get(canon, canon)}: {n} copies (max 3)")
+    if not 40 <= len(main) <= 60:
+        problems.append(f"main deck has {len(main)} cards after removing unknown cards (need 40-60)")
+    if len(extra) > 15:
+        problems.append(f"extra deck has {len(extra)} cards (max 15)")
+    if len(extra) < min_extra:
+        problems.append(f"extra deck has only {len(extra)} cards")
+    return problems
+
+
 def ground(engine: Engine, names: CardNames, d: dict) -> tuple[Deck | None, list[str], dict[str, list[str]]]:
     """JSON list -> Deck, plus problems and spelling suggestions."""
     problems: list[str] = []
@@ -152,15 +182,7 @@ def ground(engine: Engine, names: CardNames, d: dict) -> tuple[Deck | None, list
                 continue
             per_card[canon] += n
             (extra if cd.type & EXTRA_T else main).extend([code] * n)
-    for canon, n in per_card.items():
-        if n > 3:
-            problems.append(f"{names.names.get(canon, canon)}: {n} copies (max 3)")
-    if not 40 <= len(main) <= 60:
-        problems.append(f"main deck has {len(main)} cards after removing unknown cards (need 40-60)")
-    if len(extra) > 15:
-        problems.append(f"extra deck has {len(extra)} cards (max 15)")
-    if len(extra) < 5:
-        problems.append(f"extra deck has only {len(extra)} cards")
+    problems += validate_codes(main, extra, engine, names)
     counts_ok = 40 <= len(main) <= 60 and 5 <= len(extra) <= 15 and max(per_card.values(), default=0) <= 3
     deck = Deck(tuple(main), tuple(extra), (), "") if counts_ok else None
     return deck, problems, sugg

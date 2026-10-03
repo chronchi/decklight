@@ -69,11 +69,17 @@ STRAY_AGE_S = 4 * 3600  # older than any job cap: an allowed instance this old h
 
 
 def destroy_strays() -> list[int]:
-    """Destroy instances we labelled that no live launcher owns. Spared: the warm session box (SESSION_FILE) and
-    allowed labels younger than STRAY_AGE_S (another launcher's running job). 2026-10-03 a BC launch destroyed the
-    live session box here, so the planners crash-looped for an hour."""
-    sess = load_session()
-    keep = {sess["instance_id"]} if sess else set()
+    """Destroy instances we labelled that no live launcher owns. Spared: the warm session boxes (every existing
+    session file) and allowed labels younger than STRAY_AGE_S (another launcher's running job). 2026-10-03 a BC
+    launch destroyed the live session box here, so the planners crash-looped for an hour."""
+    keep: set = set()
+    for f in _session_files():
+        try:
+            sess = json.loads(f.read_text())
+        except (json.JSONDecodeError, OSError):
+            continue
+        if isinstance(sess, dict) and sess.get("instance_id") is not None:
+            keep.add(sess["instance_id"])
     allowed = set(ALLOWED_FILE.read_text().split()) if ALLOWED_FILE.exists() else set()
     now = time.time()
     ids = []
@@ -294,33 +300,51 @@ def _destroy_retrying(instance_id: int) -> None:
 SESSION_FILE = ROOT / "data" / "vast_session.json"
 
 
-def load_session() -> dict | None:
+def session_file(name: str = "lines") -> Path:
+    """Session-file path for a named session: `data/vast_session.json` for "lines" (unchanged),
+    `data/vast_session-<name>.json` otherwise."""
+    if name == "lines":
+        return SESSION_FILE
+    return ROOT / "data" / f"vast_session-{name}.json"
+
+
+def _session_files() -> list[Path]:
+    """Every existing session file (the default one plus any named ones)."""
+    files = sorted((ROOT / "data").glob("vast_session-*.json")) if (ROOT / "data").exists() else []
+    if SESSION_FILE.exists() and SESSION_FILE not in files:
+        files = [SESSION_FILE, *files]
+    return files
+
+
+def load_session(name: str = "lines") -> dict | None:
     """The warm-box record written by `start_session`, or None when there is no session."""
-    if not SESSION_FILE.exists():
+    path = session_file(name)
+    if not path.exists():
         return None
     try:
-        return json.loads(SESSION_FILE.read_text())
+        return json.loads(path.read_text())
     except (json.JSONDecodeError, OSError):
         return None
 
 
-def require_session() -> dict:
-    s = load_session()
+def require_session(name: str = "lines") -> dict:
+    s = load_session(name)
     if s is None:
         raise VastError(
-            "no vast session (no data/vast_session.json); start one with "
+            f"no vast session {name!r} (no {session_file(name).name}); start one with "
             "`uv run python scripts/vast_session.py start` on the laptop"
         )
     return s
 
 
-def start_session(spec: JobSpec, max_hosts: int = 3) -> dict:
+def start_session(spec: JobSpec, max_hosts: int = 3, name: str = "lines") -> dict:
     """Rent a cheap (usually CPU-only) box exactly like `run_job` does, push the code, run `spec.setup`
-    once, and keep the box warm: write data/vast_session.json and return it. Runs no job, destroys nothing.
-    The hours cap is recorded as a deadline in the file (`vast_session.py status` warns past it); the box
-    itself is stopped by `vast_session.py stop` (i.e. `end_session`)."""
-    if load_session() is not None:
-        raise VastError(f"a session already exists ({SESSION_FILE}); stop it first")
+    once, and keep the box warm: write the session file for `name` and return it. Runs no job, destroys
+    nothing. The hours cap is recorded as a deadline in the file (`vast_session.py status` warns past it); the
+    box itself is stopped by `vast_session.py stop` (i.e. `end_session`)."""
+    path = session_file(name)
+    if load_session(name) is not None:
+        raise VastError(f"a session already exists ({path}); stop it first")
     strays = destroy_strays()
     if strays:
         print(f"destroyed stray instances {strays}")
@@ -380,8 +404,8 @@ def start_session(spec: JobSpec, max_hosts: int = 3) -> dict:
         "name": spec.name,
         "setup": spec.setup,
     }
-    SESSION_FILE.parent.mkdir(parents=True, exist_ok=True)
-    SESSION_FILE.write_text(json.dumps(session, indent=1))
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(session, indent=1))
     LEDGER.parent.mkdir(parents=True, exist_ok=True)
     with open(LEDGER, "a") as f:
         f.write(
@@ -398,13 +422,13 @@ def start_session(spec: JobSpec, max_hosts: int = 3) -> dict:
             )
             + "\n"
         )
-    print(f"session ready on {host}:{port} (cap {spec.hours_cap}h); {SESSION_FILE} written", flush=True)
+    print(f"session ready on {host}:{port} (cap {spec.hours_cap}h); {path} written", flush=True)
     return session
 
 
-def end_session() -> dict:
+def end_session(name: str = "lines") -> dict:
     """Destroy the session box, log the spend like `run_job`, delete the session file. Returns a summary."""
-    s = require_session()
+    s = require_session(name)
     instance_id = int(s["instance_id"])
     _destroy_retrying(instance_id)
     now = time.time()
@@ -420,14 +444,14 @@ def end_session() -> dict:
         f.write(
             json.dumps({"time": time.strftime("%Y-%m-%d %H:%M"), "event": "session_end", **summary}) + "\n"
         )
-    SESSION_FILE.unlink(missing_ok=True)
+    session_file(name).unlink(missing_ok=True)
     print(f"session {instance_id} destroyed; spent ≈ ${est_cost:.3f} ({seconds / 60:.1f} min)", flush=True)
     return summary
 
 
-def session_run(cmd: str, timeout_s: float | None = None) -> tuple[int, str]:
+def session_run(cmd: str, timeout_s: float | None = None, name: str = "lines") -> tuple[int, str]:
     """Run `cmd` in REMOTE_DIR on the session box. Returns (exit code, combined output)."""
-    s = require_session()
+    s = require_session(name)
     full = f"cd {REMOTE_DIR} && ({cmd})"
     proc = subprocess.run(
         ["ssh", *SSH_OPTS, "-p", str(s["port"]), f"root@{s['host']}", full],
@@ -439,10 +463,10 @@ def session_run(cmd: str, timeout_s: float | None = None) -> tuple[int, str]:
     return proc.returncode, proc.stdout + proc.stderr
 
 
-def session_push(local_paths: list[str | Path], remote_dir: str) -> None:
+def session_push(local_paths: list[str | Path], remote_dir: str, name: str = "lines") -> None:
     """Copy local files/dirs into `remote_dir` on the session box (scp -r over the same ssh options)."""
-    s = require_session()
-    rc, _ = session_run(f"mkdir -p {shlex.quote(remote_dir)}")
+    s = require_session(name)
+    rc, _ = session_run(f"mkdir -p {shlex.quote(remote_dir)}", name=name)
     if rc != 0:
         raise VastError(f"could not create {remote_dir} on the session box")
     for p in local_paths:
@@ -452,9 +476,9 @@ def session_push(local_paths: list[str | Path], remote_dir: str) -> None:
         )
 
 
-def session_pull(remote_path: str, local_path: str | Path) -> None:
+def session_pull(remote_path: str, local_path: str | Path, name: str = "lines") -> None:
     """Copy `remote_path` from the session box to `local_path` (scp -r over the same ssh options)."""
-    s = require_session()
+    s = require_session(name)
     local_path = Path(local_path)
     local_path.parent.mkdir(parents=True, exist_ok=True)
     subprocess.run(
@@ -463,9 +487,9 @@ def session_pull(remote_path: str, local_path: str | Path) -> None:
     )
 
 
-def repush_code() -> None:
+def repush_code(name: str = "lines") -> None:
     """Re-push the working tree to the session box (for code changes mid-session; .venv and build stay)."""
-    s = require_session()
+    s = require_session(name)
     push_code(s["host"], int(s["port"]))
 
 

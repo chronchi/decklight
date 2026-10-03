@@ -19,7 +19,7 @@ from ygo_zero.decks import Deck
 from ygo_zero.engine.cpp_env import CppEnv
 from ygo_zero.engine.duel import DuelConfig, Engine, Placement
 
-LABEL_WEIGHT = {"stated": 1.0, "inferred": 0.5}
+LABEL_WEIGHT = {"stated": 1.0, "inferred": 0.5, "interrupt": 1.0}
 
 
 def record_config(rec: dict, seed: int | None = None) -> DuelConfig:

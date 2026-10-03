@@ -17,6 +17,8 @@ from __future__ import annotations
 
 import json
 import random
+import re
+import sqlite3
 import time
 from collections.abc import Callable
 
@@ -31,6 +33,7 @@ from ygo_zero.engine import constants as C
 from ygo_zero.engine.actions import Kind
 from ygo_zero.engine.cpp_env import CppEnv
 from ygo_zero.engine.duel import DuelConfig, Engine
+from ygo_zero.engine.resources import default_cdbs
 
 TURN_SYSTEM = (
     "You are an expert Yu-Gi-Oh! player. Given the exact current game state, write the strongest plan for the rest "
@@ -133,7 +136,7 @@ class Responder:
     probability `p_trap`, answer optional triggers YES with `p_yes`, attack when possible, otherwise the first
     non-cancel option. Seeded, so a game is reproducible."""
 
-    def __init__(self, seed: int, p_trap: float = 0.7, p_yes: float = 0.8):
+    def __init__(self, seed: int, p_trap: float = 0.25, p_yes: float = 0.8):
         self.rng = random.Random(seed)
         self.p_trap = p_trap
         self.p_yes = p_yes
@@ -170,8 +173,165 @@ class Responder:
 
 
 def _opts(obs) -> list[tuple[int, int]]:
-    m = int(obs["action_mask"].sum())
-    return [(int(r[0]), int(r[2])) for r in obs["actions"][:m]]
+    m = obs["action_mask"]
+    try:
+        n = int(m.sum())
+    except AttributeError:
+        n = sum(1 for x in m if x)
+    return [(int(r[0]), int(r[2])) for r in list(obs["actions"])[:n]]
+
+
+def _passive_index(obs) -> int:
+    for i, (k, _) in enumerate(_opts(obs)):
+        if k in (Kind.PASS, Kind.NO, Kind.FINISH, Kind.CANCEL, Kind.TO_END):
+            return i
+    return 0
+
+
+def _masked_rows(obs, arr_key: str, mask_key: str) -> list:
+    return [r for r, m in zip(list(obs[arr_key]), list(obs[mask_key])) if m]
+
+
+_INTERRUPT_MSGS = (C.MSG_SELECT_CHAIN, C.MSG_SELECT_EFFECTYN, C.MSG_SELECT_YESNO)
+
+_DESC_CACHE: dict[int, str] | None = None
+
+
+def _effect_text(code: int) -> str:
+    """First 300 chars of the card's effect text (whitespace-collapsed)."""
+    global _DESC_CACHE
+    if _DESC_CACHE is None:
+        out: dict[int, str] = {}
+        for path in default_cdbs():
+            try:
+                con = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+            except sqlite3.Error:
+                continue
+            try:
+                for c, desc in con.execute("SELECT id, desc FROM texts").fetchall():
+                    out.setdefault(int(c), str(desc or ""))
+            finally:
+                con.close()
+        _DESC_CACHE = out
+    raw = _DESC_CACHE.get(int(code), "")
+    return re.sub(r"\s+", " ", raw).strip()[:300]
+
+
+def chain_names(obs, names: dict[int, str]) -> list[str]:
+    out = []
+    for r in _masked_rows(obs, "chain", "chain_mask"):
+        code = int(r[1])
+        out.append(names.get(code, f"#{code}") if code else "(hidden)")
+    return out
+
+
+def options_text(obs, names: dict[int, str], engine=None) -> str:
+    lines = []
+    for i, (k, code) in enumerate(_opts(obs)):
+        try:
+            kind = Kind(k).name
+        except ValueError:
+            kind = str(k)
+        nm = names.get(int(code), f"#{int(code)}") if int(code) else "(no card)"
+        desc = _effect_text(code) if engine is not None and int(code) else ""
+        lines.append(f"{i}: {kind} {nm}" + (f" | {desc}" if desc else ""))
+    return "\n".join(lines)
+
+
+def interrupt_prompt(deck_name: str, state: str, chain: list[str], recent: list[str], options: str) -> str:
+    return f"""You are playing {deck_name} (responding on the opponent's turn).
+
+CURRENT STATE:
+{state}
+
+CHAIN: {", ".join(chain) if chain else "empty"}
+OPPONENT'S LAST ACTIONS: {", ".join(recent) if recent else "none yet"}
+
+YOUR LEGAL OPTIONS (reply with the option number):
+{options}
+
+You are an expert player. Hand traps and quick effects are limited; use one only if this is a good moment (it stops a key search/summon/combo piece or prevents lethal). Otherwise pass.
+Reply with JSON only: {{"choice": <option number or -1 for pass>, "why": "..."}}."""
+
+
+def parse_interrupt_answer(text: str, n_options: int, passive: int) -> tuple[int, str]:
+    """(option index, why); anything invalid means pass (the passive index)."""
+    t = text.strip()
+    if t.startswith("```"):
+        t = re.sub(r"^```\w*\n?", "", t)
+        t = re.sub(r"\n?```\s*$", "", t)
+    try:
+        obj = json.loads(t)
+    except json.JSONDecodeError:
+        m = re.search(r"\{.*\}", t, re.DOTALL)
+        if not m:
+            return passive, "unparsable"
+        try:
+            obj = json.loads(m.group(0))
+        except json.JSONDecodeError:
+            return passive, "unparsable"
+    if not isinstance(obj, dict):
+        return passive, "unparsable"
+    why = str(obj.get("why", ""))[:500]
+    try:
+        choice = int(obj.get("choice", -1))
+    except (TypeError, ValueError):
+        return passive, why or "bad-choice"
+    if choice == -1:
+        return passive, why
+    if 0 <= choice < n_options:
+        return choice, why
+    return passive, why or "bad-choice"
+
+
+_TRIGGER_KINDS = (Kind.SUMMON, Kind.SPSUMMON, Kind.ACTIVATE)
+
+
+class Interrupter:
+    """Deliberate opponent interruptions: ask the LLM whether a chain/quick-effect window on the
+    opponent's turn is worth answering, instead of firing hand traps at random.
+
+    Asks at most `max_per_turn` windows per turn; anything else (exhausted asks, own-turn windows)
+    stays with the rule-based `Responder`. Invalid LLM answers mean pass."""
+
+    def __init__(self, complete_fn: Callable[[str], str], names, max_per_turn: int = 3):
+        self.complete_fn = complete_fn
+        self.names = names.names if hasattr(names, "names") else dict(names)
+        self.max_per_turn = max_per_turn
+        self.used: dict[int, int] = {}
+
+    def wants(self, obs) -> bool:
+        """Whether this window qualifies: acting player is NOT the turn player, the message is a
+        chain (or an effect-yes/no quick-effect window), and at least one option activates."""
+        if bool(int(obs["global"][5])):
+            return False
+        if int(obs["global"][21]) not in _INTERRUPT_MSGS:
+            return False
+        return any(k == Kind.ACTIVATE for k, _ in _opts(obs))
+
+    def can_ask(self, turn: int) -> bool:
+        return self.used.get(int(turn), 0) < self.max_per_turn
+
+    def __call__(self, obs, deck_name: str, turn: int, player: int, recent: list[str],
+                 engine=None) -> tuple[int, str]:
+        """Ask the LLM and return (option index, why). Counts one ask for this turn; any failure
+        (unparsable answer, LLM error, no qualifying window, exhausted asks) returns the passive index."""
+        passive = _passive_index(obs)
+        if not self.wants(obs) or not self.can_ask(int(turn)):
+            return passive, "no-ask"
+        self.used[int(turn)] = self.used.get(int(turn), 0) + 1
+        prompt = interrupt_prompt(
+            deck_name,
+            describe_state(obs, self.names),
+            chain_names(obs, self.names),
+            recent,
+            options_text(obs, self.names, engine),
+        )
+        try:
+            resp = self.complete_fn(prompt)
+        except Exception:  # noqa: BLE001 - an LLM failure passes
+            return passive, "llm_error"
+        return parse_interrupt_answer(resp, len(_opts(obs)), passive)
 
 
 def play_game(
@@ -186,6 +346,8 @@ def play_game(
     examples: dict[str, list[ComboLine]] | None = None,
     log: Callable[[str], None] = print,
     max_seconds: float | None = None,
+    plan_fn: Callable | None = None,
+    interrupts: int = 3,
 ) -> dict:
     """Play one game; deck 0 goes first. Returns the record (see module docstring). `max_seconds`: stop at the next
     turn boundary once exceeded (the record is kept, winner None), so a slow game never loses its data to a kill."""
@@ -194,7 +356,9 @@ def play_game(
     sheets = {0: card_sheet(engine, deck0, names), 1: card_sheet(engine, deck1, names)}
     dnames = {0: name0, 1: name1}
     pdecks = {0: deck0, 1: deck1}
+    verify = plan_fn or plan_from_state
     responder = Responder(seed)
+    interrupter = Interrupter(complete_fn, names, max_per_turn=interrupts) if interrupts > 0 else None
     env = CppEnv(engine, config)
     obs = env.reset()
     choices: list[int] = []
@@ -202,20 +366,54 @@ def play_game(
     actors: list[int] = []
     turns: list[int] = []
     plans: list[dict] = []
+    interrupts_log: list[dict] = []
+    acted: list[tuple[int, int]] = []  # (actor, card code) of every taken decision, for recent-action context
     llm_calls = 0
     planned: list[tuple[int, str]] = []  # remaining (choice, label) of the active plan
     plan_owner, plan_turn = -1, -1
     replanned: set[tuple[int, int]] = set()  # (turn, player) that already replanned
     tried: set[tuple[int, int]] = set()  # (turn, player) that already got a plan attempt
     t0 = time.time()
+    moves = [0, 0]  # [turn-player summons/activations so far, value at the last interrupt ask]
 
     def take(i: int, lab: str) -> None:
         nonlocal obs
         actors.append(env.player)
         turns.append(int(obs["global"][2]))
+        try:
+            code = int(obs["actions"][i][2])
+        except (IndexError, TypeError):
+            code = 0
+        acted.append((env.player, code))
+        if bool(int(obs["global"][5])) and int(obs["actions"][i][0]) in _TRIGGER_KINDS:
+            moves[0] += 1  # the turn player summoned or activated something worth answering
         choices.append(i)
         labels.append(lab)
         obs = env.step(i)
+
+    def decide(o, turn: int, p: int) -> tuple[int, bool]:
+        """The opponent's decision: deliberate LLM interruption when the window qualifies and asks
+        remain, else the rule-based responder. Returns (option index, is_interrupt)."""
+        nonlocal llm_calls
+        fresh = bool(o["chain_mask"].any()) or moves[0] > moves[1]  # something to respond to (not Draw/Standby)
+        if interrupter is not None and fresh and interrupter.wants(o) and interrupter.can_ask(turn):
+            moves[1] = moves[0]
+            recent = []
+            for actor, code in reversed(acted):
+                if actor != p:
+                    recent.append(names.names.get(code, f"#{code}") if code else "(hidden)")
+                    if len(recent) >= 3:
+                        break
+            idx, why = interrupter(o, dnames[p], turn, p, recent, engine)
+            llm_calls += 1
+            try:
+                code = int(o["actions"][idx][2])
+            except (IndexError, TypeError):
+                code = 0
+            card = names.names.get(code, f"#{code}") if code else "-"
+            interrupts_log.append({"turn": turn, "player": p, "card": card, "why": why})
+            return idx, True
+        return responder(o), False
 
     def make_plan(p: int, turn: int, why: str) -> list[tuple[int, str]]:
         nonlocal llm_calls
@@ -257,7 +455,7 @@ def play_game(
             for k, st in enumerate(line.steps):
                 st.i = k
             _fill_codes(line, names)
-            v = plan_from_state(engine, config, choices, line, pdecks[p], budget=budget)
+            v = verify(engine, config, choices, line, pdecks[p], budget=budget)
             entry["attempts"].append(
                 {"line": json.loads(compact_line_json(line)), "reason": v.reason, "nodes": v.nodes}
             )
@@ -294,12 +492,12 @@ def play_game(
                 planned.pop(0)
                 continue
             # an opponent decision inside the plan: the plan assumed the passive answer
-            r = responder(obs)
+            r, is_int = decide(obs, turn, p)
             if r == want:
-                take(r, "auto")
+                take(r, "interrupt" if is_int else "auto")
                 planned.pop(0)
             else:
-                take(r, "responder")
+                take(r, "interrupt" if is_int else "responder")
                 planned = []  # interrupted: the turn player replans at its next open state
                 log(f"  turn {turn}: p{p} interrupts p{plan_owner}'s plan")
             continue
@@ -315,7 +513,8 @@ def play_game(
                 plan_owner, plan_turn = p, turn
                 if planned:
                     continue
-        take(responder(obs), "responder" if p != plan_owner or turn != plan_turn else "fallback")
+        r, is_int = decide(obs, turn, p)
+        take(r, "interrupt" if is_int else ("responder" if p != plan_owner or turn != plan_turn else "fallback"))
     winner = env.winner if obs is None else None
     g = obs["global"] if obs is not None else None
     return {
@@ -334,6 +533,7 @@ def play_game(
         "actors": actors,
         "turns": turns,
         "plans": plans,
+        "interrupts": interrupts_log,
         "winner": winner,
         "end_turn": turns[-1] if turns else 0,
         # obs global[0:2] = (LP of the player to act, LP of the other): stored by absolute player

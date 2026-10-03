@@ -154,18 +154,24 @@ def improve_command(src: str, deck: str) -> list[str]:
             "--remote", "--workers", "6"]
 
 
-def game_command(a: str, b: str, seed: int, variant: str | None) -> list[str]:
+def game_command(a: str, b: str, seed: int, variant: str | None, remote: bool = False) -> list[str]:
     cmd = ["uv", "run", "--no-sync", "python", "scripts/play_games.py",
            "--pairs", f"{a}:{b}", "--games", "1", "--seed", str(seed), "--max-turns", "12"]
     if variant is not None:
         cmd += ["--variant", variant]
+    if remote:
+        cmd += ["--remote"]
     cmd += ["--out", "data/demos/games"]
     return cmd
 
 
-def session_command(hhmm: str) -> list[str]:
-    return ["uv", "run", "--no-sync", "python", "scripts/vast_session.py",
-            "start", "--name", f"verify-{hhmm}", "--hours-cap", "4"]
+def session_command(hhmm: str, name: str = "lines") -> list[str]:
+    label = f"verify-{hhmm}" if name == "lines" else f"games-{hhmm}"
+    cmd = ["uv", "run", "--no-sync", "python", "scripts/vast_session.py",
+           "start", "--name", label, "--hours-cap", "4"]
+    if name != "lines":
+        cmd += ["--session", name]
+    return cmd
 
 
 def bc_command(name: str) -> list[str]:
@@ -275,8 +281,8 @@ class DatagenLoop:
         self.rng = random.Random()
         self.start_t = time.time()
         self.bc_next_due = self.start_t + 3600  # first BC run 1 h after start
-        self.failed_starts = 0
-        self.session_retry_after = 0.0
+        self.failed_starts: dict[str, int] = {}
+        self.session_retry_after: dict[str, float] = {}
         self.last_summary = 0.0
         self.over_budget = False
 
@@ -313,13 +319,14 @@ class DatagenLoop:
             self.children.remove(child)
             self.log(f"exit {child.kind} {child.desc} rc={rc}")
             if child.kind == "session":
+                sname = child.name or "lines"
                 if rc == 0:
-                    self.failed_starts = 0
+                    self.failed_starts[sname] = 0
                 else:
-                    self.failed_starts += 1
-                    if self.failed_starts >= 2:
-                        self.session_retry_after = time.time() + SESSION_RETRY_S
-                        self.log("session: 2 consecutive failed starts, retry after 30 min")
+                    self.failed_starts[sname] = self.failed_starts.get(sname, 0) + 1
+                    if self.failed_starts[sname] >= 2:
+                        self.session_retry_after[sname] = time.time() + SESSION_RETRY_S
+                        self.log(f"session {sname}: 2 consecutive failed starts, retry after 30 min")
             elif child.kind == "bc":
                 self._finish_bc(child)
 
@@ -369,38 +376,44 @@ class DatagenLoop:
         with open(ALLOWED_FILE, "a") as f:
             f.write(label + "\n")
 
-    def _ensure_session(self, now: float, credit: float | None) -> None:
-        sess = vast.load_session()
+    def _ensure_session(self, now: float, credit: float | None, name: str = "lines") -> None:
+        sess = vast.load_session(name)
         if sess is not None and sess.get("deadline", float("inf")) < now:
-            self.log("vast session past deadline, stopping it first")
+            self.log(f"vast session {name} past deadline, stopping it first")
             try:
-                subprocess.run(["uv", "run", "--no-sync", "python", "scripts/vast_session.py", "stop"],
-                               capture_output=True, cwd=ROOT, timeout=600, check=False)
+                cmd = ["uv", "run", "--no-sync", "python", "scripts/vast_session.py", "stop"]
+                if name != "lines":
+                    cmd += ["--session", name]
+                subprocess.run(cmd, capture_output=True, cwd=ROOT, timeout=600, check=False)
             except (OSError, subprocess.SubprocessError) as e:
                 self.log(f"session stop failed: {e}")
             sess = None
-        if sess is not None and not self._live("session"):
+        live_names = {c.name or "lines" for c in self._live("session")}
+        if sess is not None and name not in live_names:
             try:
                 alive = any(i["id"] == sess["instance_id"] for i in vast.our_instances())
             except Exception as e:  # noqa: BLE001 - vast CLI hiccup: assume alive this tick
                 self.log(f"session liveness check failed: {e}")
                 alive = True
             if not alive:
-                self.log(f"vast session instance {sess['instance_id']} is gone: dropping {vast.SESSION_FILE.name}")
-                vast.SESSION_FILE.unlink(missing_ok=True)
+                self.log(f"vast session instance {sess['instance_id']} is gone: "
+                         f"dropping {vast.session_file(name).name}")
+                vast.session_file(name).unlink(missing_ok=True)
                 sess = None
         if sess is not None:
             return
         if credit is None or credit < self.args.credit_floor:
             return
-        if self._live("session"):
+        if name in live_names:
             return
-        if now < self.session_retry_after:
+        if now < self.session_retry_after.get(name, 0.0):
             return
         hhmm = time.strftime("%H%M")
-        self._allow(f"ygo-zero-verify-{hhmm}")
-        self._launch("session", session_command(hhmm),
-                     RUNS_CACHE / f"vast-session-{hhmm}.log", desc=f"verify-{hhmm}")
+        label = f"verify-{hhmm}" if name == "lines" else f"games-{hhmm}"
+        self._allow(f"ygo-zero-{label}")
+        logname = f"vast-session-{hhmm}.log" if name == "lines" else f"vast-session-games-{hhmm}.log"
+        self._launch("session", session_command(hhmm, name),
+                     RUNS_CACHE / logname, desc=label, name=name)
 
     def _ensure_planners(self) -> None:
         if vast.load_session() is None:
@@ -429,7 +442,7 @@ class DatagenLoop:
                          RUNS_CACHE / f"improve-{src.replace('/', '_')}-{deck}.log", desc=f"{src} {deck}", deck=job)
             running.add(job)
 
-    def _ensure_games(self) -> None:
+    def _ensure_games(self, remote: bool = False) -> None:
         while len(self._live("game")) < self.args.games:
             decks = eligible_game_decks(ROOT)
             if len(decks) < 2:
@@ -437,7 +450,7 @@ class DatagenLoop:
                 return
             a, b = pick_game_pair(decks, count_games_per_deck(ROOT), self.rng)
             seed = self.rng.randint(0, 10**6)
-            self._launch("game", game_command(a, b, seed, self.args.variant),
+            self._launch("game", game_command(a, b, seed, self.args.variant, remote=remote),
                          RUNS_CACHE / f"game-{a}-vs-{b}-{seed}.log", desc=f"{a}-vs-{b} seed={seed}")
 
     def _ensure_bc(self, now: float, credit: float | None) -> None:
@@ -538,10 +551,14 @@ class DatagenLoop:
             self.last_summary = now
         self._ensure_llm_server()
         credit = self._credit()
-        self._ensure_session(now, credit)
+        self._ensure_session(now, credit, "lines")
+        games_remote = False
+        if self.args.game_session:
+            self._ensure_session(now, credit, "games")
+            games_remote = vast.load_session("games") is not None
         self._ensure_planners()
         self._ensure_improvers()
-        self._ensure_games()
+        self._ensure_games(remote=games_remote)
         self._ensure_bc(now, credit)
         return False
 
@@ -566,6 +583,8 @@ def parse_args(argv: list[str] | None = None):
     ap.add_argument("--variant", default=None,
                     help="muse reasoning effort (minimal|low|high|max; default: provider's)")
     ap.add_argument("--credit-floor", type=float, default=3.0)
+    ap.add_argument("--game-session", action=argparse.BooleanOptionalAction, default=True,
+                    help="keep a second warm box (session 'games') for game verification")
     ap.add_argument("--bc-every-h", type=float, default=3.0)
     ap.add_argument("--once", action="store_true", help="one tick then exit (for tests)")
     return ap.parse_args(argv)
@@ -576,7 +595,8 @@ def main(argv: list[str] | None = None) -> int:
     pin_laptop()
     loop = DatagenLoop(args)
     loop.log(f"datagen start planners={args.planners} games={args.games} variant={args.variant} "
-             f"credit_floor={args.credit_floor} bc_every_h={args.bc_every_h}")
+               f"credit_floor={args.credit_floor} bc_every_h={args.bc_every_h} "
+               f"game_session={args.game_session}")
     while True:
         done = loop.tick()
         if done or args.once:

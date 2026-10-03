@@ -13,7 +13,18 @@ from ygo_zero.demos import llm as _llm
 from ygo_zero.demos.game import TURN_SYSTEM, play_game
 from ygo_zero.demos.names import CardNames
 from ygo_zero.demos.schema import ComboLine
+from ygo_zero.demos.verify import plan_from_state
 from ygo_zero.engine.duel import Engine
+from ygo_zero.infra import remote as _remote
+
+
+def _remote_plan_fn(engine, config, prefix, line, deck, budget):
+    """Verify a turn plan on the games session box; fall back to local search on any error."""
+    try:
+        return _remote.remote_plan_from_state(config, prefix, line, deck, budget, session="games")
+    except Exception as e:  # noqa: BLE001 - remote failure must not kill the game
+        print(f"remote plan failed, falling back to local: {e}", flush=True)
+        return plan_from_state(engine, config, prefix, line, deck, budget=budget)
 
 
 def verified_examples(deck: str, k: int = 2) -> list[ComboLine]:
@@ -37,6 +48,10 @@ ap.add_argument("--model", default="opencode-go/muse-spark-1.3-contributor")
 ap.add_argument("--out", type=Path, default=Path("data/demos/games"))
 ap.add_argument("--max-seconds", type=float, default=5400, help="stop at the next turn boundary after this")
 ap.add_argument("--variant", default=None, help="muse reasoning effort (minimal|low|high|max; default: provider's)")
+ap.add_argument("--remote", action="store_true", default=False,
+                help="verify turn plans on the games session box (falls back to local)")
+ap.add_argument("--interrupts", type=int, default=3,
+                help="LLM interruption asks per turn for the responding player (0 = old random behaviour)")
 args = ap.parse_args()
 engine, names = Engine(), CardNames()
 args.out.mkdir(parents=True, exist_ok=True)
@@ -49,6 +64,7 @@ for pair in args.pairs:
         print(f"== {a} vs {b}, seed {seed}", flush=True)
         rec = play_game(engine, decks, seed, lambda p: _llm.complete(p, model=args.model, system=TURN_SYSTEM, timeout=900, variant=args.variant),
                         names, max_turns=args.max_turns, max_seconds=args.max_seconds, budget=args.budget, examples=ex,
+                        plan_fn=_remote_plan_fn if args.remote else None, interrupts=args.interrupts,
                         log=lambda s: print(s, flush=True))  # fmt: skip
         with (args.out / f"{a}-vs-{b}.jsonl").open("a") as f:
             f.write(json.dumps(rec) + "\n")
