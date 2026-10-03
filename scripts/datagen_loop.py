@@ -240,7 +240,7 @@ def choose_expand_job(root: Path, running: set[str] | frozenset = frozenset()) -
 def expand_command(vf: Path, lines_dir: Path, out_dir: Path, skips: list[str], session: str = "lines") -> list[str]:
     return ["uv", "run", "--no-sync", "python", "scripts/expand_lines.py",
             "--verified", str(vf), "--lines-dir", str(lines_dir), "--out", str(out_dir),
-            "--variants", "8", "--skip-done", *skips, "--remote", "--session", session]
+            "--variants", "3", "--skip-done", *skips, "--remote", "--session", session]  # mix exp: expansions add little
 
 
 def game_command(a: str, b: str, seed: int, variant: str | None, remote: bool = False) -> list[str]:
@@ -598,7 +598,13 @@ class DatagenLoop:
             if len(decks) < 2:
                 self.log("games: fewer than 2 eligible decks")
                 return
-            a, b = pick_game_pair(decks, count_games_per_deck(ROOT), self.rng)
+            hold = sorted(holdout_decks(ROOT) & set(pool_decks(ROOT)))
+            if len(hold) >= 2 and self.rng.random() < self.args.holdout_game_frac:
+                # evaluation-only games: holdout vs holdout, so every sample lands in the holdout split and no
+                # training sample ever sees a holdout deck's cards (not even as the opponent's)
+                a, b = pick_game_pair(hold, count_games_per_deck(ROOT), self.rng)
+            else:
+                a, b = pick_game_pair(decks, count_games_per_deck(ROOT), self.rng)
             seed = self.rng.randint(0, 10**6)
             self._launch("game", game_command(a, b, seed, self.args.variant, remote=remote),
                          RUNS_CACHE / f"game-{a}-vs-{b}-{seed}.log", desc=f"{a}-vs-{b} seed={seed}")
@@ -733,6 +739,8 @@ def parse_args(argv: list[str] | None = None):
     ap.add_argument("--planners", type=int, default=3)
     ap.add_argument("--improvers", type=int, default=2)
     ap.add_argument("--expanders", type=int, default=1)
+    ap.add_argument("--holdout-game-frac", type=float, default=0.15,
+                    help="share of games played holdout-vs-holdout (evaluation of interaction on unseen decks)")
     ap.add_argument("--judge", action=argparse.BooleanOptionalAction, default=True, help="rate new games for realism")
     ap.add_argument("--line-sessions", type=int, default=1, help="number of warm 'lines' boxes (lines, lines2, ...)")
     ap.add_argument("--games", type=int, default=3)
