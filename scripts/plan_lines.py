@@ -115,7 +115,9 @@ def main() -> None:
     ap.add_argument("--repairs", type=int, default=2)
     ap.add_argument("--model", default="opencode-go/muse-spark-1.3-contributor")
     ap.add_argument("--workers", type=int, default=6)
-    ap.add_argument("--variant", default=None, help="muse reasoning effort (minimal|low|high|max; default: provider's)")
+    ap.add_argument(
+        "--variant", default=None, help="muse reasoning effort (minimal|low|high|max; default: provider's)"
+    )
     ap.add_argument("--jobs", type=int, default=4)
     ap.add_argument("--budget", type=int, default=6000)
     ap.add_argument("--budget-long", type=int, default=15000)
@@ -193,6 +195,7 @@ def main() -> None:
         repairs=args.repairs,
         budget=args.budget,
         budget_long=args.budget_long,
+        id_tag=f"-s{args.seed}" if args.seed else "",
     )
 
     out_dir = ROOT / args.out_dir

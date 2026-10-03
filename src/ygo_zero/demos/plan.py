@@ -227,6 +227,7 @@ def plan_hands(
     repairs: int = 2,
     budget: int = 2000,
     budget_long: int = 10000,
+    id_tag: str = "",
 ) -> list[dict]:
     """Plan one combo line per hand with up to `repairs` repair rounds.
 
@@ -305,7 +306,7 @@ def plan_hands(
                 continue
             line.hand = list(hand_names_list[k])
             line.going = "first"
-            line.id = f"{deck_name}/plan-h{k}-a{attempt}"
+            line.id = f"{deck_name}/plan{id_tag}-h{k}-a{attempt}"  # id_tag: e.g. "-s3" (seed), unique across runs
             line.deck = deck_name
             line.source_file = "planner"
             # card-less narration steps ("pass", "end turn") are not actions: drop them before grounding
