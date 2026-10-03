@@ -40,12 +40,16 @@ class CardText(nn.Module):
         self.register_buffer("table", torch.from_numpy(table), persistent=False)
         self.unknown = nn.Parameter(torch.zeros(table.shape[1]))
         self.proj = nn.Sequential(nn.Linear(table.shape[1], d), nn.GELU(), nn.Linear(d, d))
+        self.p_unknown = 0.0
 
     def forward(self, code: torch.Tensor) -> torch.Tensor:
         c = code.long().clamp(min=0)
         idx = torch.searchsorted(self.codes, c).clamp(max=len(self.codes) - 1)
         hit = (self.codes[idx] == c) & (c > 0)
         vec = torch.where(hit.unsqueeze(-1), self.table[idx], self.unknown.expand(*c.shape, -1))
+        if self.training and self.p_unknown > 0.0:
+            drop = torch.rand(c.shape, device=c.device) < self.p_unknown
+            vec = torch.where(drop.unsqueeze(-1), self.unknown.expand(*c.shape, -1), vec)
         return self.proj(vec)
 
 
@@ -83,10 +87,12 @@ class ActionEmbed(nn.Module):
 
 class PolicyNet(nn.Module):
     def __init__(
-        self, emb: dict[str, np.ndarray], d: int = 256, layers: int = 4, heads: int = 4, dropout: float = 0.1
+        self, emb: dict[str, np.ndarray], d: int = 256, layers: int = 4, heads: int = 4, dropout: float = 0.1,
+        card_dropout: float = 0.0,
     ):
         super().__init__()
         self.text = CardText(emb["codes"], emb["card"], emb["effects"], emb["n_effects"], d)
+        self.text.p_unknown = card_dropout
         self.loc = nn.Embedding(16, d)
         self.seq = nn.Embedding(33, d)
         self.ctrl = nn.Embedding(2, d)

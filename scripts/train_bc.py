@@ -83,6 +83,13 @@ def main() -> None:
     ap.add_argument("--lr", type=float, default=3e-4)
     ap.add_argument("--d", type=int, default=256)
     ap.add_argument("--layers", type=int, default=4)
+    ap.add_argument("--heads", type=int, default=4)
+    ap.add_argument("--dropout", type=float, default=0.1)
+    ap.add_argument("--wd", type=float, default=0.01)
+    ap.add_argument("--label-smoothing", type=float, default=0.0)
+    ap.add_argument("--select-on", choices=["val", "holdout"], default="val")
+    ap.add_argument("--patience", type=int, default=0)
+    ap.add_argument("--card-dropout", type=float, default=0.0)
     ap.add_argument("--holdout", nargs="*", default=["kewl-tune"], help="decks never trained on")
     ap.add_argument("--limit", type=int, default=None, help="use only the first N samples (smoke)")
     ap.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
@@ -105,23 +112,31 @@ def main() -> None:
     print({k: len(v) for k, v in idx.items()}, "decks:", sorted(set(map(str, data["deck"]))), flush=True)
 
     emb = dict(np.load(args.emb))
-    model = PolicyNet(emb, d=args.d, layers=args.layers).to(device)
+    model = PolicyNet(
+        emb, d=args.d, layers=args.layers, heads=args.heads, dropout=args.dropout,
+        card_dropout=args.card_dropout,
+    ).to(device)
     n_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     print(f"params {n_params / 1e6:.2f}M device {device} amp {amp}", flush=True)
-    opt = torch.optim.AdamW([p for p in model.parameters() if p.requires_grad], lr=args.lr, weight_decay=0.01)
+    opt = torch.optim.AdamW([p for p in model.parameters() if p.requires_grad], lr=args.lr, weight_decay=args.wd)
     steps = args.epochs * math.ceil(len(idx["train"]) / args.batch)
     sched = torch.optim.lr_scheduler.OneCycleLR(
         opt, max_lr=args.lr, total_steps=max(steps, 1), pct_start=0.05
     )
     best = -1.0
+    bad = 0
     log = (args.out / "metrics.jsonl").open("a")
     t0 = time.time()
+    args_rec = {k: str(v) if isinstance(v, Path) else v for k, v in vars(args).items()}
     for ep in range(args.epochs):
         run = {"loss": 0.0, "n": 0}
         for obs, act, w, j in batches(data, idx["train"], args.batch, device, True, rng):
             with torch.autocast(device.type, dtype=torch.bfloat16, enabled=amp):
                 logits = model(obs)
-            loss = (F.cross_entropy(logits.float(), act, reduction="none") * w).sum() / w.sum()
+            loss = (
+                F.cross_entropy(logits.float(), act, reduction="none", label_smoothing=args.label_smoothing)
+                * w
+            ).sum() / w.sum()
             opt.zero_grad(set_to_none=True)
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
@@ -130,6 +145,8 @@ def main() -> None:
             run["loss"] += loss.item() * len(j)
             run["n"] += len(j)
         rec = {"epoch": ep, "time": round(time.time() - t0, 1), "train_loss": run["loss"] / max(run["n"], 1)}
+        if ep == 0:
+            rec["args"] = args_rec
         for split in ("val", "holdout"):
             if len(idx[split]):
                 rec[split] = evaluate(model, data, idx[split], args.batch * 2, device, amp)
@@ -140,14 +157,20 @@ def main() -> None:
             {"model": model.state_dict(), "opt": opt.state_dict(), "epoch": ep, "args": vars(args)},
             args.out / "last.pt",
         )
-        score = rec.get("val", {}).get("acc", -rec["train_loss"])
+        score = rec.get(args.select_on, {}).get("acc", -rec["train_loss"])
         if score > best:
             best = score
+            bad = 0
             torch.save(
                 {k: v.half() if v.is_floating_point() else v for k, v in model.state_dict().items()},
                 args.out / "best.pt",
             )
-    print(f"done in {time.time() - t0:.0f}s, best val acc {best:.4f}", flush=True)
+        else:
+            bad += 1
+            if args.patience > 0 and bad >= args.patience:
+                print(f"early stop at epoch {ep} (no {args.select_on} improvement for {bad} epochs)", flush=True)
+                break
+    print(f"done in {time.time() - t0:.0f}s, best {args.select_on} acc {best:.4f}", flush=True)
 
 
 if __name__ == "__main__":
