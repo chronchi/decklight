@@ -818,6 +818,8 @@ def _search(
     if found:
         v: Verdict = done["v"]
         g = quality_guard(n, v.skipped_steps, v.labels)
+        if g == "trivial" and prefix is not None:
+            g = None  # in a game, a one-card turn (set a trap, pass) is a legitimate plan
         if g is not None:
             exe = n - len(v.skipped_steps or [])
             return Verdict(

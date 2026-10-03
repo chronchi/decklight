@@ -245,6 +245,15 @@ def play_game(
             line.deck = dnames[p]
             line.going = "first" if bool(int(obs["global"][4])) else "second"
             line.source_file = "game"
+            # "pass" steps name no card and do nothing; an all-pass plan ends the turn via the fallback
+            line.steps = [st for st in line.steps if st.card or st.action not in ("other", "pass")]
+            if not line.steps:
+                entry["attempts"].append({"line": dicts[0], "reason": "pass", "nodes": 0})
+                plans.append(entry)
+                log(f"  turn {turn} p{p} ({dnames[p]}): plan = pass")
+                return []
+            for k, st in enumerate(line.steps):
+                st.i = k
             _fill_codes(line, names)
             v = plan_from_state(engine, config, choices, line, pdecks[p], budget=budget)
             entry["attempts"].append(
@@ -322,7 +331,8 @@ def play_game(
         "plans": plans,
         "winner": winner,
         "end_turn": turns[-1] if turns else 0,
-        "lp": [int(g[0]), int(g[1])] if g is not None else None,
+        # obs global[0:2] = (LP of the player to act, LP of the other): stored by absolute player
+        "lp": None if g is None else ([int(g[0]), int(g[1])] if env.player == 0 else [int(g[1]), int(g[0])]),
         "llm_calls": llm_calls,
         "seconds": round(time.time() - t0, 1),
     }  # fmt: skip
