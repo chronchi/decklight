@@ -18,6 +18,7 @@ from __future__ import annotations
 import argparse
 import ast
 import datetime
+import glob
 import json
 import os
 import random
@@ -44,7 +45,7 @@ SESSION_RETRY_S = 30 * 60
 REPO_BUDGET_BYTES = 45 * 1024**3
 KILL_GRACE_S = 30
 
-CHILD_LIMITS = {"planner": 3 * 3600, "improver": 3 * 3600, "game": 2 * 3600, "session": 30 * 60, "bc": 3 * 3600}
+CHILD_LIMITS = {"planner": 3 * 3600, "improver": 3 * 3600, "expander": 2 * 3600, "game": 2 * 3600, "session": 30 * 60, "bc": 3 * 3600}
 
 
 # ---------------------------------------------------------------- pure helpers
@@ -152,6 +153,94 @@ def improve_command(src: str, deck: str) -> list[str]:
     # the quality pass keeps muse's default reasoning effort (NOTEBOOK 2026-10-03: 7/9 kept vs 2/6 at minimal)
     return ["uv", "run", "--no-sync", "python", "scripts/improve_lines.py", "--deck", deck, "--src", src,
             "--remote", "--workers", "6"]
+
+
+def expander_verified_files(root: Path = ROOT) -> list[Path]:
+    """Candidate verified files for hand-variant expansion (claude + planned, incl. improved)."""
+    demos = root / "data" / "demos"
+    files: list[Path] = []
+    for pat in ("claude/verified/*.jsonl", "planned*/verified/*.jsonl",
+                "planned*/improved/verified/*.jsonl"):
+        files.extend(sorted(demos.glob(pat)))
+    return sorted(set(files))
+
+
+def expander_target(vf: Path) -> tuple[Path, Path, list[str]]:
+    """(lines_dir, out_dir, skip_done_globs) for a verified file `vf` (same absoluteness as `vf`).
+
+    `<src>` is the dir holding `verified/` (`<src>/improved` for improved files); expansions live in
+    `<src>/expanded-<deck>/`, so planned and improved lines never share a done-set (an improved `X+imp`
+    expands to `X#hV`, the same base id a planned expansion of `X` would use).
+    """
+    src = vf.parent.parent
+    deck = vf.stem
+    return src / "lines", src / f"expanded-{deck}", [str(src / "expanded*" / "*.jsonl")]
+
+
+def _expanded_done_ids(patterns: list[str]) -> set[str]:
+    """Base line ids (`<id>` of `<id>#hV`) already expanded in files matching the globs."""
+    done: set[str] = set()
+    for pat in patterns:
+        for f in glob.glob(pat, recursive=True):
+            p = Path(f)
+            if not p.is_file():
+                continue
+            try:
+                text = p.read_text()
+            except OSError:
+                continue
+            for raw in text.splitlines():
+                if not raw.strip():
+                    continue
+                try:
+                    lid = json.loads(raw)["line_id"]
+                except (json.JSONDecodeError, KeyError):
+                    continue
+                done.add(str(lid).split("#")[0])
+    return done
+
+
+def expander_backlog(vf: Path) -> int:
+    """Verified records in `vf` with no expansion yet (mirrors expand_lines' --skip-done check)."""
+    _, _, skips = expander_target(vf)
+    done = _expanded_done_ids(skips)
+    try:
+        lines = vf.read_text().splitlines()
+    except OSError:
+        return 0
+    n = 0
+    for raw in lines:
+        if not raw.strip():
+            continue
+        try:
+            lid = str(json.loads(raw)["line_id"])
+        except (json.JSONDecodeError, KeyError):
+            continue
+        if lid.split("#")[0] not in done and lid.split("+")[0] not in done:
+            n += 1
+    return n
+
+
+def choose_expand_job(root: Path, running: set[str] | frozenset = frozenset()) -> Path | None:
+    """Verified file with the most unexpanded records, skipping running expanders and empty backlogs."""
+    best, best_n = None, 0
+    for vf in expander_verified_files(root):
+        try:
+            key = str(vf.relative_to(root))
+        except ValueError:
+            key = str(vf)
+        if key in running or str(vf) in running:
+            continue
+        n = expander_backlog(vf)
+        if n > best_n:
+            best, best_n = vf, n
+    return best
+
+
+def expand_command(vf: Path, lines_dir: Path, out_dir: Path, skips: list[str]) -> list[str]:
+    return ["uv", "run", "--no-sync", "python", "scripts/expand_lines.py",
+            "--verified", str(vf), "--lines-dir", str(lines_dir), "--out", str(out_dir),
+            "--variants", "8", "--skip-done", *skips, "--remote"]
 
 
 def game_command(a: str, b: str, seed: int, variant: str | None, remote: bool = False) -> list[str]:
@@ -262,7 +351,7 @@ def metrics_best(metrics_path: Path) -> dict:
 
 @dataclass
 class Child:
-    kind: str  # planner | game | session | bc
+    kind: str  # planner | improver | expander | game | session | bc
     proc: subprocess.Popen
     log_file: object = None
     log_path: Path = field(default_factory=Path)
@@ -445,6 +534,23 @@ class DatagenLoop:
                          RUNS_CACHE / f"improve-{src.replace('/', '_')}-{deck}.log", desc=f"{src} {deck}", deck=job)
             running.add(job)
 
+    def _ensure_expanders(self) -> None:
+        if vast.load_session() is None:
+            return  # expansion verifies --remote on the session box
+        running = {c.deck for c in self._live("expander")}
+        while len(self._live("expander")) < self.args.expanders:
+            vf = choose_expand_job(ROOT, running)
+            if vf is None:
+                return
+            vf_rel = vf.relative_to(ROOT)
+            src_rel = vf_rel.parent.parent
+            lines_dir, out_dir, skips = expander_target(vf_rel)
+            key = str(vf_rel)
+            self._launch("expander", expand_command(vf_rel, lines_dir, out_dir, skips),
+                         RUNS_CACHE / f"expand-{path_to_flat(src_rel)}-{vf_rel.stem}.log",
+                         desc=f"{src_rel} {vf_rel.stem}", deck=key)
+            running.add(key)
+
     def _ensure_games(self, remote: bool = False) -> None:
         while len(self._live("game")) < self.args.games:
             decks = eligible_game_decks(ROOT)
@@ -561,6 +667,7 @@ class DatagenLoop:
             games_remote = vast.load_session("games") is not None
         self._ensure_planners()
         self._ensure_improvers()
+        self._ensure_expanders()
         self._ensure_games(remote=games_remote)
         self._ensure_bc(now, credit)
         return False
@@ -582,6 +689,7 @@ def parse_args(argv: list[str] | None = None):
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--planners", type=int, default=3)
     ap.add_argument("--improvers", type=int, default=2)
+    ap.add_argument("--expanders", type=int, default=1)
     ap.add_argument("--games", type=int, default=3)
     ap.add_argument("--variant", default=None,
                     help="muse reasoning effort (minimal|low|high|max; default: provider's)")
@@ -597,7 +705,8 @@ def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     pin_laptop()
     loop = DatagenLoop(args)
-    loop.log(f"datagen start planners={args.planners} games={args.games} variant={args.variant} "
+    loop.log(f"datagen start planners={args.planners} improvers={args.improvers} "
+               f"expanders={args.expanders} games={args.games} variant={args.variant} "
                f"credit_floor={args.credit_floor} bc_every_h={args.bc_every_h} "
                f"game_session={args.game_session}")
     while True:

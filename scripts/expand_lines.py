@@ -25,6 +25,7 @@ from ygo_zero.demos.pool import failed_verdict, map_timeout
 from ygo_zero.demos.schema import ComboLine
 from ygo_zero.demos.verify import Verdict, verify_line
 from ygo_zero.engine.duel import Engine
+from ygo_zero.infra.remote import remote_verify
 
 
 def default_jobs() -> int:
@@ -113,6 +114,12 @@ def main() -> None:
         default=default_jobs(),
         help="worker processes over hand variants (default: %(default)s)",
     )
+    ap.add_argument(
+        "--remote",
+        action="store_true",
+        help="verify variants on the warm session box via remote_verify (one call for the whole batch)",
+    )
+    ap.add_argument("--session", default="lines", help="vast session name for --remote")
     args = ap.parse_args()
 
     lines = {}
@@ -122,18 +129,21 @@ def main() -> None:
                 d = json.loads(raw)
                 lines[d["id"]] = d
     args.out.mkdir(parents=True, exist_ok=True)
-    for old in args.out.glob("*.jsonl"):  # each run rewrites the expansion from scratch
-        old.unlink()
+    # --skip-done: incremental (append; the skip set is read BEFORE writing). Without it: rewrite from scratch.
+    done = collect_done_ids(args.skip_done) if args.skip_done else set()
+    if not args.skip_done:
+        for old in args.out.glob("*.jsonl"):
+            old.unlink()
     rng = random.Random(args.seed)
     kept = Counter()
     t0 = time.time()
-    done = collect_done_ids(args.skip_done) if args.skip_done else set()
     skipped = 0
     # Pass 1: deal every record's hand variants (rng order unchanged), so pass 2 can verify all of them in one pool
     # call; one record's variants at a time left most cores idle on big boxes (8 busy of 23).
     plans = []  # (rec, me, variants, full_main, my_extra)
     for rec in load_records(args.verified):
-        base_id = rec["line_id"].split("+")[0]
+        # improved lines keep "+imp" in their own id; other records carry a "+tag" suffix not in the line id
+        base_id = rec["line_id"] if rec["line_id"] in lines else rec["line_id"].split("+")[0]
         if base_id_of(rec["line_id"]) in done or base_id in done:
             skipped += 1
             continue
@@ -165,7 +175,19 @@ def main() -> None:
     print(f"{len(plans)} records, {len(items)} hand variants to verify", flush=True)
     if args.skip_done:
         print(f"skipped {skipped} records with existing expansions", flush=True)
-    flat = map_ordered(_expand_job, items, args.jobs, initializer=_worker_init)
+    if args.remote:
+        # Same verify-item 7-tuples plan_lines sends (side/name default to ()/""): verify_items._verify_job
+        # rebuilds Deck(main, extra, side, name) and runs the same verify_line, so no new item kind is needed.
+        remote_items = [
+            (var.to_json(), tuple(full_main), tuple(my_extra), (), rec.get("deck", ""),
+             rec["config"]["seed"], args.budget)
+            for rec, _, variants, full_main, my_extra in plans
+            for var, _ in variants
+        ]
+        print(f"verifying {len(remote_items)} variants on session '{args.session}'", flush=True)
+        flat = remote_verify(remote_items, VARIANT_TIMEOUT, session=args.session)
+    else:
+        flat = map_ordered(_expand_job, items, args.jobs, initializer=_worker_init)
     # Pass 2: write the verified variants, per record, in input order.
     pos = 0
     for rec, me, variants, _, _ in plans:
