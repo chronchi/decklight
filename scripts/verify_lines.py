@@ -53,6 +53,7 @@ def _verify_job(job: tuple) -> Verdict:
 
 
 LINE_TIMEOUT = 900.0  # seconds per (line, seed); see demos/pool.py
+REMOTE = False  # --remote: verify on the warm vast session box (scripts/vast_session.py)
 
 
 def map_ordered(fn, items: list, jobs: int, initializer=None):
@@ -60,6 +61,10 @@ def map_ordered(fn, items: list, jobs: int, initializer=None):
     with a wall-clock limit (a killed job becomes a failed Verdict)."""
     if not items:
         return []
+    if REMOTE:
+        from ygo_zero.infra.remote import remote_verify
+
+        return remote_verify(items, LINE_TIMEOUT)  # the box sizes its pool from its cgroup quota
     if initializer is not None:
         initializer()  # children inherit the parent's Engine
     return map_timeout(
@@ -153,7 +158,7 @@ def deck_from_guide_json(engine: Engine, data: dict, name: str) -> Deck:
 
 
 def main() -> None:
-    global LINE_TIMEOUT
+    global LINE_TIMEOUT, REMOTE
     ap = argparse.ArgumentParser()
     ap.add_argument("--lines", required=True)
     ap.add_argument(
@@ -189,8 +194,10 @@ def main() -> None:
         default=LINE_TIMEOUT,
         help="seconds per (line, seed) before it is killed",
     )
+    ap.add_argument("--remote", action="store_true", help="verify on the warm vast session box")
     args = ap.parse_args()
     LINE_TIMEOUT = args.line_timeout
+    REMOTE = args.remote
 
     engine = Engine()
     lines = [

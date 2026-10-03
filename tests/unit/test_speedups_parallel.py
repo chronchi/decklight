@@ -66,7 +66,7 @@ def test_complete_many_cache_and_order(monkeypatch, tmp_path):
     monkeypatch.setattr(llm, "_read_key", _no_key)
     calls: list[str] = []
 
-    def fake_cli(model, system, prompt, timeout):
+    def fake_cli(model, system, prompt, timeout, variant=None):
         calls.append(prompt)
         return f"resp:{prompt}"
 
@@ -90,7 +90,7 @@ def test_complete_many_return_exceptions(monkeypatch, tmp_path):
     monkeypatch.setattr(llm, "MIN_INTERVAL_S", 0.0)
     monkeypatch.setattr(llm, "_read_key", _no_key)
 
-    def fake_cli(model, system, prompt, timeout):
+    def fake_cli(model, system, prompt, timeout, variant=None):
         if prompt == "boom":
             raise RuntimeError("cli exit 1")
         return f"resp:{prompt}"
@@ -120,7 +120,7 @@ def test_http_skipped_after_first_failure(monkeypatch, tmp_path):
         posts.append(prompt)
         raise RuntimeError("http 400: bad request")
 
-    def fake_cli(model, system, prompt, timeout):
+    def fake_cli(model, system, prompt, timeout, variant=None):
         clis.append(prompt)
         return "cli-ok"
 

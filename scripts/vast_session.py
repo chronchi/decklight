@@ -65,8 +65,9 @@ def main() -> None:
     st.add_argument("--min-cpus", type=int, default=24)
     st.add_argument("--max-dph", type=float, default=0.15)
     st.add_argument("--hours-cap", type=float, default=6)
-    st.add_argument("--cpu", action="store_true", default=True, help="CPU-only box (default)")
-    st.add_argument("--gpu", action="store_false", dest="cpu", help="rent a GPU box instead")
+    # CPU-only listings are stale (create -> no_such_ask, NOTEBOOK 2026-10-02): rent a cheap many-core GPU host
+    st.add_argument("--cpu", action="store_true", default=False, help="CPU-only listing (usually stale)")
+    st.add_argument("--gpu", action="store_false", dest="cpu", help="cheap GPU host for its cores (default)")
     st.add_argument("--data", nargs="*", default=[], help="repo paths under data/ to ship with the code")
     st.set_defaults(fn=cmd_start)
     sst = sub.add_parser("status", help="show the session box, uptime and est. cost")

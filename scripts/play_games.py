@@ -35,6 +35,7 @@ ap.add_argument("--max-turns", type=int, default=6)
 ap.add_argument("--budget", type=int, default=4000)
 ap.add_argument("--model", default="opencode-go/muse-spark-1.3-contributor")
 ap.add_argument("--out", type=Path, default=Path("data/demos/games"))
+ap.add_argument("--variant", default=None, help="muse reasoning effort (minimal|low|high|max; default: provider's)")
 args = ap.parse_args()
 engine, names = Engine(), CardNames()
 args.out.mkdir(parents=True, exist_ok=True)
@@ -45,7 +46,7 @@ for pair in args.pairs:
     for g in range(args.games):
         seed = args.seed + g
         print(f"== {a} vs {b}, seed {seed}", flush=True)
-        rec = play_game(engine, decks, seed, lambda p: _llm.complete(p, model=args.model, system=TURN_SYSTEM, timeout=900),
+        rec = play_game(engine, decks, seed, lambda p: _llm.complete(p, model=args.model, system=TURN_SYSTEM, timeout=900, variant=args.variant),
                         names, max_turns=args.max_turns, budget=args.budget, examples=ex,
                         log=lambda s: print(s, flush=True))  # fmt: skip
         with (args.out / f"{a}-vs-{b}.jsonl").open("a") as f:

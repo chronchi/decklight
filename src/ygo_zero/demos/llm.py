@@ -5,8 +5,15 @@ read from `~/.local/share/opencode/auth.json` (structure inspected, key never
 printed or logged). Fallback: `opencode run --pure -m <model>` subprocess.
 Both paths share the same disk cache, so a cache hit never touches the net.
 
+Fastest path (opt-in): a long-running `opencode serve` (scripts/llm_server.sh) set in `YGO_OPENCODE_SERVER`, e.g.
+http://127.0.0.1:4097. One HTTP call per completion, no client process: about 1.5 s overhead instead of 7.5 s,
+~0 client CPU instead of ~11 CPU-s and 600 MB per call (NOTEBOOK 2026-10-02 23:40).
+
+`variant` = the provider's reasoning effort (muse: minimal|low|high|max; None = default). It is part of the cache
+key only when set.
+
 `last_backend` reports which path produced the last result:
-"cache" | "http" | "cli".
+"cache" | "server" | "http" | "cli".
 """
 
 from __future__ import annotations
@@ -40,14 +47,37 @@ REQ_HEADERS = {
 last_backend: str | None = None
 _last_call_ts = 0.0
 _throttle_lock = threading.Lock()
+SERVER_URL = os.environ.get("YGO_OPENCODE_SERVER") or None
+DEFAULT_VARIANT = os.environ.get("YGO_LLM_VARIANT") or None
+# tools the opencode agent must not use for a plain completion
+_NO_TOOLS = {
+    t: False
+    for t in [
+        "bash",
+        "edit",
+        "write",
+        "read",
+        "grep",
+        "glob",
+        "list",
+        "patch",
+        "webfetch",
+        "websearch",
+        "task",
+        "todowrite",
+        "todoread",
+        "skill",
+        "question",
+    ]
+}
 # Once the HTTP endpoint has failed in this process it always fails here
 # (workflow.md "Skip the dead HTTP attempt"), so stop trying it.
 http_dead = False
 
 
-def _cache_key(model: str, system: str | None, prompt: str) -> str:
+def _cache_key(model: str, system: str | None, prompt: str, variant: str | None = None) -> str:
     h = hashlib.sha256()
-    h.update(model.encode())
+    h.update(model.encode() + (f"#{variant}".encode() if variant else b""))
     h.update(b"\x00")
     h.update((system or "").encode())
     h.update(b"\x00")
@@ -106,10 +136,47 @@ def _post_http(model: str, system: str | None, prompt: str, key: str, timeout: i
     return body["choices"][0]["message"]["content"]
 
 
-def _run_cli(model: str, system: str | None, prompt: str, timeout: int) -> str:
+def _server_req(method: str, path: str, body: dict | None, timeout: float) -> dict | None:
+    req = urllib.request.Request(
+        SERVER_URL.rstrip("/") + path,
+        method=method,
+        data=json.dumps(body).encode() if body is not None else None,
+        headers={"Content-Type": "application/json"},
+    )
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        raw = resp.read()
+    return json.loads(raw) if raw else None
+
+
+def _post_server(model: str, system: str | None, prompt: str, variant: str | None, timeout: int) -> str:
+    """One completion through the opencode server: a throwaway session, tools off, then deleted."""
+    provider, model_id = model.split("/", 1)
+    sid = _server_req("POST", "/session", {"title": "ygo-zero"}, 30)["id"]
+    try:
+        body = {"model": {"providerID": provider, "modelID": model_id}, "tools": _NO_TOOLS,
+                "parts": [{"type": "text", "text": prompt}]}  # fmt: skip
+        if system:
+            body["system"] = system
+        if variant:
+            body["variant"] = variant
+        r = _server_req("POST", f"/session/{sid}/message", body, timeout)
+    finally:
+        try:
+            _server_req("DELETE", f"/session/{sid}", None, 30)
+        except Exception:  # noqa: BLE001, S110 - cleanup only
+            pass
+    if r is None or r.get("info", {}).get("error"):
+        raise RuntimeError(f"server error: {str((r or {}).get('info', {}).get('error'))[:300]}")
+    text = "".join(p.get("text", "") for p in r.get("parts", []) if p.get("type") == "text")
+    if not text.strip():
+        raise RuntimeError("server: empty reply")
+    return text
+
+
+def _run_cli(model: str, system: str | None, prompt: str, timeout: int, variant: str | None = None) -> str:
     full = f"{system}\n\n{prompt}" if system else prompt
     proc = subprocess.run(
-        ["opencode", "run", "--pure", "-m", model, full],
+        ["opencode", "run", "--pure", "-m", model, *(["--variant", variant] if variant else []), full],
         capture_output=True,
         text=True,
         timeout=timeout,
@@ -126,16 +193,29 @@ def complete(
     model: str = "opencode-go/muse-spark-1.3-contributor",
     system: str | None = None,
     timeout: int = 300,
+    variant: str | None = None,
 ) -> str:
     """Complete a prompt, using the disk cache when possible."""
     global last_backend, http_dead
+    variant = variant or DEFAULT_VARIANT
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
-    path = CACHE_DIR / f"{_cache_key(model, system, prompt)}.json"
+    path = CACHE_DIR / f"{_cache_key(model, system, prompt, variant)}.json"
     if path.exists():
         last_backend = "cache"
         return json.loads(path.read_text())["response"]
 
     errors: list[str] = []
+    if SERVER_URL:
+        for attempt in range(2):
+            _throttle()
+            try:
+                text = _post_server(model, system, prompt, variant, timeout)
+                _write_cache(path, {"model": model, "variant": variant, "response": text})
+                last_backend = "server"
+                return text
+            except Exception as e:  # noqa: BLE001 - retry once, then fall back to the CLI
+                errors.append(f"server try{attempt}: {e}"[:300])
+                time.sleep(2 ** (attempt + 1))
     # Primary: HTTP endpoint, 3 attempts with backoff on 429/5xx.
     # Skipped entirely once it has failed in this process.
     try:
@@ -163,8 +243,8 @@ def complete(
     # Fallback: CLI subprocess (same cache entry).
     _throttle()
     try:
-        text = _run_cli(model, system, prompt, timeout)
-        _write_cache(path, {"model": model, "response": text})
+        text = _run_cli(model, system, prompt, timeout, variant)
+        _write_cache(path, {"model": model, "variant": variant, "response": text})
         last_backend = "cli"
         return text
     except Exception as e:  # noqa: BLE001 - report both paths in the error
@@ -179,6 +259,7 @@ def complete_many(
     timeout: int = 300,
     max_workers: int = 6,
     return_exceptions: bool = False,
+    variant: str | None = None,
 ) -> list[str | Exception]:
     """Complete many prompts concurrently, preserving input order.
 
@@ -194,7 +275,7 @@ def complete_many(
         out: list[str | Exception] = []
         for p in prompts:
             try:
-                out.append(complete(p, model=model, system=system, timeout=timeout))
+                out.append(complete(p, model=model, system=system, timeout=timeout, variant=variant))
             except Exception as e:
                 if not return_exceptions:
                     raise
@@ -202,7 +283,10 @@ def complete_many(
         return out
     with ThreadPoolExecutor(max_workers=max_workers) as ex:
         if return_exceptions:
-            futs = [ex.submit(complete, p, model=model, system=system, timeout=timeout) for p in prompts]
+            futs = [
+                ex.submit(complete, p, model=model, system=system, timeout=timeout, variant=variant)
+                for p in prompts
+            ]
             res: list[str | Exception] = []
             for f in futs:
                 try:
@@ -210,4 +294,8 @@ def complete_many(
                 except Exception as e:  # noqa: BLE001 - captured in place when asked
                     res.append(e)
             return res
-        return list(ex.map(lambda p: complete(p, model=model, system=system, timeout=timeout), prompts))
+        return list(
+            ex.map(
+                lambda p: complete(p, model=model, system=system, timeout=timeout, variant=variant), prompts
+            )
+        )

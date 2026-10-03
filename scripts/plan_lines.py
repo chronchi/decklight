@@ -112,6 +112,7 @@ def main() -> None:
     ap.add_argument("--repairs", type=int, default=2)
     ap.add_argument("--model", default="opencode-go/muse-spark-1.3-contributor")
     ap.add_argument("--workers", type=int, default=6)
+    ap.add_argument("--variant", default=None, help="muse reasoning effort (minimal|low|high|max; default: provider's)")
     ap.add_argument("--jobs", type=int, default=4)
     ap.add_argument("--budget", type=int, default=6000)
     ap.add_argument("--budget-long", type=int, default=15000)
@@ -145,7 +146,7 @@ def main() -> None:
 
     def complete_many_fn(prompts: list[str]) -> list:
         for p in prompts:
-            key = _llm._cache_key(args.model, SYSTEM, p)
+            key = _llm._cache_key(args.model, SYSTEM, p, args.variant or _llm.DEFAULT_VARIANT)
             if (_llm.CACHE_DIR / f"{key}.json").exists():
                 llm_counts["cached"] += 1
             else:
@@ -157,6 +158,7 @@ def main() -> None:
             max_workers=args.workers,
             return_exceptions=True,
             timeout=args.llm_timeout,
+            variant=args.variant,
         )
 
     main_t, extra_t, side_t = tuple(deck.main), tuple(deck.extra), tuple(deck.side)
