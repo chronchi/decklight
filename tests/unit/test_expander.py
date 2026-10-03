@@ -112,7 +112,7 @@ def test_expand_command_shape(tmp_path: Path):
     cmd = dl.expand_command(vf, lines, out, skips)
     assert cmd[:5] == ["uv", "run", "--no-sync", "python", "scripts/expand_lines.py"]
     assert "--remote" in cmd
-    assert cmd[cmd.index("--variants") + 1] == "8"
+    assert cmd[cmd.index("--variants") + 1] == "3"
     assert cmd[cmd.index("--verified") + 1] == str(vf)
     assert cmd[cmd.index("--lines-dir") + 1] == str(lines)
     assert cmd[cmd.index("--out") + 1] == str(out)
