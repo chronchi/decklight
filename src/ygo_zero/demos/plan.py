@@ -167,6 +167,44 @@ Rules:
 JSON only, no prose."""
 
 
+def improve_prompt(
+    deck_name: str, sheet: str, hand_names: list[str], old_line_json: str, old_end: list[str]
+) -> str:
+    """Ask for a strictly stronger turn-1 ComboLine for the same hand.
+
+    The current line is legal and engine-verified; the model must beat it
+    (bigger / more resilient end board) or answer `{"lines": []}`.
+    """
+    hand = "\n".join(f"- {n}" for n in hand_names)
+    end = ", ".join(old_end) if old_end else "(empty)"
+    return f"""Deck: {deck_name} (going first)
+
+DECKLIST (card sheet):
+{sheet}
+
+OPENING HAND (exactly these 5 cards):
+{hand}
+
+CURRENT VERIFIED LINE (legal, compact JSON, names only):
+{old_line_json}
+
+CURRENT END BOARD: {end}
+
+This line is legal and verified. Write a strictly stronger turn-1 line for the SAME hand: a bigger or more resilient end board (more interruptions / negates / board presence), using effects the current line leaves unused. Same JSON schema. If no stronger line exists, answer {{"lines": []}}.
+Write the single strongest turn-1 combo line this hand allows as JSON:
+{{"lines": [ComboLine]}}
+{SCHEMA_TEXT}
+
+Rules:
+- `hand` must be exactly the 5 cards above, in any order.
+- Use ONLY cards from the decklist above (main + extra). Every step's card must be in the hand, on the field, in the GY, or reachable at that point via a previous step's search/summon.
+- Normal Summon at most once; respect "once per turn" limits.
+- Aim for the strongest end board (interruptions) the hand allows.
+- `going` must be "first". `end_board` = cards on your field at the end; `end_board_text` = one-line summary; `claimed_interruptions` = opponent-turn interactions or null.
+- If the hand cannot combo, return the best simple line (normal summon, set cards, pass) rather than an illegal flashy one.
+JSON only, no prose."""
+
+
 def repair_prompt(base_prompt: str, line_json: str, verdict_reason: str, explain_text: str) -> str:
     """Base prompt + previous answer + engine rejection + repair instruction."""
     return (

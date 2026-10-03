@@ -44,7 +44,7 @@ SESSION_RETRY_S = 30 * 60
 REPO_BUDGET_BYTES = 45 * 1024**3
 KILL_GRACE_S = 30
 
-CHILD_LIMITS = {"planner": 3 * 3600, "game": 2 * 3600, "session": 30 * 60, "bc": 3 * 3600}
+CHILD_LIMITS = {"planner": 3 * 3600, "improver": 3 * 3600, "game": 2 * 3600, "session": 30 * 60, "bc": 3 * 3600}
 
 
 # ---------------------------------------------------------------- pure helpers
@@ -131,9 +131,32 @@ def planner_command(deck: str, seed: int, variant: str | None) -> list[str]:
     return cmd
 
 
+def choose_improve_job(root: Path, running: set[tuple[str, str]] = frozenset()) -> tuple[str, str] | None:
+    """(src dir, deck) with the most verified planner lines not yet tried by improve_lines.py, or None."""
+    best, best_n = None, 0
+    for vf in sorted((root / "data" / "demos").glob("planned*/verified/*.jsonl")):
+        src, deck = vf.parent.parent, vf.stem
+        key = (str(src.relative_to(root)), deck)
+        if key in running:
+            continue
+        ids = {json.loads(x)["line_id"] for x in vf.read_text().splitlines() if x.strip()}
+        rp = src / "improved" / "report" / f"{deck}.json"
+        tried = {r.get("old_id") for r in json.loads(rp.read_text())} if rp.is_file() else set()
+        n = len(ids - tried)
+        if n > best_n:
+            best, best_n = key, n
+    return best
+
+
+def improve_command(src: str, deck: str) -> list[str]:
+    # the quality pass keeps muse's default reasoning effort (NOTEBOOK 2026-10-03: 7/9 kept vs 2/6 at minimal)
+    return ["uv", "run", "--no-sync", "python", "scripts/improve_lines.py", "--deck", deck, "--src", src,
+            "--remote", "--workers", "6"]
+
+
 def game_command(a: str, b: str, seed: int, variant: str | None) -> list[str]:
     cmd = ["uv", "run", "--no-sync", "python", "scripts/play_games.py",
-           "--pairs", f"{a}:{b}", "--games", "1", "--seed", str(seed), "--max-turns", "8"]
+           "--pairs", f"{a}:{b}", "--games", "1", "--seed", str(seed), "--max-turns", "12"]
     if variant is not None:
         cmd += ["--variant", variant]
     cmd += ["--out", "data/demos/games"]
@@ -393,6 +416,19 @@ class DatagenLoop:
                          desc=f"{deck} s{seed}", deck=deck)
             running.add(deck)
 
+    def _ensure_improvers(self) -> None:
+        if vast.load_session() is None:
+            return
+        running = {c.deck for c in self._live("improver")}
+        while len(self._live("improver")) < self.args.improvers:
+            job = choose_improve_job(ROOT, running)
+            if job is None:
+                return
+            src, deck = job
+            self._launch("improver", improve_command(src, deck),
+                         RUNS_CACHE / f"improve-{src.replace('/', '_')}-{deck}.log", desc=f"{src} {deck}", deck=job)
+            running.add(job)
+
     def _ensure_games(self) -> None:
         while len(self._live("game")) < self.args.games:
             decks = eligible_game_decks(ROOT)
@@ -504,6 +540,7 @@ class DatagenLoop:
         credit = self._credit()
         self._ensure_session(now, credit)
         self._ensure_planners()
+        self._ensure_improvers()
         self._ensure_games()
         self._ensure_bc(now, credit)
         return False
@@ -524,6 +561,7 @@ def pin_laptop() -> None:
 def parse_args(argv: list[str] | None = None):
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--planners", type=int, default=3)
+    ap.add_argument("--improvers", type=int, default=2)
     ap.add_argument("--games", type=int, default=3)
     ap.add_argument("--variant", default=None,
                     help="muse reasoning effort (minimal|low|high|max; default: provider's)")

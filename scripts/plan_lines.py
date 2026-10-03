@@ -87,10 +87,12 @@ def load_examples(deck_name: str, k: int) -> list[ComboLine]:
     dirs = [demos, demos / "claude", *sorted(demos.glob("planned*"))]
     same: dict[str, ComboLine] = {}
     for d in dirs:
-        lines = _read_lines(d / "lines" / f"{deck_name}.jsonl")
-        for i in _verified_ids(d / "verified" / f"{deck_name}.jsonl"):
-            if i in lines:
-                same[i] = lines[i]
+        for sub in ("", "improved"):
+            base = d / sub if sub else d
+            lines = _read_lines(base / "lines" / f"{deck_name}.jsonl")
+            for i in _verified_ids(base / "verified" / f"{deck_name}.jsonl"):
+                if i in lines:
+                    same[i] = lines[i]
     if same:
         return sorted(same.values(), key=lambda ln: (-len(ln.end_board), -len(ln.steps), ln.id))[:k]
     # Fallback: the strongest verified guide/Claude lines of other decks, one per deck.

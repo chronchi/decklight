@@ -11,7 +11,8 @@ from ygo_zero.model.bc_data import build_shards
 SOURCES = {  # tag -> globs of record files (verified lines and their hand-variant expansions)
     "guides": ["data/demos/verified/*.jsonl", "data/demos/expanded/*.jsonl"],
     "claude": ["data/demos/claude/verified/*.jsonl", "data/demos/claude/expanded*/*.jsonl"],
-    "muse": ["data/demos/planned*/verified/*.jsonl", "data/demos/planned*/expanded*/*.jsonl"],
+    "muse": ["data/demos/planned*/verified/*.jsonl", "data/demos/planned*/expanded*/*.jsonl",
+             "data/demos/planned*/improved/verified/*.jsonl"],
     "games": ["data/demos/games/*.jsonl"],  # ADR 0004 L2-L4 (deck label = actor's deck)
 }
 
