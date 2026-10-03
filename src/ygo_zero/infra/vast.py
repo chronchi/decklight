@@ -277,6 +277,184 @@ def _destroy_retrying(instance_id: int) -> None:
             time.sleep(10)
 
 
+SESSION_FILE = ROOT / "data" / "vast_session.json"
+
+
+def load_session() -> dict | None:
+    """The warm-box record written by `start_session`, or None when there is no session."""
+    if not SESSION_FILE.exists():
+        return None
+    try:
+        return json.loads(SESSION_FILE.read_text())
+    except (json.JSONDecodeError, OSError):
+        return None
+
+
+def require_session() -> dict:
+    s = load_session()
+    if s is None:
+        raise VastError(
+            "no vast session (no data/vast_session.json); start one with "
+            "`uv run python scripts/vast_session.py start` on the laptop"
+        )
+    return s
+
+
+def start_session(spec: JobSpec, max_hosts: int = 3) -> dict:
+    """Rent a cheap (usually CPU-only) box exactly like `run_job` does, push the code, run `spec.setup`
+    once, and keep the box warm: write data/vast_session.json and return it. Runs no job, destroys nothing.
+    The hours cap is recorded as a deadline in the file (`vast_session.py status` warns past it); the box
+    itself is stopped by `vast_session.py stop` (i.e. `end_session`)."""
+    if load_session() is not None:
+        raise VastError(f"a session already exists ({SESSION_FILE}); stop it first")
+    strays = destroy_strays()
+    if strays:
+        print(f"destroyed stray instances {strays}")
+    credit_before = credit()
+    created: list[tuple[int, float, float]] = []  # (instance id, $/h, start time)
+    bad_machines: set[int] = set()
+    t0 = time.time()
+    for _ in range(max_hosts):
+        offer = _rentable_offer(spec, bad_machines)
+        selected = {
+            k: offer.get(k)
+            for k in ("id", "machine_id", "gpu_name", "dph_total", "cpu_cores_effective", "geolocation")
+        }
+        out = offer.pop("_created")  # worst-case cost was checked before creating
+        instance_id = int(out["new_contract"])
+        created.append((instance_id, offer["dph_total"], time.time()))
+        print(f"instance {instance_id}: {selected}", flush=True)
+        try:
+            host, port = wait_ready(instance_id)
+            break
+        except HostFailed as e:
+            print(f"host failed, trying another machine: {e}", flush=True)
+            mark_bad_machine(offer.get("machine_id"), str(e))
+            _destroy_retrying(instance_id)
+            bad_machines.add(offer.get("machine_id"))
+    else:
+        raise VastError(f"{max_hosts} hosts failed to start the container")
+    print(f"ready after {time.time() - t0:.0f}s; pushing code", flush=True)
+    for attempt in range(3):
+        try:
+            push_code(host, port, spec.data_paths)
+            break
+        except subprocess.CalledProcessError:
+            if attempt == 2:
+                mark_bad_machine(selected.get("machine_id"), "ssh transfers keep failing (exit 255)")
+                _destroy_retrying(instance_id)
+                raise
+            time.sleep(10)
+    print(f"running setup: {spec.setup}", flush=True)
+    setup_log = ROOT / "runs" / "session" / "setup.log"
+    setup_log.parent.mkdir(parents=True, exist_ok=True)
+    job = f"export PATH=$HOME/.local/bin:$PATH && cd {REMOTE_DIR} && ({spec.setup})"
+    rc = ssh(host, port, job, timeout_s=1800, log=setup_log)
+    if rc != 0:
+        _destroy_retrying(instance_id)
+        raise VastError(f"session setup failed (exit {rc}); see {setup_log}")
+    started = time.time()
+    session = {
+        "instance_id": instance_id,
+        "host": host,
+        "port": port,
+        "started": started,
+        "dph": offer["dph_total"],
+        "offer": selected,
+        "hours_cap": spec.hours_cap,
+        "deadline": started + spec.hours_cap * 3600,
+        "name": spec.name,
+        "setup": spec.setup,
+    }
+    SESSION_FILE.parent.mkdir(parents=True, exist_ok=True)
+    SESSION_FILE.write_text(json.dumps(session, indent=1))
+    LEDGER.parent.mkdir(parents=True, exist_ok=True)
+    with open(LEDGER, "a") as f:
+        f.write(
+            json.dumps(
+                {
+                    "time": time.strftime("%Y-%m-%d %H:%M"),
+                    "event": "session_start",
+                    "name": spec.name,
+                    "instance_id": instance_id,
+                    "offer": selected,
+                    "dph": offer["dph_total"],
+                    "credit_before": credit_before,
+                }
+            )
+            + "\n"
+        )
+    print(f"session ready on {host}:{port} (cap {spec.hours_cap}h); {SESSION_FILE} written", flush=True)
+    return session
+
+
+def end_session() -> dict:
+    """Destroy the session box, log the spend like `run_job`, delete the session file. Returns a summary."""
+    s = require_session()
+    instance_id = int(s["instance_id"])
+    _destroy_retrying(instance_id)
+    now = time.time()
+    seconds = now - float(s.get("started", now))
+    est_cost = float(s.get("dph", 0.0)) * seconds / 3600
+    summary = {"instance_id": instance_id, "seconds": seconds, "est_cost": est_cost}
+    try:
+        summary["credit_after"] = credit()
+    except VastError:
+        pass
+    LEDGER.parent.mkdir(parents=True, exist_ok=True)
+    with open(LEDGER, "a") as f:
+        f.write(
+            json.dumps({"time": time.strftime("%Y-%m-%d %H:%M"), "event": "session_end", **summary}) + "\n"
+        )
+    SESSION_FILE.unlink(missing_ok=True)
+    print(f"session {instance_id} destroyed; spent ≈ ${est_cost:.3f} ({seconds / 60:.1f} min)", flush=True)
+    return summary
+
+
+def session_run(cmd: str, timeout_s: float | None = None) -> tuple[int, str]:
+    """Run `cmd` in REMOTE_DIR on the session box. Returns (exit code, combined output)."""
+    s = require_session()
+    full = f"cd {REMOTE_DIR} && ({cmd})"
+    proc = subprocess.run(
+        ["ssh", *SSH_OPTS, "-p", str(s["port"]), f"root@{s['host']}", full],
+        capture_output=True,
+        text=True,
+        timeout=timeout_s,
+        check=False,
+    )
+    return proc.returncode, proc.stdout + proc.stderr
+
+
+def session_push(local_paths: list[str | Path], remote_dir: str) -> None:
+    """Copy local files/dirs into `remote_dir` on the session box (scp -r over the same ssh options)."""
+    s = require_session()
+    rc, _ = session_run(f"mkdir -p {shlex.quote(remote_dir)}")
+    if rc != 0:
+        raise VastError(f"could not create {remote_dir} on the session box")
+    for p in local_paths:
+        subprocess.run(
+            ["scp", "-r", *SSH_OPTS, "-P", str(s["port"]), str(p), f"root@{s['host']}:{remote_dir}/"],
+            check=True,
+        )
+
+
+def session_pull(remote_path: str, local_path: str | Path) -> None:
+    """Copy `remote_path` from the session box to `local_path` (scp -r over the same ssh options)."""
+    s = require_session()
+    local_path = Path(local_path)
+    local_path.parent.mkdir(parents=True, exist_ok=True)
+    subprocess.run(
+        ["scp", "-r", *SSH_OPTS, "-P", str(s["port"]), f"root@{s['host']}:{remote_path}", str(local_path)],
+        check=True,
+    )
+
+
+def repush_code() -> None:
+    """Re-push the working tree to the session box (for code changes mid-session; .venv and build stay)."""
+    s = require_session()
+    push_code(s["host"], int(s["port"]))
+
+
 def run_job(spec: JobSpec, reserve: float = 0.25, max_hosts: int = 3) -> JobResult:
     """The whole lifecycle. Every instance created is destroyed in `finally`, whatever happens. A host that
     cannot start the container is dropped and the next-cheapest offer on another machine is tried."""

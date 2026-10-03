@@ -27,6 +27,7 @@ from ygo_zero.demos.records import make_record
 from ygo_zero.demos.schema import ComboLine
 from ygo_zero.demos.verify import Verdict, verify_line
 from ygo_zero.engine.duel import Engine
+from ygo_zero.infra.remote import remote_verify, require_session
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -119,7 +120,18 @@ def main() -> None:
         "--llm-timeout", type=int, default=900, help="seconds per LLM call (repair prompts are long)"
     )
     ap.add_argument("--out-dir", default="data/demos/planned")
+    ap.add_argument(
+        "--remote",
+        action="store_true",
+        help="verify on the warm vast session box instead of the local fork pool "
+        "(start one with scripts/vast_session.py start; LLM calls stay local)",
+    )
     args = ap.parse_args()
+    if args.remote:
+        try:
+            require_session()
+        except RuntimeError as e:
+            ap.error(str(e))
 
     t0 = time.time()
     engine = Engine()
@@ -153,6 +165,8 @@ def main() -> None:
         jobs = [(ln.to_json(), main_t, extra_t, side_t, deck.name, 0, b) for ln, _, b in items]
         if not jobs:
             return []
+        if args.remote:
+            return remote_verify(jobs, LINE_TIMEOUT)  # the box sizes its pool from its cgroup quota
         _worker_init()  # forked children inherit this Engine
         return map_timeout(
             _verify_job,
