@@ -1,0 +1,50 @@
+# slug	archetype / build	era	split (train|holdout). Read by scripts/build_decks.py.
+snake-eye	Snake-Eye Fire combo (Snake-Eye Ash, Diabellstar, Original Sinful Spoils)	2024 TCG	train
+yubel	Yubel / Fiendsmith (Spirit of Yubel, Samsara D Lotus, Fiendsmith Engraver)	2024-2025 TCG	train
+tenpai-dragon	Tenpai Dragon battle-phase OTK (Paidra, Chundra, Fadra, Sangen)	2024 TCG	train
+labrynth	Labrynth trap control (Lady Labrynth, Arianna, Welcome Labrynth, Big Welcome)	2023-2024 TCG	holdout
+kashtira	Kashtira Xyz banish control (Fenrir, Unicorn, Arise-Heart)	2023 TCG	train
+tearlaments	Tearlaments mill-fusion (Kitkallos, Reinoheart, Scheiren, Rulkallos)	2022-2023 TCG	train
+purrely	Purrely Xyz (Purrely, Epurrely, Purrelyly, Happy Memory)	2023 TCG	train
+fire-king	Fire King (Fire King Avatar Arvata, Garunix, Sanctuary)	2023 TCG	train
+runick	Runick Spell-speed stall (Runick Tip, Fountain, Hugin, Munin)	2023 TCG	train
+centur-ion	Centur-Ion Synchro (Primera, Trudea, Auxila, Emperor's Stand)	2024 TCG	train
+ryzeal	Ryzeal Rank 4 Xyz (Ice Ryzeal, Thunder Ryzeal, Ryzeal Duo Drive)	2025 TCG	train
+maliss	Maliss Link combo (Maliss P Dormouse, White Rabbit, Chessy Cat, Maliss in Underground)	2025 TCG	train
+dracotail	Dracotail fusion (Dracotail Lukias, Mululu, Arthalion)	2025-2026 TCG	train
+white-forest	White Forest Synchro (Silvy, Elzette, Astellar, Diabellze)	2024-2025 TCG	train
+voiceless-voice	Voiceless Voice ritual (Lo the Prayers, Skull Guardian, Sauravis)	2024-2025 TCG	train
+spright	Spright Level/Rank 2 (Spright Blue, Jet, Elf, Gigantic Splight)	2022 TCG	train
+swordsoul	Swordsoul Synchro (Mo Ye, Longyuan, Sinful Spoils / Tenyi)	2022 TCG	train
+floowandereeze	Floowandereeze Normal Summon chain (Robina, Eglen, Empen, Piriria)	2022 TCG	train
+dogmatika-invoked	Invoked Dogmatika (Aleister, Ecclesia, Titaniklad)	2021 TCG	train
+dragon-link	Dragon Link / Rokket (Absorouter, Striker Dragon, Borreload Savage)	2019-2020 TCG	train
+eldlich	Eldlich the Golden Lord trap control (Golden Land, Conquistador)	2021 TCG	train
+adamancipator	Adamancipator Synchro (Adamancipator Researcher, Seeker, Crystal - Dragite)	2020-2021 TCG	train
+drytron	Drytron ritual (Drytron Alpha Thuban, Meteonis Drytron, Herald of Perfection)	2021 TCG	holdout
+virtual-world	Virtual World Synchro (Lulu, Xiezhi, Shenshen, Gate - Chuche)	2021-2022 TCG	train
+zoodiac	Zoodiac Xyz (Ratpier, Whiptail, Drident, Boarbow)	2017 TCG	train
+abc-dragon	ABC Union (A-Assault Core, Dragon Buster Destruction Sword)	2016-2017 TCG	train
+burning-abyss	Burning Abyss (Graff, Cir, Scarm, Dante, Malebranche)	2015 TCG	train
+shaddoll	Shaddoll fusion (Shaddoll Falco, Dragon, Construct, El Shaddoll Winda)	2014-2015 TCG	train
+nekroz	Nekroz ritual (Nekroz of Unicore, Brionac, Trishula, Shurit)	2015 TCG	holdout
+qliphort	Qliphort Pendulum (Qliphort Scout, Carrier, Disk, Apoqliphort Towers)	2014-2015 TCG	train
+hero	Destiny HERO / Elemental HERO fusion (Destiny HERO - Malicious, Fusion Destiny, Vision HERO)	2023 TCG	train
+blackwing	Blackwing Synchro (Gofu, Kalut, Simoon, Black-Winged Dragon)	2009-2010 TCG	holdout
+lightsworn	Lightsworn mill (Judgment Dragon, Ryko, Lumina, Charge of the Light Brigade)	2008-2009 TCG	train
+six-samurai	Legendary Six Samurai (Kizan, Shi En, Gateway, Shien's Smoke Signal)	2011 TCG	train
+gladiator-beast	Gladiator Beast tag-out (Bestiari, Darius, Heraklinos)	2008-2009 TCG	train
+monarch	Monarch tribute control (Ehther, Erebus, Domain of the True Monarchs)	2016-2017 TCG	train
+dark-magician	Dark Magician (Magician's Souls, Eternal Soul, Illusion of Chaos)	2020-2021 TCG	train
+dinosaur	True King / Dinosaur (Miscellaneousaurus, Ultimate Conductor Tyranno, Lost World)	2017-2018 TCG	holdout
+lunalight	Lunalight fusion (Lunalight Black Sheep, Crimson Fox, Sabre Dancer)	2018-2019 TCG	train
+witchcrafter	Witchcrafter spell control (Madame Verre, Pittore, Haine)	2019-2020 TCG	train
+vanquish-soul	Vanquish Soul hand-reveal (Razen, Hollie Sue, Dr. Mad Love)	2023 TCG	train
+memento	Memento (Mementoal Tecuhtlica, Mementotlan)	2024 TCG	train
+plunder-patroll	Plunder Patroll / Marincess Water rogue (Plunder Patrollship Brann, Goldenhind)	2020-2021 TCG	train
+altergeist	Altergeist trap tempo (Multifaker, Silquitous, Marionetter)	2018-2019 TCG	train
+orcust	Orcust Knightmare Link (Orcust Harp Horror, Galatea, Dingirsu)	2019 TCG	train
+tri-brigade	Tri-Brigade Beast Link (Kerass, Nervall, Shuraig, Fraktall)	2021 TCG	train
+infernoid	Infernoid banish (Infernoid Decatron, Void Feast, Onuncu)	2015 TCG	train
+burn	Chain burn / Ojama-style FTK rogue (Ring of Destruction, Secret Barrel, Just Desserts)	2014 TCG	train
+exodia	Exodia draw/turbo rogue (Exodia the Forbidden One, Pot of Desires, Magical Mallet)	2019-2020 TCG	train

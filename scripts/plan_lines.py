@@ -52,56 +52,57 @@ def _verify_job(job: tuple) -> Verdict:
     return verify_line(engine, line, deck, seed=seed, budget=budget)
 
 
-def load_examples(deck_name: str, k: int) -> list[ComboLine]:
-    """Verified lines of the same deck (else of other decks), up to `k`."""
-    if k <= 0:
-        return []
-    verified_dir = ROOT / "data" / "demos" / "verified"
-    lines_dir = ROOT / "data" / "demos" / "lines"
-
-    def read_lines(path: Path) -> dict[str, ComboLine]:
-        out: dict[str, ComboLine] = {}
-        if not path.is_file():
-            return out
-        for raw in path.read_text().splitlines():
-            if raw.strip():
-                d = json.loads(raw)
-                try:
-                    out[d["id"]] = ComboLine.from_json(d)
-                except Exception as e:  # noqa: BLE001 - skip malformed lines
-                    logger.warning("plan_lines: skipping malformed line: %s", e)
-                    continue
+def _read_lines(path: Path) -> dict[str, ComboLine]:
+    out: dict[str, ComboLine] = {}
+    if not path.is_file():
         return out
-
-    same_lines = read_lines(lines_dir / f"{deck_name}.jsonl")
-    vp = verified_dir / f"{deck_name}.jsonl"
-    if vp.is_file() and same_lines:
-        ids = []
-        for raw in vp.read_text().splitlines():
-            if raw.strip():
-                try:
-                    ids.append(json.loads(raw)["line_id"])
-                except (KeyError, json.JSONDecodeError):
-                    continue
-        got = [same_lines[i] for i in ids if i in same_lines][:k]
-        if got:
-            return got
-    # Fallback: verified lines of other decks (stable file order).
-    out: list[ComboLine] = []
-    for f in sorted(lines_dir.glob("*.jsonl")):
-        if f.stem == deck_name:
-            continue
-        for raw in f.read_text().splitlines():
-            if not raw.strip():
-                continue
+    for raw in path.read_text().splitlines():
+        if raw.strip():
             try:
-                out.append(ComboLine.from_json(json.loads(raw)))
+                d = json.loads(raw)
+                out[d["id"]] = ComboLine.from_json(d)
             except Exception as e:  # noqa: BLE001 - skip malformed lines
                 logger.warning("plan_lines: skipping malformed line: %s", e)
-                continue
-            if len(out) >= k:
-                return out
     return out
+
+
+def _verified_ids(path: Path) -> set[str]:
+    if not path.is_file():
+        return set()
+    ids = set()
+    for raw in path.read_text().splitlines():
+        try:
+            ids.add(json.loads(raw)["line_id"])
+        except (KeyError, json.JSONDecodeError):
+            continue
+    return ids
+
+
+def load_examples(deck_name: str, k: int) -> list[ComboLine]:
+    """Engine-verified lines of the same deck from every source (guides, Claude, every planner run), biggest end
+    board first, else verified lines of other decks. New decks thus bootstrap from their own verified lines."""
+    if k <= 0:
+        return []
+    demos = ROOT / "data" / "demos"
+    dirs = [demos, demos / "claude", *sorted(demos.glob("planned*"))]
+    same: dict[str, ComboLine] = {}
+    for d in dirs:
+        lines = _read_lines(d / "lines" / f"{deck_name}.jsonl")
+        for i in _verified_ids(d / "verified" / f"{deck_name}.jsonl"):
+            if i in lines:
+                same[i] = lines[i]
+    if same:
+        return sorted(same.values(), key=lambda ln: (-len(ln.end_board), -len(ln.steps), ln.id))[:k]
+    # Fallback: the strongest verified guide/Claude lines of other decks, one per deck.
+    best: dict[str, ComboLine] = {}
+    for d in (demos, demos / "claude"):
+        for f in sorted((d / "lines").glob("*.jsonl")):
+            ids = _verified_ids(d / "verified" / f.name)
+            for i, ln in _read_lines(f).items():
+                cur = best.get(f.stem)
+                if i in ids and (cur is None or len(ln.end_board) > len(cur.end_board)):
+                    best[f.stem] = ln
+    return sorted(best.values(), key=lambda ln: (-len(ln.end_board), ln.id))[:k]
 
 
 def main() -> None:
