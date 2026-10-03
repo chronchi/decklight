@@ -181,7 +181,10 @@ static bool is_select(uint8_t t) {
 }
 
 const Bytes* Duel::advance() {
+  // A few card interactions make the core spin without ever asking for input; fail instead of hanging the worker.
+  uint64_t spins = 0;
   while (!has_pending_ && !ended) {
+    if (++spins > 2000000) throw std::runtime_error("core made no progress (no selection after 2M process calls)");
     int status = OCG_DuelProcess(handle_);
     uint32_t length = 0;
     auto* buf = static_cast<const uint8_t*>(OCG_DuelGetMessage(handle_, &length));

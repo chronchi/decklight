@@ -14,10 +14,10 @@ import argparse
 import json
 import os
 from collections import Counter
-from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 
 from ygo_zero.decks import Deck, load_ydk
+from ygo_zero.demos.pool import failed_verdict, map_timeout
 from ygo_zero.demos.records import make_record
 from ygo_zero.demos.schema import ComboLine
 from ygo_zero.demos.verify import Verdict, verify_line
@@ -52,12 +52,19 @@ def _verify_job(job: tuple) -> Verdict:
     return verify_line(engine, line, deck, seed=seed, budget=budget)
 
 
+LINE_TIMEOUT = 900.0  # seconds per (line, seed); see demos/pool.py
+
+
 def map_ordered(fn, items: list, jobs: int, initializer=None):
-    """Run fn over items, returning results in input order (identical to serial)."""
-    if jobs <= 1 or not items:
-        return [fn(x) for x in items]
-    with ProcessPoolExecutor(max_workers=jobs, initializer=initializer) as ex:
-        return list(ex.map(fn, items))
+    """Run fn over items, returning results in input order (identical to serial). Each job runs in a forked child
+    with a wall-clock limit (a killed job becomes a failed Verdict)."""
+    if not items:
+        return []
+    if initializer is not None:
+        initializer()  # children inherit the parent's Engine
+    return map_timeout(
+        fn, items, jobs, LINE_TIMEOUT, lambda it, why: failed_verdict(it[0]["id"], it[5], why, LINE_TIMEOUT)
+    )
 
 
 def default_pool_ydk(deck: str) -> Path | None:
@@ -101,8 +108,8 @@ def verify_all(
     """Verify every line under every seed; print per-line results; return ok records + reps.
 
     Lines with more than 8 steps use budget_long when given (long lines need more search nodes).
-    With jobs > 1, (line, seed) pairs verify in worker processes (one Engine each);
-    results are regrouped in serial order so output is identical to jobs=1.
+    (line, seed) pairs verify in forked children (`jobs` at a time, wall-clock limit LINE_TIMEOUT);
+    results are regrouped in serial order.
     """
     main_t, extra_t, side_t = tuple(deck.main), tuple(deck.extra), tuple(deck.side)
     items: list[tuple] = []
@@ -110,15 +117,7 @@ def verify_all(
         b = budget_long if budget_long and len(line.steps) > 8 else budget
         for s in seeds:
             items.append((line.to_json(), main_t, extra_t, side_t, deck.name, s, b))
-    if jobs <= 1:
-        # serial path reuses the caller's engine directly (same order as the job list)
-        flat = []
-        for line in lines:
-            b = budget_long if budget_long and len(line.steps) > 8 else budget
-            for s in seeds:
-                flat.append(verify_line(engine, line, deck, seed=s, budget=b))
-    else:
-        flat = map_ordered(_verify_job, items, jobs, initializer=_worker_init)
+    flat = map_ordered(_verify_job, items, jobs, initializer=_worker_init)  # forked, with a wall-clock limit
     records, reps = [], {}
     pos = 0
     for line in lines:
@@ -154,6 +153,7 @@ def deck_from_guide_json(engine: Engine, data: dict, name: str) -> Deck:
 
 
 def main() -> None:
+    global LINE_TIMEOUT
     ap = argparse.ArgumentParser()
     ap.add_argument("--lines", required=True)
     ap.add_argument(
@@ -183,7 +183,14 @@ def main() -> None:
         default=default_jobs(),
         help="worker processes over (line, seed) pairs (default: %(default)s)",
     )
+    ap.add_argument(
+        "--line-timeout",
+        type=float,
+        default=LINE_TIMEOUT,
+        help="seconds per (line, seed) before it is killed",
+    )
     args = ap.parse_args()
+    LINE_TIMEOUT = args.line_timeout
 
     engine = Engine()
     lines = [

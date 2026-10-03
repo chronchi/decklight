@@ -16,13 +16,13 @@ import json
 import logging
 import time
 from collections import Counter
-from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 
 from ygo_zero.decks import Deck, load_ydk
 from ygo_zero.demos import llm as _llm
 from ygo_zero.demos.names import CardNames
 from ygo_zero.demos.plan import SYSTEM, plan_hands, sample_hands
+from ygo_zero.demos.pool import failed_verdict, map_timeout
 from ygo_zero.demos.records import make_record
 from ygo_zero.demos.schema import ComboLine
 from ygo_zero.demos.verify import Verdict, verify_line
@@ -33,6 +33,7 @@ ROOT = Path(__file__).resolve().parents[1]
 logger = logging.getLogger(__name__)
 
 _WORKER_ENGINE: Engine | None = None
+LINE_TIMEOUT = 900.0  # seconds per verify job; see demos/pool.py
 
 
 def _worker_init() -> None:
@@ -150,10 +151,16 @@ def main() -> None:
 
     def verify_fn(items: list[tuple]) -> list[Verdict]:
         jobs = [(ln.to_json(), main_t, extra_t, side_t, deck.name, 0, b) for ln, _, b in items]
-        if args.jobs <= 1 or not jobs:
-            return [_verify_job(j) for j in jobs]
-        with ProcessPoolExecutor(max_workers=args.jobs, initializer=_worker_init) as ex:
-            return list(ex.map(_verify_job, jobs))
+        if not jobs:
+            return []
+        _worker_init()  # forked children inherit this Engine
+        return map_timeout(
+            _verify_job,
+            jobs,
+            args.jobs,
+            LINE_TIMEOUT,
+            lambda it, why: failed_verdict(it[0]["id"], it[5], why, LINE_TIMEOUT),
+        )
 
     results = plan_hands(
         engine,

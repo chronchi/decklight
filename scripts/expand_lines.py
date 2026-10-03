@@ -16,11 +16,11 @@ import os
 import random
 import time
 from collections import Counter
-from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 
 from ygo_zero.decks import Deck
 from ygo_zero.demos.dataset import load_records
+from ygo_zero.demos.pool import failed_verdict, map_timeout
 from ygo_zero.demos.schema import ComboLine
 from ygo_zero.demos.verify import Verdict, verify_line
 from ygo_zero.engine.duel import Engine
@@ -49,12 +49,22 @@ def _expand_job(job: tuple) -> Verdict:
     return verify_line(engine, var, deck, seed=seed, budget=budget)
 
 
+VARIANT_TIMEOUT = 600.0  # seconds per hand variant; see demos/pool.py
+
+
 def map_ordered(fn, items: list, jobs: int, initializer=None):
-    """Run fn over items, returning results in input order (identical to serial)."""
-    if jobs <= 1 or not items:
-        return [fn(x) for x in items]
-    with ProcessPoolExecutor(max_workers=jobs, initializer=initializer) as ex:
-        return list(ex.map(fn, items))
+    """Run fn over items in input order, each in a forked child with a wall-clock limit (a killed job fails)."""
+    if not items:
+        return []
+    if initializer is not None:
+        initializer()  # children inherit the parent's Engine
+    return map_timeout(
+        fn,
+        items,
+        jobs,
+        VARIANT_TIMEOUT,
+        lambda it, why: failed_verdict(it[0]["id"], it[3], why, VARIANT_TIMEOUT),
+    )
 
 
 def main() -> None:
