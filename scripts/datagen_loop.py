@@ -328,6 +328,10 @@ class DatagenLoop:
                         self.log(f"session {sname}: 2 consecutive failed starts, retry after 30 min")
             elif child.kind == "bc":
                 self._finish_bc(child)
+                if not (ROOT / "runs" / str(child.name) / "bc" / "metrics.jsonl").is_file():
+                    # host never ready / job cap hit: retry soon instead of waiting a whole slot (2 of 4 failed so)
+                    self.bc_next_due = min(self.bc_next_due, time.time() + 900)
+                    self.log(f"bc {child.name}: no metrics, retry in 15 min")
 
     def _enforce_limits(self, now: float) -> None:
         for child in self.children:
