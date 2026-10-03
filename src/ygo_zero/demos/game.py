@@ -348,6 +348,7 @@ def play_game(
     max_seconds: float | None = None,
     plan_fn: Callable | None = None,
     interrupts: int = 3,
+    interrupt_fn: Callable[[str], str] | None = None,  # LLM for interruption asks (default: complete_fn)
 ) -> dict:
     """Play one game; deck 0 goes first. Returns the record (see module docstring). `max_seconds`: stop at the next
     turn boundary once exceeded (the record is kept, winner None), so a slow game never loses its data to a kill."""
@@ -358,7 +359,7 @@ def play_game(
     pdecks = {0: deck0, 1: deck1}
     verify = plan_fn or plan_from_state
     responder = Responder(seed)
-    interrupter = Interrupter(complete_fn, names, max_per_turn=interrupts) if interrupts > 0 else None
+    interrupter = (Interrupter(interrupt_fn or complete_fn, names, max_per_turn=interrupts) if interrupts > 0 else None)
     env = CppEnv(engine, config)
     obs = env.reset()
     choices: list[int] = []

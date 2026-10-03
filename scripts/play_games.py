@@ -6,6 +6,7 @@ Records: data/demos/games/<deck0>-vs-<deck1>.jsonl (append), one game per line.
 
 import argparse
 import json
+import sys
 from pathlib import Path
 
 from ygo_zero.decks import load_ydk
@@ -16,6 +17,9 @@ from ygo_zero.demos.schema import ComboLine
 from ygo_zero.demos.verify import plan_from_state
 from ygo_zero.engine.duel import Engine
 from ygo_zero.infra import remote as _remote
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from plan_lines import load_examples
 
 
 def _remote_plan_fn(engine, config, prefix, line, deck, budget):
@@ -28,14 +32,8 @@ def _remote_plan_fn(engine, config, prefix, line, deck, budget):
 
 
 def verified_examples(deck: str, k: int = 2) -> list[ComboLine]:
-    """A few of this deck's verified Claude lines as few-shot examples."""
-    ver = Path(f"data/demos/claude/verified/{deck}.jsonl")
-    lines = Path(f"data/demos/claude/lines/{deck}.jsonl")
-    if not ver.exists() or not lines.exists():
-        return []
-    ok = [json.loads(x)["line_id"] for x in ver.read_text().splitlines() if x.strip()]
-    by_id = {json.loads(x)["id"]: x for x in lines.read_text().splitlines() if x.strip()}
-    return [ComboLine.from_json(json.loads(by_id[i])) for i in ok[:k] if i in by_id]
+    """This deck's strongest verified lines from every source (else the strongest of other decks)."""
+    return load_examples(deck, k)
 
 
 ap = argparse.ArgumentParser()
@@ -47,7 +45,8 @@ ap.add_argument("--budget", type=int, default=4000)
 ap.add_argument("--model", default="opencode-go/muse-spark-1.3-contributor")
 ap.add_argument("--out", type=Path, default=Path("data/demos/games"))
 ap.add_argument("--max-seconds", type=float, default=5400, help="stop at the next turn boundary after this")
-ap.add_argument("--variant", default=None, help="muse reasoning effort (minimal|low|high|max; default: provider's)")
+ap.add_argument("--variant", default=None, help="muse reasoning effort for turn plans (default: provider's)")
+ap.add_argument("--interrupt-variant", default="minimal", help="muse reasoning effort for interruption asks")
 ap.add_argument("--remote", action="store_true", default=False,
                 help="verify turn plans on the games session box (falls back to local)")
 ap.add_argument("--interrupts", type=int, default=3,
@@ -65,6 +64,7 @@ for pair in args.pairs:
         rec = play_game(engine, decks, seed, lambda p: _llm.complete(p, model=args.model, system=TURN_SYSTEM, timeout=900, variant=args.variant),
                         names, max_turns=args.max_turns, max_seconds=args.max_seconds, budget=args.budget, examples=ex,
                         plan_fn=_remote_plan_fn if args.remote else None, interrupts=args.interrupts,
+                        interrupt_fn=lambda p: _llm.complete(p, model=args.model, system=TURN_SYSTEM, timeout=300, variant=args.interrupt_variant),
                         log=lambda s: print(s, flush=True))  # fmt: skip
         with (args.out / f"{a}-vs-{b}.jsonl").open("a") as f:
             f.write(json.dumps(rec) + "\n")

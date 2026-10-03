@@ -157,10 +157,9 @@ def improve_command(src: str, deck: str) -> list[str]:
 def game_command(a: str, b: str, seed: int, variant: str | None, remote: bool = False) -> list[str]:
     cmd = ["uv", "run", "--no-sync", "python", "scripts/play_games.py",
            "--pairs", f"{a}:{b}", "--games", "1", "--seed", str(seed), "--max-turns", "12"]
-    if variant is not None:
-        cmd += ["--variant", variant]
+    # turn plans keep muse's default effort (realism); interruption asks run at minimal (play_games default)
     if remote:
-        cmd += ["--remote"]
+        cmd += ["--remote", "--budget", "20000"]  # complex decks (Tearlaments) exhaust 4000 nodes every turn
     cmd += ["--out", "data/demos/games"]
     return cmd
 
