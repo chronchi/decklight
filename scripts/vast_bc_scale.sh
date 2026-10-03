@@ -34,4 +34,8 @@ uv run --no-sync python scripts/train_bc.py --shards data/cache/bc_shards --emb 
   --out "$OUT/bc" --epochs "$EPOCHS" --batch 512 --lr 5e-4 --holdout $HOLD > "$OUT/train.txt" 2>&1
 echo "train $((SECONDS - T0)) s" >> "$OUT/timing.txt"
 rm -f "$OUT/bc/last.pt"
+# 4. playtest the new model on this box (GPU inference; laptop CPU is too slow for the match part)
+uv run --no-sync python scripts/playtest.py --ckpt "$OUT/bc/best.pt" --device cuda --threads "$J" --decks 10 --hands 6 \
+  --seeds 2 --narrate 3 > "$OUT/playtest.txt" 2>&1
+echo "playtest $((SECONDS - T0)) s" >> "$OUT/timing.txt"
 echo done > "$OUT/DONE"

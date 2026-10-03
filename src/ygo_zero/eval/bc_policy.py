@@ -28,7 +28,7 @@ def _run_args(ckpt: Path) -> dict:
 
 class BCPolicy:
     def __init__(self, ckpt: str | Path, emb: str | Path, temperature: float = 0.0, seed: int = 0,
-                 threads: int = 2, batch: int = 256) -> None:  # fmt: skip
+                 threads: int = 2, batch: int = 256, device: str = "cpu") -> None:  # fmt: skip
         ckpt = Path(ckpt)
         a = _run_args(ckpt)
         torch.set_num_threads(threads)
@@ -37,15 +37,16 @@ class BCPolicy:
         state = torch.load(ckpt, map_location="cpu")
         state = state.get("model", state)
         self.model.load_state_dict({k: v.float() if v.is_floating_point() else v for k, v in state.items()})
-        self.model.eval()
+        self.device = torch.device(device)
+        self.model.to(self.device).eval()
         self.temperature, self.batch = temperature, batch
         self.rng = np.random.default_rng(seed)
         self.name = f"bc:{ckpt.parent.parent.name}"
 
     @torch.no_grad()
     def logits(self, obs: dict[str, np.ndarray]) -> np.ndarray:
-        t = {k: torch.from_numpy(np.ascontiguousarray(obs[k])) for k in OBS_KEYS}
-        return self.model(t).numpy()
+        t = {k: torch.from_numpy(np.ascontiguousarray(obs[k])).to(self.device) for k in OBS_KEYS}
+        return self.model(t).float().cpu().numpy()
 
     def __call__(self, buf: dict[str, np.ndarray], rows: np.ndarray) -> np.ndarray:
         out = np.zeros(len(rows), np.int32)

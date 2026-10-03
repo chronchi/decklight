@@ -16,10 +16,36 @@ from collections.abc import Iterator
 from pathlib import Path
 
 from ygo_zero.decks import Deck
+from ygo_zero.engine import constants as C
+from ygo_zero.engine.actions import Kind
 from ygo_zero.engine.cpp_env import CppEnv
 from ygo_zero.engine.duel import DuelConfig, Engine, Placement
 
-LABEL_WEIGHT = {"stated": 1.0, "inferred": 0.5, "interrupt": 1.0}
+LABEL_WEIGHT = {"stated": 1.0, "inferred": 0.5, "interrupt": 1.0, "end": 1.0}
+_PASSIVE_KINDS = (Kind.PASS, Kind.NO, Kind.FINISH, Kind.CANCEL)
+
+
+def end_turn_sample(env, obs, me: int, max_steps: int = 60) -> tuple[dict, int] | None:
+    """After a line's last choice: answer pending prompts passively until player `me` is back at an open idle state in
+    the same turn, and return (that obs, the index of its "end turn" option). Line records stop at the last combo step,
+    so without this the model never learns to stop (playtest 2026-10-03: it reproduced a Mikanko line exactly, then
+    kept acting and wrecked its board). None when the turn ends on its own or no end option exists."""
+    if obs is None:
+        return None
+    turn = int(obs["global"][2])
+    for _ in range(max_steps):
+        if obs is None or int(obs["global"][2]) != turn:
+            return None
+        n = int(obs["action_mask"].sum())
+        kinds = [int(obs["actions"][i][0]) for i in range(n)]
+        if env.player == me and int(obs["global"][21]) == C.MSG_SELECT_IDLECMD:
+            for want in (Kind.TO_END, Kind.TO_MAIN2):  # turn 1 has no battle: Main 1 -> End
+                if want in kinds:
+                    return {k: v.copy() for k, v in obs.items()}, kinds.index(want)
+            return None
+        a = next((i for i, k in enumerate(kinds) if k in _PASSIVE_KINDS), 0)
+        obs = env.step(a)
+    return None
 
 ROOT = Path(__file__).resolve().parents[3]
 JUDGED_DIR = ROOT / "data" / "demos" / "games_judged"
@@ -177,3 +203,10 @@ def iter_samples(engine: Engine, path: Path) -> Iterator[tuple[dict, int, float,
                         }
                         yield {key: v.copy() for key, v in obs.items()}, choice, weight, meta
                     obs = env.step(choice)
+                if "actors" not in rec:  # a combo line: teach the stop (records end at the last combo step)
+                    end = end_turn_sample(env, obs, rec.get("me", 0))
+                    if end is not None:
+                        obs_end, a_end = end
+                        meta = {"line_id": rec["line_id"], "seed": seed, "k": len(rec["choices"]), "label": "end",
+                                "deck": rec["line_id"].split("/")[0], "kind": sample_kind(f, "end"), "judge": None}
+                        yield obs_end, a_end, LABEL_WEIGHT["end"], meta
