@@ -116,6 +116,12 @@ as ground truth:
 - Recover your earlier "cloning works well" setup and fold it in here.
 - Exit: ≥10k verified decision steps for 2–3 decks; the search finds the guide's end board on ≥X% of hands.
 
+### Phase 3b — Data at all levels (ADR 0004)
+- L1 combo lines (ADR 0003), L2 going second, L3 combos under interruption (replan from the interrupted state),
+  L4 full multi-turn games with outcomes. Full-game generator: planner per main phase from the current state, engine-
+  verified, rule-based responder, then the policy itself (DAgger). More decks (30–50) with fixed held-out decks.
+- Exit: full games between pool decks with recorded winners; BC v2 trains on the level mix.
+
 ### Phase 4 — BC model (first GPU spend, ~$X)
 - Model: ygo-agent-style transformer, but card input = frozen card vec + small adapter; no ID table.
 - Train BC on Phase 3 data (+ ygo-agent ckpt rollouts as a "general play" prior).
