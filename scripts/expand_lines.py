@@ -84,7 +84,6 @@ def main() -> None:
     )
     args = ap.parse_args()
 
-    engine = Engine()
     lines = {}
     for f in args.lines_dir.glob("*.jsonl"):
         for raw in f.read_text().splitlines():
@@ -97,6 +96,9 @@ def main() -> None:
     rng = random.Random(args.seed)
     kept = Counter()
     t0 = time.time()
+    # Pass 1: deal every record's hand variants (rng order unchanged), so pass 2 can verify all of them in one pool
+    # call; one record's variants at a time left most cores idle on big boxes (8 busy of 23).
+    plans = []  # (rec, me, variants, full_main, my_extra)
     for rec in load_records(args.verified):
         base_id = rec["line_id"].split("+")[0]
         if base_id not in lines:
@@ -109,8 +111,6 @@ def main() -> None:
         hand = [p[1] for p in hands]
         my_main, my_extra = c[f"deck{me}_main"], c[f"deck{me}_extra"]
         full_main = list(my_main) + hand  # the record's deck excludes the placed hand
-        deck = Deck(tuple(full_main), tuple(my_extra))
-        # Deal all variants serially (rng order identical to --jobs 1), then verify.
         variants: list = []
         for v in range(args.variants):
             pool = list(my_main)
@@ -120,16 +120,19 @@ def main() -> None:
                 line, id=f"{base_id}#h{v}", hand=line.hand + [str(x) for x in extra], hand_codes=hand + extra
             )
             variants.append((var, extra))
-        if args.jobs <= 1:
-            verdicts = [
-                verify_line(engine, var, deck, seed=c["seed"], budget=args.budget) for var, _ in variants
-            ]
-        else:
-            items = [
-                (var.to_json(), tuple(full_main), tuple(my_extra), c["seed"], args.budget)
-                for var, _ in variants
-            ]
-            verdicts = map_ordered(_expand_job, items, args.jobs, initializer=_worker_init)
+        plans.append((rec, me, variants, full_main, my_extra))
+    items = [
+        (var.to_json(), tuple(full_main), tuple(my_extra), rec["config"]["seed"], args.budget)
+        for rec, _, variants, full_main, my_extra in plans
+        for var, _ in variants
+    ]
+    print(f"{len(plans)} records, {len(items)} hand variants to verify", flush=True)
+    flat = map_ordered(_expand_job, items, args.jobs, initializer=_worker_init)
+    # Pass 2: write the verified variants, per record, in input order.
+    pos = 0
+    for rec, me, variants, _, _ in plans:
+        verdicts = flat[pos : pos + len(variants)]
+        pos += len(variants)
         out_records = []
         for (var, extra), verdict in zip(variants, verdicts):
             kept[verdict.reason] += 1
@@ -140,6 +143,7 @@ def main() -> None:
                 **{k: rec[k] for k in ("source_url", "deck", "end_board", "end_board_codes") if k in rec},
                 "line_id": var.id,
                 "variant_of": rec["line_id"],
+                "me": me,
                 "config": {
                     "deck0_main": list(cfg.deck0.main), "deck0_extra": list(cfg.deck0.extra),
                     "deck1_main": list(cfg.deck1.main), "deck1_extra": list(cfg.deck1.extra),
