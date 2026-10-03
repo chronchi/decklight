@@ -52,7 +52,7 @@ def _shard_one(job: tuple[str, str, str]) -> tuple[str, int]:
         action.append(a)
         weight.append(w)
         line.append(base_line(meta["line_id"]))
-        deck.append(meta["line_id"].split("/")[0])
+        deck.append(meta["deck"])
     if not action:
         return out_file, 0
     np.savez_compressed(

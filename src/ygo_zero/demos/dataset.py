@@ -52,6 +52,8 @@ def iter_samples(engine: Engine, path: Path) -> Iterator[tuple[dict, int, float,
                 if obs is None:
                     raise ValueError(f"{rec['line_id']} seed {seed}: duel ended at choice {k}")
                 if label in LABEL_WEIGHT:
-                    meta = {"line_id": rec["line_id"], "seed": seed, "k": k, "label": label}
+                    # game records (ADR 0004) carry both decks and who acted; lines are named <deck>/<id>
+                    deck = rec["decks"][rec["actors"][k]] if "actors" in rec else rec["line_id"].split("/")[0]
+                    meta = {"line_id": rec["line_id"], "seed": seed, "k": k, "label": label, "deck": deck}
                     yield {key: v.copy() for key, v in obs.items()}, choice, LABEL_WEIGHT[label], meta
                 obs = env.step(choice)
