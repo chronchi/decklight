@@ -185,7 +185,7 @@ def remote_verify(items: list[VerifyItem], timeout_per_item: float, jobs: int | 
     write_items(local_in, items)
     try:
         _push(str(local_in), remote_in)
-        cmd = f"uv run --no-sync python scripts/verify_items.py --in {remote_in} --out {remote_out} --timeout {timeout_per_item}"  # fmt: skip
+        cmd = f"export PATH=\"$HOME/.local/bin:$PATH\"; uv run --no-sync python scripts/verify_items.py --in {remote_in} --out {remote_out} --timeout {timeout_per_item}"  # fmt: skip
         if jobs is not None:
             cmd += f" --jobs {int(jobs)}"
         rc, out = _run(cmd, timeout_s=len(items) * timeout_per_item + 300)

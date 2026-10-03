@@ -11,6 +11,7 @@ turn 1 other seeds alone would not (the own deck is an unordered multiset in the
 
 import argparse
 import dataclasses
+import glob
 import json
 import os
 import random
@@ -52,6 +53,29 @@ def _expand_job(job: tuple) -> Verdict:
 VARIANT_TIMEOUT = 600.0  # seconds per hand variant; see demos/pool.py
 
 
+def base_id_of(line_id: str) -> str:
+    """The part of an expansion's line_id before `#` (`<base id>#<suffix>`)."""
+    return line_id.split("#")[0]
+
+
+def collect_done_ids(patterns: list[str]) -> set[str]:
+    """Base ids that already have expansions in any file matching the globs."""
+    done: set[str] = set()
+    for pat in patterns:
+        for f in glob.glob(pat, recursive=True):
+            p = Path(f)
+            if not p.is_file():
+                continue
+            for raw in p.read_text().splitlines():
+                if not raw.strip():
+                    continue
+                try:
+                    done.add(base_id_of(json.loads(raw)["line_id"]))
+                except (KeyError, json.JSONDecodeError):
+                    continue
+    return done
+
+
 def map_ordered(fn, items: list, jobs: int, initializer=None):
     """Run fn over items in input order, each in a forked child with a wall-clock limit (a killed job fails)."""
     if not items:
@@ -77,6 +101,13 @@ def main() -> None:
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--out", type=Path, default=Path("data/demos/expanded"))
     ap.add_argument(
+        "--skip-done",
+        nargs="*",
+        default=[],
+        metavar="GLOB",
+        help="skip input records whose line_id already has expansions in files matching these globs",
+    )
+    ap.add_argument(
         "--jobs",
         type=int,
         default=default_jobs(),
@@ -96,11 +127,16 @@ def main() -> None:
     rng = random.Random(args.seed)
     kept = Counter()
     t0 = time.time()
+    done = collect_done_ids(args.skip_done) if args.skip_done else set()
+    skipped = 0
     # Pass 1: deal every record's hand variants (rng order unchanged), so pass 2 can verify all of them in one pool
     # call; one record's variants at a time left most cores idle on big boxes (8 busy of 23).
     plans = []  # (rec, me, variants, full_main, my_extra)
     for rec in load_records(args.verified):
         base_id = rec["line_id"].split("+")[0]
+        if base_id_of(rec["line_id"]) in done or base_id in done:
+            skipped += 1
+            continue
         if base_id not in lines:
             print(f"{rec['line_id']}: source line not found, skipped")
             continue
@@ -127,6 +163,8 @@ def main() -> None:
         for var, _ in variants
     ]
     print(f"{len(plans)} records, {len(items)} hand variants to verify", flush=True)
+    if args.skip_done:
+        print(f"skipped {skipped} records with existing expansions", flush=True)
     flat = map_ordered(_expand_job, items, args.jobs, initializer=_worker_init)
     # Pass 2: write the verified variants, per record, in input order.
     pos = 0

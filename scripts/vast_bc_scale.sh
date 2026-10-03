@@ -19,9 +19,9 @@ T0=$SECONDS
 for v in data/demos/claude/verified/*.jsonl data/demos/planned*/verified/*.jsonl; do
   [ -s "$v" ] || continue
   src=$(dirname "$(dirname "$v")"); deck=$(basename "$v" .jsonl); dst="$src/expanded-$deck"
-  if compgen -G "$src/expanded*/$deck.jsonl" >/dev/null || compgen -G "$src/expanded*/$deck+*.jsonl" >/dev/null; then continue; fi  # already expanded
   uv run --no-sync python scripts/expand_lines.py --verified "$v" --lines-dir "$src/lines" --out "$dst" --variants 8 --jobs "$J" \
-    >> "$OUT/expand.txt" 2>&1 && cp -r "$dst" "$OUT/expanded/$(echo "$dst" | tr / _)"
+    --skip-done "$src/expanded*/*.jsonl" >> "$OUT/expand.txt" 2>&1
+  if [ -d "$dst" ] && [ -n "$(ls -A "$dst")" ]; then cp -r "$dst" "$OUT/expanded/$(echo "$dst" | tr / _)"; fi
 done
 echo "expand $((SECONDS - T0)) s" > "$OUT/timing.txt"
 # 2. shards from every record source (guides, claude, muse, games)
