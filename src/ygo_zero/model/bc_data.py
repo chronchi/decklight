@@ -26,6 +26,54 @@ OBS_KEYS = (
     "history_mask",
 )
 
+# Option-row columns (docs/action_spec.md): 0 kind, 1 card row, 2 code, 3 effect_code,
+# 4 effect_idx, 5 arg, 6 msg, 7 location, 8 controller, 9 step.
+PLACE_KIND = 19
+_SINGLETON_KINDS = frozenset({11, 17, 18})  # PASS, FINISH, CANCEL: never equivalent to anything else
+
+
+def equivalent_mask(
+    actions: np.ndarray, action: int, mask: np.ndarray | None = None
+) -> np.ndarray:
+    """Bool [64] mask of options equivalent to the chosen option `action`.
+
+    Option j is equivalent to the chosen option a when their action rows are equal on every
+    column EXCEPT the ones that only identify a position among identical things: the card-row
+    index (col 1) and, for PLACE-kind options (kind 19), the zone/sequence argument (col 5).
+    Concretely, j != a is equivalent when: same kind (col 0), same code (col 2), same effect
+    code/index (cols 3-4), same msg (col 6), same location (col 7), same controller (col 8),
+    same step (col 9), and -- for non-PLACE kinds -- same arg (col 5). The chosen option itself
+    is always included. Options of kind PASS (11), FINISH (17) or CANCEL (18) are never marked
+    equivalent to anything else (a one-hot of `action` is returned when the choice itself is
+    one of those). Illegal slots (per `mask`, when given) are never marked equivalent.
+    """
+    n = actions.shape[0]
+    equiv = np.zeros(n, dtype=bool)
+    equiv[action] = True
+    a = actions[action]
+    kind_a = int(a[0])
+    if kind_a in _SINGLETON_KINDS:
+        return equiv
+    same = (
+        (actions[:, 0] == kind_a)
+        & (actions[:, 2] == a[2])
+        & (actions[:, 3] == a[3])
+        & (actions[:, 4] == a[4])
+        & (actions[:, 6] == a[6])
+        & (actions[:, 7] == a[7])
+        & (actions[:, 8] == a[8])
+        & (actions[:, 9] == a[9])
+    )
+    if kind_a != PLACE_KIND:
+        same &= actions[:, 5] == a[5]
+    for k in _SINGLETON_KINDS:
+        same &= actions[:, 0] != k
+    if mask is not None:
+        same &= np.asarray(mask, dtype=bool)
+    same[action] = True  # always include the choice itself, even if masked out
+    return same
+
+
 _ENGINE = None
 
 
@@ -45,10 +93,11 @@ def _shard_one(job: tuple[str, str, str]) -> tuple[str, int]:
 
     src_file, out_file, src_tag = job
     cols: dict[str, list] = {k: [] for k in OBS_KEYS}
-    action, weight, line, deck, kind = [], [], [], [], []
+    action, weight, line, deck, kind, equiv = [], [], [], [], [], []
     for obs, a, w, meta in iter_samples(_ENGINE, Path(src_file)):
         for k in OBS_KEYS:
             cols[k].append(obs[k])
+        equiv.append(equivalent_mask(obs["actions"], a, obs.get("action_mask")))
         action.append(a)
         weight.append(w)
         line.append(base_line(meta["line_id"]))
@@ -60,6 +109,7 @@ def _shard_one(job: tuple[str, str, str]) -> tuple[str, int]:
         out_file,
         **{k: np.stack(v) for k, v in cols.items()},
         action=np.array(action, dtype=np.int64),
+        equiv=np.stack(equiv),
         weight=np.array(weight, dtype=np.float32),
         line=np.array(line),
         deck=np.array(deck),
@@ -75,7 +125,15 @@ def build_shards(sources: dict[str, list[Path]], out_dir: Path, jobs: int) -> in
     work = []
     for tag, files in sources.items():
         for f in files:
-            work.append((str(f), str(out_dir / f"{tag}__{f.parent.name}__{f.stem}.npz"), tag))
+            # the full path makes names unique: planned-s1/verified/x and planned-s2/verified/x collided before
+            # (later files silently overwrote earlier ones; fixed 2026-10-03)
+            rel = Path(f).resolve()
+            try:
+                rel = rel.relative_to(Path(__file__).resolve().parents[3] / "data" / "demos")
+            except ValueError:
+                pass
+            flat = "~".join(rel.with_suffix("").parts[-6:])
+            work.append((str(f), str(out_dir / f"{tag}__{flat}.npz"), tag))
     total = 0
     with mp.get_context("fork").Pool(max(1, jobs), initializer=_init) as pool:
         for out, n in pool.imap_unordered(_shard_one, work):
@@ -89,6 +147,12 @@ def load_shards(shard_dir: Path) -> dict[str, np.ndarray]:
     for p in parts:  # backward compat: shards written before kind tags existed
         if "kind" not in p:
             p["kind"] = np.array(["unknown"] * len(p["action"]))
+    for p in parts:  # backward compat: shards written before equiv masks existed
+        if "equiv" not in p and "actions" in p:
+            n = len(p["action"])
+            eq = np.zeros((n, p["actions"].shape[1]), dtype=bool)
+            eq[np.arange(n), p["action"]] = True
+            p["equiv"] = eq
     return {k: np.concatenate([p[k] for p in parts]) for k in parts[0]}
 
 

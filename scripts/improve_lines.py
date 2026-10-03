@@ -373,10 +373,14 @@ def main() -> None:
         help="verify on the warm vast session box instead of the local fork pool "
         "(start one with scripts/vast_session.py start; LLM calls stay local)",
     )
+    ap.add_argument(
+        "--session", default="lines",
+        help="vast session name for --remote verification (driver spreads work over boxes)",
+    )
     args = ap.parse_args()
     if args.remote:
         try:
-            require_session()
+            require_session(args.session)
         except RuntimeError as e:
             ap.error(str(e))
 
@@ -422,7 +426,7 @@ def main() -> None:
         if not jobs:
             return []
         if args.remote:
-            return remote_verify(jobs, LINE_TIMEOUT)  # the box sizes its pool from its cgroup quota
+            return remote_verify(jobs, LINE_TIMEOUT, session=args.session)  # box sizes pool from cgroup quota
         _worker_init()  # forked children inherit this Engine
         return map_timeout(
             _verify_job,

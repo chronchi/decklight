@@ -123,6 +123,14 @@ def main() -> None:
     ap.add_argument("--budget-long", type=int, default=15000)
     ap.add_argument("--examples", type=int, default=2)
     ap.add_argument(
+        "--candidates", type=int, default=1,
+        help="best-of-N: ask for N different lines per hand in one call, keep the strongest verified",
+    )
+    ap.add_argument(
+        "--session", default="lines",
+        help="vast session name for --remote verification (driver spreads work over boxes)",
+    )
+    ap.add_argument(
         "--llm-timeout", type=int, default=900, help="seconds per LLM call (repair prompts are long)"
     )
     ap.add_argument("--out-dir", default="data/demos/planned")
@@ -135,7 +143,7 @@ def main() -> None:
     args = ap.parse_args()
     if args.remote:
         try:
-            require_session()
+            require_session(args.session)
         except RuntimeError as e:
             ap.error(str(e))
 
@@ -173,7 +181,7 @@ def main() -> None:
         if not jobs:
             return []
         if args.remote:
-            return remote_verify(jobs, LINE_TIMEOUT)  # the box sizes its pool from its cgroup quota
+            return remote_verify(jobs, LINE_TIMEOUT, session=args.session)  # box sizes pool from cgroup quota
         _worker_init()  # forked children inherit this Engine
         return map_timeout(
             _verify_job,
@@ -196,6 +204,7 @@ def main() -> None:
         budget=args.budget,
         budget_long=args.budget_long,
         id_tag=f"-s{args.seed}" if args.seed else "",
+        candidates=args.candidates,
     )
 
     out_dir = ROOT / args.out_dir
@@ -228,13 +237,26 @@ def main() -> None:
                 if att["line"] is not None:
                     lf.write(json.dumps(att["line"].to_json()) + "\n")
             if r["ok_verdict"] is not None:
-                ok_attempt = next(a for a, att in enumerate(r["attempts"]) if att["reason"] == "ok")
+                best_id = r["ok_line"].id if r["ok_line"] is not None else None
+                ok_attempt = next(
+                    (a for a, att in enumerate(r["attempts"]) if att["reason"] == "ok"
+                     and att["line"] is not None and att["line"].id == best_id),
+                    next(a for a, att in enumerate(r["attempts"]) if att["reason"] == "ok"),
+                )
                 by_attempt[ok_attempt] += 1
                 v = r["ok_verdict"]
                 v.deck_source = "planned"
                 records.append(make_record(engine, r["ok_line"], deck, v, 0, [0], "+planned"))
                 exec_steps.append(v.executed_steps)
                 bc_decisions.append(sum(1 for x in v.labels if x != "auto"))
+                # Best-of-N extras: other verified candidates with a distinct end
+                # board (ids already carry the -c<k> tag from plan_hands).
+                for x in r.get("extras", []):
+                    xv = x["verdict"]
+                    xv.deck_source = "planned"
+                    records.append(make_record(engine, x["line"], deck, xv, 0, [0], "+planned"))
+                    exec_steps.append(xv.executed_steps)
+                    bc_decisions.append(sum(1 for lab in xv.labels if lab != "auto"))
             report.append(
                 {
                     "hand": list(r["hand"]),

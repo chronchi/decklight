@@ -45,7 +45,7 @@ SESSION_RETRY_S = 30 * 60
 REPO_BUDGET_BYTES = 45 * 1024**3
 KILL_GRACE_S = 30
 
-CHILD_LIMITS = {"planner": 3 * 3600, "improver": 3 * 3600, "expander": 2 * 3600, "game": 2 * 3600, "session": 30 * 60, "bc": 3 * 3600}
+CHILD_LIMITS = {"judge": 2 * 3600, "planner": 3 * 3600, "improver": 3 * 3600, "expander": 2 * 3600, "game": 2 * 3600, "session": 30 * 60, "bc": 3 * 3600}
 
 
 # ---------------------------------------------------------------- pure helpers
@@ -125,7 +125,7 @@ def next_planner_seed(root: Path, deck: str) -> int:
 def planner_command(deck: str, seed: int, variant: str | None, session: str = "lines") -> list[str]:
     cmd = ["uv", "run", "--no-sync", "python", "scripts/plan_lines.py",
            "--deck", deck, "--seed", str(seed), "--hands", "20", "--repairs", "2",
-           "--workers", "6", "--remote", "--session", session]
+           "--workers", "6", "--remote", "--session", session, "--candidates", "3"]
     if variant is not None:
         cmd += ["--variant", variant]
     cmd += ["--out-dir", f"data/demos/planned-s{seed}"]
@@ -249,8 +249,20 @@ def game_command(a: str, b: str, seed: int, variant: str | None, remote: bool = 
     # turn plans keep muse's default effort (realism); interruption asks run at minimal (play_games default)
     if remote:
         cmd += ["--remote", "--budget", "20000"]  # complex decks (Tearlaments) exhaust 4000 nodes every turn
+    cmd += ["--opening-frac", "0.5"]  # half the games start from a verified turn-1 board (going-second data)
     cmd += ["--out", "data/demos/games"]
     return cmd
+
+
+def judge_command() -> list[str]:
+    return ["uv", "run", "--no-sync", "python", "scripts/judge_games.py", "--workers", "4", "--limit", "40"]
+
+
+def unjudged_games(root: Path = ROOT) -> int:
+    """Games recorded minus games judged (line counts; cheap)."""
+    def count(d: Path) -> int:
+        return sum(sum(1 for x in f.read_text().splitlines() if x.strip()) for f in d.glob("*.jsonl")) if d.is_dir() else 0
+    return count(root / "data" / "demos" / "games") - count(root / "data" / "demos" / "games_judged")
 
 
 def session_label(name: str, hhmm: str) -> str:
@@ -575,6 +587,11 @@ class DatagenLoop:
                          desc=f"{src_rel} {vf_rel.stem} @{sess}", deck=key, name=sess)
             running.add(key)
 
+    def _ensure_judge(self) -> None:
+        """One judge worker whenever >= 10 games are unjudged (realism scores -> BC weights, NOTEBOOK 2026-10-03)."""
+        if self.args.judge and not self._live("judge") and unjudged_games(ROOT) >= 10:
+            self._launch("judge", judge_command(), RUNS_CACHE / "judge.log", desc="judge_games")
+
     def _ensure_games(self, remote: bool = False) -> None:
         while len(self._live("game")) < self.args.games:
             decks = eligible_game_decks(ROOT)
@@ -694,6 +711,7 @@ class DatagenLoop:
         self._ensure_improvers()
         self._ensure_expanders()
         self._ensure_games(remote=games_remote)
+        self._ensure_judge()
         self._ensure_bc(now, credit)
         return False
 
@@ -715,6 +733,7 @@ def parse_args(argv: list[str] | None = None):
     ap.add_argument("--planners", type=int, default=3)
     ap.add_argument("--improvers", type=int, default=2)
     ap.add_argument("--expanders", type=int, default=1)
+    ap.add_argument("--judge", action=argparse.BooleanOptionalAction, default=True, help="rate new games for realism")
     ap.add_argument("--line-sessions", type=int, default=1, help="number of warm 'lines' boxes (lines, lines2, ...)")
     ap.add_argument("--games", type=int, default=3)
     ap.add_argument("--variant", default=None,

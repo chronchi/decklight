@@ -21,6 +21,15 @@ from ygo_zero.engine.duel import DuelConfig, Engine, Placement
 
 LABEL_WEIGHT = {"stated": 1.0, "inferred": 0.5, "interrupt": 1.0}
 
+ROOT = Path(__file__).resolve().parents[3]
+JUDGED_DIR = ROOT / "data" / "demos" / "games_judged"
+
+# Realism-judge multiplier by turn/interrupt score (Task C): bad turns are
+# dropped, mediocre ones down-weighted, good ones unchanged.
+JUDGE_WEIGHT = {5: 1.0, 4: 1.0, 3: 0.5, 2: 0.0, 1: 0.0}
+
+_judge_cache: dict[str, dict[str, dict]] = {}
+
 
 def sample_kind(source: str | Path, label: str) -> str:
     """BC data-mix kind tag from the record file path and the sample label.
@@ -38,6 +47,67 @@ def sample_kind(source: str | Path, label: str) -> str:
     if "games" in parts:
         return "game_interrupt" if label == "interrupt" else "game_plan"
     return "line"
+
+
+def load_judgements(source: str | Path) -> dict[str, dict]:
+    """Judgements for a record file, keyed by line_id (and game_id): {} when unjudged.
+
+    The judgement file is `JUDGED_DIR/<same file name>.jsonl`, one line per
+    game (see scripts/judge_games.py). Results are cached per source path.
+    """
+    key = str(source)
+    if key not in _judge_cache:
+        out: dict[str, dict] = {}
+        p = JUDGED_DIR / Path(source).name
+        if p.exists():
+            for line in p.read_text().splitlines():
+                if not line.strip():
+                    continue
+                try:
+                    j = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if not isinstance(j, dict):
+                    continue
+                for k in (j.get("line_id"), j.get("game_id")):
+                    if k and k not in out:
+                        out[k] = j
+        _judge_cache[key] = out
+    return _judge_cache[key]
+
+
+def _valid_score(v) -> int | None:
+    try:
+        s = int(v)
+    except (TypeError, ValueError):
+        return None
+    return s if s in JUDGE_WEIGHT else None
+
+
+def judge_turn_score(judgement: dict | None, turn: int) -> int | None:
+    """The judged realism score for a turn, or None when unjudged/invalid."""
+    if not judgement:
+        return None
+    entry = (judgement.get("turns") or {}).get(str(turn))
+    if isinstance(entry, dict):
+        entry = entry.get("score")
+    return _valid_score(entry)
+
+
+def judge_interrupt_scores(judgement: dict | None) -> dict[tuple[int, int], list[int]]:
+    """Valid interrupt scores grouped by (turn, player), in judgement order."""
+    out: dict[tuple[int, int], list[int]] = {}
+    for e in (judgement or {}).get("interrupts") or []:
+        if not isinstance(e, dict):
+            continue
+        s = _valid_score(e.get("score"))
+        if s is None:
+            continue
+        try:
+            out.setdefault((int(e["turn"]), int(e["player"])), []).append(s)
+        except (KeyError, TypeError, ValueError):
+            continue
+    return out
 
 
 def record_config(rec: dict, seed: int | None = None) -> DuelConfig:
@@ -64,19 +134,46 @@ def iter_samples(engine: Engine, path: Path) -> Iterator[tuple[dict, int, float,
     `seeds_ok` were verified with their own (unstored) choices."""
     files = sorted(path.glob("*.jsonl")) if path.is_dir() else [path]
     for f in files:
+        judges = load_judgements(f)
         for rec in load_records(f):
+            judge = judges.get(rec.get("line_id")) or judges.get(rec.get("game_id"))
+            iscores = judge_interrupt_scores(judge)
+            used: dict[tuple[int, int], int] = {}
             for seed in [rec["config"]["seed"]]:
                 env = CppEnv(engine, record_config(rec, seed), rec.get("auto_single", True))
                 obs = env.reset()
                 for k, (choice, label) in enumerate(zip(rec["choices"], rec["labels"], strict=True)):
                     if obs is None:
                         raise ValueError(f"{rec['line_id']} seed {seed}: duel ended at choice {k}")
-                    if label in LABEL_WEIGHT:
+                    weight, score = LABEL_WEIGHT.get(label, 0.0), None
+                    if weight and judge is not None and "turns" in rec and "actors" in rec:
+                        turn, actor = rec["turns"][k], rec["actors"][k]
+                        if label == "interrupt":
+                            key = (turn, actor)
+                            pool = iscores.get(key, [])
+                            i = used.get(key, 0)
+                            if i < len(pool):
+                                score = pool[i]
+                            used[key] = i + 1
+                        else:
+                            score = judge_turn_score(judge, turn)
+                        if score is not None:
+                            weight *= JUDGE_WEIGHT[score]
+                    if weight:
                         # game records (ADR 0004) carry both decks and who acted; lines are named <deck>/<id>
-                        deck = rec["decks"][rec["actors"][k]] if "actors" in rec else rec["line_id"].split("/")[0]
+                        deck = (
+                            rec["decks"][rec["actors"][k]]
+                            if "actors" in rec
+                            else rec["line_id"].split("/")[0]
+                        )
                         meta = {
-                            "line_id": rec["line_id"], "seed": seed, "k": k, "label": label,
-                            "deck": deck, "kind": sample_kind(f, label),
+                            "line_id": rec["line_id"],
+                            "seed": seed,
+                            "k": k,
+                            "label": label,
+                            "deck": deck,
+                            "kind": sample_kind(f, label),
+                            "judge": score,
                         }
-                        yield {key: v.copy() for key, v in obs.items()}, choice, LABEL_WEIGHT[label], meta
+                        yield {key: v.copy() for key, v in obs.items()}, choice, weight, meta
                     obs = env.step(choice)

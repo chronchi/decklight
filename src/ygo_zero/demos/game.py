@@ -21,13 +21,17 @@ import re
 import sqlite3
 import time
 from collections.abc import Callable
+from dataclasses import replace
+from pathlib import Path
 
 from ygo_zero.decks import Deck
+from ygo_zero.demos.dataset import record_config
 from ygo_zero.demos.explain import explain_failure
 from ygo_zero.demos.extract import _fill_codes, _parse_json
 from ygo_zero.demos.names import CardNames
 from ygo_zero.demos.plan import SCHEMA_TEXT, card_sheet, compact_line_json, repair_prompt
 from ygo_zero.demos.schema import ComboLine
+from ygo_zero.demos.strategy import notes_block
 from ygo_zero.demos.verify import plan_from_state
 from ygo_zero.engine import constants as C
 from ygo_zero.engine.actions import Kind
@@ -98,6 +102,25 @@ def describe_state(obs, names: dict[int, str]) -> str:
     ])  # fmt: skip
 
 
+def _vs_set_board(state: str) -> bool:
+    """Whether the acting player went second and the opponent already holds a board."""
+    if "went second" not in state.lower():
+        return False
+    for line in state.splitlines():
+        s = line.strip().lower()
+        if s.startswith(("opponent monsters:", "opponent spells/traps:")) and s.split(":", 1)[1].strip() not in (
+            "", "none",
+        ):
+            return True
+    return False
+
+
+_GO_SECOND_HINT = (
+    "Plan how to break or play through the opponent's board (board breakers, removal, "
+    "hand traps you already used), then build or attack for lethal if possible."
+)
+
+
 def turn_prompt(deck_name: str, sheet: str, state: str, can_attack: bool, examples: list[ComboLine]) -> str:
     ex = ""
     if examples:
@@ -110,8 +133,9 @@ def turn_prompt(deck_name: str, sheet: str, state: str, can_attack: bool, exampl
         if can_attack
         else "- You cannot attack this turn (first turn of the duel)."
     )
+    second = f"- {_GO_SECOND_HINT}\n" if _vs_set_board(state) else ""
     return f"""You are playing {deck_name}.
-
+{notes_block(deck_name)}
 YOUR DECKLIST (card sheet):
 {sheet}
 {ex}
@@ -125,7 +149,7 @@ Rules:
 - `hand` = your current hand above. Only cards you have (hand, field, GY, banished, Extra Deck) or can reach through a
   previous step's search/summon. Normal Summon at most once (if not already used); respect once-per-turn limits.
 - Deal with the opponent's board if it threatens you (removal, negation, out-valuing), then build the strongest position.
-{attack_rule}
+{second}{attack_rule}
 - `going` = "first" if you went first in the duel, else "second". `end_board` = your field at the end of the turn.
 - If there is nothing useful to do, return a short line (e.g. set a card) rather than an illegal flashy one.
 JSON only, no prose."""
@@ -151,10 +175,13 @@ class Responder:
         opts = _opts(obs)
         kinds = [k for k, _ in opts]
         msg, my_turn = int(obs["global"][21]), bool(int(obs["global"][5]))
-        if msg == C.MSG_SELECT_CHAIN and not my_turn:
-            acts = [i for i, (k, _) in enumerate(opts) if k == Kind.ACTIVATE]
-            if acts and self.rng.random() < self.p_trap:
-                return self.rng.choice(acts)
+        if msg == C.MSG_SELECT_CHAIN:
+            if not my_turn:
+                acts = [i for i, (k, _) in enumerate(opts) if k == Kind.ACTIVATE]
+                if acts and self.rng.random() < self.p_trap:
+                    return self.rng.choice(acts)
+            # own-turn chain windows outside a plan: pass (the old fall-through picked the first option, which fired
+            # hand traps like Ash/Fuwalos on the player's own turn; the judge flagged it, 2026-10-03)
             return self.passive(obs)
         if Kind.YES in kinds and Kind.NO in kinds:
             return kinds.index(Kind.YES) if self.rng.random() < self.p_yes else kinds.index(Kind.NO)
@@ -240,7 +267,7 @@ def options_text(obs, names: dict[int, str], engine=None) -> str:
 
 def interrupt_prompt(deck_name: str, state: str, chain: list[str], recent: list[str], options: str) -> str:
     return f"""You are playing {deck_name} (responding on the opponent's turn).
-
+{notes_block(deck_name)}
 CURRENT STATE:
 {state}
 
@@ -334,6 +361,85 @@ class Interrupter:
         return parse_interrupt_answer(resp, len(_opts(obs)), passive)
 
 
+_OPENING_PATTERNS = (
+    "verified/{a}*.jsonl",
+    "*/verified/{a}*.jsonl",
+    "planned*/verified/{a}*.jsonl",
+    "planned*/improved/verified/{a}*.jsonl",
+)
+
+
+def rank_openings(recs: list[dict], deck_a: str) -> list[dict]:
+    """Verified turn-1 line records of deck A, biggest end board first (deduped by line_id)."""
+    out: dict[str, dict] = {}
+    for rec in recs:
+        lid = str(rec.get("line_id", ""))
+        if not lid.startswith(deck_a + "/") or lid in out:
+            continue
+        if not rec.get("choices") or len(rec.get("labels", [])) != len(rec["choices"]):
+            continue
+        out[lid] = rec
+    return sorted(
+        out.values(),
+        key=lambda r: (-len(r.get("end_board") or []), -len(r["choices"]), str(r["line_id"])),
+    )
+
+
+def find_openings(deck_a: str, base: Path) -> list[dict]:
+    """Ranked opening candidates for deck A among the verified records under `base`."""
+    recs = []
+    for pat in _OPENING_PATTERNS:
+        for f in sorted(base.glob(pat.format(a=deck_a))):
+            if not f.is_file():
+                continue
+            try:
+                lines = f.read_text().splitlines()
+            except OSError:
+                continue
+            for raw in lines:
+                raw = raw.strip()
+                if not raw:
+                    continue
+                try:
+                    recs.append(json.loads(raw))
+                except json.JSONDecodeError:
+                    continue
+    return rank_openings(recs, deck_a)
+
+
+def opening_valid(engine: Engine, config: DuelConfig, choices: list[int]) -> bool:
+    """Whether a turn-1 line prefix replays cleanly under `config` (no early duel end, every index legal)."""
+    env = CppEnv(engine, config)
+    obs = env.reset()
+    for i in choices:
+        if obs is None:
+            return False
+        if not 0 <= int(i) < len(_opts(obs)):
+            return False
+        obs = env.step(int(i))
+    return True
+
+
+def build_opening(engine: Engine, rec: dict, deck_b: Deck) -> tuple[DuelConfig, list[int], list[str]] | None:
+    """An opening for `play_game` from a verified turn-1 line record: the record's config with deck1
+    replaced by the chosen opponent deck `deck_b`. The line only uses deck0's cards, so the prefix stays
+    valid; None (skip the record) when the prefix no longer replays cleanly. The seed stays the record's
+    (the setup-fixed hand and search order are seed-dependent)."""
+    if len(rec.get("labels", [])) != len(rec.get("choices", [])):
+        return None
+    try:
+        config = replace(record_config(rec), deck1=deck_b)
+    except (KeyError, TypeError, ValueError):
+        return None
+    choices = [int(i) for i in rec["choices"]]
+    labels = [str(x) for x in rec["labels"]]
+    try:
+        ok = opening_valid(engine, config, choices)
+    except Exception:  # noqa: BLE001 - an unreadable engine state skips the record
+        ok = False
+    return (config, choices, labels) if ok else None
+
+
 def play_game(
     engine: Engine,
     decks: tuple[tuple[str, Deck], tuple[str, Deck]],
@@ -349,14 +455,25 @@ def play_game(
     plan_fn: Callable | None = None,
     interrupts: int = 3,
     interrupt_fn: Callable[[str], str] | None = None,  # LLM for interruption asks (default: complete_fn)
+    opening: tuple[DuelConfig, list[int], list[str]] | None = None,
 ) -> dict:
     """Play one game; deck 0 goes first. Returns the record (see module docstring). `max_seconds`: stop at the next
-    turn boundary once exceeded (the record is kept, winner None), so a slow game never loses its data to a kill."""
+    turn boundary once exceeded (the record is kept, winner None), so a slow game never loses its data to a kill.
+    `opening`: (config, choices, labels) of a verified turn-1 line of deck 0, replayed blindly (actor 0, labels
+    copied) instead of planning turn 1; the game then continues normally from turn 1's end, i.e. the opponent
+    plans turn 2 against the established board. The record carries "opening" (None here; the driver fills in the
+    source record's line_id). A prefix that no longer replays raises ValueError (the driver skips the record)."""
     (name0, deck0), (name1, deck1) = decks
-    config = DuelConfig(deck0, deck1, seed=seed)
-    sheets = {0: card_sheet(engine, deck0, names), 1: card_sheet(engine, deck1, names)}
+    if opening is not None:
+        oconfig, ochoices, olabels = opening
+        config = oconfig
+        pdecks = {0: config.deck0, 1: config.deck1}  # the decks actually in play (deck1 replaced by the driver)
+        sheets = {0: card_sheet(engine, config.deck0, names), 1: card_sheet(engine, config.deck1, names)}
+    else:
+        config = DuelConfig(deck0, deck1, seed=seed)
+        pdecks = {0: deck0, 1: deck1}
+        sheets = {0: card_sheet(engine, deck0, names), 1: card_sheet(engine, deck1, names)}
     dnames = {0: name0, 1: name1}
-    pdecks = {0: deck0, 1: deck1}
     verify = plan_fn or plan_from_state
     responder = Responder(seed)
     interrupter = (Interrupter(interrupt_fn or complete_fn, names, max_per_turn=interrupts) if interrupts > 0 else None)
@@ -477,6 +594,26 @@ def play_game(
         )
         return []
 
+    if opening is not None:
+        for k, (i, lab) in enumerate(zip(ochoices, olabels, strict=True)):
+            if obs is None:
+                raise ValueError(f"opening prefix ended early at choice {k}/{len(ochoices)}")
+            if not 0 <= int(i) < len(_opts(obs)):
+                raise ValueError(f"opening choice {k} illegal: {i}")
+            actors.append(0)
+            turns.append(int(obs["global"][2]))
+            try:
+                code = int(obs["actions"][int(i)][2])
+            except (IndexError, TypeError):
+                code = 0
+            acted.append((0, code))
+            if bool(int(obs["global"][5])) and int(obs["actions"][int(i)][0]) in _TRIGGER_KINDS:
+                moves[0] += 1
+            choices.append(int(i))
+            labels.append(lab)
+            obs = env.step(int(i))
+        tried.add((1, 0))  # turn 1 belonged to the opening line; the game continues from its end
+
     while obs is not None:
         turn = int(obs["global"][2])
         if turn > max_turns:
@@ -537,6 +674,7 @@ def play_game(
         "turns": turns,
         "plans": plans,
         "interrupts": interrupts_log,
+        "opening": None,  # the driver fills in the source record's line_id when an opening was replayed
         "winner": winner,
         "end_turn": turns[-1] if turns else 0,
         # obs global[0:2] = (LP of the player to act, LP of the other): stored by absolute player

@@ -5,8 +5,9 @@ uv run python scripts/train_bc.py --shards data/cache/bc_shards --emb data/cards
 On vast: scripts/vast_bc.sh builds shards + embeddings and calls this with --device cuda.
 
 Metrics per epoch (runs/<name>/metrics.jsonl): loss, top-1 accuracy over legal options (all / stated-only) on train,
-val (unseen lines of trained decks) and holdout (unseen decks). Checkpoints: last.pt (with optimizer), best.pt
-(fp16 weights, by val accuracy).
+val (unseen lines of trained decks) and holdout (unseen decks); with --set-target (default) the loss is
+-log(sum of softmax over the equiv set) and acc counts argmax in the equiv set (acc_exact = old definition).
+Checkpoints: last.pt (with optimizer), best.pt (fp16 weights, by val accuracy).
 """
 
 from __future__ import annotations
@@ -28,35 +29,59 @@ from ygo_zero.model.policy import PolicyNet
 def batches(data, idx, bs, device, shuffle, rng):
     if shuffle:
         idx = rng.permutation(idx)
+    has_equiv = "equiv" in data
     for i in range(0, len(idx), bs):
         j = idx[i : i + bs]
         obs = {k: torch.from_numpy(data[k][j]).to(device, non_blocking=True) for k in OBS_KEYS}
+        act = torch.from_numpy(data["action"][j]).to(device)
+        if has_equiv:
+            eq = torch.from_numpy(data["equiv"][j]).to(device, non_blocking=True)
+        else:  # old shards: equiv = one-hot of the action
+            eq = torch.zeros(len(j), obs["actions"].shape[1], dtype=torch.bool, device=device)
+            eq[torch.arange(len(j), device=device), act] = True
         yield (
             obs,
-            torch.from_numpy(data["action"][j]).to(device),
+            act,
             torch.from_numpy(data["weight"][j]).to(device),
+            eq,
             j,
         )
 
 
-def evaluate(model, data, idx, bs, device, amp):
+def set_loss(logits: torch.Tensor, equiv: torch.Tensor) -> torch.Tensor:
+    """Per-sample -log(sum of softmax over the equiv set): lse(all) - lse(equiv)."""
+    return torch.logsumexp(logits, -1) - torch.logsumexp(
+        logits.masked_fill(~equiv, float("-inf")), -1
+    )
+
+
+def evaluate(model, data, idx, bs, device, amp, set_target=True):
     model.eval()
-    tot = {"n": 0, "loss": 0.0, "acc": 0.0, "n_stated": 0, "acc_stated": 0.0, "chance": 0.0}
+    tot = {
+        "n": 0, "loss": 0.0, "acc": 0.0, "acc_exact": 0.0,
+        "n_stated": 0, "acc_stated": 0.0, "chance": 0.0,
+    }
     per_deck: dict[str, list[int]] = {}
     per_kind: dict[str, list[int]] = {}
     has_kind = "kind" in data
     with torch.no_grad():
-        for obs, act, w, j in batches(data, idx, bs, device, False, None):
+        for obs, act, w, eq, j in batches(data, idx, bs, device, False, None):
             with torch.autocast(device.type, dtype=torch.bfloat16, enabled=amp):
                 logits = model(obs)
             logits = logits.float()
-            loss = F.cross_entropy(logits, act, reduction="none")
-            hit = (logits.argmax(-1) == act).float()
+            if set_target:
+                loss = set_loss(logits, eq)
+            else:
+                loss = F.cross_entropy(logits, act, reduction="none")
+            pred = logits.argmax(-1)
+            hit = eq[torch.arange(len(j), device=logits.device), pred].float()
+            exact = (pred == act).float()
             tot["chance"] += (1.0 / obs["action_mask"].sum(-1).clamp(min=1).float()).sum().item()
             stated = w >= 1.0
             tot["n"] += len(j)
             tot["loss"] += loss.sum().item()
             tot["acc"] += hit.sum().item()
+            tot["acc_exact"] += exact.sum().item()
             tot["n_stated"] += stated.sum().item()
             tot["acc_stated"] += hit[stated].sum().item()
             for d, h in zip(data["deck"][j], hit.tolist(), strict=True):
@@ -74,6 +99,7 @@ def evaluate(model, data, idx, bs, device, amp):
         "n": tot["n"],
         "loss": tot["loss"] / n,
         "acc": tot["acc"] / n,
+        "acc_exact": tot["acc_exact"] / n,
         "acc_stated": tot["acc_stated"] / max(tot["n_stated"], 1),
         "chance": tot["chance"] / n,  # expected accuracy of a uniform pick among the legal options
         "per_deck": {d: round(h / c, 4) for d, (c, h) in sorted(per_deck.items())},
@@ -105,6 +131,10 @@ def main() -> None:
     ap.add_argument("--dropout", type=float, default=0.1)
     ap.add_argument("--wd", type=float, default=0.01)
     ap.add_argument("--label-smoothing", type=float, default=0.0)
+    ap.add_argument(
+        "--set-target", dest="set_target", action=argparse.BooleanOptionalAction, default=True,
+        help="loss = -log(sum of softmax over equiv options); off = plain CE on the action",
+    )
     ap.add_argument("--select-on", choices=["val", "holdout"], default="val")
     ap.add_argument("--patience", type=int, default=0)
     ap.add_argument("--card-dropout", type=float, default=0.0)
@@ -115,6 +145,8 @@ def main() -> None:
     ap.add_argument("--threads", type=int, default=None, help="torch CPU threads (laptop: <= 2)")
     ap.add_argument("--seed", type=int, default=0)
     args = ap.parse_args()
+    if args.set_target and args.label_smoothing:
+        ap.error("--set-target and --label-smoothing are mutually exclusive")
     if args.threads:
         torch.set_num_threads(args.threads)
     torch.manual_seed(args.seed)
@@ -149,13 +181,16 @@ def main() -> None:
     args_rec = {k: str(v) if isinstance(v, Path) else v for k, v in vars(args).items()}
     for ep in range(args.epochs):
         run = {"loss": 0.0, "n": 0}
-        for obs, act, w, j in batches(data, idx["train"], args.batch, device, True, rng):
+        for obs, act, w, eq, j in batches(data, idx["train"], args.batch, device, True, rng):
             with torch.autocast(device.type, dtype=torch.bfloat16, enabled=amp):
                 logits = model(obs)
-            loss = (
-                F.cross_entropy(logits.float(), act, reduction="none", label_smoothing=args.label_smoothing)
-                * w
-            ).sum() / w.sum()
+            if args.set_target:
+                per = set_loss(logits.float(), eq)
+            else:
+                per = F.cross_entropy(
+                    logits.float(), act, reduction="none", label_smoothing=args.label_smoothing
+                )
+            loss = (per * w).sum() / w.sum()
             opt.zero_grad(set_to_none=True)
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
@@ -168,7 +203,9 @@ def main() -> None:
             rec["args"] = args_rec
         for split in ("val", "holdout"):
             if len(idx[split]):
-                rec[split] = evaluate(model, data, idx[split], args.batch * 2, device, amp)
+                rec[split] = evaluate(
+                    model, data, idx[split], args.batch * 2, device, amp, args.set_target
+                )
         print(json.dumps(rec), flush=True)
         log.write(json.dumps(rec) + "\n")
         log.flush()
