@@ -121,17 +121,26 @@ as ground truth:
   L4 full multi-turn games with outcomes. Full-game generator: planner per main phase from the current state, engine-
   verified, rule-based responder, then the policy itself (DAgger). More decks (30–50) with fixed held-out decks.
 - Exit: full games between pool decks with recorded winners; BC v2 trains on the level mix.
+- 2026-10-03 (NOTEBOOK 17:15, 20:30): full games with two-sided interaction are the priority; hand-variant expansions
+  stop (no unseen-deck gain). One curation pipeline (replay check, loops/stalls, judge tier, near-duplicates, holdout
+  decontamination) before mixing; muse judges a sample, a distilled cheap scorer rates everything (Kolibri §2.3.2.3).
 
 ### Phase 4 — BC model (first GPU spend, ~$X)
 - Model: ygo-agent-style transformer, but card input = frozen card vec + small adapter; no ID table.
 - Train BC on Phase 3 data (+ ygo-agent ckpt rollouts as a "general play" prior).
 - Exit: beats ygo-agent ckpt on the trained decks *and* holds up on a held-out deck.
+- Mix chosen from trained candidates scored on holdout accuracy, interruption accuracy and the playtest (each capability
+  its own term); scarce data repeated ≤ ~4×; last-K checkpoint merge (NOTEBOOK 2026-10-03 20:30).
+- Always report turn-level play (paired combo test, best-of-K headroom, matches) next to accuracy.
 
 ### Phase 5 — RL on top (~$X)
 - PPO from the BC init, KL penalty to BC (decayed), VRPO advantages, DAGS starts from demo states,
   small league (BC policy + snapshots + ygo-agent ckpt as fixed opponents).
 - Expert iteration: periodically regenerate search demos with the current policy as prior.
 - Exit: Elo gain on the gauntlet over BC, with no held-out regression.
+- Curriculum by success rate (hard / trainable / solved hands and positions; sample the trainable ones), drop zero-
+  variance groups, DAgger with the verifier/muse as the corrective "hint" on failures; narrated games every run to catch
+  exploits (stalling, loops). Search at decision time (policy-guided verifier DFS / MCTS) is part of "superhuman".
 
 ### Phase 6 — Test-time play
 - Turn-1: policy-guided search (fully available, mostly perfect info).
