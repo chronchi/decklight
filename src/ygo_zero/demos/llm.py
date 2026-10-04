@@ -18,11 +18,13 @@ key only when set.
 
 from __future__ import annotations
 
+import fcntl
 import hashlib
 import json
 import os
 import re
 import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -173,8 +175,37 @@ def _post_server(model: str, system: str | None, prompt: str, variant: str | Non
     return text
 
 
+CLI_SLOTS = int(os.environ.get("YGO_LLM_CLI_SLOTS", "2"))  # machine-wide cap on `opencode run` (~450 MB each)
+
+
+def _cli_slot(timeout: float) -> int:
+    """Hold one of CLI_SLOTS lock files (flock, released when the fd closes); wait up to `timeout` s."""
+    d = CACHE_DIR / "cli-slots"
+    d.mkdir(parents=True, exist_ok=True)
+    end = time.monotonic() + timeout
+    while True:
+        for i in range(CLI_SLOTS):
+            fd = os.open(d / f"{i}.lock", os.O_CREAT | os.O_RDWR)
+            try:
+                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                return fd
+            except OSError:
+                os.close(fd)
+        if time.monotonic() > end:
+            raise RuntimeError(f"cli: no free slot of {CLI_SLOTS} in {timeout:.0f} s")
+        time.sleep(3)
+
+
 def _run_cli(model: str, system: str | None, prompt: str, timeout: int, variant: str | None = None) -> str:
     full = f"{system}\n\n{prompt}" if system else prompt
+    fd = _cli_slot(timeout)
+    try:
+        return _run_cli_locked(model, full, timeout, variant)
+    finally:
+        os.close(fd)
+
+
+def _run_cli_locked(model: str, full: str, timeout: int, variant: str | None) -> str:
     proc = subprocess.run(
         ["opencode", "run", "--pure", "-m", model, *(["--variant", variant] if variant else []), full],
         capture_output=True,
@@ -240,7 +271,9 @@ def complete(
                 if m and int(m.group(1)) not in (429, 500, 502, 503, 504):
                     break
                 time.sleep(2 ** (attempt + 1))
-    # Fallback: CLI subprocess (same cache entry).
+    # Fallback: CLI subprocess (same cache entry), at most CLI_SLOTS at once machine-wide.
+    if errors:
+        print(f"llm: falling back to cli ({'; '.join(errors)[:300]})", file=sys.stderr, flush=True)
     _throttle()
     try:
         text = _run_cli(model, system, prompt, timeout, variant)

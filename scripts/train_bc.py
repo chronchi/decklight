@@ -8,6 +8,9 @@ Metrics per epoch (runs/<name>/metrics.jsonl): loss, top-1 accuracy over legal o
 val (unseen lines of trained decks) and holdout (unseen decks); with --set-target (default) the loss is
 -log(sum of softmax over the equiv set) and acc counts argmax in the equiv set (acc_exact = old definition).
 Checkpoints: last.pt (with optimizer), best.pt (fp16 weights, by val accuracy).
+Mixing: --kind-frac line_expanded=0.2 game_plan=3 redraws each kind's train share every epoch (<1 subsample, >1 repeat).
+Merging: --merge-last K also evaluates the uniform average of the last K epochs' weights (Kolibri tech report §2.2:
+checkpoint merges add points); saved as merged.pt when it beats best.pt on --select-on.
 """
 
 from __future__ import annotations
@@ -117,6 +120,37 @@ def select_train_idx(data, masks, kinds):
     return idx
 
 
+def parse_kind_frac(items: list[str] | None) -> dict[str, float]:
+    out = {}
+    for it in items or []:
+        k, _, v = it.partition("=")
+        out[k] = float(v)
+    return out
+
+
+def epoch_train_idx(data, train_idx: np.ndarray, kind_frac: dict[str, float], rng) -> np.ndarray:
+    """Per-epoch training indices: each kind in kind_frac keeps frac x its samples (fresh draw every epoch; frac > 1
+    repeats the kind floor(frac) times plus a random remainder). Kinds not listed keep all their samples once."""
+    if not kind_frac or "kind" not in data:
+        return train_idx
+    kinds = data["kind"][train_idx]
+    parts = [train_idx[~np.isin(kinds, list(kind_frac))]]
+    for k, f in kind_frac.items():
+        pool = train_idx[kinds == k]
+        if not len(pool) or f <= 0:
+            continue
+        reps, rem = int(f), f - int(f)
+        parts += [pool] * reps
+        if rem > 0:
+            parts.append(rng.choice(pool, size=round(rem * len(pool)), replace=False))
+    return np.concatenate(parts)
+
+
+def average_states(states: list[dict]) -> dict:
+    return {k: (sum(s[k].float() for s in states) / len(states)) if states[0][k].is_floating_point() else states[-1][k]
+            for k in states[0]}
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--shards", type=Path, required=True)
@@ -140,6 +174,9 @@ def main() -> None:
     ap.add_argument("--card-dropout", type=float, default=0.0)
     ap.add_argument("--holdout", nargs="*", default=["kewl-tune"], help="decks never trained on")
     ap.add_argument("--kinds", nargs="*", default=None, help="train only on these sample kinds (default: all)")
+    ap.add_argument("--kind-frac", nargs="*", default=None, metavar="KIND=FRAC",
+                    help="per-epoch share of each kind's train samples (<1 subsample, >1 repeat)")
+    ap.add_argument("--merge-last", type=int, default=0, help="also evaluate the average of the last K epochs")
     ap.add_argument("--limit", type=int, default=None, help="use only the first N samples (smoke)")
     ap.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     ap.add_argument("--threads", type=int, default=None, help="torch CPU threads (laptop: <= 2)")
@@ -170,7 +207,10 @@ def main() -> None:
     n_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     print(f"params {n_params / 1e6:.2f}M device {device} amp {amp}", flush=True)
     opt = torch.optim.AdamW([p for p in model.parameters() if p.requires_grad], lr=args.lr, weight_decay=args.wd)
-    steps = args.epochs * math.ceil(len(idx["train"]) / args.batch)
+    kind_frac = parse_kind_frac(args.kind_frac)
+    n_epoch = len(epoch_train_idx(data, idx["train"], kind_frac, np.random.default_rng(0)))
+    print(f"train samples per epoch {n_epoch} (kind_frac {kind_frac or 'none'})", flush=True)
+    steps = args.epochs * math.ceil(n_epoch / args.batch)
     sched = torch.optim.lr_scheduler.OneCycleLR(
         opt, max_lr=args.lr, total_steps=max(steps, 1), pct_start=0.05
     )
@@ -179,9 +219,11 @@ def main() -> None:
     log = (args.out / "metrics.jsonl").open("a")
     t0 = time.time()
     args_rec = {k: str(v) if isinstance(v, Path) else v for k, v in vars(args).items()}
+    recent: list[dict] = []
     for ep in range(args.epochs):
         run = {"loss": 0.0, "n": 0}
-        for obs, act, w, eq, j in batches(data, idx["train"], args.batch, device, True, rng):
+        ep_idx = epoch_train_idx(data, idx["train"], kind_frac, rng)
+        for obs, act, w, eq, j in batches(data, ep_idx, args.batch, device, True, rng):
             with torch.autocast(device.type, dtype=torch.bfloat16, enabled=amp):
                 logits = model(obs)
             if args.set_target:
@@ -198,7 +240,9 @@ def main() -> None:
             sched.step()
             run["loss"] += loss.item() * len(j)
             run["n"] += len(j)
-        rec = {"epoch": ep, "time": round(time.time() - t0, 1), "n_train": len(idx["train"]), "train_loss": run["loss"] / max(run["n"], 1)}
+        if args.merge_last > 1:
+            recent = (recent + [{k: v.detach().to("cpu", copy=True) for k, v in model.state_dict().items()}])[-args.merge_last:]
+        rec = {"epoch": ep, "time": round(time.time() - t0, 1), "n_train": len(ep_idx), "train_loss": run["loss"] / max(run["n"], 1)}
         if ep == 0:
             rec["args"] = args_rec
         for split in ("val", "holdout"):
@@ -226,6 +270,24 @@ def main() -> None:
             if args.patience > 0 and bad >= args.patience:
                 print(f"early stop at epoch {ep} (no {args.select_on} improvement for {bad} epochs)", flush=True)
                 break
+    if args.merge_last > 1 and len(recent) > 1:
+        live = {k: v.detach().clone() for k, v in model.state_dict().items()}
+        model.load_state_dict(average_states(recent))
+        rec = {"merged_last": len(recent)}
+        for split in ("val", "holdout"):
+            if len(idx[split]):
+                rec[split] = evaluate(model, data, idx[split], args.batch * 2, device, amp, args.set_target)
+        print(json.dumps(rec), flush=True)
+        log.write(json.dumps(rec) + "\n")
+        log.flush()
+        score = rec.get(args.select_on, {}).get("acc", -1.0)
+        if score > best:
+            print(f"merge of last {len(recent)} beats best ({score:.4f} > {best:.4f}): merged.pt + best.pt", flush=True)
+            best = score
+            half = {k: v.half() if v.is_floating_point() else v for k, v in model.state_dict().items()}
+            torch.save(half, args.out / "merged.pt")
+            torch.save(half, args.out / "best.pt")
+        model.load_state_dict(live)
     print(f"done in {time.time() - t0:.0f}s, best {args.select_on} acc {best:.4f}", flush=True)
 
 

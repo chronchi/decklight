@@ -2,8 +2,9 @@
 
     uv run python scripts/playtest.py --ckpt runs/<run>/bc/best.pt [--decks 12] [--seeds 4] [--narrate 2]
 
-1. combo test: per deck, the policy pilots turn 1 alone (going first, opponent passive) on sampled hands; its end board
-   (cards it controls on the field) vs the deck's verified expert lines (mean end-board size of the verified records).
+1. combo test: per deck, the policy pilots turn 1 alone (going first, opponent passive) on the expert lines' own hands;
+   its end board (cards it controls on the field) vs the expert line's. `--samples K` adds best-of-K sampled runs
+   (temperature 1): the gap best-of-K vs greedy is the headroom search/RL can harvest (pass@k vs pass@1, Kolibri §3.2.5).
 2. matches: policy vs random and greedy (both seats, all ordered deck pairs of the sample) -> win rate (Wilson CI);
    `--ygoagent` adds the ygo-agent gauntlet opponent.
 3. narrate: N games policy vs greedy written turn by turn to runs/<run>/playtest/game-<k>.txt for a human audit.
@@ -121,7 +122,7 @@ def _replay_field(engine, rec: dict) -> int:
     return last
 
 
-def combo_test(engine, pol: BCPolicy, deck_name: str, hands: int) -> dict:
+def combo_test(engine, pol: BCPolicy, deck_name: str, hands: int, sampler: BCPolicy | None = None, k: int = 0) -> dict:
     """Paired test on the expert's own hands: for each verified going-first line record (same config and seed, so the
     same opening hand), the policy plays turn 1 from scratch; compare its end field with the expert line's."""
     from ygo_zero.demos.dataset import record_config
@@ -132,7 +133,13 @@ def combo_test(engine, pol: BCPolicy, deck_name: str, hands: int) -> dict:
             env = CppEnv(engine, record_config(r), r.get("auto_single", True))
             mine, n = _turn1_field(env, env.reset(), lambda o: int(pol({k: v[None] for k, v in o.items()}, np.array([0]))[0]))
             expert = _replay_field(engine, r)
-            pairs.append((mine, expert, n))
+            best = mine
+            for _ in range(k if sampler is not None else 0):
+                env = CppEnv(engine, record_config(r), r.get("auto_single", True))
+                f, _n = _turn1_field(env, env.reset(),
+                                     lambda o: int(sampler({kk: v[None] for kk, v in o.items()}, np.array([0]))[0]))
+                best = max(best, f)
+            pairs.append((mine, expert, n, best))
         except Exception:  # noqa: BLE001, S112 - a record that no longer replays is skipped
             continue
     if not pairs:
@@ -144,6 +151,8 @@ def combo_test(engine, pol: BCPolicy, deck_name: str, hands: int) -> dict:
         "expert_end_board": round(statistics.mean(p[1] for p in pairs), 2),
         "policy_decisions": round(statistics.mean(p[2] for p in pairs), 1),
         "ge_expert": round(sum(p[0] >= p[1] for p in pairs) / len(pairs), 2),
+        "best_of_k_end_board": round(statistics.mean(p[3] for p in pairs), 2) if k else None,
+        "best_of_k_ge_expert": round(sum(p[3] >= p[1] for p in pairs) / len(pairs), 2) if k else None,
         "expert_lines": len(pairs),
     }  # fmt: skip
 
@@ -181,6 +190,7 @@ def main() -> None:
     ap.add_argument("--hands", type=int, default=6, help="combo-test hands per deck")
     ap.add_argument("--seeds", type=int, default=3, help="match seeds per ordered deck pair")
     ap.add_argument("--narrate", type=int, default=2)
+    ap.add_argument("--samples", type=int, default=0, help="best-of-K sampled turn-1 runs per hand (headroom)")
     ap.add_argument("--ygoagent", action="store_true")
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--device", default="cpu")
@@ -195,17 +205,19 @@ def main() -> None:
     sample = rng.sample(train_d, min(args.decks // 2, len(train_d))) + rng.sample(hold_d, min(args.decks // 2, len(hold_d)))
     engine, names = Engine(), CardNames().names
     pol = BCPolicy(args.ckpt, args.emb, device=args.device)
+    sampler = BCPolicy(args.ckpt, args.emb, temperature=1.0, seed=args.seed, device=args.device) if args.samples else None
     out_dir = args.ckpt.parent.parent / "playtest"
     out_dir.mkdir(parents=True, exist_ok=True)
     report: dict = {"ckpt": str(args.ckpt), "decks": sample, "holdout": sorted(set(sample) & hold)}
 
     combos = []
     for d in sample:
-        combos.append(combo_test(engine, pol, d, args.hands) | {"holdout": d in hold})
+        combos.append(combo_test(engine, pol, d, args.hands, sampler, args.samples) | {"holdout": d in hold})
         c = combos[-1]
         print(f"combo {c['deck'][:34]:34s} {'H' if c['holdout'] else ' '} same {c['hands']} hands: policy field "
               f"{c['policy_end_board']} vs expert {c['expert_end_board']}, policy >= expert on {c['ge_expert']} "
-              f"({c['policy_decisions']} decisions)", flush=True)
+              f"({c['policy_decisions']} decisions); best-of-{args.samples} {c.get('best_of_k_end_board')} "
+              f">= expert on {c.get('best_of_k_ge_expert')}", flush=True)
     report["combo"] = combos
 
     decks = [load_ydk(ROOT / "decks" / "pool" / f"{d}.ydk") for d in sample]
@@ -218,7 +230,7 @@ def main() -> None:
     report["matches"] = {}
     for name, opp in opps:
         games = play_match(engine, decks, pol, opp, pairs, range(args.seeds), num_envs=64, num_threads=args.threads)
-        w = sum(g.win for g in games)
+        w = sum(g.winner_is_a for g in games)
         lo, hi = wilson(w, len(games))
         report["matches"][name] = {"games": len(games), "win_rate": round(w / len(games), 3), "ci": [round(lo, 3), round(hi, 3)]}
         print(f"vs {name:8s}: {w:.0f}/{len(games)} = {w / len(games):.1%}  [{lo:.1%}, {hi:.1%}]", flush=True)

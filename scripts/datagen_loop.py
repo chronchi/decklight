@@ -285,8 +285,8 @@ def session_command(hhmm: str, name: str = "lines") -> list[str]:
 
 def bc_command(name: str) -> list[str]:
     return ["uv", "run", "--no-sync", "python", "scripts/vast_job.py",
-            "--name", name, "--cmd", f"bash scripts/vast_bc_scale.sh {name} 15",
-            "--hours", "2", "--max-dph", "0.5", "--min-cpus", "16",
+            "--name", name, "--cmd", f"bash scripts/vast_bc_scale.sh {name} 12",
+            "--hours", "3", "--max-dph", "0.5", "--min-cpus", "16",
             "--min-gpu-ram", "12", "--extra-query", "compute_cap>=800",
             "--data", "data/demos", "data/cards/emb", "decks"]
 
@@ -409,7 +409,8 @@ class DatagenLoop:
         fh = open(log_path, "ab")  # noqa: SIM115 - handle stays open for the child's lifetime
         env = dict(os.environ)
         env["YGO_OPENCODE_SERVER"] = LLM_SERVER_URL
-        proc = subprocess.Popen(cmd, stdout=fh, stderr=subprocess.STDOUT, cwd=ROOT, env=env)
+        proc = subprocess.Popen(cmd, stdout=fh, stderr=subprocess.STDOUT, cwd=ROOT, env=env,
+                                preexec_fn=_oom_first)
         child = Child(kind=kind, proc=proc, log_file=fh, log_path=log_path,
                       started=time.time(), **kw)
         self.children.append(child)
@@ -543,7 +544,8 @@ class DatagenLoop:
         if self._line_session() is None:
             return  # planners verify --remote on a lines box
         running = {c.deck for c in self._live("planner")}
-        while len(self._live("planner")) < self.args.planners:
+        orphans = max(0, running_scripts("plan_lines.py") - len(self._live("planner")))
+        while len(self._live("planner")) + orphans < self.args.planners:
             deck = choose_planner_deck(ROOT, running)
             if deck is None:
                 return
@@ -593,7 +595,8 @@ class DatagenLoop:
             self._launch("judge", judge_command(), RUNS_CACHE / "judge.log", desc="judge_games")
 
     def _ensure_games(self, remote: bool = False) -> None:
-        while len(self._live("game")) < self.args.games:
+        orphans = max(0, running_scripts("play_games.py") - len(self._live("game")))
+        while len(self._live("game")) + orphans < self.args.games:
             decks = eligible_game_decks(ROOT)
             if len(decks) < 2:
                 self.log("games: fewer than 2 eligible decks")
@@ -720,6 +723,31 @@ class DatagenLoop:
         self._ensure_judge()
         self._ensure_bc(now, credit)
         return False
+
+
+def running_scripts(script: str) -> int:
+    """Python processes running `scripts/<script>` machine-wide (uv wrappers not counted). Includes workers orphaned
+    by a previous driver, so a restarted driver does not oversubscribe the laptop or the LLM server."""
+    n = 0
+    for d in Path("/proc").iterdir():
+        if not d.name.isdigit():
+            continue
+        try:
+            argv = (d / "cmdline").read_bytes().split(b"\0")
+        except OSError:
+            continue
+        if argv and Path(argv[0].decode(errors="ignore")).name.startswith("python") and \
+                any(a.decode(errors="ignore").endswith(f"scripts/{script}") for a in argv[1:3]):
+            n += 1
+    return n
+
+
+def _oom_first() -> None:
+    """Children volunteer for the OOM killer before the driver (2026-10-03: an OOM took the driver down)."""
+    try:
+        Path("/proc/self/oom_score_adj").write_text("500")
+    except OSError:
+        pass
 
 
 def pin_laptop() -> None:
