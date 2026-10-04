@@ -662,6 +662,26 @@ def build_opening(engine: Engine, rec: dict, deck_b: Deck, seed: int = 0
     return config, out_c, out_l
 
 
+def waiting_on_limits(fn: Callable[[str], str], log: Callable[[str], None], max_wait: float = 1800,
+                      pause: float = 60) -> Callable[[str], str]:
+    """`fn` that waits out LLM rate/usage limits (errors mentioning "limit": llm.QuotaExceeded / ModelLimited) instead
+    of failing the decision. 2026-10-04: a Go output-token rate limit turned 46 game turns into "no verified plan"
+    (played by the rule-based fallback) within minutes; waiting keeps every turn LLM-decided."""
+
+    def call(prompt: str) -> str:
+        t0 = time.time()
+        while True:
+            try:
+                return fn(prompt)
+            except Exception as e:
+                if "limit" not in str(e).lower() or time.time() - t0 > max_wait:
+                    raise
+                log(f"  LLM limited, retrying in {pause:.0f}s: {str(e)[:80]}")
+                time.sleep(pause)
+
+    return call
+
+
 def play_game(
     engine: Engine,
     decks: tuple[tuple[str, Deck], tuple[str, Deck]],
@@ -687,6 +707,9 @@ def play_game(
     plans turn 2 against the established board. The record carries "opening" (None here; the driver fills in the
     source record's line_id). A prefix that no longer replays raises ValueError (the driver skips the record)."""
     (name0, deck0), (name1, deck1) = decks
+    complete_fn = waiting_on_limits(complete_fn, log)
+    if interrupt_fn is not None:
+        interrupt_fn = waiting_on_limits(interrupt_fn, log)
     if opening is not None:
         oconfig, ochoices, olabels = opening
         config = oconfig
