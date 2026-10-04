@@ -192,6 +192,14 @@ def _server_req(method: str, path: str, body: dict | None, timeout: float) -> di
     return json.loads(raw) if raw else None
 
 
+# Tools off for models that allow it (opencode-go): with tools on, muse acted as an agent during completions and read
+# repo files (verify.py, game.py, card scripts; 24 file reads in 12 min, 2026-10-04), slowing every answer. The free
+# Zen tier rejects requests without OpenCode's tool set, so it keeps tools plus a "no tools" instruction.
+_NO_TOOLS = {t: False for t in ["bash", "edit", "write", "read", "grep", "glob", "list", "patch", "webfetch", "websearch",
+                                "task", "todowrite", "todoread", "skill", "question"]}  # fmt: skip
+_NO_TOOLS_NOTE = "Answer directly from the prompt. Do not use any tools and do not read files."
+
+
 def _post_server(model: str, system: str | None, prompt: str, variant: str | None, timeout: int) -> str:
     """One completion through the opencode server: a throwaway session, tools off, then deleted."""
     provider, model_id = model.split("/", 1)
@@ -202,6 +210,10 @@ def _post_server(model: str, system: str | None, prompt: str, variant: str | Non
         # OPENCODE_CONFIG=config/opencode-llm.json with bash/edit/webfetch/... = "ask"; nobody answers, so a tool call stalls to the timeout).
         body = {"model": {"providerID": provider, "modelID": model_id},
                 "parts": [{"type": "text", "text": prompt}]}  # fmt: skip
+        if model_id.endswith("-free"):
+            system = f"{system}\n{_NO_TOOLS_NOTE}" if system else _NO_TOOLS_NOTE
+        else:
+            body["tools"] = _NO_TOOLS
         if system:
             body["system"] = system
         if variant:
