@@ -47,7 +47,7 @@ SESSION_RETRY_S = 30 * 60
 REPO_BUDGET_BYTES = 45 * 1024**3
 KILL_GRACE_S = 180  # a SIGTERMed vast launcher destroys its box in `finally` (destroy verifies for up to 60 s)
 
-CHILD_LIMITS = {"judge": 2 * 3600, "planner": 3 * 3600, "improver": 3 * 3600, "expander": 2 * 3600, "game": 2 * 3600, "session": 30 * 60,
+CHILD_LIMITS = {"judge": 2 * 3600, "planner": 3 * 3600, "improver": 3 * 3600, "expander": 2 * 3600, "game": int(2.5 * 3600), "session": 30 * 60,
                 "bc": int(3.6 * 3600)}  # > the job cap (3 h) + pull + destroy: 3.0 here killed 2 launchers before the pull
 
 
@@ -248,7 +248,7 @@ def expand_command(vf: Path, lines_dir: Path, out_dir: Path, skips: list[str], s
 
 def game_command(a: str, b: str, seed: int, variant: str | None, remote: bool = False) -> list[str]:
     cmd = ["uv", "run", "--no-sync", "python", "scripts/play_games.py",
-           "--pairs", f"{a}:{b}", "--games", "1", "--seed", str(seed), "--max-turns", "12"]
+           "--pairs", f"{a}:{b}", "--games", "1", "--seed", str(seed), "--max-turns", "16"]  # 12 left 32% of games unfinished (2026-10-04 audit)
     # turn plans keep muse's default effort (realism); interruption asks run at minimal (play_games default)
     if remote:
         cmd += ["--remote", "--budget", "20000"]  # complex decks (Tearlaments) exhaust 4000 nodes every turn

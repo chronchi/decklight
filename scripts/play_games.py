@@ -45,13 +45,13 @@ ap.add_argument("--max-turns", type=int, default=6)
 ap.add_argument("--budget", type=int, default=4000)
 ap.add_argument("--model", default="opencode/muse-spark-1.3-contributor-free")
 ap.add_argument("--out", type=Path, default=Path("data/demos/games"))
-ap.add_argument("--max-seconds", type=float, default=5400, help="stop at the next turn boundary after this")
+ap.add_argument("--max-seconds", type=float, default=7900, help="stop at the next turn boundary after this")
 ap.add_argument("--variant", default=None, help="muse reasoning effort for turn plans (default: provider's)")
 ap.add_argument("--interrupt-variant", default="minimal", help="muse reasoning effort for interruption asks")
 ap.add_argument("--remote", action="store_true", default=False,
                 help="verify turn plans on the games session box (falls back to local)")
-ap.add_argument("--interrupts", type=int, default=3,
-                help="LLM interruption asks per turn for the responding player (0 = old random behaviour)")
+ap.add_argument("--interrupts", type=int, default=6,
+                help="LLM interruption asks per turn for the responding player (0 = never activate on the opponent's turn)")
 ap.add_argument("--from-line", default=None,
                 help="verified records file/dir for going-second openings: replay a verified turn-1 line "
                      "of deck A as turn 1 instead of planning it (deck B then plays turn 2 against the board)")

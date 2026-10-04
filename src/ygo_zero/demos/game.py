@@ -182,13 +182,16 @@ JSON only, no prose."""
 
 class Responder:
     """Rule-based decisions outside plans: activate hand traps / quick effects at the opponent's chain windows with
-    probability `p_trap`, answer optional triggers YES with `p_yes`, attack when possible, otherwise the first
-    non-cancel option. Seeded, so a game is reproducible."""
+    probability `p_trap` (0 by default since 2026-10-04: 78% of opponent-turn activations were this coin flip, fired
+    at pointless windows; only the LLM `Interrupter` activates now), answer optional triggers YES with `p_yes`, battle
+    with `battle_choice` (attack only into monsters it beats, direct attacks first), otherwise the first non-cancel
+    option. Seeded, so a game is reproducible."""
 
-    def __init__(self, seed: int, p_trap: float = 0.25, p_yes: float = 0.8):
+    def __init__(self, seed: int, p_trap: float = 0.0, p_yes: float = 0.8):
         self.rng = random.Random(seed)
         self.p_trap = p_trap
         self.p_yes = p_yes
+        self.attacker_atk: int | None = None  # set after declaring an attack: the next card pick is its target
 
     def passive(self, obs) -> int:
         for i, (k, _) in enumerate(_opts(obs)):
@@ -211,9 +214,13 @@ class Responder:
         if Kind.YES in kinds and Kind.NO in kinds:
             return kinds.index(Kind.YES) if self.rng.random() < self.p_yes else kinds.index(Kind.NO)
         if msg == C.MSG_SELECT_BATTLECMD:
-            atk = [i for i, k in enumerate(kinds) if k == Kind.ATTACK]
-            if atk:
-                return self.rng.choice(atk)
+            i, self.attacker_atk = battle_choice(obs)
+            return i
+        if self.attacker_atk is not None and my_turn and msg == C.MSG_SELECT_CARD:
+            t = attack_target(obs, self.attacker_atk)
+            self.attacker_atk = None
+            if t is not None:
+                return t
         if (
             msg == C.MSG_SELECT_IDLECMD
         ):  # an unplanned main phase: go to battle if possible, else end the turn
@@ -222,6 +229,68 @@ class Responder:
                     return kinds.index(want)
         cand = [i for i, k in enumerate(kinds) if k != Kind.CANCEL]
         return cand[0] if cand else 0
+
+
+_MZONE = 3  # obs location id of the monster zone (obs_spec)
+_FD_GUESS = 1500  # assumed DEF of a face-down monster
+
+
+def _row(obs, i: int):
+    r = int(obs["actions"][i][1])
+    return obs["cards"][r] if r >= 0 else None
+
+
+def _beats(my_atk: int, row) -> int | None:
+    """How good attacking this opponent monster is (higher = better), None when the attack loses or bounces."""
+    pos, atk, dfn = int(row[5]), int(row[14]), int(row[15])
+    if pos == 1:  # face-up attack: destroys and deals damage
+        return 10_000 + atk if my_atk > atk else None
+    if pos == 3:  # face-up defense
+        return 5_000 + dfn if my_atk > dfn else None
+    return 1_000 if my_atk > _FD_GUESS else None  # face-down: unknown DEF
+
+
+def battle_choice(obs) -> tuple[int, int | None]:
+    """Battle-phase rule (2026-10-04, replaces a random attack): a direct attack with the strongest monster that can;
+    else the attack that destroys the most valuable monster this attacker beats; else Main Phase 2 / end.
+    Returns (option index, attacker ATK when an attack that needs a target was declared)."""
+    opts = _opts(obs)
+    opp = [r for r in obs["cards"][obs["card_mask"]] if int(r[3]) == 1 and int(r[1]) == _MZONE]
+    best: tuple[int, int, int | None] | None = None  # (score, option, attacker atk for target pick)
+    for i, (k, _) in enumerate(opts):
+        if k != Kind.ATTACK:
+            continue
+        row = _row(obs, i)
+        my_atk = int(row[14]) if row is not None else 0
+        if int(obs["actions"][i][5]) == 1 or not opp:  # can attack directly
+            cand = (100_000 + my_atk, i, None)
+        else:
+            scores = [s for s in (_beats(my_atk, r) for r in opp) if s is not None]
+            if not scores:
+                continue
+            cand = (max(scores), i, my_atk)
+        if best is None or cand[0] > best[0]:
+            best = cand
+    if best is not None:
+        return best[1], best[2]
+    kinds = [k for k, _ in opts]
+    for want in (Kind.TO_MAIN2, Kind.TO_END):
+        if want in kinds:
+            return kinds.index(want), None
+    return 0, None
+
+
+def attack_target(obs, my_atk: int) -> int | None:
+    """The target pick after an attack declaration: the opponent monster with the best `_beats` score."""
+    best = None
+    for i, (k, _) in enumerate(_opts(obs)):
+        row = _row(obs, i) if k == Kind.SELECT else None
+        if row is None or int(row[3]) != 1:
+            continue
+        sc = _beats(my_atk, row)
+        if sc is not None and (best is None or sc > best[0]):
+            best = (sc, i)
+    return None if best is None else best[1]
 
 
 def _opts(obs) -> list[tuple[int, int]]:
