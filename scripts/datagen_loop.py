@@ -274,6 +274,8 @@ def session_label(name: str, hhmm: str) -> str:
 
 
 def line_session_names(n: int) -> list[str]:
+    if n <= 0:
+        return []  # games-only mode: no warm lines box
     return ["lines"] + [f"lines{k}" for k in range(2, n + 1)]
 
 
