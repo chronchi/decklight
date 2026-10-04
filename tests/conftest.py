@@ -28,3 +28,12 @@ def decks():
     from ygo_zero.decks import load_ydk
 
     return {p.stem: load_ydk(p) for p in sorted((FIXTURES / "decks").glob("*.ydk"))}
+
+
+@pytest.fixture(autouse=True)
+def _no_real_opencode_log(monkeypatch, tmp_path):
+    """llm reads opencode's log for rate/usage limits; tests must not depend on the machine's live log."""
+    from ygo_zero.demos import llm
+
+    monkeypatch.setattr(llm, "OPENCODE_LOG", tmp_path / "no-opencode.log")
+    monkeypatch.setattr(llm, "QUOTA_MARKER", tmp_path / "QUOTA_EXCEEDED")

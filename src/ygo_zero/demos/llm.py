@@ -18,6 +18,7 @@ key only when set.
 
 from __future__ import annotations
 
+import calendar
 import fcntl
 import hashlib
 import json
@@ -76,25 +77,50 @@ class QuotaExceeded(RuntimeError):
     """The OpenCode Go plan's usage limit is hit: every backend will hang/retry, so fail fast (2026-10-03 20:30)."""
 
 
-def quota_exceeded(window_s: float = 600) -> bool:
-    """True when opencode logged "usage limit exceeded" in the last `window_s` seconds (tail of its log)."""
+LIMIT_PATTERNS = ("usage limit exceeded", "rate limit exceeded", "insufficient account funds")
+# the free Zen model rate-limits at our volume (2026-10-03 21:50); the paid Go plan model takes over while it does
+FALLBACK_MODEL = os.environ.get("YGO_LLM_FALLBACK", "opencode-go/muse-spark-1.3-contributor") or None
+
+
+class ModelLimited(RuntimeError):
+    """opencode logged a rate/usage/funds limit for this model while our request was pending."""
+
+
+def _log_tail(n_bytes: int = 300_000) -> list[str]:
     try:
         with open(OPENCODE_LOG, "rb") as f:
             f.seek(0, 2)
-            f.seek(max(0, f.tell() - 200_000))
-            tail = f.read().decode(errors="ignore").splitlines()
+            f.seek(max(0, f.tell() - n_bytes))
+            return f.read().decode(errors="ignore").splitlines()
     except OSError:
-        return False
-    now = time.time()
-    for line in reversed(tail):
-        if "usage limit exceeded" not in line.lower():
-            continue
+        return []
+
+
+def limit_hit(since: float, model_id: str | None = None) -> bool:
+    """Whether opencode logged a limit error (LIMIT_PATTERNS) at or after `since` (epoch s), for `model_id` if given."""
+    for line in reversed(_log_tail()):
         m = re.match(r"timestamp=(\S+?)(?:\.\d+)?Z", line)
         if not m:
+            continue
+        t = calendar.timegm(time.strptime(m.group(1), "%Y-%m-%dT%H:%M:%S"))  # UTC (mktime - timezone broke on DST)
+        if t < since:
+            return False
+        low = line.lower()
+        if "level=error" not in low or not any(p in low for p in LIMIT_PATTERNS):
+            continue
+        mid = re.search(r"modelID=(\S+)", line)
+        if model_id is None or (mid and mid.group(1) == model_id):
             return True
-        t = time.mktime(time.strptime(m.group(1), "%Y-%m-%dT%H:%M:%S")) - time.timezone
-        return now - t < window_s
     return False
+
+
+def model_limited(model: str, window_s: float = 300) -> bool:
+    return limit_hit(time.time() - window_s, model.split("/", 1)[-1])
+
+
+def quota_exceeded(window_s: float = 600) -> bool:
+    """True when opencode logged any limit error (LIMIT_PATTERNS) in the last `window_s` seconds."""
+    return limit_hit(time.time() - window_s)
 
 
 def _flag_quota() -> None:
@@ -180,7 +206,30 @@ def _post_server(model: str, system: str | None, prompt: str, variant: str | Non
             body["system"] = system
         if variant:
             body["variant"] = variant
-        r = _server_req("POST", f"/session/{sid}/message", body, timeout)
+        # the request runs in a thread so a limit error (which opencode retries silently until our timeout) aborts it
+        # within ~10 s instead of hanging for `timeout`
+        out: dict = {}
+
+        def run() -> None:
+            try:
+                out["r"] = _server_req("POST", f"/session/{sid}/message", body, timeout)
+            except Exception as e:  # noqa: BLE001 - re-raised below
+                out["e"] = e
+
+        t0 = time.time()
+        th = threading.Thread(target=run, daemon=True)
+        th.start()
+        while th.is_alive():
+            th.join(10)
+            if th.is_alive() and limit_hit(t0 - 2, model_id):
+                try:
+                    _server_req("POST", f"/session/{sid}/abort", {}, 15)
+                except Exception:  # noqa: BLE001, S110 - best effort
+                    pass
+                raise ModelLimited(f"{model} limited (opencode log)")
+        if "e" in out:
+            raise out["e"]
+        r = out.get("r")
     finally:
         try:
             _server_req("DELETE", f"/session/{sid}", None, 30)
@@ -257,19 +306,29 @@ def complete(
         return json.loads(path.read_text())["response"]
 
     errors: list[str] = []
+    models = [model] + ([FALLBACK_MODEL] if FALLBACK_MODEL and model.endswith("-free") else [])
+    usable = [m for m in models if not model_limited(m)]
+    if not usable:
+        _flag_quota()
     if SERVER_URL:
-        for attempt in range(2):
-            _throttle()
-            try:
-                text = _post_server(model, system, prompt, variant, timeout)
-                _write_cache(path, {"model": model, "variant": variant, "response": text})
-                last_backend = "server"
-                return text
-            except Exception as e:  # noqa: BLE001 - retry once, then fall back to the CLI
-                errors.append(f"server try{attempt}: {e}"[:300])
-                if quota_exceeded():
-                    _flag_quota()
-                time.sleep(2 ** (attempt + 1))
+        for m in usable:
+            for attempt in range(2):
+                _throttle()
+                try:
+                    text = _post_server(m, system, prompt, variant, timeout)
+                    _write_cache(path, {"model": m, "variant": variant, "response": text})
+                    last_backend = "server" if m == model else "server-fallback"
+                    return text
+                except ModelLimited as e:
+                    errors.append(str(e))
+                    break  # next model
+                except Exception as e:  # noqa: BLE001 - retry once, then the next backend
+                    errors.append(f"server {m} try{attempt}: {e}"[:300])
+                    time.sleep(2 ** (attempt + 1))
+        usable = [m for m in models if not model_limited(m)]
+        if not usable:
+            _flag_quota()
+        model = usable[-1]
     # Primary: HTTP endpoint, 3 attempts with backoff on 429/5xx.
     # Skipped entirely once it has failed in this process.
     try:
@@ -294,7 +353,7 @@ def complete(
                 if m and int(m.group(1)) not in (429, 500, 502, 503, 504):
                     break
                 time.sleep(2 ** (attempt + 1))
-    if quota_exceeded():
+    if model_limited(model):
         _flag_quota()
     # Fallback: CLI subprocess (same cache entry), at most CLI_SLOTS at once machine-wide.
     if errors:
