@@ -105,7 +105,28 @@ def main() -> None:
         print(f"  with winner {win} ({win / len(games):.0%}), mean end turn {statistics.mean(turns):.1f}, "
               f"going-second openings {opened}")
         print(f"  interruption asks {len(ints)} (activated {used}, passed {len(ints) - used})")
-        print(f"  decks seen in games: {len(in_games)} / {len(pool) - len(holdout & set(pool))} train decks")
+        print(f"  decks seen in games: {len(in_games)} of {len(pool)} pool decks")
+        # realism checks (NOTEBOOK 2026-10-03 20:55 / 21:30)
+        starved = [g for g in games if g.get("opening") and g.get("config", {}).get("hand", 5) == 0
+                   and not any(int(p[0]) == 1 and int(p[2]) == 2 for p in g.get("config", {}).get("setup", []))]
+        good_open = [g for g in games if g.get("opening") and g not in starved]
+        t1 = sum(any(x.get("turn") == 1 and x.get("card") not in ("-", None) for x in g.get("interrupts", []))
+                 for g in good_open)
+        print(f"  opening games: {len(good_open)} with a real opponent hand ({t1} with a turn-1 activation by the "
+              f"second player); {len(starved)} starved (excluded from training)")
+        weak = total = 0
+        for g in games:
+            if g in starved:
+                continue
+            for e in g.get("plans", []):
+                if e.get("player") == 1 and e.get("turn") == 2 and e.get("why") == "turn":
+                    ok = [a for a in e.get("attempts", []) if a.get("reason") == "ok"]
+                    steps = (ok[-1].get("line") or {}).get("steps", []) if ok else []
+                    total += 1
+                    weak += len(steps) == 0 or (len(steps) == 1 and steps[0].get("action") in
+                                                ("set_spelltrap", "set_monster"))
+        if total:
+            print(f"  second player's turn-2 plan: weak (no plan / pass / one Set) {weak}/{total} = {weak / total:.0%}")
     judged = list((DEMOS / "games_judged").glob("*.jsonl")) if (DEMOS / "games_judged").exists() else []
     if judged:
         scores = [int(t["score"]) for f in judged for j in load(f) for t in j.get("turns", {}).values()
