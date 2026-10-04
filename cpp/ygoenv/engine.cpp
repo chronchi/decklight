@@ -212,7 +212,11 @@ const Bytes* Duel::advance() {
         win_reason = m[2];
         ended = true;
         break;
+      } else if (t == MSG_HINT && size >= 11 && m[1] == HINT_SELECTMSG) {
+        std::memcpy(&hint_, m + 3, 8);
       } else if (is_select(t)) {
+        select_hint = hint_;
+        hint_ = 0;
         pending_.assign(m, m + size);
         has_pending_ = true;
       }

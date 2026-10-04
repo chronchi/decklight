@@ -104,6 +104,7 @@ PYBIND11_MODULE(_ygoenv, m) {
       })
       .def_property_readonly("player", &Env::player)
       .def_property_readonly("turn", [](const Env& e) { return e.duel().turn; })
+      .def_property_readonly("select_hint", [](const Env& e) { return e.duel().select_hint; })
       .def_property_readonly("errors", [](const Env& e) { return e.duel().errors; })
       .def_readonly("choices", &Env::choices)
       .def_readonly("decisions", &Env::decisions)

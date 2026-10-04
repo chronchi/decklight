@@ -108,9 +108,11 @@ class Duel {
   bool ended = false;
   int winner = -1, win_reason = 0;
   int turn = 0, turn_player = 0, first_player = -1, phase = 0;
+  uint64_t select_hint = 0;  // HINT_SELECTMSG sent just before the pending select message (0 = none)
 
  private:
   OCG_Duel handle_ = nullptr;
+  uint64_t hint_ = 0;
   Bytes pending_;
   bool has_pending_ = false;
   void add_cards(uint8_t team, uint32_t location, const std::vector<uint32_t>& codes);
