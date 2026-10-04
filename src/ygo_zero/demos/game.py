@@ -595,24 +595,12 @@ def play_game(
         return []
 
     if opening is not None:
-        for k, (i, lab) in enumerate(zip(ochoices, olabels, strict=True)):
-            if obs is None:
-                raise ValueError(f"opening prefix ended early at choice {k}/{len(ochoices)}")
-            if not 0 <= int(i) < len(_opts(obs)):
-                raise ValueError(f"opening choice {k} illegal: {i}")
-            actors.append(0)
-            turns.append(int(obs["global"][2]))
-            try:
-                code = int(obs["actions"][int(i)][2])
-            except (IndexError, TypeError):
-                code = 0
-            acted.append((0, code))
-            if bool(int(obs["global"][5])) and int(obs["actions"][int(i)][0]) in _TRIGGER_KINDS:
-                moves[0] += 1
-            choices.append(int(i))
-            labels.append(lab)
-            obs = env.step(int(i))
-        tried.add((1, 0))  # turn 1 belonged to the opening line; the game continues from its end
+        # the verified turn-1 line becomes player 0's turn-1 PLAN (not a blind prefix): the second player's chain windows
+        # inside it go through `decide` (deliberate LLM interruptions / responder), so hand traps on turn 1 happen like in
+        # any game; an interruption breaks the line and player 0 replans from the interrupted state.
+        planned = [(int(i), str(lab)) for i, lab in zip(ochoices, olabels, strict=True)]
+        plan_owner, plan_turn = 0, 1
+        tried.add((1, 0))  # no fresh LLM plan at the start of turn 1: the opening line is the plan
 
     while obs is not None:
         turn = int(obs["global"][2])

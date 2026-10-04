@@ -162,18 +162,8 @@ def test_opening_replay_then_turn_two(monkeypatch):
     assert rec["winner"] == 1
 
 
-def test_opening_prefix_ending_early_raises(monkeypatch):
-    import pytest
-
-    with pytest.raises(ValueError):
-        _play(monkeypatch, _EnvEarlyEnd, _opening())
-
-
-def test_opening_illegal_index_raises(monkeypatch):
-    import pytest
-
-    with pytest.raises(ValueError):
-        _play(monkeypatch, _EnvContinue, _opening(choices=(0, 9)))
+# Openings are no longer replayed blindly (2026-10-03): the line is player 0's turn-1 plan, so the second player can
+# interrupt it. Bad openings are rejected up front by `build_opening`/`opening_valid` (tested below).
 
 
 def test_opening_valid(monkeypatch):
