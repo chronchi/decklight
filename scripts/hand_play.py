@@ -13,9 +13,13 @@ so each command is a fresh process that replays the duel.
 Tokens: an option number; P (pass/no/cancel at a prompt); KIND:name-substring where KIND is a prefix of the
 option kind (ACT, SUM, SPS, MSET, SSET, SEL, UNSEL, YES, NO, ATK, OPT, FIN, CANCEL) or one of END (TO_END),
 BP (TO_BATTLE), M2 (TO_MAIN2). `do` stops at the first token that matches no option and prints the state.
-PASS* passes through chain windows that offer nothing new (only activations already on offer when it
-started) for the current seat, stopping at a seat, message, chain, turn or phase change, a new activation or
-an optional-trigger prompt (50 steps max); those answers are labeled `pass`.
+A numeric token is only valid while the current prompt's option list still equals the option list of the
+prompt the command started on (numbers re-index after every pick, so a stale number would hit the wrong
+card); otherwise `do` stops with a prompt-changed message. Named tokens (SEL:name, P, ...) keep working
+across prompts as today. PASS* passes through chain windows that offer nothing new (per seat: only
+activations already on offer at that seat's first window of the run), for either seat, stopping at a
+non-chain message, chain length change, turn or phase change, a new activation for either seat
+(50 steps max); those answers are labeled `pass`.
 `do --auto-pass` appends PASS* after the last token. `show`/`do --json` print one machine-readable object
 instead of the text view.
 """
@@ -52,6 +56,10 @@ _ALIASES = {"END": Kind.TO_END, "BP": Kind.TO_BATTLE, "M2": Kind.TO_MAIN2, "ATK"
 _PASSIVE = (Kind.PASS, Kind.NO, Kind.CANCEL, Kind.FINISH)
 _MSGS = {v: k for k, v in vars(C).items() if k.startswith("MSG_")}
 _PASS_STEPS = 50
+_MULTI_MSGS = (C.MSG_SELECT_CARD, C.MSG_SELECT_UNSELECT_CARD, C.MSG_SELECT_TRIBUTE, C.MSG_SELECT_SUM)
+# Option-row location labels (obs action col 7; 0 = no card). Matches game._LOCS wording.
+_LOC_NAMES = {1: "Deck", 2: "hand", 3: "Monster Zone", 4: "S/T Zone", 5: "GY",
+              6: "banished", 7: "Extra Deck", 8: "Xyz"}  # fmt: skip
 
 
 def _load(game: str) -> dict:
@@ -69,10 +77,26 @@ def _config(st: dict) -> DuelConfig:
     return DuelConfig(d0, d1, seed=st["seed"])
 
 
+# seat -> live options it passed on at its latest chain window, valid until the next real action or turn
+_DECLINED: dict[int, set] = {}
+
+
+def _note(env, obs, i: int) -> None:
+    """Track declined chain windows for PASS*: a pass at a chain window records that seat's live options; any
+    other choice (an action) or a new turn forgets all of them."""
+    k = _opts(obs)[i][0]
+    if int(obs["global"][21]) == C.MSG_SELECT_CHAIN and k in _PASSIVE:
+        _DECLINED[env.player] = _live(obs) | {("turn", int(obs["global"][2]))}
+    elif int(obs["global"][21]) != C.MSG_SELECT_PLACE:
+        _DECLINED.clear()
+
+
 def _replay(engine: Engine, st: dict):
     env = CppEnv(engine, _config(st))
     obs = env.reset()
+    _DECLINED.clear()
     for i in st["choices"]:
+        _note(env, obs, i)
         obs = env.step(i)
         if obs is None:
             break
@@ -84,6 +108,58 @@ def _kind(k: int) -> str:
         return Kind(k).name
     except ValueError:
         return str(k)
+
+
+def _loc_of(obs, i: int) -> str:
+    """Location suffix of option `i` ("" when the option names no card), e.g. "GY" or "opponent's GY".
+    From the option row's loc_id column (col 7) and relative controller (col 8: 1 = opponent)."""
+    try:
+        row = list(obs["actions"])[i]
+        loc, ctrl = int(row[7]), int(row[8])
+    except (IndexError, TypeError):
+        return ""
+    name = _LOC_NAMES.get(loc, "")
+    if not name:
+        return ""
+    return f"opponent's {name}" if ctrl == 1 else name
+
+
+def _display_names(obs, names: dict[int, str]) -> list[str]:
+    """Base card name of each option, with a " (loc)" suffix wherever two or more options share a name."""
+    opts = _opts(obs)
+    base = []
+    for i, (_, code) in enumerate(opts):
+        if code:
+            base.append(names.get(code, f"#{code}"))
+        else:
+            base.append(hidden_card(obs, i) or "(no card)")
+    counts: dict[str, int] = {}
+    for nm in base:
+        counts[nm.lower()] = counts.get(nm.lower(), 0) + 1
+    out = []
+    for i, nm in enumerate(base):
+        loc = _loc_of(obs, i)
+        if loc and counts[nm.lower()] >= 2:
+            out.append(f"{nm} ({loc})")
+        else:
+            out.append(nm)
+    return out
+
+
+def _selected_names(obs, names: dict[int, str]) -> list[str]:
+    """Names of already-picked cards in a multi-select prompt (obs card col 20 == 1)."""
+    out = []
+    for r in obs["cards"][obs["card_mask"]]:
+        if int(r[20]) != 1:
+            continue
+        code = int(r[0])
+        out.append(names.get(code, f"#{code}") if code else "(hidden)")
+    return out
+
+
+def _prompt_key(obs) -> tuple:
+    """The option list of the current prompt as (kind, code, desc) keys (for the numeric-token guard)."""
+    return tuple((k, code, option_desc(obs, i)) for i, (k, code) in enumerate(_opts(obs)))
 
 
 def _match(obs, tok: str, names: dict[int, str]) -> int | None:
@@ -99,19 +175,31 @@ def _match(obs, tok: str, names: dict[int, str]) -> int | None:
     for i, (k, code) in enumerate(opts):
         kname = _kind(k)
         ok_kind = (k == _ALIASES[head]) if head in _ALIASES else kname.startswith(head)
-        nm = names.get(code, "").lower()
         if not ok_kind:
             continue
-        rank = (
-            0
-            if not sub or nm == sub
-            else 1
-            if nm.startswith(sub)
-            else 2
-            if sub in f"{nm} {option_desc(obs, i)}".lower()
-            else None
-        )
-        if rank is not None and (best is None or rank < best[0]):
+        nm = (names.get(code, "") if code else "").lower()
+        cands = [nm]
+        loc = _loc_of(obs, i).lower()
+        if nm and loc:
+            cands.append(f"{nm} ({loc})")
+            short = loc.split()[-1]  # "opponent's GY" also matches " (GY)"
+            if short != loc:
+                cands.append(f"{nm} ({short})")
+        desc = option_desc(obs, i).lower()
+        rank = None
+        for cand in cands:
+            r = (
+                0
+                if not sub or cand == sub
+                else 1
+                if cand.startswith(sub)
+                else 2
+                if sub in f"{cand} {desc}"
+                else None
+            )
+            if r is not None and (rank is None or r < rank):
+                rank = r
+        if rank is not None and (best is None or (rank, i) < (best[0], best[1])):
             best = (rank, i)
     return best[1] if best else None
 
@@ -141,43 +229,44 @@ def _live(obs) -> set:
 
 
 def _pass_star(env, obs, st: dict) -> tuple:
-    """Answer the passive option (the `P` rule) while the prompt is a MSG_SELECT_CHAIN window for the acting
-    seat that offers nothing new: every activation on offer was already on offer at the first window
-    (e.g. a held Big Bang). Stops as soon as the seat, message, chain, turn or phase changes, a new
-    activation appears, or _PASS_STEPS answers are given. Optional-trigger prompts (EFFECTYN/YESNO) always
-    stop: they are real decisions. Steps are labeled `pass` (zone prompts answered on the way keep the
-    `auto` label). Returns (obs, stop reason)."""
-    seat = env.player if obs is not None else None
+    """Answer the passive option (the `P` rule) while the prompt is a MSG_SELECT_CHAIN window for either
+    seat whose live options are a subset of what that
+    seat already passed on at its latest chain window this turn with no action since (e.g. a held Big Bang
+    through Draw and Standby). Stops at a non-chain message, chain length change, turn change, any window of
+    a seat that has not yet declined those options, or _PASS_STEPS answers. Optional-trigger prompts (EFFECTYN/YESNO) always stop: they are real
+    decisions. Steps are labeled `pass` (zone prompts answered on the way keep the `auto` label).
+    Returns (obs, stop reason naming the seat)."""
     turn0 = int(obs["global"][2]) if obs is not None else -1
-    phase0 = int(obs["global"][3]) if obs is not None else -1
     chain0 = _chain_len(obs) if obs is not None else -1
-    live0 = _live(obs) if obs is not None else set()
+    first = True
     reason = f"cap ({_PASS_STEPS} steps)"
     for _ in range(_PASS_STEPS):
         if obs is None:
             reason = "duel over"
             break
-        if env.player != seat:
-            reason = f"seat changed to P{env.player}"
-            break
+        seat = env.player
         msg = int(obs["global"][21])
         if msg != C.MSG_SELECT_CHAIN:
-            reason = f"{_MSGS.get(msg, msg)} is not a response window"
+            reason = f"P{seat} {_MSGS.get(msg, msg)} is not a response window"
             break
         if _chain_len(obs) != chain0:
-            reason = "chain changed"
+            reason = f"chain changed (P{seat} to act)"
             break
-        if int(obs["global"][2]) != turn0 or int(obs["global"][3]) != phase0:
-            reason = "turn/phase changed"
+        if int(obs["global"][2]) != turn0:
+            reason = f"turn changed (P{seat} to act)"
+            break
+        live = _live(obs)
+        if first:  # the window PASS* was issued at: an explicit decision
+            first = False
+        elif not live <= _DECLINED.get(seat, set()) or ("turn", turn0) not in _DECLINED.get(seat, set()):
+            reason = f"P{seat} has something to decide (not declined since the last action)"
             break
         opts = _opts(obs)
-        if not _live(obs) <= live0:
-            reason = "a new activation is on offer"
-            break
         i = next((j for j, (k, _) in enumerate(opts) if k in _PASSIVE), None)
         if i is None:
-            reason = "no passive option"
+            reason = f"P{seat} has no passive option"
             break
+        _note(env, obs, i)
         st["choices"].append(i)
         st["labels"].append("pass")
         st["actors"].append(env.player)
@@ -213,14 +302,24 @@ def decision_json(
     p = env.player
     g = obs["global"]
     msg = int(g[21])
+    disp = _display_names(obs, names.names)
     opts = []
     for i, (k, code) in enumerate(_opts(obs)):
-        nm = names.names.get(code, f"#{code}") if code else (hidden_card(obs, i) or "(no card)")
+        nm = disp[i]
         txt = ""
         if code and (texts or code not in seen):
             txt = _effect_text(code)
             seen.add(code)
-        opts.append({"i": i, "kind": _kind(k), "card": nm, "desc": option_desc(obs, i), "text": txt})
+        opts.append(
+            {
+                "i": i,
+                "kind": _kind(k),
+                "card": nm,
+                "desc": option_desc(obs, i),
+                "loc": _loc_of(obs, i),
+                "text": txt,
+            }
+        )
     out.update(
         {
             "actor": p,
@@ -265,9 +364,14 @@ def _show(env, obs, st: dict, names: CardNames, texts: bool) -> None:
     ch = chain_names(obs, names.names)
     if ch:
         print("CHAIN:", " -> ".join(ch))
+    if int(g[21]) in _MULTI_MSGS:
+        # min/max counts are not exposed by the obs or the env (C++ untouched), so only the picks so far.
+        sel = _selected_names(obs, names.names)
+        print(f"Selected so far: {', '.join(sel) if sel else 'none'}")
     seen = set(st.setdefault("seen", []))
+    disp = _display_names(obs, names.names)
     for i, (k, code) in enumerate(_opts(obs)):
-        nm = names.names.get(code, f"#{code}") if code else hidden_card(obs, i)
+        nm = disp[i]
         what = option_desc(obs, i)
         nm = f'{nm} "{what}"' if what else nm
         txt = ""
@@ -278,9 +382,61 @@ def _show(env, obs, st: dict, names: CardNames, texts: bool) -> None:
     st["seen"] = sorted(seen)
 
 
+def _check(engine: Engine, env, obs, st: dict, names: CardNames) -> None:
+    """Print a pre-END/BP self-review for the acting seat (no state change): unused options, effects this
+    seat already activated this turn, and lethal math (opponent LP vs face-up ATK + blockers)."""
+    if obs is None:
+        print(f"DUEL OVER: winner {env.winner}")
+        print("Unused options:\n  none (duel over)")
+        print("Already activated this turn:\n  none (duel over)")
+        print("Opponent LP vs your face-up ATK total: duel over")
+        return
+    p = env.player
+    turn = int(obs["global"][2])
+    print(f"[{len(st['choices'])}] P{p} {st['decks'][p]} check — turn {turn}")
+    print("Unused options:")
+    n = 0
+    for i, (k, code) in enumerate(_opts(obs)):
+        if k in _PASSIVE:
+            continue
+        nm = names.names.get(code, f"#{code}") if code else (hidden_card(obs, i) or "(no card)")
+        what = option_desc(obs, i)
+        nm = f'{nm} "{what}"' if what else nm
+        print(f"  {i}: {_kind(k)} {nm}")
+        n += 1
+    if not n:
+        print("  none")
+    # effects this seat already activated this turn: replay and record each chosen ACTIVATE of this seat+turn
+    print(f"Already activated this turn (P{p}):")
+    cfg_env = CppEnv(engine, _config(st))
+    o2 = cfg_env.reset()
+    done = []
+    for k, ch in enumerate(st["choices"]):
+        if o2 is None:
+            break
+        if k < len(st["actors"]) and k < len(st["turns"]) and st["actors"][k] == p and st["turns"][k] == turn:
+            oo = _opts(o2)
+            if 0 <= int(ch) < len(oo) and oo[int(ch)][0] == Kind.ACTIVATE:
+                c = oo[int(ch)][1]
+                nm = names.names.get(c, f"#{c}") if c else "(no card)"
+                what = option_desc(o2, int(ch))
+                done.append(f'{nm} "{what}"' if what else nm)
+        o2 = cfg_env.step(int(ch))
+    print(f"  {'; '.join(done) if done else 'none'}")
+    g = obs["global"]
+    rows = obs["cards"][obs["card_mask"]]
+    atk = sum(int(r[14]) for r in rows if int(r[3]) == 0 and int(r[1]) == 3 and int(r[5]) == 1 and int(r[0]))
+    opp_mons = any(int(r[3]) == 1 and int(r[1]) == 3 for r in rows)
+    print(
+        f"Opponent LP {int(g[1])} vs your face-up ATK total {atk} "
+        f"({'lethal' if atk >= int(g[1]) and not opp_mons else 'not lethal' if not opp_mons else 'blocked'}); "
+        f"opponent controls monsters: {'yes' if opp_mons else 'no'}"
+    )
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("cmd", choices=["new", "show", "do", "undo", "save"])
+    ap.add_argument("cmd", choices=["new", "show", "do", "undo", "save", "check"])
     ap.add_argument("game")
     ap.add_argument("rest", nargs="*")
     ap.add_argument("--why", default="")
@@ -317,10 +473,14 @@ def main() -> None:
             for key in ("choices", "labels", "actors", "turns"):
                 st[key].pop()
     env, obs = _replay(engine, st)
+    if a.cmd == "check":
+        _check(engine, env, obs, st, names)
+        return
     if a.cmd == "do":
         start = len(st["choices"])
         actor = env.player if obs is not None else None
         stopped = "ok"
+        first_opts = _prompt_key(obs) if obs is not None else ()
         toks = " ".join(a.rest).split()
         if a.auto_pass:
             toks.append("PASS*")
@@ -338,11 +498,24 @@ def main() -> None:
                 print(f"PASS* answered {len(st['choices']) - n0} windows: {reason}")
                 stopped = f"PASS*: {reason}"
                 continue
+            if tok.isdigit() and _prompt_key(obs) != first_opts:
+                print(
+                    f"!! prompt changed after the first choice; option numbers refer to the first prompt. "
+                    f"Use names (SEL:<card>) or issue a new command. Stopped before {tok!r}"
+                )
+                stopped = f"prompt changed before {tok!r}"
+                break
             i = _match(obs, tok, names.names)
             if i is None:
                 print(f"!! token {tok!r} matches no option; stopped here")
                 stopped = f"no match for {tok!r}"
                 break
+            k, code = _opts(obs)[i]
+            nm = names.names.get(code, f"#{code}") if code else (hidden_card(obs, i) or "(no card)")
+            what = option_desc(obs, i)
+            if not a.json:
+                print(f'  [{len(st["choices"])}] P{env.player} {_kind(k)} {nm} "{what}"')
+            _note(env, obs, i)
             st["choices"].append(i)
             st["labels"].append("gold")
             st["actors"].append(env.player)
