@@ -26,7 +26,9 @@ sys.path.insert(0, str(ROOT / "src"))
 
 from ygo_zero.demos import llm as _llm
 from ygo_zero.demos.dataset import JUDGE_WEIGHT, record_config
+from ygo_zero.demos.game import legal_actions
 from ygo_zero.demos.names import CardNames
+from ygo_zero.engine import constants as C
 from ygo_zero.engine.actions import Kind
 from ygo_zero.engine.cpp_env import CppEnv
 from ygo_zero.engine.duel import Engine
@@ -38,7 +40,7 @@ JUDGED_DIR = ROOT / "data" / "demos" / "games_judged"
 INTERESTING = {Kind.SUMMON, Kind.SPSUMMON, Kind.MSET, Kind.SSET, Kind.ACTIVATE, Kind.ATTACK, Kind.REPOS}
 _MAX_NARR_CHARS = 9000
 
-PROMPT_TMPL = """You are a top competitive Yu-Gi-Oh! player. Below is a full duel between "{d0}" (goes first) and "{d1}", summarized turn by turn from the engine replay. "Plan" is what the acting player intended (title + steps); "Actions" is what it actually did (summons, activations, sets, attacks); "Interrupts" are hand-trap/quick-effect decisions by the NON-turn player with their stated reason.
+PROMPT_TMPL = """You are a top competitive Yu-Gi-Oh! player. Below is a full duel between "{d0}" (goes first) and "{d1}", summarized turn by turn from the engine replay. "Plan" is what the acting player intended (title + steps); "Actions" is what it actually did (summons, activations, sets, attacks); "Interrupts" are hand-trap/quick-effect decisions by the NON-turn player with their stated reason. "Legal at Main Phase 1" is what the game engine allowed the turn player to do at the start of its Main Phase 1 (activate / summon / set); never fault a player for not doing something that is not in that list (a card in hand may be unplayable: conditions unmet, no targets, already used). "Step decisions" are moves chosen one at a time, with their reason, when no full-turn plan could be verified.
 
 {GAME}
 
@@ -99,7 +101,8 @@ def build_narrative(rec: dict, engine: Engine, names: CardNames) -> str:
 
     def turn_block(t: int) -> dict:
         if t not in by_turn:
-            by_turn[t] = {"hand": None, "deck": None, "player": None, "actions": [], "other": 0, "lp": None}
+            by_turn[t] = {"hand": None, "deck": None, "player": None, "actions": [], "other": 0, "lp": None,
+                          "legal": None}
             order.append(t)
         return by_turn[t]
 
@@ -108,8 +111,10 @@ def build_narrative(rec: dict, engine: Engine, names: CardNames) -> str:
             break
         turn, actor = rec["turns"][k], rec["actors"][k]
         b = turn_block(turn)
-        if b["hand"] is None:
+        if b["hand"] is None and int(obs["global"][5]):  # the turn player's view (not an opponent's Draw Phase window)
             b.update(hand=_hand_names(obs, nm), deck=decks[actor], player=actor)
+        if b["legal"] is None and int(obs["global"][5]) and int(obs["global"][21]) == C.MSG_SELECT_IDLECMD:
+            b["legal"] = legal_actions(obs, nm)[0]
         row = obs["actions"][choice]
         kind, code = int(row[0]), int(row[2])
         card = nm.get(code, f"#{code}") if code else ""
@@ -131,6 +136,10 @@ def build_narrative(rec: dict, engine: Engine, names: CardNames) -> str:
             lp = _lp_absolute(obs, env.player)
             b["lp"] = f"{lp[0]}-{lp[1]}"
 
+    steps_by_turn: dict[int, list[str]] = defaultdict(list)
+    for e in rec.get("steps", []) or []:
+        if isinstance(e, dict):
+            steps_by_turn[e.get("turn")].append(f"{e.get('kind')} {e.get('card', '')} ({str(e.get('why', ''))[:100]})")
     int_by_turn: dict[int, list[str]] = defaultdict(list)
     for e in interrupts:
         if isinstance(e, dict):
@@ -153,8 +162,10 @@ def build_narrative(rec: dict, engine: Engine, names: CardNames) -> str:
         lines.append(
             f"Turn {t} — {b['deck']} (player {b['player']}):\n"
             f"  Hand: {', '.join(b['hand'] or []) or 'none'}\n"
+            f"  Legal at Main Phase 1: {b['legal'] or 'unknown'}\n"
             f"  Plan: {_plan_summary(rec.get('plans', []), t)}\n"
-            f"  Actions: {'; '.join(acts) or 'none'}\n"
+            + (f"  Step decisions: {'; '.join(steps_by_turn[t][:16])}\n" if steps_by_turn.get(t) else "")
+            + f"  Actions: {'; '.join(acts) or 'none'}\n"
             f"  Interrupts: {'; '.join(int_by_turn.get(t, [])) or 'none'}\n"
             f"  LP after: {b['lp']}"
         )
