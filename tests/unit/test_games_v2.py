@@ -182,3 +182,18 @@ def test_interrupter_only_on_opponent_turn():
     no_act = _fake_obs(kinds=((K.PASS, 0),))
     assert not it.wants(no_act)
     assert calls == []
+
+
+def test_legal_actions_lists_engine_options_and_flags_live_plays():
+    from ygo_zero.demos.game import legal_actions, turn_prompt
+
+    names = {1: "Pre-Preparation of Rites", 2: "Ragged", 3: "Trap A"}
+    obs = _fake_obs(1, C.MSG_SELECT_IDLECMD, ((Kind.ACTIVATE, 1), (Kind.ACTIVATE, 1), (Kind.SUMMON, 2),
+                                              (Kind.SSET, 3), (Kind.TO_BATTLE, 0), (Kind.TO_END, 0)))
+    text, live = legal_actions(obs, names)
+    assert text == "Activate: Pre-Preparation of Rites; Normal Summon: Ragged; Set spell/trap: Trap A"
+    assert live
+    text, live = legal_actions(_fake_obs(1, C.MSG_SELECT_IDLECMD, ((Kind.SSET, 3), (Kind.TO_END, 0))), names)
+    assert text == "Set spell/trap: Trap A" and not live
+    assert "LEGAL RIGHT NOW" in turn_prompt("x", "", "Your hand: none", True, [], text)
+    assert "LEGAL RIGHT NOW" not in turn_prompt("x", "", "Your hand: none", True, [])

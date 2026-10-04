@@ -146,7 +146,32 @@ def weak_plan(steps) -> str | None:
     return None
 
 
-def turn_prompt(deck_name: str, sheet: str, state: str, can_attack: bool, examples: list[ComboLine]) -> str:
+_LEGAL_KINDS = (
+    (Kind.ACTIVATE, "Activate"),
+    (Kind.SUMMON, "Normal Summon"),
+    (Kind.SPSUMMON, "Special Summon"),
+    (Kind.MSET, "Set monster"),
+    (Kind.SSET, "Set spell/trap"),
+)
+_LIVE_KINDS = (Kind.ACTIVATE, Kind.SUMMON, Kind.SPSUMMON)
+
+
+def legal_actions(obs, names: dict[int, str]) -> tuple[str, bool]:
+    """The engine's legal main-phase actions as text, and whether any of them is a live play (activate / summon).
+    2026-10-04: without this list the planner guessed what was playable; low-scored game turns were mostly passes with
+    a playable hand, and `no_anchor@0` failures (the plan's first step never legal) were the top verifier failure."""
+    by: dict[int, list[str]] = {}
+    for k, code in _opts(obs):
+        if code and any(k == kk for kk, _ in _LEGAL_KINDS):
+            nm = names.get(code, f"#{code}")
+            if nm not in by.setdefault(k, []):
+                by[k].append(nm)
+    parts = [f"{label}: {', '.join(by[k])}" for k, label in _LEGAL_KINDS if by.get(k)]
+    return "; ".join(parts) or "none", any(by.get(k) for k in _LIVE_KINDS)
+
+
+def turn_prompt(deck_name: str, sheet: str, state: str, can_attack: bool, examples: list[ComboLine],
+                legal: str = "") -> str:
     ex = ""
     if examples:
         ex = "\nEXAMPLES of verified lines for this deck (names only):\n" + "\n\n".join(
@@ -159,6 +184,18 @@ def turn_prompt(deck_name: str, sheet: str, state: str, can_attack: bool, exampl
         else "- You cannot attack this turn (first turn of the duel)."
     )
     second = f"- {_GO_SECOND_HINT}\n" if _vs_set_board(state) else ""
+    legal_block = (
+        f"\nLEGAL RIGHT NOW (from the game engine; your first step must be one of these, later steps may use what "
+        f"earlier steps make available):\n{legal}\n"
+        if legal
+        else ""
+    )
+    live_rule = (
+        "- If the legal list contains Activate or Summon actions, passing or only setting is almost always wrong: a "
+        "strong player searches, summons and develops toward the deck's win condition.\n"
+        if legal
+        else ""
+    )
     return f"""You are playing {deck_name}.
 {notes_block(deck_name)}
 YOUR DECKLIST (card sheet):
@@ -166,7 +203,7 @@ YOUR DECKLIST (card sheet):
 {ex}
 CURRENT STATE (exact):
 {state}
-
+{legal_block}
 Plan the rest of YOUR current turn from this exact state as JSON: {{"lines": [ComboLine]}}
 {SCHEMA_TEXT}
 
@@ -174,7 +211,7 @@ Rules:
 - `hand` = your current hand above. Only cards you have (hand, field, GY, banished, Extra Deck) or can reach through a
   previous step's search/summon. Normal Summon at most once (if not already used); respect once-per-turn limits.
 - Deal with the opponent's board if it threatens you (removal, negation, out-valuing), then build the strongest position.
-{second}{attack_rule}
+{second}{live_rule}{attack_rule}
 - `going` = "first" if you went first in the duel, else "second". `end_board` = your field at the end of the turn.
 - If there is nothing useful to do, return a short line (e.g. set a card) rather than an illegal flashy one.
 JSON only, no prose."""
@@ -787,7 +824,8 @@ def play_game(
         nonlocal llm_calls
         state = describe_state(obs, names.names)
         can_attack = turn > 1
-        base = turn_prompt(dnames[p], sheets[p], state, can_attack, (examples or {}).get(dnames[p], []))
+        legal, live = legal_actions(obs, names.names)
+        base = turn_prompt(dnames[p], sheets[p], state, can_attack, (examples or {}).get(dnames[p], []), legal)
         prompt = base
         entry = {"turn": turn, "player": p, "deck": dnames[p], "why": why, "attempts": []}
         n_hand = hand_size(state)
@@ -822,7 +860,7 @@ def play_game(
             # "pass" steps name no card and do nothing; an all-pass plan ends the turn via the fallback
             line.steps = [st for st in line.steps if st.card or st.action not in ("other", "pass")]
             weak = weak_plan(line.steps)
-            if weak and n_hand >= 4 and not pushed:
+            if weak and (n_hand >= 4 or live) and not pushed:
                 pushed = True
                 if not line.steps:
                     entry["attempts"].append({"line": dicts[0], "reason": "pass_pushed", "nodes": 0})
@@ -844,7 +882,7 @@ def play_game(
             )
             if v.ok:
                 got = list(zip(v.choices[len(choices) :], v.labels[len(choices) :], strict=True))
-                if weak and pushed and fallback is None and n_hand >= 4:
+                if weak and pushed and fallback is None and (n_hand >= 4 or live):
                     fallback = got  # verified but weak: ask once for a stronger line, keep this one if that fails
                     weak_at = len(entry["attempts"]) - 1
                     entry["attempts"][weak_at]["reason"] = "ok_weak_pushed"
