@@ -405,6 +405,89 @@ def parse_interrupt_answer(text: str, n_options: int, passive: int) -> tuple[int
     return passive, why or "bad-choice"
 
 
+
+# battle-relevant effect text: such a card makes the battle decision non-trivial (a losing "crash" attack can be right)
+_BATTLE_TEXT = re.compile(r"battle|attack|damage calculation|damage step|piercing|destroyed by", re.IGNORECASE)
+
+
+def battle_needs_llm(obs) -> bool:
+    """A Battle Phase command worth an LLM decision (2026-10-04): a quick effect can be activated, or an attacker or a
+    face-up opponent monster has battle-related text (crash attacks for "destroyed by battle" / "when this card
+    battles" effects, monsters that cannot be destroyed by battle, piercing ...). Plain stat comparisons stay with
+    the `battle_choice` rule."""
+    if int(obs["global"][21]) != C.MSG_SELECT_BATTLECMD:
+        return False
+    opts = _opts(obs)
+    if not any(k == Kind.ATTACK for k, _ in opts):
+        return False
+    if any(k == Kind.ACTIVATE for k, _ in opts):
+        return True
+    codes = [c for k, c in opts if k == Kind.ATTACK and c]
+    codes += [int(r[0]) for r in obs["cards"][obs["card_mask"]] if int(r[3]) == 1 and int(r[1]) == _MZONE and int(r[0])]
+    return any(_BATTLE_TEXT.search(_effect_text(c)) for c in codes)
+
+
+def battle_prompt(deck_name: str, state: str, options: str, attacker: str | None = None) -> str:
+    task = (
+        f"You declared an attack with {attacker}. Choose its target." if attacker else
+        "It is your Battle Phase. Choose an attack (option = the attacking monster; the target is asked next), a "
+        "quick effect, or leave the Battle Phase."
+    )
+    return f"""You are playing {deck_name}.
+{notes_block(deck_name)}
+CURRENT STATE:
+{state}
+
+{task}
+YOUR LEGAL OPTIONS (reply with the option number):
+{options}
+
+You are an expert player. Check lethal first (sum of attacks vs the opponent's LP). Attack into monsters you beat;
+a losing attack is right only when it gains something (a "destroyed by battle" / "when this card battles" effect,
+damage you need, clearing a blocker, baiting a trap) and you can afford the monster. Keep monsters you need on
+defense. Monsters that cannot be destroyed by battle or have battle-step effects change the math.
+Reply with JSON only: {{"choice": <option number, or -1 to let the default rule decide>, "why": "..."}}."""
+
+
+class BattleAdvisor:
+    """LLM decisions in the turn player's Battle Phase outside a plan, when `battle_needs_llm` (at most `max_per_turn`
+    asks per turn, the target pick after an LLM-declared attack included). Returns None to leave the decision to the
+    `Responder` rule (trivial window, no asks left, invalid answer)."""
+
+    def __init__(self, complete_fn: Callable[[str], str], names, max_per_turn: int = 4):
+        self.complete_fn = complete_fn
+        self.names = names.names if hasattr(names, "names") else dict(names)
+        self.max_per_turn = max_per_turn
+        self.used: dict[int, int] = {}
+        self.attacker: str | None = None  # name of the monster whose attack the LLM just declared
+
+    def _ask(self, obs, deck_name: str, turn: int, engine, attacker: str | None) -> tuple[int, str] | None:
+        if self.used.get(turn, 0) >= self.max_per_turn:
+            return None
+        self.used[turn] = self.used.get(turn, 0) + 1
+        prompt = battle_prompt(deck_name, describe_state(obs, self.names), options_text(obs, self.names, engine), attacker)
+        try:
+            resp = self.complete_fn(prompt)
+        except Exception:  # noqa: BLE001 - an LLM failure falls back to the rule
+            return None
+        idx, why = parse_interrupt_answer(resp, len(_opts(obs)), -1)
+        return None if idx < 0 else (idx, why)
+
+    def __call__(self, obs, deck_name: str, turn: int, engine=None) -> tuple[int, str] | None:
+        msg = int(obs["global"][21])
+        attacker, self.attacker = self.attacker, None
+        if attacker is not None and msg == C.MSG_SELECT_CARD:
+            if sum(1 for k, _ in _opts(obs) if k == Kind.SELECT) < 2:
+                return None  # one possible target: nothing to decide
+            return self._ask(obs, deck_name, turn, engine, attacker)
+        if not battle_needs_llm(obs):
+            return None
+        got = self._ask(obs, deck_name, turn, engine, None)
+        if got is not None and _opts(obs)[got[0]][0] == Kind.ATTACK:
+            code = _opts(obs)[got[0]][1]
+            self.attacker = self.names.get(code, f"#{code}") if code else "your monster"
+        return got
+
 _TRIGGER_KINDS = (Kind.SUMMON, Kind.SPSUMMON, Kind.ACTIVATE)
 
 
@@ -595,6 +678,7 @@ def play_game(
     interrupts: int = 3,
     interrupt_fn: Callable[[str], str] | None = None,  # LLM for interruption asks (default: complete_fn)
     opening: tuple[DuelConfig, list[int], list[str]] | None = None,
+    battle_asks: int = 4,  # LLM battle decisions per turn outside plans (0 = rule only)
 ) -> dict:
     """Play one game; deck 0 goes first. Returns the record (see module docstring). `max_seconds`: stop at the next
     turn boundary once exceeded (the record is kept, winner None), so a slow game never loses its data to a kill.
@@ -616,6 +700,8 @@ def play_game(
     verify = plan_fn or plan_from_state
     responder = Responder(seed)
     interrupter = (Interrupter(interrupt_fn or complete_fn, names, max_per_turn=interrupts) if interrupts > 0 else None)
+    battler = BattleAdvisor(complete_fn, names, max_per_turn=battle_asks) if battle_asks > 0 else None
+    battles_log: list[dict] = []
     env = CppEnv(engine, config)
     obs = env.reset()
     choices: list[int] = []
@@ -808,6 +894,20 @@ def play_game(
                 plan_owner, plan_turn = p, turn
                 if planned:
                     continue
+        if my_turn and battler is not None:
+            asked = battler.used.get(turn, 0)
+            got = battler(obs, dnames[p], turn, engine)
+            llm_calls += battler.used.get(turn, 0) - asked
+            if got is not None:
+                b, why = got
+                if _opts(obs)[b][0] == Kind.ATTACK:
+                    row = _row(obs, b)
+                    responder.attacker_atk = int(row[14]) if row is not None else 0  # rule target pick if needed
+                code = _opts(obs)[b][1]
+                battles_log.append({"turn": turn, "player": p, "card": names.names.get(code, "-") if code else "-",
+                                    "kind": Kind(_opts(obs)[b][0]).name, "why": why})  # fmt: skip
+                take(b, "battle")
+                continue
         r, is_int = decide(obs, turn, p)
         take(r, "interrupt" if is_int else ("responder" if p != plan_owner or turn != plan_turn else "fallback"))
     winner = env.winner if obs is None else None
@@ -831,6 +931,7 @@ def play_game(
         "turns": turns,
         "plans": plans,
         "interrupts": interrupts_log,
+        "battles": battles_log,
         "opening": None,  # the driver fills in the source record's line_id when an opening was replayed
         "winner": winner,
         "end_turn": turns[-1] if turns else 0,

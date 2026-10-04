@@ -65,12 +65,21 @@ def _verdict(ok: bool, line_id: str, executed: int = 2, reason: str = "ok") -> V
 # --- notes injection ---
 
 
-def test_notes_absent_prompts_have_no_strategy_block():
+def test_notes_absent_prompts_have_no_strategy_block(monkeypatch, tmp_path):
+    monkeypatch.setattr(strategy, "PRINCIPLES_PATH", tmp_path / "none.md")
     assert strategy.notes_block("no-such-deck-xyz") == ""
     p = plan_prompt("no-such-deck-xyz", "SHEET", ["A"], [])
     assert "STRATEGY" not in p
     q = improve_prompt("no-such-deck-xyz", "SHEET", ["A"], "{}", ["X"])
     assert "STRATEGY" not in q
+
+
+def test_principles_go_into_every_notes_block(monkeypatch, tmp_path):
+    f = tmp_path / "PRINCIPLES.md"
+    f.write_text("GENERAL PRINCIPLES\n- attack for lethal")
+    monkeypatch.setattr(strategy, "PRINCIPLES_PATH", f)
+    assert "attack for lethal" in strategy.notes_block("no-such-deck-xyz")
+    assert "attack for lethal" in plan_prompt("no-such-deck-xyz", "SHEET", ["A"], [])
 
 
 def test_notes_present_injected_after_decklist(tmp_path, monkeypatch):

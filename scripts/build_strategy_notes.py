@@ -10,6 +10,11 @@ page description for meta decks, matched by the `pretty_url` in the ydk header
 comment), and up to 3 of the deck's strongest engine-verified lines
 (`plan_lines.load_examples`). Writes ≤ 2000 chars of Markdown with the six
 required headings.
+
+    uv run python scripts/build_strategy_notes.py --win-conditions [--workers 3]
+
+prepends a `## Win condition` section (≤ 450 chars: how the deck closes games, what it needs, what stops it) to every
+note that lacks one (2026-10-04: only 2 of 175 notes said how the deck wins).
 """
 
 from __future__ import annotations
@@ -148,6 +153,63 @@ Rules:
 Markdown only, no prose outside the six sections."""
 
 
+WIN_HEADING = "## Win condition"
+
+
+def win_prompt(deck_name: str, sheet: str, context: str, note: str) -> str:
+    return f"""Deck: {deck_name}
+
+CONTEXT (archetype / tournament info):
+{context}
+
+DECKLIST (card sheet — every card you may name):
+{sheet}
+
+CURRENT STRATEGY NOTE:
+{note}
+
+Write ONE Markdown section, at most 450 characters, starting with the line `{WIN_HEADING}`:
+- how this deck actually wins games (OTK with which monsters, burn, lock / floodgates, grind with recursion,
+  alternate win condition, deck-out), naming the key cards from the decklist;
+- what it needs on board / in GY / in hand to close the game, and on which turn it usually wins (going first vs second);
+- what stops it (the choke points an opponent should hit).
+Markdown only, nothing outside the section."""
+
+
+def add_win_conditions(args, pool: list[str]) -> None:
+    targets = [d for d in pool if notes_path(d).is_file() and WIN_HEADING not in notes_path(d).read_text()]
+    if not targets:
+        print("win: every note already has a win condition")
+        return
+    gen, meta = parse_generated(), load_meta_descriptions()
+    engine, names = Engine(), CardNames()
+    prompts = []
+    for d in targets:
+        sheet = card_sheet(engine, load_ydk(ROOT / "decks" / "pool" / f"{d}.ydk"), names)
+        row = gen.get(d, {})
+        bits = [f"{k.capitalize()}: {row[k]}" for k in ("archetype", "era", "plan") if row.get(k)]
+        pretty = ydk_pretty_url(d)
+        if pretty and pretty in meta:
+            bits.append(f"YGOPRODeck page ({pretty}): {strip_html(meta[pretty])[:1500]}")
+        prompts.append(win_prompt(d, sheet, "\n".join(bits) or "(no published context)", notes_path(d).read_text()))
+    responses = _llm.complete_many(prompts, model=args.model, system=SYSTEM_WIN, max_workers=args.workers,
+                                   return_exceptions=True, timeout=args.llm_timeout, variant=None)  # fmt: skip
+    wrote, failed = 0, 0
+    for d, resp in zip(targets, responses, strict=True):
+        text = "" if isinstance(resp, BaseException) else str(resp).strip()
+        if WIN_HEADING not in text:
+            print(f"win: {d}: bad answer ({str(resp)[:120]!r}), skipping")
+            failed += 1
+            continue
+        text = text[text.index(WIN_HEADING):][:500].rstrip()
+        notes_path(d).write_text(text + "\n" + notes_path(d).read_text())  # first, so prompt trimming keeps it
+        wrote += 1
+    print(f"win: wrote={wrote} failed={failed} decks={len(targets)}")
+
+
+SYSTEM_WIN = "You are a Yu-Gi-Oh! TCG expert. Explain concisely how the given deck wins games. Markdown only."
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--decks", nargs="*", default=None, help="pool decks (default: all without notes)")
@@ -156,6 +218,7 @@ def main() -> None:
     ap.add_argument("--model", default=MODEL)
     ap.add_argument("--max-chars", type=int, default=2000, help="note budget (writes truncate here)")
     ap.add_argument("--llm-timeout", type=int, default=900)
+    ap.add_argument("--win-conditions", action="store_true", help="prepend a win-condition section to every note")
     args = ap.parse_args()
 
     pool = sorted(p.stem for p in (ROOT / "decks" / "pool").glob("*.ydk"))
@@ -165,6 +228,9 @@ def main() -> None:
         if unknown:
             ap.error(f"unknown decks: {', '.join(unknown)}")
         pool = [d for d in pool if d in wanted]
+    if args.win_conditions:
+        add_win_conditions(args, pool)
+        return
     targets = [d for d in pool if args.force or not notes_path(d).is_file()]
     skipped = len(pool) - len(targets)
     if not targets:
