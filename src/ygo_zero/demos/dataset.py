@@ -162,51 +162,57 @@ def iter_samples(engine: Engine, path: Path) -> Iterator[tuple[dict, int, float,
     for f in files:
         judges = load_judgements(f)
         for rec in load_records(f):
-            judge = judges.get(rec.get("line_id")) or judges.get(rec.get("game_id"))
-            iscores = judge_interrupt_scores(judge)
-            used: dict[tuple[int, int], int] = {}
-            for seed in [rec["config"]["seed"]]:
-                env = CppEnv(engine, record_config(rec, seed), rec.get("auto_single", True))
-                obs = env.reset()
-                for k, (choice, label) in enumerate(zip(rec["choices"], rec["labels"], strict=True)):
-                    if obs is None:
-                        raise ValueError(f"{rec['line_id']} seed {seed}: duel ended at choice {k}")
-                    weight, score = LABEL_WEIGHT.get(label, 0.0), None
-                    if weight and judge is not None and "turns" in rec and "actors" in rec:
-                        turn, actor = rec["turns"][k], rec["actors"][k]
-                        if label == "interrupt":
-                            key = (turn, actor)
-                            pool = iscores.get(key, [])
-                            i = used.get(key, 0)
-                            if i < len(pool):
-                                score = pool[i]
-                            used[key] = i + 1
-                        else:
-                            score = judge_turn_score(judge, turn)
-                        if score is not None:
-                            weight *= JUDGE_WEIGHT[score]
-                    if weight:
-                        # game records (ADR 0004) carry both decks and who acted; lines are named <deck>/<id>
-                        deck = (
-                            rec["decks"][rec["actors"][k]]
-                            if "actors" in rec
-                            else rec["line_id"].split("/")[0]
-                        )
-                        meta = {
-                            "line_id": rec["line_id"],
-                            "seed": seed,
-                            "k": k,
-                            "label": label,
-                            "deck": deck,
-                            "kind": sample_kind(f, label),
-                            "judge": score,
-                        }
-                        yield {key: v.copy() for key, v in obs.items()}, choice, weight, meta
-                    obs = env.step(choice)
-                if "actors" not in rec:  # a combo line: teach the stop (records end at the last combo step)
-                    end = end_turn_sample(env, obs, rec.get("me", 0))
-                    if end is not None:
-                        obs_end, a_end = end
-                        meta = {"line_id": rec["line_id"], "seed": seed, "k": len(rec["choices"]), "label": "end",
-                                "deck": rec["line_id"].split("/")[0], "kind": sample_kind(f, "end"), "judge": None}
-                        yield obs_end, a_end, LABEL_WEIGHT["end"], meta
+            out: list = []  # buffered: a record that fails to replay is skipped whole (never half-yielded)
+            try:
+                judge = judges.get(rec.get("line_id")) or judges.get(rec.get("game_id"))
+                iscores = judge_interrupt_scores(judge)
+                used: dict[tuple[int, int], int] = {}
+                for seed in [rec["config"]["seed"]]:
+                    env = CppEnv(engine, record_config(rec, seed), rec.get("auto_single", True))
+                    obs = env.reset()
+                    for k, (choice, label) in enumerate(zip(rec["choices"], rec["labels"], strict=True)):
+                        if obs is None:
+                            raise ValueError(f"{rec['line_id']} seed {seed}: duel ended at choice {k}")
+                        weight, score = LABEL_WEIGHT.get(label, 0.0), None
+                        if weight and judge is not None and "turns" in rec and "actors" in rec:
+                            turn, actor = rec["turns"][k], rec["actors"][k]
+                            if label == "interrupt":
+                                key = (turn, actor)
+                                pool = iscores.get(key, [])
+                                i = used.get(key, 0)
+                                if i < len(pool):
+                                    score = pool[i]
+                                used[key] = i + 1
+                            else:
+                                score = judge_turn_score(judge, turn)
+                            if score is not None:
+                                weight *= JUDGE_WEIGHT[score]
+                        if weight:
+                            # game records (ADR 0004) carry both decks and who acted; lines are named <deck>/<id>
+                            deck = (
+                                rec["decks"][rec["actors"][k]]
+                                if "actors" in rec
+                                else rec["line_id"].split("/")[0]
+                            )
+                            meta = {
+                                "line_id": rec["line_id"],
+                                "seed": seed,
+                                "k": k,
+                                "label": label,
+                                "deck": deck,
+                                "kind": sample_kind(f, label),
+                                "judge": score,
+                            }
+                            out.append(({key: v.copy() for key, v in obs.items()}, choice, weight, meta))
+                        obs = env.step(choice)
+                    if "actors" not in rec:  # a combo line: teach the stop (records end at the last combo step)
+                        end = end_turn_sample(env, obs, rec.get("me", 0))
+                        if end is not None:
+                            obs_end, a_end = end
+                            meta = {"line_id": rec["line_id"], "seed": seed, "k": len(rec["choices"]), "label": "end",
+                                    "deck": rec["line_id"].split("/")[0], "kind": sample_kind(f, "end"), "judge": None}
+                            out.append((obs_end, a_end, LABEL_WEIGHT["end"], meta))
+            except Exception as e:  # noqa: BLE001 - one bad record must not kill a shard build
+                print(f"iter_samples: skipping {rec.get('line_id')} in {f.name}: {e!r}"[:300], flush=True)
+                continue
+            yield from out

@@ -662,10 +662,12 @@ def play_game(
         "line_id": f"{name0}-vs-{name1}/game{seed}",
         "level": "L4",
         "decks": [name0, name1],
+        # the config actually played (an opening replays a line record's config: its seed, deck0 and setup)
         "config": {
-            "deck0_main": list(deck0.main), "deck0_extra": list(deck0.extra),
-            "deck1_main": list(deck1.main), "deck1_extra": list(deck1.extra),
-            "seed": seed, "hand": config.hand, "draw": config.draw, "setup": [],
+            "deck0_main": list(config.deck0.main), "deck0_extra": list(config.deck0.extra),
+            "deck1_main": list(config.deck1.main), "deck1_extra": list(config.deck1.extra),
+            "seed": config.seed, "hand": config.hand, "draw": config.draw, "lp": config.lp,
+            "setup": [[pl.team, pl.code, pl.location, pl.sequence] for pl in config.setup],
         },
         "auto_single": True,
         "choices": choices,
