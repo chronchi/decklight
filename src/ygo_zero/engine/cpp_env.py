@@ -26,8 +26,8 @@ def cpp_engine(engine: Engine) -> "_ygoenv.Engine":
 
 def cpp_config(config: DuelConfig) -> "_ygoenv.DuelConfig":
     return _ygoenv.DuelConfig(
-        main0=list(config.deck0.main), extra0=list(config.deck0.extra),
-        main1=list(config.deck1.main), extra1=list(config.deck1.extra),
+        main0=config.main_of(0), extra0=list(config.deck0.extra),
+        main1=config.main_of(1), extra1=list(config.deck1.extra),
         seed=config.seed, flags=config.flags, lp=config.lp, hand=config.hand, draw=config.draw,
         setup=[tuple(p) for p in config.setup],
     )  # fmt: skip

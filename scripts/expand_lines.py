@@ -209,6 +209,7 @@ def main() -> None:
                     "deck1_main": list(cfg.deck1.main), "deck1_extra": list(cfg.deck1.extra),
                     "seed": cfg.seed, "hand": cfg.hand, "draw": cfg.draw,
                     "setup": [[p.team, p.code, p.location, p.sequence] for p in cfg.setup],
+                    "shuffle": cfg.shuffle,
                 },
                 "auto_single": True,
                 "choices": verdict.choices,

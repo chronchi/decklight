@@ -1086,6 +1086,7 @@ def play_game(
             "deck1_main": list(config.deck1.main), "deck1_extra": list(config.deck1.extra),
             "seed": config.seed, "hand": config.hand, "draw": config.draw, "lp": config.lp,
             "setup": [[pl.team, pl.code, pl.location, pl.sequence] for pl in config.setup],
+            "shuffle": config.shuffle,
         },
         "auto_single": True,
         "choices": choices,

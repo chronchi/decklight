@@ -36,6 +36,7 @@ def make_record(
             "hand": cfg.hand,
             "draw": cfg.draw,
             "setup": [[p.team, p.code, p.location, p.sequence] for p in cfg.setup],
+            "shuffle": cfg.shuffle,
         },
         "auto_single": True,
         "choices": verdict_ok.choices,

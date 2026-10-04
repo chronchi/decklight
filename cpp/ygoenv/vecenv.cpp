@@ -12,6 +12,18 @@ static uint64_t splitmix(uint64_t& x) {
   return z ^ (z >> 31);
 }
 
+// Seeded main-deck shuffle (Fisher-Yates, splitmix64 stream), mirrored by Python DuelConfig.main_of: the core never
+// shuffles at duel start (EDOPro's host does it before adding the cards), so without this every game of a deck had
+// the same opening hand (the last 5 cards of the .ydk) and draws.
+static std::vector<uint32_t> shuffled_main(std::vector<uint32_t> main, uint64_t seed, uint64_t team) {
+  uint64_t st = seed ^ (0x9E3779B97F4A7C15ull * (team + 1));
+  for (size_t k = main.size(); k > 1; --k) {
+    size_t j = static_cast<size_t>(splitmix(st) % k);
+    std::swap(main[k - 1], main[j]);
+  }
+  return main;
+}
+
 VecEnv::VecEnv(Engine& engine, std::vector<Deck> decks, int num_envs, int num_threads, uint64_t seed, bool auto_single)
     : num_envs(num_envs), obs(num_envs), player(num_envs, 0), winner(num_envs, -1), done(num_envs, 0), game(num_envs, -1),
       engine_(engine), decks_(std::move(decks)), auto_single_(auto_single), envs_(num_envs), rng_(num_envs),
@@ -70,9 +82,9 @@ void VecEnv::start_episode(int i) {
   }
   const Deck &a = decks_[ep.deck0], &b = decks_[ep.deck1];
   DuelConfig cfg;
-  cfg.main0 = a.main;
+  cfg.main0 = shuffled_main(a.main, ep.seed, 0);  // same order as Python DuelConfig.main_of (shuffle=True)
   cfg.extra0 = a.extra;
-  cfg.main1 = b.main;
+  cfg.main1 = shuffled_main(b.main, ep.seed, 1);
   cfg.extra1 = b.extra;
   cfg.seed = ep.seed;
   envs_[i] = std::make_unique<Env>(engine_, std::move(cfg), auto_single_);

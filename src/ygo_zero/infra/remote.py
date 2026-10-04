@@ -54,6 +54,7 @@ def _config_to_json(config: DuelConfig | None) -> dict | None:
         "hand": config.hand,
         "draw": config.draw,
         "setup": [list(p) for p in config.setup],
+        "shuffle": config.shuffle,
     }
 
 
@@ -69,6 +70,7 @@ def _config_from_json(d: dict | None) -> DuelConfig | None:
         hand=d["hand"],
         draw=d["draw"],
         setup=tuple(Placement(*p) for p in d.get("setup", [])),
+        shuffle=d.get("shuffle", False),
     )
 
 

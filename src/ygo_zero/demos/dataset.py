@@ -144,7 +144,7 @@ def record_config(rec: dict, seed: int | None = None) -> DuelConfig:
     setup = tuple(Placement(*p) for p in c.get("setup", []))
     return DuelConfig(
         deck0, deck1, seed=c["seed"] if seed is None else seed, lp=c.get("lp", 8000), hand=c.get("hand", 0),
-        draw=c.get("draw", 1), setup=setup,
+        draw=c.get("draw", 1), setup=setup, shuffle=c.get("shuffle", False),  # no key: made before decks were shuffled
     )  # fmt: skip
 
 

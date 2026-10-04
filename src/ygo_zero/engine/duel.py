@@ -62,6 +62,34 @@ class DuelConfig:
     # Puzzle start: cards placed before the start (use hand=0 to skip the opening draw). The deck is
     # still shuffled by the seed, so a puzzle's hidden information is sampled by varying the seed.
     setup: tuple[Placement, ...] = ()
+    # Shuffle each main deck (seeded) before it reaches the core, like EDOPro's host does (generic_duel.cpp
+    # std::shuffle): the core itself never shuffles at duel start. False = the .ydk order, which every record
+    # made before 2026-10-04 used (opening hand = the last 5 listed cards, usually traps/hand traps).
+    shuffle: bool = True
+
+    def main_of(self, team: int) -> list[int]:
+        """Team `team`'s main deck in the order it is added to the duel (the top card is the last one)."""
+        main = list((self.deck0 if team == 0 else self.deck1).main)
+        if self.shuffle:
+            shuffle_main(main, self.seed, team)
+        return main
+
+
+_M64 = (1 << 64) - 1
+
+
+def shuffle_main(main: list[int], seed: int, team: int) -> None:
+    """In-place seeded Fisher-Yates over a splitmix64 stream; bit-identical to `shuffled_main` in
+    cpp/ygoenv/vecenv.cpp, so VecEnv games replay in PyEnv/CppEnv."""
+    st = (seed ^ (0x9E3779B97F4A7C15 * (team + 1))) & _M64
+    for k in range(len(main), 1, -1):
+        st = (st + 0x9E3779B97F4A7C15) & _M64
+        z = st
+        z = ((z ^ (z >> 30)) * 0xBF58476D1CE4E5B9) & _M64
+        z = ((z ^ (z >> 27)) * 0x94D049BB133111EB) & _M64
+        z ^= z >> 31
+        j = z % k
+        main[k - 1], main[j] = main[j], main[k - 1]
 
 
 class InvalidResponse(RuntimeError):
@@ -192,7 +220,7 @@ class Duel:
             if not self._load_script(name):
                 raise ScriptError(f"cannot load {name}: {self.log[-3:]}")
         for team, deck in ((0, config.deck0), (1, config.deck1)):
-            self._add_cards(team, C.LOCATION_DECK, deck.main)
+            self._add_cards(team, C.LOCATION_DECK, config.main_of(team))
             self._add_cards(team, C.LOCATION_EXTRA, deck.extra)
         for pl in config.setup:
             self._place(pl)
