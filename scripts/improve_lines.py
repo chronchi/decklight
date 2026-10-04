@@ -357,7 +357,7 @@ def main() -> None:
     ap.add_argument("--deck", required=True, help="pool deck (decks/pool/<NAME>.ydk)")
     ap.add_argument("--src", default="data/demos/planned", help="planner run dir to improve")
     ap.add_argument("--repairs", type=int, default=1)
-    ap.add_argument("--model", default="opencode-go/muse-spark-1.3-contributor")
+    ap.add_argument("--model", default="opencode/muse-spark-1.3-contributor-free")
     ap.add_argument("--workers", type=int, default=6)
     ap.add_argument("--variant", default=None, help="muse reasoning effort (minimal|low|high|max; default: provider's)")
     ap.add_argument("--jobs", type=int, default=4)

@@ -1,6 +1,6 @@
 """Latency / quality benchmark of OpenCode Go models on our real extraction prompts (no cache).
 
-    uv run python scripts/bench_llm.py --models opencode-go/muse-spark-1.3-contributor opencode-go/deepseek-v4.1-flash \
+    uv run python scripts/bench_llm.py --models opencode/muse-spark-1.3-contributor-free opencode-go/deepseek-v4.1-flash \
         opencode-go/longcat-2.5-preview-free --reps 2 --parallel 4
 
 Quality = step-card-sequence overlap of each extracted line with the best-matching line of the reference model's
@@ -67,7 +67,7 @@ def main() -> None:
     ap.add_argument("--models", nargs="+", required=True)
     ap.add_argument("--reps", type=int, default=2)
     ap.add_argument("--parallel", type=int, default=4)
-    ap.add_argument("--ref", default="opencode-go/muse-spark-1.3-contributor")
+    ap.add_argument("--ref", default="opencode/muse-spark-1.3-contributor-free")
     ap.add_argument("--out", type=Path, default=Path("data/cache/bench_llm.json"))
     args = ap.parse_args()
     ps = prompts()

@@ -168,7 +168,7 @@ and the pool gets refreshed each banlist.
 ## 4b. Model / API providers (OpenCode Go subscription, key configured)
 | Need | Model | Why |
 |---|---|---|
-| Hard reasoning / synthetic data (combo-line proposals, analysis) | `opencode-go/muse-spark-1.3-contributor` | large reasoning-request allowance |
+| Hard reasoning / synthetic data (combo-line proposals, analysis) | `opencode/muse-spark-1.3-contributor-free` | large reasoning-request allowance |
 | Bulk cheap generation | `opencode-go/deepseek-v4.1-flash` | more requests per window than v4-flash |
 | Classification / tagging | `opencode-go/longcat-2.5-preview-free` | free; preview models can disappear, so cache every answer |
 | Later, if classification volume explodes | Jev (TypeSafe, $X/M input) | no key yet |

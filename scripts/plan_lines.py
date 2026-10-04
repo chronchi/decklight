@@ -113,7 +113,7 @@ def main() -> None:
     ap.add_argument("--hands", type=int, default=20)
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--repairs", type=int, default=2)
-    ap.add_argument("--model", default="opencode-go/muse-spark-1.3-contributor")
+    ap.add_argument("--model", default="opencode/muse-spark-1.3-contributor-free")
     ap.add_argument("--workers", type=int, default=6)
     ap.add_argument(
         "--variant", default=None, help="muse reasoning effort (minimal|low|high|max; default: provider's)"

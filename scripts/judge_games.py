@@ -31,7 +31,7 @@ from ygo_zero.engine.actions import Kind
 from ygo_zero.engine.cpp_env import CppEnv
 from ygo_zero.engine.duel import Engine
 
-MODEL = "opencode-go/muse-spark-1.3-contributor"
+MODEL = "opencode/muse-spark-1.3-contributor-free"
 JUDGED_DIR = ROOT / "data" / "demos" / "games_judged"
 
 # Actions worth naming in the narrative; everything else is counted, not listed.

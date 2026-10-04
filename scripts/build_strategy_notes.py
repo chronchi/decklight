@@ -30,7 +30,7 @@ from ygo_zero.demos.plan import card_sheet, compact_line_json
 from ygo_zero.demos.strategy import NOTES_DIR, notes_path
 from ygo_zero.engine.duel import Engine
 
-MODEL = "opencode-go/muse-spark-1.3-contributor"
+MODEL = "opencode/muse-spark-1.3-contributor-free"
 
 SYSTEM = (
     "You are a Yu-Gi-Oh! TCG expert. Write a short, concrete strategy note for "

@@ -36,7 +36,7 @@ ROOT = Path(__file__).resolve().parents[1]
 POOL = ROOT / "decks" / "pool"
 SCRIPTS = ROOT / "third_party" / "CardScripts" / "official"
 EXTRA_T = C.TYPE_FUSION | C.TYPE_SYNCHRO | C.TYPE_XYZ | C.TYPE_LINK
-MODEL = "opencode-go/muse-spark-1.3-contributor"
+MODEL = "opencode/muse-spark-1.3-contributor-free"
 
 SYSTEM = "You are a Yu-Gi-Oh! TCG deckbuilding expert. You answer with JSON only."
 

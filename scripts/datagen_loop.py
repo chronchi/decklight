@@ -29,6 +29,7 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from ygo_zero.demos import llm
 from ygo_zero.infra import vast
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -38,6 +39,7 @@ ALLOWED_FILE = RUNS_CACHE / "vast-allowed.txt"
 STOP_FILE = RUNS_CACHE / "STOP_DATAGEN"
 SCALING_TSV = RUNS_CACHE / "bc_scaling.tsv"
 LLM_SERVER_URL = "http://127.0.0.1:4097"
+PROBE_MODEL = "opencode/muse-spark-1.3-contributor-free"
 
 TICK_S = 60
 SUMMARY_S = 30 * 60
@@ -394,6 +396,8 @@ class DatagenLoop:
         self.session_retry_after: dict[str, float] = {}
         self.last_summary = 0.0
         self.over_budget = False
+        self.quota_since: float | None = None  # LLM quota pause start (llm.QUOTA_MARKER)
+        self.quota_probe_at = 0.0
 
     # -- logging ------------------------------------------------------
     def log(self, msg: str) -> None:
@@ -691,6 +695,39 @@ class DatagenLoop:
             self.over_budget = True
             self.log(f"WARNING: repo {hr} >= 45 GB, stop launching (AGENTS.md storage rule)")
 
+    def _quota_paused(self, now: float) -> bool:
+        """LLM quota hit (marker written by llm.complete): launch nothing that calls muse; probe every 10 min with one
+        tiny call; after 30 min paused, end the vast sessions (no verification work while muse is down)."""
+        if not llm.QUOTA_MARKER.exists():
+            if self.quota_since is not None:
+                self.log(f"llm quota: resumed after {(now - self.quota_since) / 60:.0f} min")
+                self.quota_since = None
+            return False
+        if self.quota_since is None:
+            self.quota_since = now
+            self.quota_probe_at = now + 600
+            self.log("llm quota exceeded: pausing LLM workers (probe every 10 min)")
+        if now >= self.quota_probe_at:
+            self.quota_probe_at = now + 600
+            os.environ["YGO_OPENCODE_SERVER"] = LLM_SERVER_URL
+            try:
+                llm.complete(f"Reply with the word ok. {now:.0f}", model=PROBE_MODEL, timeout=90)
+                llm.QUOTA_MARKER.unlink(missing_ok=True)
+                self.log("llm quota probe ok: resuming")
+                return False
+            except Exception as e:  # noqa: BLE001 - still limited (or down): stay paused
+                self.log(f"llm quota probe failed: {str(e)[:120]}")
+                llm.QUOTA_MARKER.write_text(str(now))
+        if now - self.quota_since > 1800:
+            for name in [*line_session_names(self.args.line_sessions), "games"]:
+                if vast.load_session(name) is not None:
+                    self.log(f"llm quota pause > 30 min: ending vast session {name}")
+                    cmd = ["uv", "run", "--no-sync", "python", "scripts/vast_session.py", "stop"]
+                    if name != "lines":
+                        cmd += ["--session", name]
+                    subprocess.run(cmd, capture_output=True, cwd=ROOT, timeout=600, check=False)
+        return True
+
     # -- main tick ----------------------------------------------------
     def tick(self, now: float | None = None) -> bool:
         """One 60 s step. Returns True when the driver should exit."""
@@ -710,6 +747,9 @@ class DatagenLoop:
             self.last_summary = now
         self._ensure_llm_server()
         credit = self._credit()
+        if self._quota_paused(now):
+            self._ensure_bc(now, credit)  # training needs no LLM
+            return False
         for name in line_session_names(self.args.line_sessions):
             self._ensure_session(now, credit, name)
         games_remote = False
