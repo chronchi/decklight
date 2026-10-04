@@ -153,6 +153,15 @@ def load_records(path: Path) -> list[dict]:
     return [json.loads(line) for f in files for line in f.read_text().splitlines() if line.strip()]
 
 
+def starved_opening(rec: dict) -> bool:
+    """An opening game recorded before 2026-10-03 21:30: the line record's config gave the opponent no opening hand
+    (0 cards, so 1 card on its turn 2). Unrealistic for both players: never trained on (NOTEBOOK 2026-10-03 21:30)."""
+    if not rec.get("opening") or "game_id" not in rec:
+        return False
+    c = rec.get("config", {})
+    return c.get("hand", 5) == 0 and not any(int(p[0]) == 1 and int(p[2]) == C.LOCATION_HAND for p in c.get("setup", []))
+
+
 def iter_samples(engine: Engine, path: Path) -> Iterator[tuple[dict, int, float, dict]]:
     """Yield (obs, action, weight, meta) for every agent decision of every verified record.
 
@@ -162,6 +171,8 @@ def iter_samples(engine: Engine, path: Path) -> Iterator[tuple[dict, int, float,
     for f in files:
         judges = load_judgements(f)
         for rec in load_records(f):
+            if starved_opening(rec):
+                continue
             out: list = []  # buffered: a record that fails to replay is skipped whole (never half-yielded)
             try:
                 judge = judges.get(rec.get("line_id")) or judges.get(rec.get("game_id"))

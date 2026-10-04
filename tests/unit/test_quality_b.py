@@ -220,11 +220,13 @@ def test_find_openings_searches_listed_layouts(tmp_path):
 
 def test_build_opening_replaces_deck1(monkeypatch):
     monkeypatch.setattr(G, "CppEnv", _EnvContinue)
-    deck_b = Deck((12345,), (), (), "b")
-    out = G.build_opening(object(), _rec("a/line", 2, n_choices=2), deck_b)
+    deck_b = Deck(tuple(range(1, 8)), (), (), "b")
+    out = G.build_opening(object(), _rec("a/line", 2, n_choices=2), deck_b, seed=3)
     assert out is not None
     cfg, choices, labels = out
-    assert cfg.deck1 == deck_b and list(cfg.deck0.main) == [89631139]
+    hand = [pl.code for pl in cfg.setup if pl.team == 1]
+    assert len(hand) == G.OPENING_HAND and len(cfg.deck1.main) == 2  # opponent gets a real opening hand
+    assert sorted(hand + list(cfg.deck1.main)) == list(deck_b.main) and list(cfg.deck0.main) == [89631139]
     assert choices == [0, 0] and labels == ["stated"] * 2
 
 

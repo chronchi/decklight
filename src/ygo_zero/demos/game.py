@@ -36,7 +36,7 @@ from ygo_zero.demos.verify import plan_from_state
 from ygo_zero.engine import constants as C
 from ygo_zero.engine.actions import Kind
 from ygo_zero.engine.cpp_env import CppEnv
-from ygo_zero.engine.duel import DuelConfig, Engine
+from ygo_zero.engine.duel import DuelConfig, Engine, Placement
 from ygo_zero.engine.resources import default_cdbs
 
 TURN_SYSTEM = (
@@ -445,24 +445,69 @@ def opening_valid(engine: Engine, config: DuelConfig, choices: list[int]) -> boo
     return True
 
 
-def build_opening(engine: Engine, rec: dict, deck_b: Deck) -> tuple[DuelConfig, list[int], list[str]] | None:
-    """An opening for `play_game` from a verified turn-1 line record: the record's config with deck1
-    replaced by the chosen opponent deck `deck_b`. The line only uses deck0's cards, so the prefix stays
-    valid; None (skip the record) when the prefix no longer replays cleanly. The seed stays the record's
-    (the setup-fixed hand and search order are seed-dependent)."""
+def _actors(engine: Engine, config: DuelConfig, choices: list[int]) -> list[int] | None:
+    """The acting player of each recorded choice under `config`, or None when the choices do not replay."""
+    env = CppEnv(engine, config)
+    obs, out = env.reset(), []
+    for i in choices:
+        if obs is None or not 0 <= int(i) < len(_opts(obs)):
+            return None
+        out.append(env.player)
+        obs = env.step(int(i))
+    return out
+
+
+OPENING_HAND = 5
+
+
+def build_opening(engine: Engine, rec: dict, deck_b: Deck, seed: int = 0
+                  ) -> tuple[DuelConfig, list[int], list[str]] | None:  # fmt: skip
+    """An opening for `play_game` from a verified turn-1 line record: the record's config with deck1 replaced by the
+    opponent deck `deck_b`, which now gets a real opening hand (OPENING_HAND random cards placed in hand and removed
+    from its deck, like player 0's setup; line records start the opponent with 0 cards, so turn-1 hand traps were
+    impossible, NOTEBOOK 2026-10-03 21:20). The choice sequence is re-derived for the new config: player 0's recorded
+    choices in order, player 1 passive at every window (its hand traps now open windows the record never had; in the
+    game those windows go through the interrupter). None when the line no longer replays."""
     if len(rec.get("labels", [])) != len(rec.get("choices", [])):
         return None
     try:
-        config = replace(record_config(rec), deck1=deck_b)
+        orig = record_config(rec)
     except (KeyError, TypeError, ValueError):
         return None
     choices = [int(i) for i in rec["choices"]]
     labels = [str(x) for x in rec["labels"]]
     try:
-        ok = opening_valid(engine, config, choices)
+        actors = _actors(engine, orig, choices)
     except Exception:  # noqa: BLE001 - an unreadable engine state skips the record
-        ok = False
-    return (config, choices, labels) if ok else None
+        actors = None
+    if actors is None:
+        return None
+    mine = [(c, lab) for c, lab, a in zip(choices, labels, actors, strict=True) if a == 0]
+    rng = random.Random(seed)
+    main = list(deck_b.main)
+    hand = [main.pop(rng.randrange(len(main))) for _ in range(min(OPENING_HAND, len(main)))]
+    config = replace(orig, deck1=Deck(tuple(main), tuple(deck_b.extra), (), deck_b.name),
+                     setup=tuple(orig.setup) + tuple(Placement(1, c, C.LOCATION_HAND) for c in hand))  # fmt: skip
+    try:
+        env = CppEnv(engine, config)
+        obs = env.reset()
+        out_c, out_l, k = [], [], 0
+        while k < len(mine):
+            if obs is None or int(obs["global"][2]) > 1:
+                return None  # the line no longer completes on turn 1
+            if env.player == 0:
+                c, lab = mine[k]
+                if not 0 <= c < len(_opts(obs)):
+                    return None
+                k += 1
+            else:
+                c, lab = _passive_index(obs), "auto"
+            out_c.append(c)
+            out_l.append(lab)
+            obs = env.step(c)
+    except Exception:  # noqa: BLE001
+        return None
+    return config, out_c, out_l
 
 
 def play_game(

@@ -97,7 +97,7 @@ for pair in args.pairs:
             start = 0 if spread else args.from_index % len(pool)
             for j in range(len(cands)):
                 rec0 = cands[(start + j) % len(cands)]
-                built = build_opening(engine, rec0, decks[1][1])
+                built = build_opening(engine, rec0, decks[1][1], seed=seed)
                 if built is not None:
                     opening, opening_id = built, rec0["line_id"]
                     break
