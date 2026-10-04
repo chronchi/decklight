@@ -376,6 +376,68 @@ def _effect_text(code: int) -> str:
     return re.sub(r"\s+", " ", raw).strip()
 
 
+_SYS_STRINGS: dict[int, str] | None = None
+_CARD_STRINGS: dict[int, list[str]] | None = None
+_STRINGS_CONF = default_cdbs()[0].parents[1] / "edopro-strings.conf"
+
+
+def desc_text(hi: int, lo: int) -> str:
+    """Text of an engine description id split as (desc >> 20, desc & 0xFFFFF): a card's str<lo+1> when `hi` is a card
+    code, else EDOPro system string `lo` (e.g. 573 "Add the card(s) to your hand"). "" when unknown."""
+    global _SYS_STRINGS, _CARD_STRINGS
+    hi, lo = int(hi), int(lo)
+    if hi <= 0:
+        if _SYS_STRINGS is None:
+            _SYS_STRINGS = {}
+            if _STRINGS_CONF.exists():
+                for line in _STRINGS_CONF.read_text(encoding="utf-8").splitlines():
+                    if line.startswith("!system "):
+                        _, num, *rest = line.split(" ", 2)
+                        if num.isdigit() and rest:
+                            _SYS_STRINGS[int(num)] = rest[0].strip()
+        return _SYS_STRINGS.get(lo, "")
+    if _CARD_STRINGS is None:
+        out: dict[int, list[str]] = {}
+        cols = ", ".join(f"str{i}" for i in range(1, 17))
+        for path in default_cdbs():
+            try:
+                con = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+            except sqlite3.Error:
+                continue
+            try:
+                for row in con.execute(f"SELECT id, {cols} FROM texts").fetchall():
+                    out[int(row[0])] = [str(x or "") for x in row[1:]]
+            finally:
+                con.close()
+        _CARD_STRINGS = out
+    strs = _CARD_STRINGS.get(hi, [])
+    return strs[lo].strip() if 0 <= lo < len(strs) else ""
+
+
+_POSITIONS = {1: "face-up Attack", 2: "face-down Attack", 4: "face-up Defense", 8: "face-down Defense"}
+
+
+_LOCS = {1: "Deck", 2: "hand", 3: "Monster Zone", 4: "Spell/Trap Zone", 5: "GY", 6: "banishment", 7: "Extra Deck", 8: "Xyz material"}
+
+
+def hidden_card(obs, i: int) -> str:
+    """Label for an option on a card the player cannot see (code 0), e.g. "opponent's face-down card (Spell/Trap Zone)"."""
+    r = list(obs["actions"])[i]
+    if int(r[2]) or int(r[1]) < 0:
+        return ""
+    whose = {0: "your", 1: "opponent's"}.get(int(r[8]), "a")
+    return f"{whose} face-down card ({_LOCS.get(int(r[7]), 'field')})"
+
+
+def option_desc(obs, i: int) -> str:
+    """The engine's description of option `i` (which effect / which choice), from action columns 3-4."""
+    r = list(obs["actions"])[i]
+    if int(r[0]) == Kind.POSITION:
+        return _POSITIONS.get(int(r[5]), "")
+    t = desc_text(int(r[3]), int(r[4]))
+    return "" if "%" in t else t  # "%ls" prompt templates ("Activate the Trigger Effect of ...?") say nothing
+
+
 def chain_names(obs, names: dict[int, str]) -> list[str]:
     out = []
     for r in _masked_rows(obs, "chain", "chain_mask"):
@@ -392,7 +454,10 @@ def options_text(obs, names: dict[int, str], engine=None) -> str:
             kind = Kind(k).name
         except ValueError:
             kind = str(k)
-        nm = names.get(int(code), f"#{int(code)}") if int(code) else "(no card)"
+        nm = names.get(int(code), f"#{int(code)}") if int(code) else (hidden_card(obs, i) or "(no card)")
+        what = option_desc(obs, i)
+        if what:  # which effect / which choice; without it SELECT_OPTION rows were blank
+            nm = f'{nm} "{what}"' if int(code) else f'"{what}"'
         desc = _effect_text(code) if engine is not None and int(code) and int(code) not in shown else ""
         shown.add(int(code))
         lines.append(f"{i}: {kind} {nm}" + (f" | {desc}" if desc else ""))

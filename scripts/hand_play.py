@@ -1,7 +1,7 @@
 """Hand-play a full duel (both seats) through the engine and save it as a "gold" game record.
 
-A person (or Claude) drives every decision by kind + card name, with a short reason; zone (PLACE) and
-position (POSITION) prompts are answered automatically. State lives in data/demos/gold_work/<game>/state.json,
+A person (or Claude) drives every decision by kind + card name, with a short reason; zone (PLACE) prompts are
+answered automatically; positions are chosen with POS:attack / POS:defense. State lives in data/demos/gold_work/<game>/state.json,
 so each command is a fresh process that replays the duel.
 
     uv run python scripts/hand_play.py new  g1 snake-eye tenpai-dragon 7
@@ -26,7 +26,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 from ygo_zero.decks import load_ydk
-from ygo_zero.demos.game import _effect_text, _opts, chain_names, describe_state
+from ygo_zero.demos.game import _effect_text, _opts, chain_names, describe_state, hidden_card, option_desc
 from ygo_zero.demos.names import CardNames
 from ygo_zero.engine import constants as C
 from ygo_zero.engine.actions import Kind
@@ -35,7 +35,7 @@ from ygo_zero.engine.duel import DuelConfig, Engine
 
 WORK = ROOT / "data" / "demos" / "gold_work"
 OUT = ROOT / "data" / "demos" / "gold"
-_ALIASES = {"END": Kind.TO_END, "BP": Kind.TO_BATTLE, "M2": Kind.TO_MAIN2}
+_ALIASES = {"END": Kind.TO_END, "BP": Kind.TO_BATTLE, "M2": Kind.TO_MAIN2, "ATK": Kind.ATTACK}
 _PASSIVE = (Kind.PASS, Kind.NO, Kind.CANCEL, Kind.FINISH)
 _MSGS = {v: k for k, v in vars(C).items() if k.startswith("MSG_")}
 
@@ -81,17 +81,22 @@ def _match(obs, tok: str, names: dict[int, str]) -> int | None:
         return next((i for i, (k, _) in enumerate(opts) if k in _PASSIVE), None)
     head, _, sub = tok.partition(":")
     head, sub = head.upper(), sub.replace("_", " ").lower()
+    best = None  # (rank, index): exact name < name prefix < substring of name/description
     for i, (k, code) in enumerate(opts):
         kname = _kind(k)
         ok_kind = (k == _ALIASES[head]) if head in _ALIASES else kname.startswith(head)
-        if ok_kind and (not sub or sub in names.get(code, "").lower()):
-            return i
-    return None
+        nm = names.get(code, "").lower()
+        if not ok_kind:
+            continue
+        rank = 0 if not sub or nm == sub else 1 if nm.startswith(sub) else 2 if sub in f"{nm} {option_desc(obs, i)}".lower() else None
+        if rank is not None and (best is None or rank < best[0]):
+            best = (rank, i)
+    return best[1] if best else None
 
 
 def _auto(env, obs, st: dict):
-    """Answer zone/position prompts with their first option."""
-    while obs is not None and int(obs["global"][21]) in (C.MSG_SELECT_PLACE, C.MSG_SELECT_POSITION):
+    """Answer zone prompts with their first option (positions are real decisions and wait for a token)."""
+    while obs is not None and int(obs["global"][21]) == C.MSG_SELECT_PLACE:
         st["choices"].append(0)
         st["labels"].append("auto")
         st["actors"].append(env.player)
@@ -113,7 +118,9 @@ def _show(env, obs, st: dict, names: CardNames, texts: bool) -> None:
         print("CHAIN:", " -> ".join(ch))
     seen = set(st.setdefault("seen", []))
     for i, (k, code) in enumerate(_opts(obs)):
-        nm = names.names.get(code, f"#{code}") if code else ""
+        nm = names.names.get(code, f"#{code}") if code else hidden_card(obs, i)
+        what = option_desc(obs, i)
+        nm = f'{nm} "{what}"' if what else nm
         txt = ""
         if code and (texts or code not in seen):
             txt = " | " + _effect_text(code)
@@ -129,6 +136,7 @@ def main() -> None:
     ap.add_argument("rest", nargs="*")
     ap.add_argument("--why", default="")
     ap.add_argument("--texts", action="store_true")
+    ap.add_argument("--cross", action="store_true", help="let tokens continue after the acting seat changes")
     a = ap.parse_args()
     engine, names = Engine(), CardNames()
     if a.cmd == "new":
@@ -152,8 +160,12 @@ def main() -> None:
     env, obs = _replay(engine, st)
     if a.cmd == "do":
         start = len(st["choices"])
+        actor = env.player if obs is not None else None
         for tok in " ".join(a.rest).split():
             if obs is None:
+                break
+            if env.player != actor and not a.cross:  # never let leftover tokens decide for the other seat
+                print(f"!! player changed to P{env.player}; stopped before {tok!r}")
                 break
             i = _match(obs, tok, names.names)
             if i is None:
