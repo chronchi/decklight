@@ -5,11 +5,15 @@ uv run python scripts/vast_job.py --cleanup        # destroy any leftover ygo-ze
 """
 
 import argparse
+import signal
+import sys
 
 from ygo_zero.infra import vast
 
 
 def main() -> None:
+    # SIGTERM (driver timeout) must run run_job's `finally`, which destroys the box; Python's default handler skips it
+    signal.signal(signal.SIGTERM, lambda *_: sys.exit(143))
     ap = argparse.ArgumentParser()
     ap.add_argument("--name")
     ap.add_argument("--cmd")

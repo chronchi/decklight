@@ -45,9 +45,10 @@ TICK_S = 60
 SUMMARY_S = 30 * 60
 SESSION_RETRY_S = 30 * 60
 REPO_BUDGET_BYTES = 45 * 1024**3
-KILL_GRACE_S = 30
+KILL_GRACE_S = 180  # a SIGTERMed vast launcher destroys its box in `finally` (destroy verifies for up to 60 s)
 
-CHILD_LIMITS = {"judge": 2 * 3600, "planner": 3 * 3600, "improver": 3 * 3600, "expander": 2 * 3600, "game": 2 * 3600, "session": 30 * 60, "bc": 3 * 3600}
+CHILD_LIMITS = {"judge": 2 * 3600, "planner": 3 * 3600, "improver": 3 * 3600, "expander": 2 * 3600, "game": 2 * 3600, "session": 30 * 60,
+                "bc": int(3.6 * 3600)}  # > the job cap (3 h) + pull + destroy: 3.0 here killed 2 launchers before the pull
 
 
 # ---------------------------------------------------------------- pure helpers
@@ -617,8 +618,8 @@ class DatagenLoop:
                          RUNS_CACHE / f"game-{a}-vs-{b}-{seed}.log", desc=f"{a}-vs-{b} seed={seed}")
 
     def _ensure_bc(self, now: float, credit: float | None) -> None:
-        if now < self.bc_next_due or self._live("bc"):
-            return
+        if now < self.bc_next_due or self._live("bc") or running_scripts("vast_job.py"):
+            return  # vast_job.py running without a live bc child = a launcher orphaned by a previous driver
         if credit is None or credit < self.args.credit_floor:
             return
         name = "bcs-" + time.strftime("%Y%m%d-%H%M")

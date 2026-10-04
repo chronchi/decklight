@@ -43,7 +43,8 @@ uv run --no-sync python scripts/train_bc.py "${COMMON[@]}" --out "$OUT/bc-noexp"
 echo "train-noexp $((SECONDS - T0)) s" >> "$OUT/timing.txt"
 rm -f "$OUT/bc/last.pt" "$OUT/bc-noexp/last.pt"
 # 4. playtest the variant with the better holdout accuracy on this box (GPU inference; laptop CPU is too slow);
-#    --samples 8 adds best-of-8 sampled turn-1 runs (headroom for search/RL)
+#    --samples 8 adds best-of-8 sampled turn-1 runs (headroom for search/RL); capped at 40 min (2026-10-03 22:02 it ran
+#    2 h for 10 decks of combo tests and the job cap killed it before the matches; per-deck lines are flushed as they go)
 BEST=$(uv run --no-sync python - "$OUT" <<'PY'
 import json, sys
 from pathlib import Path
@@ -59,7 +60,7 @@ print(arg)
 PY
 )
 echo "playtest variant $BEST" >> "$OUT/timing.txt"
-uv run --no-sync python scripts/playtest.py --ckpt "$OUT/$BEST/best.pt" --device cuda --threads "$J" --decks 10 --hands 6 \
+timeout 40m uv run --no-sync python scripts/playtest.py --ckpt "$OUT/$BEST/best.pt" --device cuda --threads "$J" --decks 10 --hands 6 \
   --seeds 2 --narrate 3 --samples 8 > "$OUT/playtest.txt" 2>&1
 echo "playtest $((SECONDS - T0)) s" >> "$OUT/timing.txt"
 echo done > "$OUT/DONE"
