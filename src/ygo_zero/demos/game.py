@@ -528,6 +528,86 @@ class BattleAdvisor:
             self.attacker = self.names.get(code, f"#{code}") if code else "your monster"
         return got
 
+_STEP_MSGS = {
+    C.MSG_SELECT_IDLECMD: "Main Phase: choose your next action (activate, summon, set), or move on (TO_BATTLE to attack, "
+    "TO_END to end your turn) when you are done.",
+    C.MSG_SELECT_CARD: "Choose a card for the effect/action in progress.",
+    C.MSG_SELECT_UNSELECT_CARD: "Choose a card for the effect/action in progress (FINISH when you have enough).",
+    C.MSG_SELECT_CHAIN: "You may activate an effect now (e.g. a trigger of your own card), or PASS.",
+    C.MSG_SELECT_EFFECTYN: "Use this optional effect?",
+    C.MSG_SELECT_YESNO: "Answer yes or no.",
+    C.MSG_SELECT_OPTION: "Choose one of the effect's options.",
+}
+
+
+def step_prompt(deck_name: str, state: str, task: str, options: str, done: list[str]) -> str:
+    return f"""You are playing {deck_name}. It is your turn and you play it one decision at a time.
+{notes_block(deck_name)}
+CURRENT STATE:
+{state}
+
+THIS TURN SO FAR: {"; ".join(done) if done else "nothing yet"}
+
+{task}
+YOUR LEGAL OPTIONS (from the game engine; reply with the option number):
+{options}
+
+You are an expert player. Use your resources toward your deck's win condition: searches, summons, Extra Deck plays,
+removal of the opponent's threats, then a resilient end board or lethal. Respect once-per-turn limits and what the
+opponent may still have (set cards, hand traps). Do not end the turn while a useful play remains; do not throw away
+cards for nothing.
+Reply with JSON only: {{"choice": <option number>, "why": "<short reason>"}}."""
+
+
+class StepPlayer:
+    """LLM turn play one decision at a time, used when no plan for the turn verified (2026-10-04: a failed plan used to
+    end the turn; 24 of 35 low-scored passive turns had live plays). Asks only at decisions with a real choice (main
+    phase commands, card picks with ≥2 candidates, own optional effects, yes/no, effect options); zones and positions
+    stay with the `Responder`. At most `max_per_turn` asks per turn; returns None to leave a decision to the rule."""
+
+    def __init__(self, complete_fn: Callable[[str], str], names, max_per_turn: int = 16):
+        self.complete_fn = complete_fn
+        self.names = names.names if hasattr(names, "names") else dict(names)
+        self.max_per_turn = max_per_turn
+        self.used: dict[int, int] = {}
+        self.done: dict[int, list[str]] = {}
+
+    def wants(self, obs) -> bool:
+        msg = int(obs["global"][21])
+        if msg not in _STEP_MSGS:
+            return False
+        opts = _opts(obs)
+        if len(opts) < 2:
+            return False
+        if msg in (C.MSG_SELECT_CARD, C.MSG_SELECT_UNSELECT_CARD):
+            return sum(1 for k, _ in opts if k == Kind.SELECT) >= 2
+        if msg == C.MSG_SELECT_CHAIN:
+            return any(k == Kind.ACTIVATE for k, _ in opts)
+        return True
+
+    def __call__(self, obs, deck_name: str, turn: int, engine=None) -> tuple[int, str] | None:
+        if not self.wants(obs) or self.used.get(turn, 0) >= self.max_per_turn:
+            return None
+        self.used[turn] = self.used.get(turn, 0) + 1
+        done = self.done.setdefault(turn, [])
+        prompt = step_prompt(deck_name, describe_state(obs, self.names), _STEP_MSGS[int(obs["global"][21])],
+                             options_text(obs, self.names, engine), done[-12:])  # fmt: skip
+        try:
+            resp = self.complete_fn(prompt)
+        except Exception:  # noqa: BLE001 - an LLM failure falls back to the rule
+            return None
+        idx, why = parse_interrupt_answer(resp, len(_opts(obs)), -1)
+        if idx < 0:
+            return None
+        k, code = _opts(obs)[idx]
+        try:
+            kind = Kind(k).name
+        except ValueError:
+            kind = str(k)
+        done.append(f"{kind} {self.names.get(code, '') if code else ''}".strip())
+        return idx, why
+
+
 _TRIGGER_KINDS = (Kind.SUMMON, Kind.SPSUMMON, Kind.ACTIVATE)
 
 
@@ -739,6 +819,7 @@ def play_game(
     interrupt_fn: Callable[[str], str] | None = None,  # LLM for interruption asks (default: complete_fn)
     opening: tuple[DuelConfig, list[int], list[str]] | None = None,
     battle_asks: int = 4,  # LLM battle decisions per turn outside plans (0 = rule only)
+    step_asks: int = 16,  # LLM one-decision-at-a-time asks per turn when the turn's plan failed (0 = off)
 ) -> dict:
     """Play one game; deck 0 goes first. Returns the record (see module docstring). `max_seconds`: stop at the next
     turn boundary once exceeded (the record is kept, winner None), so a slow game never loses its data to a kill.
@@ -764,6 +845,9 @@ def play_game(
     responder = Responder(seed)
     interrupter = (Interrupter(interrupt_fn or complete_fn, names, max_per_turn=interrupts) if interrupts > 0 else None)
     battler = BattleAdvisor(complete_fn, names, max_per_turn=battle_asks) if battle_asks > 0 else None
+    stepper = StepPlayer(complete_fn, names, max_per_turn=step_asks) if step_asks > 0 else None
+    stepping: set[tuple[int, int]] = set()  # (turn, player) whose plan failed: played decision by decision
+    steps_log: list[dict] = []
     battles_log: list[dict] = []
     env = CppEnv(engine, config)
     obs = env.reset()
@@ -908,7 +992,9 @@ def play_game(
         plans.append(entry)
         log(
             f"  turn {turn} p{p} ({dnames[p]}): no verified plan ({[a.get('reason') for a in entry['attempts']]})"
+            + (", playing it step by step" if stepper is not None else "")
         )
+        stepping.add((turn, p))
         return []
 
     if opening is not None:
@@ -949,7 +1035,9 @@ def play_game(
         if my_turn and is_open(obs) and int(obs["global"][21]) == C.MSG_SELECT_IDLECMD:
             key = (turn, p)
             # first plan of this turn, or one replan (after an interruption or a failed plan, e.g. at Main Phase 2)
-            if key not in tried or (key not in replanned and plan_owner == p and plan_turn == turn):
+            if key not in tried or (
+                key not in replanned and key not in stepping and plan_owner == p and plan_turn == turn
+            ):
                 why = "replan" if key in tried else "turn"
                 if key in tried:
                     replanned.add(key)
@@ -971,6 +1059,17 @@ def play_game(
                 battles_log.append({"turn": turn, "player": p, "card": names.names.get(code, "-") if code else "-",
                                     "kind": Kind(_opts(obs)[b][0]).name, "why": why})  # fmt: skip
                 take(b, "battle")
+                continue
+        if my_turn and stepper is not None and (turn, p) in stepping:
+            asked = stepper.used.get(turn, 0)
+            got = stepper(obs, dnames[p], turn, engine)
+            llm_calls += stepper.used.get(turn, 0) - asked
+            if got is not None:
+                b, why = got
+                code = _opts(obs)[b][1]
+                steps_log.append({"turn": turn, "player": p, "card": names.names.get(code, "-") if code else "-",
+                                  "kind": Kind(_opts(obs)[b][0]).name, "why": why})  # fmt: skip
+                take(b, "step")
                 continue
         r, is_int = decide(obs, turn, p)
         take(r, "interrupt" if is_int else ("responder" if p != plan_owner or turn != plan_turn else "fallback"))
@@ -996,6 +1095,7 @@ def play_game(
         "plans": plans,
         "interrupts": interrupts_log,
         "battles": battles_log,
+        "steps": steps_log,
         "opening": None,  # the driver fills in the source record's line_id when an opening was replayed
         "winner": winner,
         "end_turn": turns[-1] if turns else 0,

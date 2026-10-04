@@ -197,3 +197,25 @@ def test_legal_actions_lists_engine_options_and_flags_live_plays():
     assert text == "Set spell/trap: Trap A" and not live
     assert "LEGAL RIGHT NOW" in turn_prompt("x", "", "Your hand: none", True, [], text)
     assert "LEGAL RIGHT NOW" not in turn_prompt("x", "", "Your hand: none", True, [])
+
+
+def test_step_player_asks_only_real_choices_and_logs_the_turn():
+    from ygo_zero.demos.game import StepPlayer
+
+    asked = []
+
+    def llm(prompt):
+        asked.append(prompt)
+        return '{"choice": 0, "why": "search first"}'
+
+    sp = StepPlayer(llm, {1: "Pre-Preparation of Rites"}, max_per_turn=2)
+    idle = _fake_obs(1, C.MSG_SELECT_IDLECMD, ((Kind.ACTIVATE, 1), (Kind.TO_END, 0)))
+    assert sp(idle, "deck", 3) == (0, "search first")
+    assert "THIS TURN SO FAR: nothing yet" in asked[0]
+    sp(idle, "deck", 3)
+    assert "ACTIVATE Pre-Preparation of Rites" in asked[1]
+    assert sp(idle, "deck", 3) is None  # asks exhausted: the rule decides
+    one_target = _fake_obs(1, C.MSG_SELECT_CARD, ((Kind.SELECT, 1), (Kind.CANCEL, 0)))
+    assert not sp.wants(one_target)
+    place = _fake_obs(1, C.MSG_SELECT_PLACE, ((Kind.PLACE, 0), (Kind.PLACE, 0)))
+    assert not sp.wants(place)

@@ -21,7 +21,7 @@ from ygo_zero.engine.actions import Kind
 from ygo_zero.engine.cpp_env import CppEnv
 from ygo_zero.engine.duel import DuelConfig, Engine, Placement
 
-LABEL_WEIGHT = {"stated": 1.0, "inferred": 0.5, "interrupt": 1.0, "end": 1.0, "battle": 1.0}  # battle: LLM Battle Phase picks
+LABEL_WEIGHT = {"stated": 1.0, "inferred": 0.5, "interrupt": 1.0, "end": 1.0, "battle": 1.0, "step": 1.0}  # battle: LLM Battle Phase picks; step: LLM decision-by-decision turn play
 _PASSIVE_KINDS = (Kind.PASS, Kind.NO, Kind.FINISH, Kind.CANCEL)
 
 
