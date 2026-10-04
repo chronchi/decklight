@@ -121,6 +121,31 @@ _GO_SECOND_HINT = (
 )
 
 
+_PUSH = (
+    "\n\nYour previous plan only {what} although you hold {n} cards in hand. A strong player uses their resources: "
+    "Normal/Special Summons, searches, Extra Deck plays, removal or hand traps against the opponent's board. Plan the "
+    "strongest legal line from this exact state; only if truly nothing works, keep the short line."
+)
+
+
+def hand_size(state: str) -> int:
+    for line in state.splitlines():
+        if line.strip().lower().startswith("your hand:"):
+            rest = line.split(":", 1)[1].strip()
+            return 0 if rest.lower() in ("", "none") else len([x for x in rest.split(", ") if x.strip()])
+    return 0
+
+
+def weak_plan(steps) -> str | None:
+    """'passed' / 'set a card' when a plan does no more than that, else None (2026-10-03: 141 of ~700 second-player
+    turn-2 plans were a pass or one Set; the prompt's "set a card if nothing useful" was taken too readily)."""
+    if not steps:
+        return "passed"
+    if len(steps) == 1 and steps[0].action in ("set_spelltrap", "set_monster"):
+        return "set a card"
+    return None
+
+
 def turn_prompt(deck_name: str, sheet: str, state: str, can_attack: bool, examples: list[ComboLine]) -> str:
     ex = ""
     if examples:
@@ -542,7 +567,13 @@ def play_game(
         base = turn_prompt(dnames[p], sheets[p], state, can_attack, (examples or {}).get(dnames[p], []))
         prompt = base
         entry = {"turn": turn, "player": p, "deck": dnames[p], "why": why, "attempts": []}
-        for attempt in range(repairs + 1):
+        n_hand = hand_size(state)
+        pushed = False
+        fallback: list[tuple[int, str]] | None = None  # a verified weak plan, kept while a pushed retry is tried
+        weak_at = -1
+        attempt = -1
+        while attempt < repairs + (1 if pushed else 0):
+            attempt += 1
             llm_calls += 1
             try:
                 resp = complete_fn(prompt)
@@ -567,7 +598,16 @@ def play_game(
             line.source_file = "game"
             # "pass" steps name no card and do nothing; an all-pass plan ends the turn via the fallback
             line.steps = [st for st in line.steps if st.card or st.action not in ("other", "pass")]
+            weak = weak_plan(line.steps)
+            if weak and n_hand >= 4 and not pushed:
+                pushed = True
+                if not line.steps:
+                    entry["attempts"].append({"line": dicts[0], "reason": "pass_pushed", "nodes": 0})
+                    prompt = base + _PUSH.format(what=weak, n=n_hand)
+                    continue
             if not line.steps:
+                if fallback is not None:
+                    break
                 entry["attempts"].append({"line": dicts[0], "reason": "pass", "nodes": 0})
                 plans.append(entry)
                 log(f"  turn {turn} p{p} ({dnames[p]}): plan = pass")
@@ -580,14 +620,27 @@ def play_game(
                 {"line": json.loads(compact_line_json(line)), "reason": v.reason, "nodes": v.nodes}
             )
             if v.ok:
+                got = list(zip(v.choices[len(choices) :], v.labels[len(choices) :], strict=True))
+                if weak and pushed and fallback is None and n_hand >= 4:
+                    fallback = got  # verified but weak: ask once for a stronger line, keep this one if that fails
+                    weak_at = len(entry["attempts"]) - 1
+                    entry["attempts"][weak_at]["reason"] = "ok_weak_pushed"
+                    prompt = base + _PUSH.format(what=weak, n=n_hand)
+                    continue
                 plans.append(entry)
-                log(f"  turn {turn} p{p} ({dnames[p]}): plan ok ({len(line.steps)} steps, {v.nodes} nodes)")
-                return list(zip(v.choices[len(choices) :], v.labels[len(choices) :], strict=True))
+                log(f"  turn {turn} p{p} ({dnames[p]}): plan ok ({len(line.steps)} steps, {v.nodes} nodes)"
+                    + (" after push" if pushed else ""))
+                return got
             try:
                 ex = explain_failure(engine, line, pdecks[p], v, names.names)
             except Exception:  # noqa: BLE001
                 ex = ""
             prompt = repair_prompt(base, compact_line_json(line), f"{v.reason}: {v.detail}", ex)
+        if fallback is not None:
+            entry["attempts"][weak_at]["reason"] = "ok"  # the line actually played (judge_games reads reason == "ok")
+            plans.append(entry)
+            log(f"  turn {turn} p{p} ({dnames[p]}): push failed, keeping the weak plan")
+            return fallback
         plans.append(entry)
         log(
             f"  turn {turn} p{p} ({dnames[p]}): no verified plan ({[a.get('reason') for a in entry['attempts']]})"

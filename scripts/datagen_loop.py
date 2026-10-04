@@ -414,7 +414,7 @@ class DatagenLoop:
         env = dict(os.environ)
         env["YGO_OPENCODE_SERVER"] = LLM_SERVER_URL
         proc = subprocess.Popen(cmd, stdout=fh, stderr=subprocess.STDOUT, cwd=ROOT, env=env,
-                                preexec_fn=_oom_first)
+                                preexec_fn=_oom_first)  # noqa: PLW1509 - the driver is single-threaded
         child = Child(kind=kind, proc=proc, log_file=fh, log_path=log_path,
                       started=time.time(), **kw)
         self.children.append(child)
