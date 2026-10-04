@@ -394,7 +394,8 @@ class DatagenLoop:
         self.children: list[Child] = []
         self.rng = random.Random()
         self.start_t = time.time()
-        self.bc_next_due = self.start_t + 3600  # first BC run 1 h after start
+        # first BC run 1 h after start, or never sooner than --bc-every-h (2026-10-04: --bc-every-h 10000 still launched one)
+        self.bc_next_due = self.start_t + max(3600, args.bc_every_h * 3600)
         self.failed_starts: dict[str, int] = {}
         self.session_retry_after: dict[str, float] = {}
         self.last_summary = 0.0
