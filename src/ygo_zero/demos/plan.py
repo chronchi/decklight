@@ -124,7 +124,7 @@ def card_sheet(engine, deck, names: CardNames) -> str:
     for code in sorted(counts, key=lambda c: names.names.get(c, str(c))):
         name = names.names.get(code, str(code))
         raw = descs.get(code, "") or ""
-        desc = re.sub(r"\s+", " ", raw).strip()[:400]
+        desc = re.sub(r"\s+", " ", raw).strip()  # full text: 35% of cards exceed 400 chars (NOTEBOOK 2026-10-04 13:00)
         lines.append(f"{name} x{counts[code]} | {_stat_line(code, engine.cards, desc)}")
     return "\n".join(lines)
 

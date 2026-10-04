@@ -665,6 +665,13 @@ def _search(
         plain = [
             (i, "inferred") for i, k, c in opts if i not in anch and c not in stated and k not in _DEMOTED
         ]
+        if int(obs["global"][21]) == C.MSG_SELECT_CHAIN:
+            # an optional chain window: activating a card the line never mentions is a guess, so try passing first
+            # (2026-10-04: 29 inferred own-turn activations in 18 games, e.g. Ash Blossom on its own search)
+            named = later[si] if si < n else set()
+            kind_of = {i: (k, c) for i, k, c in opts}
+            junk = [x for x in plain if kind_of[x[0]][0] == Kind.ACTIVATE and kind_of[x[0]][1] not in named]
+            plain = [x for x in plain if x not in junk] + junk
         movers = [(i, "inferred") for i, k, c in opts if k in _MOVERS]
         cancel = [
             (i, "inferred")

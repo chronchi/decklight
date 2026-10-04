@@ -113,12 +113,12 @@ def test_quality_guard_priority():
     assert quality_guard(3, [0, 1], ["stated"]) == "too_skipped"  # too_skipped wins over trivial
 
 
-def test_single_step_execution_is_trivial(engine, decks):
+def test_single_step_execution_is_accepted(engine, decks):
+    # The "trivial" (<2 executed steps) guard is off since e62f1ad: in a game a one-card turn is a legitimate plan.
     deck = decks["BlueEyes"]
     line = _line([SAGE], [_step(0, "normal_summon", SAGE)], [SAGE])
     v = verify_line(engine, line, deck, seed=0)
-    assert not v.ok and v.reason == "trivial", (v.reason, v.detail)
-    assert v.executed_steps == 1
+    assert v.ok, (v.reason, v.detail)
 
 
 def test_all_skipped_is_vacuous(engine, decks):

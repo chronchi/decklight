@@ -41,6 +41,6 @@ def test_samples_have_legal_actions_and_weights(engine):
     n = 0
     for obs, action, weight, meta in iter_samples(engine, VERIFIED):
         assert 0 <= action < int(obs["action_mask"].sum())
-        assert weight in (1.0, 0.5) and meta["label"] in ("stated", "inferred")
+        assert weight in (1.0, 0.5) and meta["label"] in ("stated", "inferred", "end")  # "end": the stop-turn sample
         n += 1
     assert n >= len(recs)

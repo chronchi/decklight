@@ -356,7 +356,8 @@ _DESC_CACHE: dict[int, str] | None = None
 
 
 def _effect_text(code: int) -> str:
-    """First 300 chars of the card's effect text (whitespace-collapsed)."""
+    """The card's full effect text (whitespace-collapsed). Not truncated since 2026-10-04: a 300-char cut dropped the
+    second effect / once-per-turn clause of 52% of cards."""
     global _DESC_CACHE
     if _DESC_CACHE is None:
         out: dict[int, str] = {}
@@ -372,7 +373,7 @@ def _effect_text(code: int) -> str:
                 con.close()
         _DESC_CACHE = out
     raw = _DESC_CACHE.get(int(code), "")
-    return re.sub(r"\s+", " ", raw).strip()[:300]
+    return re.sub(r"\s+", " ", raw).strip()
 
 
 def chain_names(obs, names: dict[int, str]) -> list[str]:
@@ -385,13 +386,15 @@ def chain_names(obs, names: dict[int, str]) -> list[str]:
 
 def options_text(obs, names: dict[int, str], engine=None) -> str:
     lines = []
+    shown: set[int] = set()  # each card's text once (several options often name the same card)
     for i, (k, code) in enumerate(_opts(obs)):
         try:
             kind = Kind(k).name
         except ValueError:
             kind = str(k)
         nm = names.get(int(code), f"#{int(code)}") if int(code) else "(no card)"
-        desc = _effect_text(code) if engine is not None and int(code) else ""
+        desc = _effect_text(code) if engine is not None and int(code) and int(code) not in shown else ""
+        shown.add(int(code))
         lines.append(f"{i}: {kind} {nm}" + (f" | {desc}" if desc else ""))
     return "\n".join(lines)
 
