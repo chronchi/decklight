@@ -27,10 +27,15 @@ if [ "$Q" = "max" ]; then J=$(nproc); else J=$(( Q / P )); fi
 # CUDA torch straight away (the lock pins the CPU wheel: skip it instead of downloading both; 2026-10-05)
 T0=$(date +%s)
 uv sync --group dev --group ml --group gauntlet -q --no-install-package torch
-uv pip install -q torch --index-url https://download.pytorch.org/whl/cu128 > "$OUT/torch.txt" 2>&1 || true
+export UV_HTTP_TIMEOUT=300  # 30 s default: a slow mirror timed out on nvidia-nccl (bcg-mem512-20261005-0926)
+for try in 1 2 3; do
+  uv pip install -q torch --index-url https://download.pytorch.org/whl/cu128 >> "$OUT/torch.txt" 2>&1 && break
+  echo "torch install attempt $try failed" >> "$OUT/torch.txt"; sleep 10
+done
 echo "deps install $(( $(date +%s) - T0 ))s" >> "$OUT/torch.txt"
 { nvidia-smi --query-gpu=name,memory.total,compute_cap --format=csv,noheader; echo "jobs $J";
   uv run --no-sync python -c "import torch; print(torch.__version__, torch.cuda.is_available())"; } > "$OUT/machine.txt" 2>&1
+uv run --no-sync python -c "import torch; assert torch.cuda.is_available()" || { echo "no CUDA torch: abort" | tee -a "$OUT/torch.txt"; exit 3; }
 # GPU/CPU usage every 30 s (is a better GPU worth it? 2026-10-05): gpu util %, gpu mem MiB, load average
 ( while true; do echo "$(date +%T) $(nvidia-smi --query-gpu=utilization.gpu,memory.used --format=csv,noheader,nounits 2>/dev/null | tr -d ' ') $(cut -d' ' -f1 /proc/loadavg)"; sleep 30; done ) > "$OUT/usage.txt" 2>&1 &
 USAGE_PID=$!
