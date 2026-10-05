@@ -30,7 +30,7 @@ BASE=data/cache/bc_base/best.pt
 if [ "$MODE" = "smoke" ]; then
   ONLY=(--only gold); EP_FT=1; EP_MIX=1; SKIP_SCRATCH=1; PT=(--decks 2 --hands 1 --seeds 1 --narrate 0 --samples 0); PT_CAP=8m
 else
-  ONLY=(); EP_FT=10; EP_MIX=3; SKIP_SCRATCH="${SKIP_SCRATCH:-0}"; PT=(--decks 10 --hands 6 --seeds 2 --narrate 2 --samples 8); PT_CAP=25m
+  ONLY=(); EP_FT=10; EP_MIX=3; SKIP_SCRATCH="${SKIP_SCRATCH:-0}"; PT=(--decks 8 --hands 3 --seeds 2 --narrate 2 --samples 4); PT_CAP=35m
 fi
 uv run --no-sync python scripts/build_bc_shards.py "${ONLY[@]}" --out data/cache/bc_shards --jobs "$J" > "$OUT/shards.txt" 2>&1
 tick shards
@@ -56,6 +56,7 @@ import json, sys
 from pathlib import Path
 out = Path(sys.argv[1])
 best_v, best_s = "zero", -1.0
+best_hv, best_h = "zero", -1.0  # also playtest the best on unseen-deck gold (bcg-20261004-2223: mix won there)
 for v in ("zero", "ft-gold", "ft-mix", "mix", "lines-gold"):
     m = out / v / "metrics.jsonl"
     if not m.exists():
@@ -68,13 +69,18 @@ for v in ("zero", "ft-gold", "ft-mix", "mix", "lines-gold"):
     hk = r.get("holdout", {}).get("per_kind", {})
     print(f"{v:8s} at {r.get('epoch', 'merged')}: val gold {g:.4f} gold_pass {r['val']['per_kind'].get('gold_pass', -1):.4f} "
           f"| holdout gold {hk.get('gold', -1):.4f} all {r.get('holdout', {}).get('acc', -1):.4f} | val all {r['val']['acc']:.4f}")
+    hg = hk.get("gold", -1)
     if v != "zero" and g > best_s:
         best_v, best_s = v, g
-print("playtest", best_v)
+    if v != "zero" and hg > best_h:
+        best_hv, best_h = v, hg
+print("playtest", best_v, best_hv if best_hv != best_v else "")
 PY
-BEST=$(tail -1 "$OUT/summary.txt" | awk '{print $2}')
-tick "summary (best $BEST)"
-for v in zero "$BEST"; do
+BEST=$(tail -1 "$OUT/summary.txt" | cut -d' ' -f2-)
+tick "summary (playtest $BEST)"
+# playtest budget (bcg-20261004-2223): 10 decks x 6 hands x best-of-8 took the whole 25 min on combos, so the matches
+# (real games vs random/greedy) never ran; now 8 decks x 3 hands x best-of-4 to leave time for the matches
+for v in zero $BEST; do
   [ "$v" = zero ] && ck="$BASE" || ck="$OUT/$v/best.pt"
   [ -f "$ck" ] || continue
   # playtest writes to <ckpt>/../../playtest and reads the architecture from metrics.jsonl next to the checkpoint
