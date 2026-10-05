@@ -25,6 +25,9 @@ LABEL_WEIGHT = {"stated": 1.0, "inferred": 0.5, "interrupt": 1.0, "end": 1.0, "b
 # hand-played games (data/demos/gold, scripts/hand_play.py) use their own labels: gold = a chosen move, pass = a PASS*
 # auto-pass (rule-applied after a deliberate decline: half weight), auto = zone pick (not trained)
 GOLD_LABEL_WEIGHT = {"gold": 1.0, "pass": 0.5}
+# turn-1 search teacher records (scripts/gen_search.py, ADR 0006 M2): search = player 0's searched move, opp = the
+# passive opponent (not trained)
+SEARCH_LABEL_WEIGHT = {"search": 1.0}
 _PASSIVE_KINDS = (Kind.PASS, Kind.NO, Kind.FINISH, Kind.CANCEL)
 
 
@@ -68,6 +71,7 @@ def sample_kind(source: str | Path, label: str) -> str:
     - files under `games/` -> game_interrupt if label == "interrupt" else game_plan
     - files under `gold/` -> gold_pass if label == "pass" else gold
     - files under `teacher/` -> teacher_pass if label == "pass" else teacher
+    - files under `search/` -> search
     - everything else -> line
     """
     parts = Path(source).parts
@@ -75,6 +79,8 @@ def sample_kind(source: str | Path, label: str) -> str:
         return "gold_pass" if label == "pass" else "gold"
     if "teacher" in parts:
         return "teacher_pass" if label == "pass" else "teacher"
+    if "search" in parts:
+        return "search"
     if any(p.startswith("expanded") for p in parts):
         return "line_expanded"
     if "improved" in parts:
@@ -180,6 +186,7 @@ def iter_samples(engine: Engine, path: Path) -> Iterator[tuple[dict, int, float,
     for f in files:
         judges = load_judgements(f)
         weights = GOLD_LABEL_WEIGHT if ("gold" in f.parts or "teacher" in f.parts) else LABEL_WEIGHT
+        weights = SEARCH_LABEL_WEIGHT if "search" in f.parts else weights
         for rec in load_records(f):
             if starved_opening(rec):
                 continue
