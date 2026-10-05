@@ -53,3 +53,18 @@ Never self-play win rate. A step "worked" only if the report card says so.
 ## Budget (credit ≈ $X, floor $X since 2026-10-05 15:30; warn the user near $X)
 M0-M1 ≈ $X (GPU evals + RL v0 + teacher BC); M2-M3 ≈ $X (search is CPU: many-core boxes, distill on GPU);
 M4 the rest. Search and engine work are developed on the laptop (no ML there); every ML run is a capped vast job.
+
+## Amendment 2026-10-05 18:50 — teachers for every turn, muse as scenario designer (user request)
+User: "more teacher examples in diverse scenarios … many different turns and situations … when to interrupt a combo
+… distill ygo-agent but also improve using muse … avoid running millions of games". Accepted; it widens M3:
+- **DAgger labels** (`scripts/gen_dagger.py`): our policy plays ygo-agent on its 31 lists, ygo-agent labels every
+  one of our decisions (all turns; the states we actually reach). Kinds `dagger` / `dagger_pass`.
+- **Window search** (`src/ygo_zero/search/window.py`, `scripts/gen_window.py`): on recorded games (teacher, gold,
+  DAgger), every opponent-turn chain window where we can activate is searched (PASS vs each activation, played out to
+  the end of the turn by the policy for both players, position score = board diff + 0.5 hand diff + LP diff/2000),
+  plus 10% of own-turn decisions from turn 2. Any deck. Kinds `window` / `window_own`. Records carry `targets`
+  (searched option per decision) while the replay follows the recorded choices.
+- **Muse as scenario designer** (next): muse writes mid-game situations as engine puzzle starts (both sides' cards,
+  LP, turn), the engine validates them, the search teachers label them; muse also adjudicates states where the
+  teachers disagree. Grounded labels, cents per scenario, no full LLM games (those stay stopped).
+The report card (ADR 0006) is unchanged and decides which data mixes stay.
