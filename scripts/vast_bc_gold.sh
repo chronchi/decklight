@@ -11,7 +11,8 @@
 #   mix-l/    mix with a 3x larger model: d=384, 6 layers, 6 heads (~12M params vs ~4M; capacity axis, 2026-10-05)
 #   (SKIP_SCRATCH=1 skips the three from-scratch runs)
 # then playtests the base and the variant with the best val gold accuracy on the same decks/seeds.
-# Env: GOLD_GAMES=N trains on the first N gold games only (saturation curve; eval sets unchanged), PT_ZERO=0 skips the
+# Env: BASE=<ckpt> (default data/cache/bc_base/best.pt), PLAY_ALL=1 playtests every variant in VARIANTS, PT_ARGS
+# overrides the playtest flags, GOLD_GAMES=N trains on the first N gold games only (saturation curve; eval sets unchanged), PT_ZERO=0 skips the
 # base model's playtest (it is the same in every job of a curve).
 # Usage: bash scripts/vast_bc_gold.sh <name> [smoke]. smoke = gold shards only, 1 epoch, no scratch run, tiny playtest
 # (ship --data data/demos for a real playtest: it samples decks that have verified lines; with only data/demos/gold it
@@ -41,12 +42,13 @@ uv run --no-sync python -c "import torch; assert torch.cuda.is_available()" || {
 USAGE_PID=$!
 T0=$SECONDS
 tick() { echo "$1 $((SECONDS - T0)) s" >> "$OUT/timing.txt"; }
-BASE=data/cache/bc_base/best.pt
+BASE="${BASE:-data/cache/bc_base/best.pt}"  # M1 teacher job: BASE=data/cache/rl_init/best.pt
 if [ "$MODE" = "smoke" ]; then
   ONLY=(--only gold); EP_FT=1; EP_MIX=1; SKIP_SCRATCH=1; PT=(--decks 2 --hands 1 --seeds 1 --narrate 1 --samples 2 --ygoagent --selfplay 2); PT_CAP=12m
 else
   ONLY=(); EP_FT=10; EP_MIX=3; SKIP_SCRATCH="${SKIP_SCRATCH:-0}"; PT=(--decks 8 --hands 3 --seeds 2 --narrate 2 --samples 4 --ygoagent --selfplay 10); PT_CAP=40m
 fi
+[ -n "${PT_ARGS:-}" ] && read -ra PT <<< "$PT_ARGS"
 uv run --no-sync python scripts/build_bc_shards.py "${ONLY[@]}" --out data/cache/bc_shards --jobs "$J" > "$OUT/shards.txt" 2>&1
 tick shards
 HOLD="kewl-tune $( [ -f decks/pool/HOLDOUT ] && tr '\n' ' ' < decks/pool/HOLDOUT )"
@@ -75,6 +77,12 @@ want ft-mix && train ft-mix --init "$BASE" --epochs "$EP_MIX" --lr 2e-4 \
   --kinds line line_improved line_expanded gold gold_pass --kind-frac line_expanded=0.2 gold=20 gold_pass=10
 [ "$SKIP_SCRATCH" = "1" ] || ! want mix-l || train mix-l --epochs 8 --lr 3e-4 --merge-last 4 --d 384 --layers 6 --heads 6 \
   --kind-frac line_expanded=0.2 game_plan=2 game_interrupt=2 gold=20 gold_pass=10
+# M1 (ADR 0006): fine-tune on ygo-agent self-play teacher games (data/demos/teacher, 3003 games on its 31 lists) as a
+# minority mix (ft-teach) or a bigger share (ft-teach-h); gold stays repeated as in ft-mix
+want ft-teach && train ft-teach --init "$BASE" --epochs "$EP_MIX" --lr 2e-4 --kind-frac line_expanded=0.2 game_plan=1 \
+  game_interrupt=1 gold=20 gold_pass=10 teacher=0.3 teacher_pass=0.3
+want ft-teach-h && train ft-teach-h --init "$BASE" --epochs "$EP_MIX" --lr 2e-4 --kind-frac line_expanded=0.2 game_plan=1 \
+  game_interrupt=1 gold=20 gold_pass=10 teacher=1 teacher_pass=1
 for V in mix-h32 mix-h128 mix-h256 mix-h512 mix-h32k mix-h128k mix-h256k mix-h512k mix-k; do
   want "$V" || continue
   H=${V#mix-h}; H=${H%k}; [ "$V" = mix-k ] && H=0
@@ -91,7 +99,7 @@ from pathlib import Path
 out = Path(sys.argv[1])
 best_v, best_s = "zero", -1.0
 best_hv, best_h = "zero", -1.0  # also playtest the best on unseen-deck gold (bcg-20261004-2223: mix won there)
-for v in ("zero", "ft-gold", "ft-mix", "mix", "lines-gold", "mix-l", "mix-h32", "mix-h128", "mix-h256", "mix-h512",
+for v in ("zero", "ft-gold", "ft-mix", "ft-teach", "ft-teach-h", "mix", "lines-gold", "mix-l", "mix-h32", "mix-h128", "mix-h256", "mix-h512",
           "mix-h32k", "mix-h128k", "mix-h256k", "mix-h512k", "mix-k"):
     m = out / v / "metrics.jsonl"
     if not m.exists():
@@ -116,6 +124,7 @@ tick "summary (playtest $BEST)"
 # playtest budget (bcg-20261004-2223): 10 decks x 6 hands x best-of-8 took the whole 25 min on combos, so the matches
 # (real games vs random/greedy) never ran; now 8 decks x 3 hands x best-of-4 to leave time for the matches
 PLAY=($BEST); [ "${PT_ZERO:-1}" = "1" ] && PLAY=(zero "${PLAY[@]}")
+[ "${PLAY_ALL:-0}" = "1" ] && PLAY=($VARIANTS)  # every trained variant (M1 report cards)
 for v in "${PLAY[@]}"; do
   [ "$v" = zero ] && ck="$BASE" || ck="$OUT/$v/best.pt"
   [ -f "$ck" ] || continue
