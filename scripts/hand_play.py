@@ -103,8 +103,8 @@ def _store(game: str, st: dict) -> None:
 
 
 def _config(st: dict) -> DuelConfig:
-    d0 = load_ydk(ROOT / f"decks/pool/{st['decks'][0]}.ydk")
-    d1 = load_ydk(ROOT / f"decks/pool/{st['decks'][1]}.ydk")
+    # a pool deck name, or a repo path ending in .ydk (e.g. the gauntlet's tests/fixtures/decks/BlueEyes.ydk)
+    d0, d1 = (load_ydk(ROOT / (d if d.endswith(".ydk") else f"decks/pool/{d}.ydk")) for d in st["decks"][:2])
     return DuelConfig(d0, d1, seed=st["seed"])
 
 
