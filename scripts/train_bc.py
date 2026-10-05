@@ -11,6 +11,10 @@ Checkpoints: last.pt (with optimizer), best.pt (fp16 weights, by val accuracy).
 Mixing: --kind-frac line_expanded=0.2 game_plan=3 redraws each kind's train share every epoch (<1 subsample, >1 repeat).
 Merging: --merge-last K also evaluates the uniform average of the last K epochs' weights (Kolibri tech report §2.2:
 checkpoint merges add points); saved as merged.pt when it beats best.pt on --select-on.
+Fine-tuning: --init runs/<run>/bc/best.pt starts from those weights (architecture args are read from its metrics.jsonl)
+and logs an "epoch": -1 record (the starting point's metrics) first; --epochs 0 --init = evaluate only.
+--val-frac-kind gold=0.25 gold_pass=0.25 keeps a larger share of a scarce kind's lines in val;
+--select-on val:gold picks best.pt by one kind's val accuracy.
 """
 
 from __future__ import annotations
@@ -146,6 +150,24 @@ def epoch_train_idx(data, train_idx: np.ndarray, kind_frac: dict[str, float], rn
     return np.concatenate(parts)
 
 
+def select_score(rec: dict, select_on: str, default: float) -> float:
+    """--select-on value of a metrics record: "<split>" -> its acc, "<split>:<kind>" -> that kind's acc in the split."""
+    split, _, kind = select_on.partition(":")
+    m = rec.get(split, {})
+    v = m.get("per_kind", {}).get(kind) if kind else m.get("acc")
+    return default if v is None else float(v)
+
+
+def _run_args(ckpt: Path) -> dict:
+    """Training args of a checkpoint (first metrics.jsonl record with "args" next to it)."""
+    m = ckpt.parent / "metrics.jsonl"
+    for raw in m.read_text().splitlines() if m.is_file() else []:
+        rec = json.loads(raw)
+        if "args" in rec:
+            return rec["args"]
+    return {}
+
+
 def average_states(states: list[dict]) -> dict:
     return {k: (sum(s[k].float() for s in states) / len(states)) if states[0][k].is_floating_point() else states[-1][k]
             for k in states[0]}
@@ -169,7 +191,7 @@ def main() -> None:
         "--set-target", dest="set_target", action=argparse.BooleanOptionalAction, default=True,
         help="loss = -log(sum of softmax over equiv options); off = plain CE on the action",
     )
-    ap.add_argument("--select-on", choices=["val", "holdout"], default="val")
+    ap.add_argument("--select-on", default="val", help="val | holdout | <split>:<kind> (e.g. val:gold)")
     ap.add_argument("--patience", type=int, default=0)
     ap.add_argument("--card-dropout", type=float, default=0.0)
     ap.add_argument("--holdout", nargs="*", default=["kewl-tune"], help="decks never trained on")
@@ -177,6 +199,9 @@ def main() -> None:
     ap.add_argument("--kind-frac", nargs="*", default=None, metavar="KIND=FRAC",
                     help="per-epoch share of each kind's train samples (<1 subsample, >1 repeat)")
     ap.add_argument("--merge-last", type=int, default=0, help="also evaluate the average of the last K epochs")
+    ap.add_argument("--init", type=Path, default=None, help="start from this checkpoint (fine-tune)")
+    ap.add_argument("--val-frac-kind", nargs="*", default=None, metavar="KIND=FRAC",
+                    help="val share for these kinds' lines (default 0.1 for every kind)")
     ap.add_argument("--limit", type=int, default=None, help="use only the first N samples (smoke)")
     ap.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     ap.add_argument("--threads", type=int, default=None, help="torch CPU threads (laptop: <= 2)")
@@ -195,15 +220,22 @@ def main() -> None:
     data = load_shards(args.shards)
     if args.limit:
         data = {k: v[: args.limit] for k, v in data.items()}
-    masks = split_masks(data, holdout_decks=tuple(args.holdout))
+    masks = split_masks(data, holdout_decks=tuple(args.holdout), kind_val_frac=parse_kind_frac(args.val_frac_kind))
     idx = select_train_idx(data, masks, args.kinds)
     print({k: len(v) for k, v in idx.items()}, "decks:", sorted(set(map(str, data["deck"]))), flush=True)
 
+    if args.init:  # the starting checkpoint fixes the architecture
+        src_args = _run_args(args.init)
+        args.d, args.layers, args.heads = src_args.get("d", args.d), src_args.get("layers", args.layers), src_args.get("heads", args.heads)
     emb = dict(np.load(args.emb))
     model = PolicyNet(
         emb, d=args.d, layers=args.layers, heads=args.heads, dropout=args.dropout,
         card_dropout=args.card_dropout,
     ).to(device)
+    if args.init:
+        state = torch.load(args.init, map_location="cpu")
+        state = state.get("model", state)
+        model.load_state_dict({k: v.float() if v.is_floating_point() else v for k, v in state.items()})
     n_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     print(f"params {n_params / 1e6:.2f}M device {device} amp {amp}", flush=True)
     opt = torch.optim.AdamW([p for p in model.parameters() if p.requires_grad], lr=args.lr, weight_decay=args.wd)
@@ -220,6 +252,16 @@ def main() -> None:
     t0 = time.time()
     args_rec = {k: str(v) if isinstance(v, Path) else v for k, v in vars(args).items()}
     recent: list[dict] = []
+    if args.init:
+        rec = {"epoch": -1, "init": str(args.init), "args": args_rec}
+        for split in ("val", "holdout"):
+            if len(idx[split]):
+                rec[split] = evaluate(model, data, idx[split], args.batch * 2, device, amp, args.set_target)
+        print(json.dumps(rec), flush=True)
+        log.write(json.dumps(rec) + "\n")
+        log.flush()
+        best = select_score(rec, args.select_on, -1.0)
+        torch.save({k: v.half() if v.is_floating_point() else v for k, v in model.state_dict().items()}, args.out / "best.pt")
     for ep in range(args.epochs):
         run = {"loss": 0.0, "n": 0}
         ep_idx = epoch_train_idx(data, idx["train"], kind_frac, rng)
@@ -257,7 +299,7 @@ def main() -> None:
             {"model": model.state_dict(), "opt": opt.state_dict(), "epoch": ep, "args": vars(args)},
             args.out / "last.pt",
         )
-        score = rec.get(args.select_on, {}).get("acc", -rec["train_loss"])
+        score = select_score(rec, args.select_on, -rec["train_loss"])
         if score > best:
             best = score
             bad = 0
@@ -280,7 +322,7 @@ def main() -> None:
         print(json.dumps(rec), flush=True)
         log.write(json.dumps(rec) + "\n")
         log.flush()
-        score = rec.get(args.select_on, {}).get("acc", -1.0)
+        score = select_score(rec, args.select_on, -1.0)
         if score > best:
             print(f"merge of last {len(recent)} beats best ({score:.4f} > {best:.4f}): merged.pt + best.pt", flush=True)
             best = score

@@ -89,3 +89,33 @@ def test_load_shards_with_kind_roundtrips(tmp_path):
     )
     data = load_shards(d)
     assert list(data["kind"]) == ["line", "game_interrupt"]
+
+
+def test_gold_kinds_and_weights():
+    from ygo_zero.demos.dataset import GOLD_LABEL_WEIGHT, LABEL_WEIGHT
+
+    assert sample_kind("data/demos/gold/a-vs-b.jsonl", "gold") == "gold"
+    assert sample_kind("data/demos/gold/a-vs-b.jsonl", "pass") == "gold_pass"
+    # LLM games also label passes "pass": those stay untrained, only gold passes get weight
+    assert "pass" not in LABEL_WEIGHT and GOLD_LABEL_WEIGHT["pass"] == 0.5 and "auto" not in GOLD_LABEL_WEIGHT
+
+
+def test_kind_val_frac_moves_more_gold_lines_to_val():
+    lines = np.array([f"g/{i}" for i in range(400)] * 2)
+    data = {"action": np.zeros(800, np.int64), "deck": np.array(["d"] * 800), "line": lines,
+            "kind": np.array(["gold"] * 400 + ["line"] * 400)}
+    base = split_masks(data)
+    more = split_masks(data, kind_val_frac={"gold": 0.3})
+    g = data["kind"] == "gold"
+    assert more["val"][g].sum() > base["val"][g].sum() > 0
+    assert (more["val"][~g] == base["val"][~g]).all()  # other kinds untouched
+    assert not (base["val"] & ~more["val"]).any()  # val at 0.1 stays val at 0.3
+
+
+def test_select_score():
+    train_bc = _load("train_bc")
+    rec = {"train_loss": 0.5, "val": {"acc": 0.8, "per_kind": {"gold": 0.6}}}
+    assert train_bc.select_score(rec, "val", -1) == 0.8
+    assert train_bc.select_score(rec, "val:gold", -1) == 0.6
+    assert train_bc.select_score(rec, "val:gold_pass", -1) == -1
+    assert train_bc.select_score(rec, "holdout", -2) == -2

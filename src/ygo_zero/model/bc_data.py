@@ -157,13 +157,19 @@ def load_shards(shard_dir: Path) -> dict[str, np.ndarray]:
 
 
 def split_masks(
-    data: dict[str, np.ndarray], val_frac: float = 0.1, holdout_decks: tuple[str, ...] = ()
+    data: dict[str, np.ndarray], val_frac: float = 0.1, holdout_decks: tuple[str, ...] = (),
+    kind_val_frac: dict[str, float] | None = None,
 ) -> dict:
     """Boolean masks train / val / holdout. val = a stable hash of the base line id (all variants together);
-    holdout = whole decks never trained on (generalisation to unseen decks)."""
+    holdout = whole decks never trained on (generalisation to unseen decks). kind_val_frac overrides val_frac for
+    samples of the given kinds (e.g. {"gold": 0.2}: more of the scarce hand-played games kept out to evaluate on).
+    The hash threshold only grows with the fraction, so a line in val at 0.1 stays in val at 0.2."""
     hold = (
         np.isin(data["deck"], list(holdout_decks)) if holdout_decks else np.zeros(len(data["action"]), bool)
     )
     h = np.array([int(hashlib.md5(s.encode()).hexdigest()[:8], 16) % 1000 for s in data["line"]])
-    val = (h < int(val_frac * 1000)) & ~hold
+    thr = np.full(len(h), int(val_frac * 1000))
+    for kd, f in (kind_val_frac or {}).items():
+        thr[data["kind"] == kd] = int(f * 1000)
+    val = (h < thr) & ~hold
     return {"train": ~val & ~hold, "val": val, "holdout": hold}
