@@ -76,7 +76,7 @@ def main() -> None:
     ap.add_argument("--rollout", type=int, default=32768, help="finished samples per PPO iteration")
     ap.add_argument("--store", type=int, default=400_000, help="sample slots (open + finished trajectories)")
     ap.add_argument("--epochs", type=int, default=2)
-    ap.add_argument("--minibatch", type=int, default=512)
+    ap.add_argument("--minibatch", type=int, default=256)
     ap.add_argument("--lr", type=float, default=2e-5)
     ap.add_argument("--clip", type=float, default=0.2)
     ap.add_argument("--lam", type=float, default=0.95)
@@ -234,6 +234,8 @@ def main() -> None:
         adv, ret = np.concatenate(advs), np.concatenate(rets)
         adv_n = (adv - adv.mean()) / (adv.std() + 1e-8)
         warm = it <= args.value_warmup
+        if dev.type == "cuda":
+            torch.cuda.empty_cache()
         model.train()
         agg: dict[str, list] = {}
         for _ in range(args.epochs):
