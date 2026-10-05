@@ -35,6 +35,7 @@ SCENARIO_DIR = REPO_ROOT / "data" / "scenarios"
 DEMOS_DIR = REPO_ROOT / "data" / "demos"
 HOLDOUT_FILE = POOL_DIR / "HOLDOUT"
 CARD_HOLDOUT_FILE = POOL_DIR / "CARD_HOLDOUT"
+NEWCARDS_DIR = REPO_ROOT / "decks" / "newcards"
 
 CONFIG_KEYS = ("deck0_main", "deck0_extra", "deck1_main", "deck1_extra")
 
@@ -320,6 +321,23 @@ def card_holdout_codes(
     return {c for deck in held.values() for c in deck_codes(deck)} - staples(pool, min_decks)
 
 
+def newcard_codes(
+    newcards_dir: str | Path = NEWCARDS_DIR,
+    pool_dir: str | Path = POOL_DIR,
+    min_decks: int = 8,
+) -> set[int]:
+    """Non-staple cards of the `decks/newcards` evaluation decks.
+
+    Empty set when the directory holds no decks (mirrors
+    `card_holdout_codes` returning empty when CARD_HOLDOUT is absent).
+    """
+    decks = load_pool_decks(newcards_dir)
+    if not decks:
+        return set()
+    pool = load_pool_decks(pool_dir)
+    return {c for deck in decks.values() for c in deck_codes(deck)} - staples(pool, min_decks)
+
+
 def check_records(
     paths: Iterable[str | Path],
     codes: set[int] | None = None,
@@ -330,9 +348,20 @@ def check_records(
     `paths` are record files/dirs/globs and/or `.ydk` files. Returns one
     human-readable string per violation (a record whose config decks, or a
     deck whose list, contains a card-holdout code).
+
+    Default `codes` = `card_holdout_codes() | newcard_codes()`: both the
+    CARD_HOLDOUT decks and the `decks/newcards` evaluation decks are
+    protected. Extra kwargs are forwarded to each collector by name
+    (`pool_dir`/`holdout_file`/`newcards_dir`/`min_decks`).
     """
     if codes is None:
-        codes = card_holdout_codes(**kwargs) if kwargs else card_holdout_codes()
+        holdout_kwargs = {
+            k: v for k, v in kwargs.items() if k in ("pool_dir", "holdout_file", "min_decks")
+        }
+        newcard_kwargs = {
+            k: v for k, v in kwargs.items() if k in ("pool_dir", "newcards_dir", "min_decks")
+        }
+        codes = card_holdout_codes(**holdout_kwargs) | newcard_codes(**newcard_kwargs)
     if not codes:
         return []
     violations: list[str] = []

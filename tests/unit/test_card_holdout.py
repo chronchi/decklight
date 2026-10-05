@@ -7,6 +7,7 @@ from ygo_zero.decks.holdout import (
     card_holdout_codes,
     check_records,
     deck_audit_rows,
+    newcard_codes,
     record_card_counts,
     scenario_card_names,
     scenario_codes,
@@ -113,6 +114,33 @@ def test_check_records_flags_held_out_card(tmp_path):
 def test_card_holdout_codes_empty_without_file(tmp_path):
     assert card_holdout_codes(pool_dir=tmp_path, holdout_file=tmp_path / "MISSING") == set()
     assert check_records([str(tmp_path)], codes=set()) == []
+
+
+def test_newcard_codes_on_temp_dir(tmp_path):
+    lay = _layout(tmp_path)
+    nc = tmp_path / "newcards"
+    nc.mkdir()
+    _write_ydk(nc / "rogue.ydk", [STAPLE, 90000006, 90000006], [90000007])
+    codes = newcard_codes(newcards_dir=nc, pool_dir=lay["pool"], min_decks=3)
+    assert codes == {90000006, 90000007}  # staple excluded
+    assert newcard_codes(newcards_dir=tmp_path / "NODIR", pool_dir=lay["pool"]) == set()
+
+
+def test_check_records_flags_newcards_code_by_default(tmp_path):
+    lay = _layout(tmp_path)
+    nc = tmp_path / "newcards"
+    nc.mkdir()
+    _write_ydk(nc / "rogue.ydk", [STAPLE, 90000006], [90000007])
+    bad = lay["demos"] / "bad.jsonl"
+    _write_record(bad, [STAPLE], [90000006], rid="newleak")
+    violations = check_records(
+        [str(bad)],
+        pool_dir=lay["pool"],
+        holdout_file=tmp_path / "MISSING",  # no CARD_HOLDOUT: only newcards codes apply
+        newcards_dir=nc,
+        min_decks=3,
+    )
+    assert any("90000006" in v and "newleak" in v for v in violations), violations
 
 
 def test_scenario_names_map_and_unknowns_reported(tmp_path):
