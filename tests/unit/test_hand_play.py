@@ -157,3 +157,166 @@ def test_check_runs_on_fresh_duel(tmp_path, monkeypatch, capsys):
     assert "Opponent LP" in out
     st = hand_play._load("g")  # check changes no state
     assert st["choices"] == []
+
+
+def test_compact_view_hides_unchanged_extra_deck(tmp_path, monkeypatch, capsys):
+    from ygo_zero.demos.names import CardNames
+    from ygo_zero.engine.duel import Engine
+
+    monkeypatch.setattr(hand_play, "WORK", tmp_path / "work")
+    monkeypatch.setattr(sys, "argv", ["hand_play.py", "new", "g", "snake-eye", "tenpai-dragon", "11"])
+    hand_play.main()
+    st = hand_play._load("g")
+    env, obs = hand_play._replay(Engine(), st)
+    names = CardNames()
+    capsys.readouterr()
+    hand_play._show(env, obs, st, names, False)  # first view of the seat: full
+    full_out = capsys.readouterr().out
+    hand_play._show(env, obs, st, names, False, compact=True)  # same seat, same turn: compact
+    comp_out = capsys.readouterr().out
+    full_ed = next(line for line in full_out.splitlines() if line.startswith("Your Extra Deck:"))
+    comp_ed = next(line for line in comp_out.splitlines() if line.startswith("Your Extra Deck:"))
+    assert full_ed != comp_ed and comp_ed.endswith("cards")  # count only, e.g. "15 cards"
+    assert "Your GY:" not in comp_out  # unchanged since the previous view
+    assert "Your hand:" in comp_out and "Your monsters:" in comp_out  # always shown
+
+
+def _chain_obs(live_codes, chain_len=0, turn=3):
+    """Fake MSG_SELECT_CHAIN window: ACTIVATE options for `live_codes` plus the passive option."""
+    from ygo_zero.engine.actions import Kind
+
+    acts = [[int(Kind.ACTIVATE), -1, code, 0, 0, 0, 0x10, 2, 0, 0] for code in live_codes]
+    acts.append([int(Kind.PASS), -1, 0, 0, 0, 0, 0x10, 0, -1, 0])
+    g = [0] * 24
+    g[2], g[21] = turn, 0x10
+    return {
+        "actions": acts, "action_mask": [1] * len(acts),
+        "global": g, "chain_mask": [1] * chain_len,
+        "cards": [], "card_mask": [],
+    }
+
+
+class _ScriptEnv:
+    """Fake env replaying a fixed obs script (same seat throughout)."""
+
+    def __init__(self, states):
+        self.states = list(states)
+        self.player = 0
+
+    def step(self, i):
+        return self.states.pop(0)
+
+
+def _hold_names(codes=()):
+    from types import SimpleNamespace
+
+    return SimpleNamespace(names={c: n for c, n in codes})
+
+
+KIRIN, ASH = 2526224, 14558127
+
+
+def _hold_st(held=()):
+    return {
+        "choices": [], "labels": [], "actors": [], "turns": [],
+        "hold": {"0": {"turn": 3, "names": list(held)}},
+    }
+
+
+def test_hold_passes_empty_chain_only_held_options():
+    hand_play._DECLINED.clear()
+    names = _hold_names([(KIRIN, "Fire King High Avatar Kirin"), (ASH, "Ash Blossom & Joyous Spring")])
+    st = _hold_st(["fire king high avatar kirin"])
+    # first window declines Ash; next window offers only the held Kirin on an empty chain; then a link
+    # is added to the chain and PASS* must stop there
+    env = _ScriptEnv([_chain_obs([KIRIN]), _chain_obs([], chain_len=1)])
+    _obs, reason = hand_play._pass_star(env, _chain_obs([ASH]), st, names)
+    assert st["labels"] == ["pass", "pass"]
+    assert st["actors"] == [0, 0]
+    assert reason.startswith("chain changed"), reason
+
+
+def test_hold_stops_at_unheld_option_and_expires_on_turn_change():
+    hand_play._DECLINED.clear()
+    names = _hold_names([(KIRIN, "Fire King High Avatar Kirin"), (ASH, "Ash Blossom & Joyous Spring")])
+    st = _hold_st(["fire king high avatar kirin"])
+    env = _ScriptEnv([_chain_obs([ASH])])
+    _, reason = hand_play._pass_star(env, _chain_obs([KIRIN]), st, names)
+    assert reason.startswith("P0 has something to decide"), reason
+    assert st["labels"] == ["pass"]  # only the window PASS* was issued at
+    assert hand_play._held(st, 0, 3) == {"fire king high avatar kirin"}
+    assert hand_play._held(st, 0, 4) == set()  # holds expire on turn change
+    assert hand_play._hold_covers(_chain_obs([KIRIN]), {"fire king high avatar kirin"}, names.names)
+    assert not hand_play._hold_covers(_chain_obs([ASH]), {"fire king high avatar kirin"}, names.names)
+
+
+def test_check_battle_section_runs(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(hand_play, "WORK", tmp_path / "work")
+    monkeypatch.setattr(sys, "argv", ["hand_play.py", "new", "g", "snake-eye", "tenpai-dragon", "11"])
+    hand_play.main()
+    capsys.readouterr()
+    monkeypatch.setattr(sys, "argv", ["hand_play.py", "check", "g"])
+    hand_play.main()
+    out = capsys.readouterr().out
+    assert "Battle:" in out
+    assert "Direct-damage total if the opponent's field were empty:" in out
+
+
+def test_same_zone_duplicates_get_zone_suffix_and_match():
+    import numpy as np
+
+    from ygo_zero.engine.actions import Kind
+
+    code = 99999
+    cards = np.zeros((2, 21), dtype=np.int32)
+    cards[0, 0], cards[0, 1], cards[0, 2] = code, 3, 1
+    cards[1, 0], cards[1, 1], cards[1, 2] = code, 3, 3
+    obs = {
+        "actions": [
+            [int(Kind.SELECT), 0, code, 0, 0, 0, 0, 3, 0, 0],
+            [int(Kind.SELECT), 1, code, 0, 0, 0, 0, 3, 0, 0],
+        ],
+        "action_mask": [1, 1],
+        "cards": cards, "card_mask": np.array([True, True]),
+    }
+    names = {code: "Snake-Eye Ash"}
+    disp = hand_play._display_names(obs, names)
+    assert disp == ["Snake-Eye Ash (Monster Zone 0)", "Snake-Eye Ash (Monster Zone 2)"], disp
+    assert hand_play._match(obs, "SEL:Snake-Eye_Ash_(Monster_Zone_2)", names) == 1
+
+
+def test_number_options_show_values_and_match():
+    from ygo_zero.engine.actions import Kind
+
+    obs = {"actions": [[int(Kind.NUMBER), -1, 0, 0, 0, 5, 143, 0, -1, 0]], "action_mask": [1]}
+    assert hand_play._display_names(obs, {}) == ["5"]
+    assert hand_play._match(obs, "NUM:5", {}) == 0
+
+
+def test_saved_gold_games_replay_unchanged():
+    """Every saved gold record replays to the end with all choices legal (hand_play logic unchanged)."""
+    import json
+
+    from ygo_zero.demos.dataset import record_config
+    from ygo_zero.demos.game import _opts
+    from ygo_zero.engine.cpp_env import CppEnv
+    from ygo_zero.engine.duel import Engine
+
+    engine = Engine()
+    paths = sorted((ROOT / "data" / "demos" / "gold").glob("*.jsonl"))
+    assert paths, "no saved gold games"
+    n_choices = 0
+    for path in paths:
+        for line in path.read_text().splitlines():
+            if not line.strip():
+                continue
+            rec = json.loads(line)
+            env = CppEnv(engine, record_config(rec), rec.get("auto_single", True))
+            obs = env.reset()
+            for k, ch in enumerate(rec["choices"]):
+                assert obs is not None, f"{rec['game_id']}: duel ended at choice {k}"
+                assert 0 <= int(ch) < len(_opts(obs)), f"{rec['game_id']}: illegal choice {ch} at {k}"
+                obs = env.step(int(ch))
+            n_choices += len(rec["choices"])
+    assert n_choices > 0
+
