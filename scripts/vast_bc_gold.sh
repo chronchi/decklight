@@ -53,16 +53,28 @@ train() {  # <variant> <args...>
   uv run --no-sync python scripts/train_bc.py "${COMMON[@]}" --out "$OUT/$v" "$@" > "$OUT/train-$v.txt" 2>&1
   rm -f "$OUT/$v/last.pt"; tick "train-$v"
 }
+# VARIANTS: which trainings run (default: the gold-BC set). Memory sweep (ADR 0005): mix-h<H> = mix with the salient
+# long history window H (train_bc --hist H); mix itself is the v1 baseline (32 entries, passes included).
+VARIANTS=" ${VARIANTS:-zero ft-gold ft-mix mix lines-gold mix-l} "
+want() { [[ "$VARIANTS" == *" $1 "* ]]; }
+MIXK=(--kind-frac line_expanded=0.2 game_plan=2 game_interrupt=2 gold=20 gold_pass=10)
 train zero --init "$BASE" --epochs 0
-train ft-gold --init "$BASE" --epochs "$EP_FT" --lr 1e-4 --batch 256 --kinds gold gold_pass
-train ft-mix --init "$BASE" --epochs "$EP_MIX" --lr 2e-4 \
+want ft-gold && train ft-gold --init "$BASE" --epochs "$EP_FT" --lr 1e-4 --batch 256 --kinds gold gold_pass
+want ft-mix && train ft-mix --init "$BASE" --epochs "$EP_MIX" --lr 2e-4 \
   --kind-frac line_expanded=0.2 game_plan=1 game_interrupt=1 gold=20 gold_pass=10
-[ "$SKIP_SCRATCH" = "1" ] || train mix --epochs 8 --lr 5e-4 --merge-last 4 \
+[ "$SKIP_SCRATCH" = "1" ] || ! want mix || train mix --epochs 8 --lr 5e-4 --merge-last 4 \
   --kind-frac line_expanded=0.2 game_plan=2 game_interrupt=2 gold=20 gold_pass=10
-[ "$SKIP_SCRATCH" = "1" ] || train lines-gold --epochs 8 --lr 5e-4 --merge-last 4 \
+[ "$SKIP_SCRATCH" = "1" ] || ! want lines-gold || train lines-gold --epochs 8 --lr 5e-4 --merge-last 4 \
   --kinds line line_improved line_expanded gold gold_pass --kind-frac line_expanded=0.2 gold=20 gold_pass=10
-[ "$SKIP_SCRATCH" = "1" ] || train mix-l --epochs 8 --lr 3e-4 --merge-last 4 --d 384 --layers 6 --heads 6 \
+[ "$SKIP_SCRATCH" = "1" ] || ! want mix-l || train mix-l --epochs 8 --lr 3e-4 --merge-last 4 --d 384 --layers 6 --heads 6 \
   --kind-frac line_expanded=0.2 game_plan=2 game_interrupt=2 gold=20 gold_pass=10
+for H in 32 128 256 512; do
+  want "mix-h$H" || continue
+  [ "$MODE" = "smoke" ] && EPM=1 || EPM=8
+  # activations grow with 1+160+16+H tokens: batch 512 OOMs a 12 GB card at H=512 (bcg-memsmoke-20261005-0900)
+  case $H in 512) BH=(--batch 128 --lr 3e-4);; 256) BH=(--batch 256 --lr 4e-4);; *) BH=();; esac
+  train "mix-h$H" --epochs "$EPM" --lr 5e-4 --merge-last 4 --hist "$H" "${MIXK[@]}" "${BH[@]}"
+done
 # summary: per variant, best record by val gold acc (zero = its epoch -1 record)
 uv run --no-sync python - "$OUT" > "$OUT/summary.txt" <<'PY'
 import json, sys
@@ -70,7 +82,7 @@ from pathlib import Path
 out = Path(sys.argv[1])
 best_v, best_s = "zero", -1.0
 best_hv, best_h = "zero", -1.0  # also playtest the best on unseen-deck gold (bcg-20261004-2223: mix won there)
-for v in ("zero", "ft-gold", "ft-mix", "mix", "lines-gold", "mix-l"):
+for v in ("zero", "ft-gold", "ft-mix", "mix", "lines-gold", "mix-l", "mix-h32", "mix-h128", "mix-h256", "mix-h512"):
     m = out / v / "metrics.jsonl"
     if not m.exists():
         continue

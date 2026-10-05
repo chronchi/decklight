@@ -65,7 +65,7 @@ def destroy(instance_id: int, verify_s: int = 60) -> None:
 
 
 ALLOWED_FILE = ROOT / "data" / "cache" / "runs" / "vast-allowed.txt"  # labels approved by the datagen driver / Claude
-STRAY_AGE_S = 4 * 3600  # older than any job cap: an allowed instance this old has lost its launcher
+STRAY_AGE_S = 6 * 3600  # older than any job cap (4.5 h): an allowed instance this old has lost its launcher
 
 
 def destroy_strays() -> list[int]:
