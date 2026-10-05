@@ -28,6 +28,8 @@ GOLD_LABEL_WEIGHT = {"gold": 1.0, "pass": 0.5}
 # turn-1 search teacher records (scripts/gen_search.py, ADR 0006 M2): search = player 0's searched move, opp = the
 # passive opponent (not trained)
 SEARCH_LABEL_WEIGHT = {"search": 1.0}
+# mid-game search teacher (scripts/gen_window.py, M3): searched response windows and own-turn plays; skip = not trained
+WINDOW_LABEL_WEIGHT = {"window": 1.0, "own": 1.0}
 _PASSIVE_KINDS = (Kind.PASS, Kind.NO, Kind.FINISH, Kind.CANCEL)
 
 
@@ -71,7 +73,9 @@ def sample_kind(source: str | Path, label: str) -> str:
     - files under `games/` -> game_interrupt if label == "interrupt" else game_plan
     - files under `gold/` -> gold_pass if label == "pass" else gold
     - files under `teacher/` -> teacher_pass if label == "pass" else teacher
+    - files under `dagger/` -> dagger_pass if label == "pass" else dagger
     - files under `search/` -> search
+    - files under `window/` -> window_own if label == "own" else window
     - everything else -> line
     """
     parts = Path(source).parts
@@ -79,8 +83,12 @@ def sample_kind(source: str | Path, label: str) -> str:
         return "gold_pass" if label == "pass" else "gold"
     if "teacher" in parts:
         return "teacher_pass" if label == "pass" else "teacher"
+    if "dagger" in parts:
+        return "dagger_pass" if label == "pass" else "dagger"
     if "search" in parts:
         return "search"
+    if "window" in parts:
+        return "window_own" if label == "own" else "window"
     if any(p.startswith("expanded") for p in parts):
         return "line_expanded"
     if "improved" in parts:
@@ -181,12 +189,16 @@ def iter_samples(engine: Engine, path: Path) -> Iterator[tuple[dict, int, float,
     """Yield (obs, action, weight, meta) for every agent decision of every verified record.
 
     Only the record's own seed is replayed: `choices` come from that seed's search, and other seeds in
-    `seeds_ok` were verified with their own (unstored) choices."""
+    `seeds_ok` were verified with their own (unstored) choices. The replay always steps `choices`; when the
+    record carries `targets` (DAgger: the labeler's option index at student decisions, null elsewhere) the
+    yielded action is the target, and the sample is skipped when the target is not a legal option there.
+    Records without `targets` yield their choices unchanged."""
     files = sorted(path.glob("*.jsonl")) if path.is_dir() else [path]
     for f in files:
         judges = load_judgements(f)
-        weights = GOLD_LABEL_WEIGHT if ("gold" in f.parts or "teacher" in f.parts) else LABEL_WEIGHT
+        weights = GOLD_LABEL_WEIGHT if ("gold" in f.parts or "teacher" in f.parts or "dagger" in f.parts) else LABEL_WEIGHT
         weights = SEARCH_LABEL_WEIGHT if "search" in f.parts else weights
+        weights = WINDOW_LABEL_WEIGHT if "window" in f.parts else weights
         for rec in load_records(f):
             if starved_opening(rec):
                 continue
@@ -198,9 +210,17 @@ def iter_samples(engine: Engine, path: Path) -> Iterator[tuple[dict, int, float,
                 for seed in [rec["config"]["seed"]]:
                     env = CppEnv(engine, record_config(rec, seed), rec.get("auto_single", True))
                     obs = env.reset()
+                    targets = rec.get("targets")  # DAgger records: the labeler's move at student decisions
                     for k, (choice, label) in enumerate(zip(rec["choices"], rec["labels"], strict=True)):
                         if obs is None:
                             raise ValueError(f"{rec['line_id']} seed {seed}: duel ended at choice {k}")
+                        target = targets[k] if targets is not None else None
+                        action = choice if target is None else int(target)
+                        if target is not None:  # the target must be legal here, else there is no sample
+                            mask = obs.get("action_mask")
+                            if mask is None or not 0 <= action < mask.shape[0] or not bool(mask[action]):
+                                obs = env.step(choice)
+                                continue
                         weight, score = weights.get(label, 0.0), None
                         if weight and judge is not None and "turns" in rec and "actors" in rec:
                             turn, actor = rec["turns"][k], rec["actors"][k]
@@ -234,7 +254,7 @@ def iter_samples(engine: Engine, path: Path) -> Iterator[tuple[dict, int, float,
                                 "me": env.player,  # acting seat, absolute
                                 "turn": int(obs["global"][2]),
                             }
-                            out.append(({key: v.copy() for key, v in obs.items()}, choice, weight, meta))
+                            out.append(({key: v.copy() for key, v in obs.items()}, action, weight, meta))
                         obs = env.step(choice)
                     if "actors" not in rec:  # a combo line: teach the stop (records end at the last combo step)
                         end = end_turn_sample(env, obs, rec.get("me", 0))

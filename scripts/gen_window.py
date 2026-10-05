@@ -1,0 +1,123 @@
+"""Mid-game search teacher (ADR 0006 M3): searched targets for response windows and own-turn plays on recorded games.
+
+    uv run python scripts/gen_window.py --ckpt <best.pt> --device cuda --records 'data/demos/teacher/*.jsonl' 'data/demos/gold/*.jsonl' \
+        --games 500 --out runs/<name>/window/p0 [--k 4] [--horizon 1] [--own-frac 0.1] [--proc 0 --nproc 8]
+    uv run python scripts/gen_window.py --policy greedy ...   # laptop / tests: no model
+
+Each source game is replayed; selected decisions (src/ygo_zero/search/window.py: chain windows on the opponent's
+turn where the actor can activate, plus a sample of own-turn decisions) get a searched target. Output: one record per
+game in `<out>/<source file name>`: the source's config/choices/actors/turns, `targets` (searched option or null,
+aligned with choices), `labels` ("window" / "own" at searched decisions, "skip" elsewhere), the search log, and the
+source game id. Kinds once under data/demos/window/: `window`, `window_own` (dataset.py); the replay follows the
+recorded choices, the target is the searched option.
+"""
+
+from __future__ import annotations
+
+import argparse
+import glob
+import json
+import random
+import sys
+import time
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "scripts"))
+
+from gen_search import greedy_logits
+
+from ygo_zero.demos.dataset import record_config
+from ygo_zero.engine.duel import Engine
+from ygo_zero.search.window import WindowSearch
+
+KEEP = ("decks", "config", "auto_single", "choices", "actors", "turns", "winner", "end_turn", "level")
+
+
+def load_games(patterns: list[str], games: int, seed: int, proc: int, nproc: int) -> list[tuple[str, dict]]:
+    """(source file name, record) for this process's share of a seeded random sample of games with actors."""
+    files = sorted({f for pat in patterns for f in glob.glob(pat)})
+    recs = []
+    for f in files:
+        for line in Path(f).read_text().splitlines():
+            if line.strip():
+                r = json.loads(line)
+                if "actors" in r and r.get("choices"):
+                    recs.append((Path(f).name, r))
+    random.Random(seed).shuffle(recs)
+    recs = recs[:games] if games else recs
+    return recs[proc::nproc]
+
+
+def main() -> None:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--policy", default="bc", choices=["bc", "greedy"])
+    ap.add_argument("--ckpt", type=Path)
+    ap.add_argument("--emb", type=Path, default=ROOT / "data/cards/emb/qwen3-0.6b-d512.npz")
+    ap.add_argument("--device", default="cpu")
+    ap.add_argument("--bf16", type=int, default=1)
+    ap.add_argument("--records", nargs="+", required=True, help="globs of source game records")
+    ap.add_argument("--games", type=int, default=0, help="games sampled over all processes (0 = all)")
+    ap.add_argument("--proc", type=int, default=0)
+    ap.add_argument("--nproc", type=int, default=1)
+    ap.add_argument("--k", type=int, default=4)
+    ap.add_argument("--horizon", type=int, default=1, help="turns played out (1 = to the end of the current turn)")
+    ap.add_argument("--own-frac", type=float, default=0.1, help="share of own-turn decisions (turn >= 2) searched")
+    ap.add_argument("--width", type=int, default=32)
+    ap.add_argument("--batch", type=int, default=512)
+    ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--out", type=Path, required=True)
+    args = ap.parse_args()
+    if args.policy == "bc":
+        from ygo_zero.eval.bc_policy import BCPolicy
+
+        pol = BCPolicy(args.ckpt, args.emb, threads=1, device=args.device, batch=args.batch)
+        logits = pol.logits
+        if args.device.startswith("cuda") and args.bf16:
+            import torch
+
+            def logits(buf, _f=pol.logits):
+                with torch.autocast("cuda", dtype=torch.bfloat16):
+                    return _f(buf)
+    else:
+        logits = greedy_logits
+    ws = WindowSearch(Engine(), logits, k=args.k, horizon=args.horizon, own_frac=args.own_frac, batch=args.batch,
+                      seed=args.seed)  # fmt: skip
+    games = load_games(args.records, args.games, args.seed, args.proc, args.nproc)
+    args.out.mkdir(parents=True, exist_ok=True)
+    jobs = ((i, ws.game_gen(rec, record_config(rec), i)) for i, (_, rec) in enumerate(games))
+    t0 = time.time()
+    tot = {"games": 0, "window": 0, "own": 0, "fired": 0, "agree_window": 0, "agree_own": 0, "bad_replay": 0}
+    for i, res in ws.run_many(jobs, args.width):
+        src, rec = games[i]
+        tot["games"] += 1
+        if not res.replay_ok:
+            tot["bad_replay"] += 1
+            continue
+        n = len(rec["choices"])
+        targets: list[int | None] = [None] * n
+        labels = ["skip"] * n
+        for k, t in res.targets.items():
+            targets[k], labels[k] = t, res.kinds[k]
+        for e in res.log:
+            tot[e["kind"]] += 1
+            tot["fired"] += e["kind"] == "window" and e["fired"]
+            tot[f"agree_{e['kind']}"] += e["chosen"] == e["played"]
+        gid = rec.get("game_id") or rec.get("line_id", f"g{i}")
+        out = {k: rec[k] for k in KEEP if k in rec} | {
+            "game_id": f"w-{gid}", "line_id": f"{rec.get('line_id', gid)}/w", "source_game": gid,
+            "targets": targets, "labels": labels, "notes": [], "search": res.log,
+            "source": f"window search k={args.k} h={args.horizon} over {args.policy}",
+        }  # fmt: skip
+        with (args.out / src).open("a") as f:
+            f.write(json.dumps(out) + "\n")
+        if tot["games"] % 20 == 0:
+            print(f"{tot} {time.time() - t0:.0f} s", flush=True)
+    w = max(tot["window"], 1)
+    print(f"done: {tot}; fire rate {tot['fired'] / w:.3f}, agreement with the played move at windows "
+          f"{tot['agree_window'] / w:.3f}, own {tot['agree_own'] / max(tot['own'], 1):.3f}; wall {time.time() - t0:.0f} s",
+          flush=True)  # fmt: skip
+
+
+if __name__ == "__main__":
+    main()

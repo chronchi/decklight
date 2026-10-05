@@ -176,44 +176,49 @@ class Turn1Search:
         return self._drive(self.greedy_gen(config))
 
     def run_many(self, jobs, width: int = 64):
-        """Drive many hand generators at once: `jobs` is an iterable of (key, generator); up to `width` run
-        concurrently and every step's requests from all of them go through one batched forward. Yields
-        (key, result) as hands finish (completion order)."""
-        jobs = iter(jobs)
-        live: dict[int, tuple] = {}  # slot -> (key, gen, pending request)
-        slot = 0
+        """Drive many hand generators at once through one batched forward per step (see `drive_many`)."""
+        return drive_many(jobs, self._forward, width)
 
-        def start(key, gen):
-            nonlocal slot
+
+def drive_many(jobs, forward, width: int = 64):
+    """Drive many search generators at once: `jobs` is an iterable of (key, generator); up to `width` run
+    concurrently and every step's requests from all of them go through one batched forward. Yields
+    (key, result) as hands finish (completion order)."""
+    jobs = iter(jobs)
+    live: dict[int, tuple] = {}  # slot -> (key, gen, pending request)
+    slot = 0
+
+    def start(key, gen):
+        nonlocal slot
+        try:
+            live[slot] = (key, gen, next(gen))
+            slot += 1
+            return None
+        except StopIteration as stop:
+            return key, stop.value
+
+    exhausted = False
+    while True:
+        while not exhausted and len(live) < width:
+            nxt = next(jobs, None)
+            if nxt is None:
+                exhausted = True
+                break
+            done = start(*nxt)
+            if done is not None:
+                yield done
+        if not live:
+            return
+        slots = list(live)
+        reqs = [live[s][2] for s in slots]
+        lg = forward([o for r in reqs for o in r])
+        off = 0
+        for s, r in zip(slots, reqs, strict=True):
+            key, gen, _ = live[s]
+            part = lg[off : off + len(r)]
+            off += len(r)
             try:
-                live[slot] = (key, gen, next(gen))
-                slot += 1
-                return None
+                live[s] = (key, gen, gen.send(part))
             except StopIteration as stop:
-                return key, stop.value
-
-        exhausted = False
-        while True:
-            while not exhausted and len(live) < width:
-                nxt = next(jobs, None)
-                if nxt is None:
-                    exhausted = True
-                    break
-                done = start(*nxt)
-                if done is not None:
-                    yield done
-            if not live:
-                return
-            slots = list(live)
-            reqs = [live[s][2] for s in slots]
-            lg = self._forward([o for r in reqs for o in r])
-            off = 0
-            for s, r in zip(slots, reqs, strict=True):
-                key, gen, _ = live[s]
-                part = lg[off : off + len(r)]
-                off += len(r)
-                try:
-                    live[s] = (key, gen, gen.send(part))
-                except StopIteration as stop:
-                    del live[s]
-                    yield key, stop.value
+                del live[s]
+                yield key, stop.value
