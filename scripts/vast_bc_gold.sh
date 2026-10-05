@@ -56,7 +56,9 @@ COMMON=(--shards data/cache/bc_shards --emb data/cards/emb/qwen3-0.6b-d512.npz -
 train() {  # <variant> <args...>
   local v="$1"; shift
   uv run --no-sync python scripts/train_bc.py "${COMMON[@]}" --out "$OUT/$v" "$@" > "$OUT/train-$v.txt" 2>&1
-  rm -f "$OUT/$v/last.pt"; tick "train-$v"
+  rm -f "$OUT/$v/last.pt"
+  grep -q "^done in" "$OUT/train-$v.txt" || echo "FAILED train-$v (exit before 'done in': OOM?)" >> "$OUT/timing.txt"
+  tick "train-$v"
 }
 # VARIANTS: which trainings run (default: the gold-BC set). Memory sweep (ADR 0005): mix-h<H> = mix with the salient
 # long history window H (train_bc --hist H); mix itself is the v1 baseline (32 entries, passes included).

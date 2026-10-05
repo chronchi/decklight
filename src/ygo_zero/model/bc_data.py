@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import multiprocessing as mp
+import zipfile
 from pathlib import Path
 
 import numpy as np
@@ -214,8 +215,42 @@ def build_shards(sources: dict[str, list[Path]], out_dir: Path, jobs: int) -> in
     return total
 
 
+def _npz_headers(path: Path) -> dict[str, tuple[tuple[int, ...], np.dtype]]:
+    """Shape and dtype of every array in an .npz without decompressing the data."""
+    out = {}
+    with zipfile.ZipFile(path) as z:
+        for name in z.namelist():
+            with z.open(name) as f:
+                major, _ = np.lib.format.read_magic(f)
+                read = np.lib.format.read_array_header_1_0 if major == 1 else np.lib.format.read_array_header_2_0
+                shape, _, dtype = read(f)
+            out[name.removesuffix(".npy")] = (shape, dtype)
+    return out
+
+
 def load_shards(shard_dir: Path) -> dict[str, np.ndarray]:
-    parts = [dict(np.load(p)) for p in sorted(shard_dir.glob("*.npz"))]
+    """All shards of a directory, concatenated. Current shards (kind, equiv, hlog everywhere) are read one file at a
+    time into preallocated arrays: peak RAM ~ the result, not twice it (15 GB boxes OOMed on 619k samples, 2026-10-05).
+    Older or mixed directories take the simple path below."""
+    files = sorted(shard_dir.glob("*.npz"))
+    heads = [_npz_headers(f) for f in files]
+    keys = set(heads[0]) if heads else set()
+    if heads and all(set(h) == keys for h in heads) and {"kind", "equiv", "hlog"} <= keys:
+        n = {k: sum(h[k][0][0] for h in heads) for k in keys}
+        out = {k: np.empty((n[k], *heads[0][k][0][1:]), np.result_type(*(h[k][1] for h in heads))) for k in keys}
+        pos = dict.fromkeys(keys, 0)
+        hlog_off = 0
+        for f in files:
+            with np.load(f) as z:
+                for k in keys:
+                    a = z[k]
+                    if k in ("hlog_start", "hlog_end"):
+                        a = a + hlog_off
+                    out[k][pos[k] : pos[k] + len(a)] = a
+                    pos[k] += len(a)
+                hlog_off += len(z["hlog"])
+        return out
+    parts = [dict(np.load(p)) for p in files]
     for p in parts:  # backward compat: shards written before kind tags existed
         if "kind" not in p:
             p["kind"] = np.array(["unknown"] * len(p["action"]))
