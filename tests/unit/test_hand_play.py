@@ -141,7 +141,12 @@ def test_duplicate_names_get_location_suffix_and_match():
     obs2 = _fake_obs_loc([(Kind.SELECT, code, 5, 0), (Kind.SELECT, code, 5, 1)])
     disp2 = hand_play._display_names(obs2, names)
     assert disp2[1] == "Snake-Eye Ash (opponent's GY)", disp2
-    assert hand_play._match(obs2, "SEL:Snake-Eye_Ash_(GY)", names) == 0
+    # same name on both sides is ambiguous: the token stops, the qualifier picks
+    assert hand_play._match(obs2, "SEL:Snake-Eye_Ash_(GY)", names) is None
+    assert hand_play._match(obs2, "SEL:own:Snake-Eye_Ash_(GY)", names) == 0
+    assert hand_play._match(obs2, "SEL:opp:Snake-Eye_Ash_(GY)", names) == 1
+    msg = hand_play._no_match_msg(obs2, "SEL:Snake-Eye_Ash_(GY)", names)
+    assert "matches several options" in msg and "0:" in msg and "1:" in msg
 
 
 def test_check_runs_on_fresh_duel(tmp_path, monkeypatch, capsys):
@@ -760,4 +765,157 @@ def test_material_lines_show_zone_and_link_rating(tmp_path, monkeypatch, capsys)
     assert "[Link-2]" in out
     assert hand_play._link_rating(sp) == 2
     assert hand_play._link_rating(baron) is None
+
+
+def _zone_obs():
+    """SELECT prompt over four board cards: own set S/T (S0), opp set S/T (S1),
+    own face-up monster (M0), opp face-down monster (M2)."""
+    import numpy as np
+
+    from ygo_zero.engine.actions import Kind
+
+    cards = np.zeros((4, 21), dtype=np.int32)
+    cards[0, 0], cards[0, 1], cards[0, 2] = 1111, 4, 1
+    cards[0, 3], cards[0, 5] = 0, 6  # own set spell/trap
+    cards[1, 0], cards[1, 1], cards[1, 2] = 0, 4, 2
+    cards[1, 3], cards[1, 5] = 1, 6  # opponent's set spell/trap
+    cards[2, 0], cards[2, 1], cards[2, 2] = 2222, 3, 1
+    cards[2, 3], cards[2, 5], cards[2, 14] = 0, 1, 2500  # own face-up monster
+    cards[3, 0], cards[3, 1], cards[3, 2] = 0, 3, 3
+    cards[3, 3], cards[3, 5] = 1, 4  # opponent's face-down monster
+    g = [0] * 24
+    g[21] = 0xF  # MSG_SELECT_CARD
+    return {
+        "actions": [
+            [int(Kind.SELECT), 0, 1111, 0, 0, 0, 0, 4, 0, 0],
+            [int(Kind.SELECT), 1, 0, 0, 0, 0, 0, 4, 1, 0],
+            [int(Kind.SELECT), 2, 2222, 0, 0, 0, 0, 3, 0, 0],
+            [int(Kind.SELECT), 3, 0, 0, 0, 0, 0, 3, 1, 0],
+        ],
+        "action_mask": [1, 1, 1, 1],
+        "cards": cards, "card_mask": np.array([True] * 4),
+        "global": g,
+    }
+
+
+_ZONE_NAMES = {1111: "Infinite Impermanence", 2222: "Blue-Eyes White Dragon"}
+
+
+def test_sel_controller_qualifier_picks_face_down():
+    obs = _zone_obs()
+    assert hand_play._match(obs, "SEL:own:face-down", _ZONE_NAMES) == 0
+    assert hand_play._match(obs, "SEL:opp:M2", _ZONE_NAMES) == 3
+    assert hand_play._match(obs, "SEL:opp:S1", _ZONE_NAMES) == 1
+    assert hand_play._match(obs, "SEL:own:S0", _ZONE_NAMES) == 0
+    assert hand_play._match(obs, "SEL:S1", _ZONE_NAMES) == 1  # bare zone token
+    assert hand_play._match(obs, "SEL:M0", _ZONE_NAMES) == 2
+    assert hand_play._match(obs, "SEL:opp:face-down", _ZONE_NAMES) is None  # two opp face-downs
+    assert hand_play._match(obs, "SEL:own:M2", _ZONE_NAMES) is None  # nothing there
+
+
+def test_sel_ambiguous_lists_controller_and_zone():
+    obs = _zone_obs()
+    assert hand_play._match(obs, "SEL:face-down", _ZONE_NAMES) is None
+    msg = hand_play._no_match_msg(obs, "SEL:face-down", _ZONE_NAMES)
+    assert msg.startswith("!! token 'SEL:face-down' matches several face-down cards"), msg
+    for i in ("0:", "1:", "3:"):
+        assert i in msg, msg
+    assert "opponent's" in msg and "your" in msg  # controllers
+    assert "Spell/Trap Zone" in msg and "Monster Zone" in msg  # zones
+    assert "face-down" in msg
+
+
+def test_sel_ambiguous_names_stop_but_identical_copies_pick_first():
+    from ygo_zero.engine.actions import Kind
+
+    obs = _fake_obs([(Kind.SELECT, 111), (Kind.SELECT, 222)])
+    names = {111: "Mirror Force", 222: "Mirror Gate"}
+    assert hand_play._match(obs, "SEL:Mirror", names) is None  # same-rank tie, different cards
+    msg = hand_play._no_match_msg(obs, "SEL:Mirror", names)
+    assert "matches several options" in msg and "0:" in msg and "1:" in msg, msg
+    # identical copies (same code, controller, location kind) stay interchangeable
+    obs2 = _fake_obs_loc([(Kind.SELECT, 111, 2, 0), (Kind.SELECT, 111, 2, 0)])
+    assert hand_play._match(obs2, "SEL:Mirror_Force", {111: "Mirror Force"}) == 0
+
+
+def _sel_card_obs():
+    """MSG_SELECT_CARD with two SELECT options and no ATTACK option."""
+    import numpy as np
+
+    from ygo_zero.engine.actions import Kind
+
+    cards = np.zeros((2, 21), dtype=np.int32)
+    cards[0, 0], cards[0, 1], cards[0, 2] = 2222, 3, 1
+    cards[0, 3], cards[0, 5], cards[0, 14] = 0, 1, 2500
+    cards[1, 0], cards[1, 1], cards[1, 2] = 3333, 3, 2
+    cards[1, 3], cards[1, 5], cards[1, 14] = 0, 1, 2000
+    g = [0] * 24
+    g[21] = 0xF  # MSG_SELECT_CARD
+    obs = {
+        "actions": [
+            [int(Kind.SELECT), 0, 2222, 0, 0, 0, 0xF, 3, 0, 0],
+            [int(Kind.SELECT), 1, 3333, 0, 0, 0, 0xF, 3, 0, 0],
+        ],
+        "action_mask": [1, 1],
+        "cards": cards, "card_mask": np.array([True, True]),
+        "global": g,
+    }
+    return obs, {2222: "Blue-Eyes White Dragon", 3333: "Dark Magician"}
+
+
+def test_atk_at_selection_applies_unique():
+    obs, names = _sel_card_obs()
+    idx, note = hand_play._atk_fallback(obs, "ATK:Blue-Eyes_White_Dragon", names)
+    assert idx == 0
+    assert note == "(ATK at a selection prompt: applied as SEL:Blue-Eyes_White_Dragon)"
+
+
+def test_atk_at_selection_stops_when_ambiguous():
+    obs, _ = _sel_card_obs()
+    names = {2222: "Test Dragon A", 3333: "Test Dragon B"}
+    idx, msg = hand_play._atk_fallback(obs, "ATK:Dragon", names)
+    assert idx is None
+    assert "card selection" in msg and "0:" in msg and "1:" in msg, msg
+    idx, msg = hand_play._atk_fallback(obs, "ATK:Blue-Eyes", names)
+    assert idx is None and "card selection" in msg  # matches nothing
+
+
+def test_atk_fallback_not_applicable_elsewhere():
+    from ygo_zero.engine.actions import Kind
+
+    obs, names = _sel_card_obs()
+    obs["global"][21] = 0xB  # MSG_SELECT_IDLECMD: not a selection prompt
+    assert hand_play._atk_fallback(obs, "ATK:Blue-Eyes_White_Dragon", names) is None
+    obs["global"][21] = 0xF
+    obs["actions"].append([int(Kind.ATTACK), 0, 2222, 0, 0, 1, 0xA, 3, 0, 0])
+    obs["action_mask"] = [1, 1, 1]
+    assert hand_play._atk_fallback(obs, "ATK:Blue-Eyes_White_Dragon", names) is None
+    assert hand_play._atk_fallback(obs, "SEL:Blue-Eyes_White_Dragon", names) is None  # not an ATK token
+
+
+def test_do_applies_atk_as_sel_with_note(tmp_path, monkeypatch, capsys):
+    """End-to-end: ATK:<card> at a selection prompt applies the SEL and prints the note."""
+    obs, names = _sel_card_obs()
+
+    class _Env:
+        player = 0
+        select_hint = 0
+        winner = None
+
+        def step(self, i):
+            assert i == 0
+            # duel over after the pick: fall off the end (returns None)
+
+    monkeypatch.setattr(hand_play, "WORK", tmp_path / "work")
+    monkeypatch.setattr(sys, "argv", ["hand_play.py", "new", "g", "snake-eye", "tenpai-dragon", "11"])
+    hand_play.main()
+    capsys.readouterr()
+    monkeypatch.setattr(hand_play, "_replay", lambda engine, st: (_Env(), obs))
+    monkeypatch.setattr(hand_play, "CardNames", lambda: type("N", (), {"names": names})())
+    monkeypatch.setattr(sys, "argv", ["hand_play.py", "do", "g", "ATK:Blue-Eyes_White_Dragon"])
+    hand_play.main()
+    out = capsys.readouterr().out
+    assert "(ATK at a selection prompt: applied as SEL:Blue-Eyes_White_Dragon)" in out, out
+    st = hand_play._load("g")
+    assert st["choices"] == [0] and st["labels"] == ["gold"], st
 

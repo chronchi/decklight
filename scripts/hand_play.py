@@ -22,7 +22,14 @@ RACE:/ATTR: (announce race/attribute by name fragment), COUNT:/RPS:/PLA: (rare: 
 rock-paper-scissors, places — numbers usually suffice)) or one of END (TO_END), BP (TO_BATTLE),
 M2 (TO_MAIN2). `do` stops at the first token that matches no option and prints the state.
 Commands are case-insensitive (`CHECK`, `Show`). `SEL:face-down` (also `opponents_face-down`,
-`set`, `facedown`) picks the unique face-down option, else lists them for an option-number pick.
+`set`, `facedown`) picks the unique face-down option, else lists every matching option numbered with
+controller + zone + face-up name or "face-down" for an option-number pick. One token picks exactly one
+option: `SEL:own:<name|face-down>` / `SEL:opp:<name|face-down>` restrict to that controller (from the
+acting seat's view); `SEL:<M/S><zone>` / `SEL:own:M3` / `SEL:opp:S2` pick by board zone (0-indexed, the
+numbering `show` prints as `zone N`; `FZ` is the field zone); identical copies (same card, controller,
+location kind) stay interchangeable and pick the first. A still-ambiguous token stops with the numbered
+list. `ATK:<card>` at a card-selection prompt (no ATTACK option) applies as `SEL:<card>` when it selects
+exactly one option, else stops saying the prompt is a selection.
 `CAN`, `CANCEL` and `NO` answer the passive option at any prompt that offers one (YES/NO prompts
 still need explicit YES/NO). `BP` works only where a Battle Phase option is on offer (the idle
 prompt). Several `ATK:` tokens may share one `do` (one attack each; empty chain windows between
@@ -140,7 +147,7 @@ def _loc_of(obs, i: int) -> str:
     try:
         row = list(obs["actions"])[i]
         loc, ctrl = int(row[7]), int(row[8])
-    except (IndexError, TypeError):
+    except (IndexError, TypeError, KeyError):
         return ""
     name = _LOC_NAMES.get(loc, "")
     if not name:
@@ -153,7 +160,7 @@ def _arg_of(obs, i: int) -> int:
     ATTACK, the position bits for POSITION."""
     try:
         return int(list(obs["actions"])[i][5])
-    except (IndexError, TypeError):
+    except (IndexError, TypeError, KeyError):
         return 0
 
 
@@ -161,7 +168,7 @@ def _opt_row(obs, i: int) -> int:
     """Board row index behind option `i` (-1 when the option names no card)."""
     try:
         return int(list(obs["actions"])[i][1])
-    except (IndexError, TypeError):
+    except (IndexError, TypeError, KeyError):
         return -1
 
 
@@ -175,7 +182,7 @@ def _zone_of(obs, i: int) -> str:
         if not 0 <= r < len(cards):
             return ""
         loc, seq = int(cards[r][1]), int(cards[r][2])
-    except (IndexError, TypeError):
+    except (IndexError, TypeError, KeyError):
         return ""
     name = _ZONE_NAMES.get(loc, "")
     if not name:
@@ -185,6 +192,8 @@ def _zone_of(obs, i: int) -> str:
 
 
 _FACE_DOWN_POS = (2, 4, 6)  # obs position col: face-down ATK / face-down DEF / set
+_CTRL_WORDS = {"own": 0, "opp": 1, "opponent": 1, "opponents": 1}  # SEL: controller qualifiers
+_ATK_SEL_MSGS = (C.MSG_SELECT_CARD, C.MSG_SELECT_UNSELECT_CARD)  # ATK:<card> applies as SEL: here
 
 
 def _is_face_down(obs, i: int) -> bool:
@@ -192,11 +201,11 @@ def _is_face_down(obs, i: int) -> bool:
     opponent's face-down cards, whose code is 0 and whose label says "face-down")."""
     try:
         row = list(obs["actions"])[i]
-    except (IndexError, TypeError):
+    except (IndexError, TypeError, KeyError):
         return False
     try:
         lbl = hidden_card(obs, i)
-    except (IndexError, TypeError):
+    except (IndexError, TypeError, KeyError):
         lbl = ""
     if lbl and "face-down" in lbl:
         return True
@@ -204,7 +213,7 @@ def _is_face_down(obs, i: int) -> bool:
         r = int(row[1])
         cards = list(obs["cards"][obs["card_mask"]])
         pos = int(cards[r][5]) if 0 <= r < len(cards) else 0
-    except (IndexError, TypeError):
+    except (IndexError, TypeError, KeyError):
         return False
     return pos in _FACE_DOWN_POS
 
@@ -218,6 +227,143 @@ def _facedown_cands(obs, head: str) -> list[int]:
         if ok_kind and _is_face_down(obs, i):
             out.append(i)
     return out
+
+
+def _ctrl_of(obs, i: int) -> int:
+    """Relative controller behind option `i` (0 = own, 1 = opponent, -1 = no card)."""
+    try:
+        return int(list(obs["actions"])[i][8])
+    except (IndexError, TypeError, KeyError):
+        return -1
+
+
+def _zone_key(obs, i: int) -> tuple[str, int] | None:
+    """Board zone behind option `i` as ("M"/"S", 0-indexed zone), e.g. ("S", 2); None when the
+    option names no Monster/Spell-Trap Zone card. The numbering matches `show`'s "zone N"
+    (and _zone_of's "Monster Zone N"); the field zone is ("S", 5)."""
+    r = _opt_row(obs, i)
+    if r < 0:
+        return None
+    try:
+        cards = list(obs["cards"][obs["card_mask"]])
+        if not 0 <= r < len(cards):
+            return None
+        loc, seq = int(cards[r][1]), int(cards[r][2])
+    except (IndexError, TypeError, KeyError):
+        return None
+    if loc == 3:
+        return ("M", seq - 1)
+    if loc == 4:
+        return ("S", seq - 1)
+    return None
+
+
+def _split_ctrl(raw_sub: str) -> tuple[int | None, str]:
+    """`own:`/`opp:` controller qualifier of a SEL token (from the acting seat's view)."""
+    parts = raw_sub.split(":")
+    if len(parts) >= 2 and parts[0].strip().lower() in _CTRL_WORDS:
+        return _CTRL_WORDS[parts[0].strip().lower()], ":".join(parts[1:])
+    return None, raw_sub
+
+
+def _parse_zone(rest: str) -> tuple[str, int] | None:
+    """`M<n>` / `S<n>` zone token (0-indexed, the numbering `show` prints) or `FZ` (field zone)."""
+    s = _norm(rest)
+    if s == "fz":
+        return ("S", 5)
+    m = re.fullmatch(r"([ms])(\d+)", s)
+    return (m.group(1).upper(), int(m.group(2))) if m else None
+
+
+def _identical(obs, idxs: list[int]) -> bool:
+    """Whether options are interchangeable copies: same card, same controller, same location kind."""
+    keys = set()
+    for i in idxs:
+        try:
+            row = list(obs["actions"])[i]
+            keys.add((int(row[2]), int(row[8]), int(row[7])))
+        except (IndexError, TypeError, KeyError):
+            return False
+    return len(keys) == 1
+
+
+def _sel_cands(obs, head: str, raw_sub: str, names: dict[int, str]) -> tuple[str, list[tuple[int, int]]]:
+    """SELECT-head token search: (mode, [(rank, index)]). Mode is "face" for face-down tokens,
+    "zone" for a bare zone token, else "name". Controller (`own:`/`opp:`) and zone
+    (`M<n>`/`S<n>`/`FZ`) qualifiers filter the pool before name ranking."""
+    ctrl, rest = _split_ctrl(raw_sub)
+    rn = _norm(rest)
+    zone = _parse_zone(rest)
+    face = rn == "set" or "facedown" in rn
+    mode = "face" if face else "zone" if zone is not None else "name"
+    out = []
+    for i, (k, code) in enumerate(_opts(obs)):
+        kname = _kind(k)
+        ok_kind = (k == _ALIASES[head]) if head in _ALIASES else kname.startswith(head)
+        if not ok_kind:
+            continue
+        if ctrl is not None and _ctrl_of(obs, i) != ctrl:
+            continue
+        if zone is not None and _zone_key(obs, i) != zone:
+            continue
+        if mode == "face":
+            if _is_face_down(obs, i):
+                out.append((0, i))
+            continue
+        if mode == "zone":
+            out.append((0, i))
+            continue
+        if k == Kind.NUMBER:
+            cands = [str(_arg_of(obs, i))]
+        else:
+            nm = _norm(names.get(code, "") if code else "")
+            cands = [nm]
+            loc = _loc_of(obs, i).lower()
+            if nm and loc:
+                cands.append(_norm(f"{names.get(code, '')} ({loc})"))
+                short = loc.split()[-1]  # "opponent's GY" also matches " (GY)"
+                if short != loc:
+                    cands.append(_norm(f"{names.get(code, '')} ({short})"))
+            zone_sfx = _zone_of(obs, i).lower()
+            if nm and zone_sfx:
+                cands.append(_norm(f"{names.get(code, '')} ({zone_sfx})"))
+        desc = _norm(option_desc(obs, i))
+        rank = None
+        for cand in cands:
+            r = (
+                0
+                if not rn or cand == rn
+                else 1
+                if cand.startswith(rn)
+                else 2
+                if rn in f"{cand} {desc}"
+                else None
+            )
+            if r is not None and (rank is None or r < rank):
+                rank = r
+        if rank is not None:
+            out.append((rank, i))
+    return mode, out
+
+
+def _opt_label(obs, i: int, names: dict[int, str]) -> str:
+    """`i: controller name (zone)` label for the ambiguous-selection listing, e.g.
+    `1: opponent's Mirror Force (Spell/Trap Zone 0)` or `0: your face-down card (S/T Zone 2)`.
+    A known card that is face-down on the field keeps its name with a face-down marker (the
+    acting seat knows its own set cards); an unknown card shows as "face-down card"."""
+    try:
+        row = list(obs["actions"])[i]
+        code, ctrl = int(row[2]), int(row[8])
+    except (IndexError, TypeError, KeyError):
+        return f"{i}: option {i}"
+    whose = "your" if ctrl == 0 else "opponent's" if ctrl == 1 else "a"
+    known = names.get(code, f"#{code}") if code else ""
+    if known:
+        nm = known + (" (face-down)" if _is_face_down(obs, i) else "")
+    else:
+        nm = "face-down card"
+    zone = _zone_of(obs, i) or _loc_of(obs, i) or "field"
+    return f"{i}: {whose} {nm} ({zone})"
 
 
 def _link_rating(code: int) -> int | None:
@@ -323,8 +469,8 @@ def _match(obs, tok: str, names: dict[int, str]) -> int | None:
         return i if i < len(opts) else None
     if tok.upper() == "P":
         return next((i for i, (k, _) in enumerate(opts) if k in _P_CHOICE), None)
-    head, _, sub = tok.partition(":")
-    head, sub = head.upper(), _norm(sub)
+    head, _, raw_sub = tok.partition(":")
+    head, sub = head.upper(), _norm(raw_sub)
     if head in ("CAN", "CANCEL", "NO"):
         # bare cancel words (and CAN:/CANCEL:/NO: forms) mean the passive option at any prompt that
         # offers one — except YES/NO prompts, where NO is a real decision and P still refuses.
@@ -335,6 +481,20 @@ def _match(obs, tok: str, names: dict[int, str]) -> int | None:
                 return j
         if head in ("CAN", "CANCEL"):
             return None
+    if head in ("SEL", "SELECT"):
+        # Selection tokens with controller (`own:`/`opp:`) and zone (`M<n>`/`S<n>`/`FZ`)
+        # qualifiers: one token picks exactly one option. Several non-interchangeable matches
+        # stop (the `!!` lists them); identical copies pick the first.
+        mode, found = _sel_cands(obs, head, raw_sub, names)
+        if not found:
+            return None
+        if mode == "face" and len(found) > 1:
+            return None
+        best_rank = min(r for r, _ in found)
+        best = [i for r, i in found if r == best_rank]
+        if len(best) == 1 or _identical(obs, best):
+            return best[0]
+        return None
     if sub == "set" or "facedown" in sub:
         # SEL:face-down (also opponents_face-down / opponent's face-down card / set / facedown):
         # the unique face-down option of that kind; several face-downs need the option number.
@@ -407,16 +567,36 @@ def _available_kinds(obs) -> list[str]:
 
 def _no_match_msg(obs, tok: str, names: dict[int, str] | None = None) -> str:
     """The `!!` line when `tok` matches no option: which kinds are on offer (and a hint for BP)."""
-    if tok.upper() == "P" and int(obs["global"][21]) in _YESNO_MSGS:
+    if tok.upper() == "P" and "global" in obs and int(obs["global"][21]) in _YESNO_MSGS:
         return "!! P does not answer yes/no prompts: use YES or NO"
-    msg = int(obs["global"][21])
-    head, _, sub = tok.partition(":")
-    if (sub and _norm(sub) == "set") or "facedown" in _norm(sub):
-        cands = _facedown_cands(obs, head.upper())
+    msg = int(obs["global"][21]) if "global" in obs else -1
+    head, _, raw_sub = tok.partition(":")
+    head = head.upper()
+    if head in ("SEL", "SELECT"):
+        mode, found = _sel_cands(obs, head, raw_sub, names or {})
+        if found:
+            best_rank = min(r for r, _ in found)
+            best = [i for r, i in found if r == best_rank]
+            if len(best) > 1 or mode == "face":
+                listed = "; ".join(_opt_label(obs, i, names or {}) for i in best)
+                if mode == "face":
+                    return (
+                        f"!! token {tok!r} matches several face-down cards: {listed} — "
+                        "pick one with SEL:own/opp:<card>, SEL:<M/S><zone> (e.g. SEL:opp:S2) "
+                        "or the option number"
+                    )
+                return (
+                    f"!! token {tok!r} matches several options: {listed} — qualify with "
+                    "SEL:own/opp:<card> or SEL:<M/S><zone>, or pick the option number"
+                )
+        if (raw_sub and _norm(raw_sub) == "set") or "facedown" in _norm(raw_sub):
+            return f"!! token {tok!r} matches no face-down card at this prompt"
+    elif (raw_sub and _norm(raw_sub) == "set") or "facedown" in _norm(raw_sub):
+        cands = _facedown_cands(obs, head)
         if len(cands) > 1:
             try:
                 disp = _display_names(obs, names or {})
-            except (IndexError, TypeError):
+            except (IndexError, TypeError, KeyError):
                 disp = [f"option {i}" for i in cands]
             listed = "; ".join(f"{i}: {disp[i]}" for i in cands)
             return (
@@ -435,6 +615,31 @@ def _no_match_msg(obs, tok: str, names: dict[int, str] | None = None) -> str:
             f"answer it first (available: {avail})"
         )
     return f"!! token {tok!r} matches no option; available: {avail}{extra}"
+
+
+def _atk_fallback(obs, tok: str, names: dict[int, str]) -> tuple[int | None, str] | None:
+    """`ATK:<card>` typed at a card-selection prompt with no ATTACK option: (index, note) when
+    `<card>` selects exactly one option (applied as `SEL:<card>`), (None, `!!` message) when the
+    prompt is a selection but the match is ambiguous or empty, None when not applicable (other
+    prompts, or an ATTACK option is on offer). Never applies on an ambiguous match."""
+    head, _, sub = tok.partition(":")
+    if head.upper() != "ATK" or not sub.strip():
+        return None
+    if int(obs["global"][21]) not in _ATK_SEL_MSGS:
+        return None
+    if any(k == Kind.ATTACK for k, _ in _opts(obs)):
+        return None
+    j = _match(obs, "SEL:" + sub, names)
+    if j is not None:
+        return (j, f"(ATK at a selection prompt: applied as SEL:{sub})")
+    opts = [i for i, (k, _) in enumerate(_opts(obs)) if k in (Kind.SELECT, Kind.UNSELECT)]
+    listed = "; ".join(_opt_label(obs, i, names) for i in opts) or "none"
+    msg = (
+        f"!! ATK:{sub}: this prompt is a card selection "
+        f"({_MSGS.get(int(obs['global'][21]), '?')}), not an attack — {sub!r} matches no "
+        f"single option; options: {listed}"
+    )
+    return (None, msg)
 
 
 def _auto(env, obs, st: dict):
@@ -1185,6 +1390,16 @@ def main() -> None:
                 stopped = f"prompt changed before {tok!r}"
                 break
             i = _match(obs, tok, names.names)
+            note = ""
+            if i is None:
+                fb = _atk_fallback(obs, tok, names.names)
+                if fb is not None:
+                    if fb[0] is not None:
+                        i, note = fb
+                    else:
+                        print(fb[1])
+                        stopped = f"ATK at a selection prompt: {tok!r}"
+                        break
             if i is None:
                 msg = _no_match_msg(obs, tok, names.names)
                 print(msg)
@@ -1196,6 +1411,8 @@ def main() -> None:
             what = option_desc(obs, i)
             if not a.json:
                 print(f'  [{len(st["choices"])}] P{env.player} {_kind(k)} {nm} "{what}"')
+            if note and not a.json:
+                print(note)
             _note(env, obs, i)
             st["choices"].append(i)
             st["labels"].append("gold")

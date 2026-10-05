@@ -73,9 +73,10 @@ def describe_state(obs, names: dict[int, str]) -> str:
         return "; ".join(out) or "none"
 
     def sts(ctrl: int) -> str:
-        out = [
-            f"{nm(r[0])} [{_POS.get(int(r[5]), '?')}]" for r in sorted(pick(ctrl, 4), key=lambda r: int(r[2]))
-        ]
+        out = []  # zone numbers match hand_play's SEL:own:S<n> / SEL:opp:FZ qualifiers (seq 5 = Field Zone)
+        for r in sorted(pick(ctrl, 4), key=lambda r: int(r[2])):
+            z = int(r[2]) - 1
+            out.append(f"{nm(r[0])} [{_POS.get(int(r[5]), '?')}, {'field zone' if z == 5 else f'zone {z}'}]")
         return "; ".join(out) or "none"
 
     def names_at(ctrl: int, loc: int) -> str:

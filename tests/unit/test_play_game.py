@@ -91,9 +91,9 @@ def test_transient_error_retries(tmp_path, monkeypatch):
     assert len(_rows(briefs)) == 2
 
 
-def test_prologue_sheets_only_first_session(tmp_path, monkeypatch):
-    """The prologue is built and passed to every session: full deck sheets in the first
-    session, the one-liner afterwards (the per-turn cost driver)."""
+def test_prologue_carries_sheets_every_session(tmp_path, monkeypatch):
+    """Every session's prologue carries both decks' compressed sheets + strategy TL;DRs (cached
+    per game), under the cap."""
     briefs = _setup(tmp_path, monkeypatch)
     cap = tmp_path / "caps.txt"
     template = f"cat {{prologue}} >> {cap} && echo '===SEP===' >> {cap} && true"
@@ -101,20 +101,25 @@ def test_prologue_sheets_only_first_session(tmp_path, monkeypatch):
     parts = cap.read_text().split("===SEP===")
     assert len(parts) == 3, parts[-1:]  # two prologues + trailing empty
     first, second, _ = parts
-    assert "== Main" in first  # full deck sheets in session 1
+    for part in (first, second):
+        assert "== Main" in part  # compressed deck sheets in every session
+        assert "## Strategy summaries" in part
+        assert len(part) <= play_game.MAX_PROLOGUE_CHARS
     assert "do not re-run log/show unless something changed" in first
-    assert "== Main" not in second
-    assert "Deck sheets: run `deck_sheet.py" in second
-    # the cap binds the common (sheet-less) session: sheet sessions carry two --brief
-    # sheets (~20k) and stay above it, same as today's agent-run equivalent
-    assert len(second) <= play_game.MAX_PROLOGUE_CHARS
     assert (briefs / "play-g.t1.prologue.md").exists()
+    assert (briefs / "play-g.sheets.md").exists()  # computed once per game
 
 
-def test_prologue_turn_multiple_of_ten_has_sheets(tmp_path, monkeypatch):
-    """Turns that are multiples of 10 re-attach the deck sheets."""
+def test_prologue_reuses_cached_sheets(tmp_path, monkeypatch):
+    """build_prologue(game, turn) always includes sheets and reuses the per-game cache."""
     _setup(tmp_path, monkeypatch)
-    with_sheets = play_game.build_prologue("g", 10, True)
-    without = play_game.build_prologue("g", 3, False)
-    assert "== Main" in with_sheets
-    assert "== Main" not in without
+    prologue = play_game.build_prologue("g", 10)
+    assert "== Main" in prologue and "## Strategy summaries" in prologue
+    cache = tmp_path / "briefs" / "play-g.sheets.md"
+    assert cache.exists()
+    for line in cache.read_text().splitlines():
+        if line.startswith(("== ", "## ", "### ")) or " — " not in line:
+            continue
+        assert len(line.split(" — ", 1)[1]) <= play_game.SHEET_TEXT_CHARS, line[:80]
+    cache.write_text("CACHED")
+    assert "CACHED" in play_game.build_prologue("g", 3)  # cache reused, not recomputed

@@ -4,9 +4,12 @@
 
 Loop: run `opencode run --auto -m M --dir . "<msg>" -f <brief> -f <prologue>` under `taskset -c 0-3`, where msg =
 "Play ONLY turn <t> of duel <game> (both seats) following the attached brief. The current log and
-state are attached; do not re-run log/show unless something changed. Stop as soon as the turn number
+state are attached; do not re-run log/show unless something changed. Deck sheets and strategy
+summaries are in the attached prologue; re-fetch only full card text (`txt.py`) when you need it.
+Stop as soon as the turn number
 changes or the duel is over; do not write the report." <prologue> is a temp file built by
-`build_prologue` (log tail + show + deck sheets on the first session and every 10th turn).
+`build_prologue` (log tail + show + both decks' compressed `--brief` sheets and strategy TL;DRs,
+cached per game).
 After the duel is over, one final session: "The duel <game> is over: run
 `save` once and write the report per the brief." Stops on duel over, on no progress twice in a row
 (no new choices), or after 60 sessions. Transient API errors (overloaded / rate limit) are retried
@@ -47,8 +50,10 @@ RUNS = BRIEFS / "runs.tsv"
 DEFAULT_MODEL = "opencode-go/muse-spark-1.3-contributor"
 MAX_SESSIONS = 60
 PROLOGUE_TURNS = 3  # `log` tail per session: the last 3 turns (full log stays available on demand)
-PROLOGUE_SHEET_EVERY = 10  # full deck sheets in the first session + every 10th turn
-MAX_PROLOGUE_CHARS = 12_000  # truncate the log head first, never the state
+MAX_PROLOGUE_CHARS = 16_000  # truncate the log head first, then the strategy TL;DRs; never show/sheets
+SHEET_TEXT_CHARS = 100  # per-card text cap in the cached prologue sheets (compressed `--brief`)
+STRATEGY_CHARS = 600  # per-deck strategy TL;DR length in the prologue
+_TLDR_MARK = "\n## Strategy summaries\n"
 _TRANSIENT = re.compile(r"overloaded|rate limit|ECONNRESET|503|502", re.IGNORECASE)
 
 
@@ -77,11 +82,41 @@ def _result_status(log_path: Path) -> str:
     return m[-1] if m else "none"
 
 
-def build_prologue(game: str, turn: int, include_sheets: bool) -> str:
+def _compress_sheet(text: str) -> str:
+    """A `--brief` sheet with each card's text capped at SHEET_TEXT_CHARS (prologue cache)."""
+    out = []
+    for line in text.splitlines():
+        head, sep, tail = line.partition(" — ")
+        out.append(head + sep + tail[:SHEET_TEXT_CHARS] if sep else line)
+    return "\n".join(out)
+
+
+def game_sheets(game: str) -> str:
+    """Both decks' compressed `--brief` sheets + both strategy TL;DRs, cached per game in the
+    briefs dir (computed once). Sections: `## Deck sheets`, then `## Strategy summaries`."""
+    path = BRIEFS / f"play-{game}.sheets.md"
+    if path.exists():
+        return path.read_text()
+    st = hand_play._load(game)
+    parts = []
+    for deck in st["decks"]:
+        parts.append(f"### {deck}\n" + _compress_sheet(deck_sheet.sheet(deck, brief=True)))
+    tldrs = []
+    for deck in st["decks"]:
+        sp = ROOT / "data" / "strategy" / f"{deck}.md"
+        tldr = sp.read_text()[:STRATEGY_CHARS] if sp.exists() else "(no strategy note found)"
+        tldrs.append(f"### {deck}\n{tldr}")
+    text = "## Deck sheets\n" + "\n\n".join(parts) + _TLDR_MARK + "\n".join(tldrs)
+    path.write_text(text)
+    return text
+
+
+def build_prologue(game: str, turn: int) -> str:
     """The turn's opening context, so the session needs no tool call before its first decision: the
-    `log` tail (last PROLOGUE_TURNS turns) + the current `show`, then both decks' `--brief` sheets
-    (first session of a game + every PROLOGUE_SHEET_EVERY-th turn; other sessions get the one-liner).
-    Kept under MAX_PROLOGUE_CHARS by truncating the log head first, never the state."""
+    `log` tail (last PROLOGUE_TURNS turns) + the current `show`, then both decks' compressed
+    `--brief` sheets plus both strategy TL;DRs (cached per game by `game_sheets`: every session
+    carries them). Kept under MAX_PROLOGUE_CHARS by truncating the log head first, then the
+    strategy TL;DRs — never the state, never the deck sheets."""
     st = hand_play._load(game)
     engine = Engine()
     names = CardNames()
@@ -94,33 +129,25 @@ def build_prologue(game: str, turn: int, include_sheets: bool) -> str:
     with contextlib.redirect_stdout(buf):
         hand_play._show(env, obs, st, names, False)
     show_text = buf.getvalue().strip()
-    if include_sheets:
-        sheets = "\n\n".join(
-            deck_sheet.sheet(deck, brief=True) for deck in st["decks"]
-        )
-    else:
-        sheets = (
-            "Deck sheets: run `deck_sheet.py <deck> --brief` if you need them "
-            f"({st['decks'][0]}, {st['decks'][1]})."
-        )
+    cached = game_sheets(game)
+    sheets, _, tldrs = cached.partition(_TLDR_MARK)
     head = (
         f"Turn {turn} of duel {game} ({st['decks'][0]} vs {st['decks'][1]}). "
         "The current log and state are attached; do not re-run log/show unless something "
         "changed."
     )
-    prologue = head + "\n\n## Recent log (last 3 turns)\n" + log_text
-    prologue += "\n\n## Current state\n" + show_text + "\n\n## Deck sheets\n" + sheets
-    if len(prologue) <= MAX_PROLOGUE_CHARS:
-        return prologue
-    # truncate the log head first, never the state: drop whole lines until it fits (or the log
-    # is exhausted — sheet sessions stay above the cap: two --brief sheets alone are ~20k).
-    lines = log_text.splitlines()
+    log_block = "\n\n## Recent log (last 3 turns)\n"
+    tail = "\n\n## Current state\n" + show_text + "\n\n" + sheets
+    tldr_block = _TLDR_MARK + tldrs
     marker = "[... earlier log truncated; run `hand_play.py log` for the full log ...]\n"
-    tail = "\n\n## Current state\n" + show_text + "\n\n## Deck sheets\n" + sheets
-    while lines and len(head) + len(marker) + len("\n".join(lines)) + len(tail) + 60 > MAX_PROLOGUE_CHARS:
+    lines = log_text.splitlines()
+    while lines and len(head) + len(log_block) + len(marker) + len("\n".join(lines)) + len(tail) + len(tldr_block) + 60 > MAX_PROLOGUE_CHARS:
         lines.pop(0)
-    log_text = marker + "\n".join(lines) if lines else marker.strip()
-    return head + "\n\n## Recent log (last 3 turns)\n" + log_text + tail
+    log_text = (marker + "\n".join(lines)) if lines else marker.strip()
+    while tldrs and len(head) + len(log_block) + len(log_text) + len(tail) + len(tldr_block) + 60 > MAX_PROLOGUE_CHARS:
+        tldrs = tldrs[: len(tldrs) // 2]
+        tldr_block = _TLDR_MARK + tldrs + "\n[... strategy summaries truncated ...]"
+    return head + log_block + log_text + tail + tldr_block
 
 
 def run_session(
@@ -143,7 +170,9 @@ def run_session(
         msg = (
             f"Play ONLY turn {turn} of duel {game} (both seats) following the attached brief. "
             "The current log and state are attached; do not re-run log/show unless something "
-            "changed. Stop as soon as the turn number changes or the duel is over; "
+            "changed. Deck sheets and strategy summaries are in the attached prologue; "
+            "re-fetch only full card text (`txt.py`) when you need it. "
+            "Stop as soon as the turn number changes or the duel is over; "
             "do not write the report."
         )
     template = cmd_template or (
@@ -220,9 +249,8 @@ def play(game: str, brief: str, model: str, max_sessions: int, cmd_template: str
             if sessions >= max_sessions:
                 return "max-sessions"
             tag = f"{game}.t{turn}"
-            include_sheets = sessions == 0 or turn % PROLOGUE_SHEET_EVERY == 0
             prologue_file = BRIEFS / f"play-{tag}.prologue.md"
-            prologue_file.write_text(build_prologue(game, turn, include_sheets))
+            prologue_file.write_text(build_prologue(game, turn))
             run_session(game=game, turn=turn, brief=brief, model=model,
                         tag=tag, cmd_template=cmd_template,
                         prologue_path=str(prologue_file))
