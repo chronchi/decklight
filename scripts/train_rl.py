@@ -149,7 +149,8 @@ def main() -> None:
         for name, gs in (("vs_bc", games), ("vs_bc_holdout", [g for g in games if ev_names[g.deck_a] in hold])):
             w = sum(g.winner_is_a for g in gs)
             lo, hi = wilson(w, len(gs))
-            res["eval"][name] = {"n": len(gs), "wr": round(w / len(gs), 3), "ci": [round(lo, 3), round(hi, 3)]}
+            res["eval"][name] = {"n": len(gs), "wr": round(w / len(gs), 3), "ci": [round(lo, 3), round(hi, 3)],
+                                 "cut": sum(g.truncated for g in gs)}  # fmt: skip
         if ga is not None:
             ga._states.clear()  # LSTM states are keyed by schedule index, which restarts at 0 every match
             gp = [(i, j) for i in range(len(g_decks)) for j in range(len(g_decks)) if i != j]
@@ -157,9 +158,9 @@ def main() -> None:
             w = sum(g.winner_is_a for g in games)
             lo, hi = wilson(w, len(games))
             res["eval"]["vs_ygoagent"] = {"n": len(games), "wr": round(w / len(games), 3),
-                                          "ci": [round(lo, 3), round(hi, 3)]}  # fmt: skip
+                                          "ci": [round(lo, 3), round(hi, 3)], "cut": sum(g.truncated for g in games)}  # fmt: skip
         res["eval_seconds"] = round(time.time() - t)
-        print(f"[eval it {it}] " + "  ".join(f"{k} {v['wr']:.3f} [{v['ci'][0]:.3f},{v['ci'][1]:.3f}] n={v['n']}"
+        print(f"[eval it {it}] " + "  ".join(f"{k} {v['wr']:.3f} [{v['ci'][0]:.3f},{v['ci'][1]:.3f}] n={v['n']} cut={v['cut']}"
                                              for k, v in res["eval"].items()) + f"  ({res['eval_seconds']} s)", flush=True)  # fmt: skip
         log.write(json.dumps(res) + "\n")
         log.flush()

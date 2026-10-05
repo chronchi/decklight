@@ -40,6 +40,7 @@ def play(engine, decks, names, a, b, seeds, tag, out: Path, threads: int, log) -
             p._states.clear()
     vec = VecEnv(engine, decks, min(64, len(sched)), threads, seed=0)
     vec.set_schedule(sched)
+    vec.set_max_decisions(3000)  # winner 3 = cut (deterministic policies can loop)
     buf = vec.reset()
     a_seat = np.array([m[2] for m in meta] + [-2], np.int32)
     rec: dict[int, dict] = {}

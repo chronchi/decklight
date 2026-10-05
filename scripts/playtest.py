@@ -274,9 +274,10 @@ def main() -> None:
             "games": len(games), "win_rate": round(w / len(games), 3), "ci": [round(lo, 3), round(hi, 3)],
             "win_rate_first": round(sum(g.winner_is_a for g in first) / max(len(first), 1), 3),
             "mean_turns": round(statistics.mean(g.turns for g in games), 1),
+            "cut": sum(g.truncated for g in games),
         }  # fmt: skip
         print(f"vs {name:8s}: {w:.0f}/{len(games)} = {w / len(games):.1%}  [{lo:.1%}, {hi:.1%}]  "
-              f"mean turns {report['matches'][name]['mean_turns']}", flush=True)
+              f"mean turns {report['matches'][name]['mean_turns']}, cut {report['matches'][name]['cut']}", flush=True)
 
     # matches first (cheap, batched over VecEnv), then self-play games, then the slower combo test
     t = time.time()

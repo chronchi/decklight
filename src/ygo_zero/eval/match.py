@@ -22,8 +22,9 @@ class Game:
     deck_b: int
     seed: int
     a_first: bool
-    winner_is_a: float  # 1 win, 0 loss, 0.5 draw
+    winner_is_a: float  # 1 win, 0 loss, 0.5 draw (or cut at max_decisions)
     turns: int
+    truncated: bool = False
 
 
 def wilson(wins: float, n: int, z: float = 1.96) -> tuple[float, float]:
@@ -45,7 +46,11 @@ def play_match(
     seeds: Sequence[int],
     num_envs: int = 32,
     num_threads: int = 8,
+    max_decisions: int = 3000,
 ) -> list[Game]:
+    """`max_decisions`: a game still running after that many decisions (both seats) is cut and scored as a draw:
+    two deterministic policies can loop for tens of thousands of decisions, and one such game stalls the whole
+    match (RL smoke and playtests, 2026-10-05). 0 = no cap."""
     schedule, meta = [], []
     for da, db in pairs:
         for s in seeds:
@@ -55,6 +60,7 @@ def play_match(
             meta.append((da, db, s, False))
     vec = VecEnv(engine, decks, min(num_envs, len(schedule)), num_threads, seed=0)
     vec.set_schedule(schedule)
+    vec.set_max_decisions(max_decisions)
     buf = vec.reset()
     seat_of_a = np.array([0 if m[3] else 1 for m in meta] + [-2], np.int32)  # [-1] → -2: idle env
     games: list[Game] = []
@@ -74,8 +80,8 @@ def play_match(
         for ep in vec.pop_finished():
             da, db, s, a_first = meta[ep.index]
             seat = 0 if a_first else 1
-            win = 0.5 if ep.winner == 2 else float(ep.winner == seat)
-            games.append(Game(da, db, s, a_first, win, ep.turns))
+            win = 0.5 if ep.winner not in (0, 1) else float(ep.winner == seat)
+            games.append(Game(da, db, s, a_first, win, ep.turns, ep.winner == VecEnv.TRUNCATED))
     return games
 
 
@@ -93,5 +99,5 @@ def report(games: Sequence[Game], deck_names: Sequence[str], a_name: str, b_name
         by_pair[(g.deck_a, g.deck_b)].append(g)
     for (da, db), gs in sorted(by_pair.items()):
         out.append(line(f"  {deck_names[da]} vs {deck_names[db]}", gs))
-    out.append(f"mean turns {np.mean([g.turns for g in games]):.1f}")
+    out.append(f"mean turns {np.mean([g.turns for g in games]):.1f}; cut at the decision cap: {sum(g.truncated for g in games)}")
     return "\n".join(out)
