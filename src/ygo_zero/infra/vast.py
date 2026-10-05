@@ -106,6 +106,7 @@ class JobSpec:
     extra_query: str = ""
     setup: str = "bash scripts/vast_setup.sh"
     data_paths: tuple[str, ...] = ()  # extra repo paths to ship despite EXCLUDES (e.g. "data/demos/lines")
+    min_mb_s: float = 15.0  # measured download speed a host must reach (0 = skip the check); vast's inet_down lies
 
 
 @dataclass
@@ -493,6 +494,21 @@ def repush_code(name: str = "lines") -> None:
     push_code(s["host"], int(s["port"]))
 
 
+SPEED_URL = "https://download.pytorch.org/whl/cu128/torch-2.9.0%2Bcu128-cp312-cp312-manylinux_2_28_x86_64.whl"
+
+
+def download_mb_s(host: str, port: int, seconds: int = 15) -> float:
+    """Measured download speed of the box (MB/s) on the biggest file every job fetches (the CUDA torch wheel).
+    Three slow hosts in a row on 2026-10-05 advertised inet_down >= 800 Mbps and delivered 1-4 MB/s."""
+    cmd = ["ssh", *SSH_OPTS, "-p", str(port), f"root@{host}",
+           f"curl -s -o /dev/null --max-time {seconds} -w '%{{size_download}}' '{SPEED_URL}' || true"]
+    try:
+        out = subprocess.run(cmd, capture_output=True, text=True, timeout=seconds + 30, check=False).stdout
+        return float(out.strip().split()[-1]) / seconds / 1e6
+    except (subprocess.TimeoutExpired, ValueError, IndexError):
+        return 0.0
+
+
 def run_job(spec: JobSpec, reserve: float = 0.25, max_hosts: int = 3) -> JobResult:
     """The whole lifecycle. Every instance created is destroyed in `finally`, whatever happens. A host that
     cannot start the container is dropped and the next-cheapest offer on another machine is tried."""
@@ -519,6 +535,11 @@ def run_job(spec: JobSpec, reserve: float = 0.25, max_hosts: int = 3) -> JobResu
             print(f"instance {res.instance_id}: {res.offer}", flush=True)
             try:
                 host, port = wait_ready(res.instance_id)
+                if spec.min_mb_s > 0:
+                    mb_s = download_mb_s(host, port)
+                    print(f"download speed {mb_s:.1f} MB/s", flush=True)
+                    if mb_s < spec.min_mb_s:
+                        raise HostFailed(f"slow network: {mb_s:.1f} MB/s < {spec.min_mb_s}")
                 break
             except HostFailed as e:
                 print(f"host failed, trying another machine: {e}", flush=True)

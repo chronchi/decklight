@@ -51,6 +51,13 @@ class PyEnv:
     def player(self) -> int:
         return self.dec.msg.player
 
+    def history_log(self) -> np.ndarray:
+        """All recorded entries in absolute form [n, 14] (see `obs.history_log`)."""
+        return O.history_log(self.history)
+
+    def history_len(self) -> int:
+        return len(self.history)
+
     def step(self, index: int) -> Obs | None:
         """Take option `index` of the current observation; returns the next one (None once the duel ends)."""
         if not 0 <= index < len(self.opts):
@@ -123,10 +130,14 @@ class PyEnv:
         chain, chain_mask = b.chain_array()
         actions, action_mask = O.actions_array(b, dec, self.opts)
         history, history_mask = O.history_array(self.history, me, self.duel.turn)
+        hist_long, hist_long_mask = O.history_array(
+            self.history, me, self.duel.turn, n=O.HISTORY_MAX, salient=True
+        )
         return {
             "cards": cards, "card_mask": card_mask,
             "global": b.global_array(self.duel, dec.msg.type),
             "chain": chain, "chain_mask": chain_mask,
             "actions": actions, "action_mask": action_mask,
             "history": history, "history_mask": history_mask,
+            "hist_long": hist_long, "hist_long_mask": hist_long_mask,
         }  # fmt: skip

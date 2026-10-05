@@ -15,7 +15,13 @@ MAX_CARDS, CARD_COLS = 160, 21
 MAX_CHAIN, CHAIN_COLS = 16, 5
 MAX_OPTIONS, ACTION_COLS = 64, 10
 HISTORY, HISTORY_COLS = 32, 13
+HISTORY_MAX = 512  # long salient window (obs v2, docs/obs_spec.md); v1 HISTORY stays the reference
+HLOG_COLS = 14  # history_log: stored option row (10) + actor, turn, phase, public
 GLOBAL_COLS = 24
+
+# Option kinds that carry no information for future decisions: PASS answers and zone picks
+# (MSG_SELECT_PLACE / DISFIELD). Auto-taken single options are already never recorded.
+SALIENT_SKIP = frozenset({Kind.PASS, Kind.PLACE})  # == {11, 19}; row col 0 is the int kind
 
 STATUS_OBS_MASK = (
     C.STATUS_DISABLED | C.STATUS_SET_TURN | C.STATUS_SUMMON_TURN | C.STATUS_FLIP_SUMMON_TURN
@@ -226,15 +232,40 @@ def history_entry(board: Board, opt: Option, msg_type: int, step: int, turn: int
     return HistoryEntry(row, board.me, turn, phase, public)
 
 
-def history_array(entries: Sequence[HistoryEntry], me: int, turn: int) -> tuple[np.ndarray, np.ndarray]:
-    out = np.zeros((HISTORY, HISTORY_COLS), np.int32)
-    mask = np.zeros(HISTORY, bool)
-    for i, e in enumerate(reversed(entries[-HISTORY:])):
-        row = list(e.row)
-        if row[8] >= 0:
-            row[8] ^= e.actor ^ me
-        if e.actor != me and not e.public:
-            row[2] = row[3] = row[4] = 0
-        out[i] = row + [e.actor ^ me, turn - e.turn, e.phase]
+def _history_row(e: HistoryEntry, me: int, turn: int) -> list[int]:
+    """One recorded entry as seen by `me`: the single transform both history windows share."""
+    row = list(e.row)
+    if row[8] >= 0:
+        row[8] ^= e.actor ^ me
+    if e.actor != me and not e.public:
+        row[2] = row[3] = row[4] = 0
+    return row + [e.actor ^ me, turn - e.turn, e.phase]
+
+
+def history_array(
+    entries: Sequence[HistoryEntry], me: int, turn: int, n: int = HISTORY, salient: bool = False
+) -> tuple[np.ndarray, np.ndarray]:
+    """The most recent ≤ n entries, most-recent-first. `salient` skips PASS / PLACE entries (obs v2
+    `hist_long`); the default reproduces the v1 `history` window exactly."""
+    if salient:
+        entries = [e for e in entries if e.row[0] not in SALIENT_SKIP]
+    out = np.zeros((n, HISTORY_COLS), np.int32)
+    mask = np.zeros(n, bool)
+    for i, e in enumerate(reversed(entries[-n:])):
+        out[i] = _history_row(e, me, turn)
         mask[i] = True
     return out, mask
+
+
+def history_log(entries: Sequence[HistoryEntry]) -> np.ndarray:
+    """All recorded entries in absolute form [n, 14]: cols 0-9 the stored row (col 1 = -1, col 8 in the
+    actor's frame), 10 actor (absolute seat), 11 turn, 12 phase, 13 public (0/1). Shards store this log
+    and rebuild windows from it (`bc_data.history_window`)."""
+    out = np.zeros((len(entries), HLOG_COLS), np.int32)
+    for i, e in enumerate(entries):
+        out[i, :ACTION_COLS] = e.row
+        out[i, 10] = e.actor
+        out[i, 11] = e.turn
+        out[i, 12] = e.phase
+        out[i, 13] = int(e.public)
+    return out

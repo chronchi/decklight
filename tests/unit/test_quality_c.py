@@ -25,7 +25,9 @@ from ygo_zero.demos import dataset as _ds
 
 
 def _obs():
-    return {"x": np.zeros(3, np.int32)}
+    g = np.zeros(24, np.int32)
+    g[2] = 1
+    return {"x": np.zeros(3, np.int32), "global": g}
 
 
 class _FakeEnv:
@@ -33,6 +35,7 @@ class _FakeEnv:
 
     def __init__(self, *a):
         self.i = 0
+        self.player = 0
 
     def reset(self):
         return _obs()
@@ -40,6 +43,12 @@ class _FakeEnv:
     def step(self, ch):
         self.i += 1
         return _obs() if self.i < _FakeEnv.n else None
+
+    def history_len(self):
+        return 0
+
+    def history_log(self):
+        return np.zeros((0, 14), np.int32)
 
 
 def _setup_fake(monkeypatch, tmp_path, rec_extra=None, judge=None):

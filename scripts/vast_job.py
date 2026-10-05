@@ -40,7 +40,7 @@ def main() -> None:
         extra_query=args.extra_query,
         min_gpu_ram_gb=args.min_gpu_ram,
     )
-    res = vast.run_job(spec)
+    res = vast.run_job(spec, max_hosts=5)
     print(res)
 
 

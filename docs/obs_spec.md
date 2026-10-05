@@ -1,6 +1,7 @@
-# Observation spec (v1)
+# Observation spec (v1 + v2 memory annex)
 
-Status: v1, 2026-10-01. Reference implementation: `src/ygo_zero/engine/obs.py`; the C++ env must produce
+Status: v1, 2026-10-01; v2 annex (hist_long + history log), 2026-10-05, additive: every v1 key is
+bit-for-bit unchanged, so `OBS_VERSION` stays 1. Reference implementation: `src/ygo_zero/engine/obs.py`; the C++ env must produce
 identical arrays (the contract test compares them). Bump `OBS_VERSION` on any change and log it in NOTEBOOK.
 
 Adapted from ygo-agent's `docs/feature_engineering.md`, with these differences:
@@ -94,3 +95,21 @@ Opponent entries keep `code` and the effect columns only if the card was public 
 (ACTIVATE, SUMMON, SPSUMMON, REPOS, ATTACK), I control the card, or its row was public at decision time;
 no-card options are public except a face-down POSITION. Otherwise columns 2–4 are 0.
 Auto-taken single-option steps (see action spec) are not recorded.
+
+## `hist_long` — int32 [HISTORY_MAX=512, 13], `hist_long_mask` bool [512] (v2)
+
+The last ≤512 **salient** decisions, most recent first, with the same per-entry transform as `history`
+(§`history` above). An entry is salient unless its option kind (column 0) is PASS (11) or PLACE (19):
+passes and zone picks carry no information for future decisions, and one busy turn (30-100 decisions)
+otherwise fills a short window. Auto-taken single options are already never recorded. The rule lives in
+`obs.SALIENT_SKIP` (Python) and `is_salient` (`cpp/ygoenv/ygoenv.h`); the lockstep test compares these keys
+like every other obs key. v1 `history` / `history_mask` are unchanged (32, unfiltered).
+
+## history log (v2, shards only)
+
+`PyEnv.history_log()` / `CppEnv.history_log()` return **all** recorded entries in absolute form, int32
+[n_recorded, 14]: columns 0-9 the stored option row (column 1 = −1, column 8 in the actor's frame),
+10 actor (absolute seat), 11 turn, 12 phase, 13 public (0/1); `history_len()` is the row count. Shards store
+this log once per record (`hlog`, concatenated) plus per-sample `hlog_start` / `hlog_end` (rows in the
+shard's `hlog`), `me` (acting seat) and `turn`; the trainer rebuilds any window with
+`bc_data.history_window` instead of stacking 512-row windows per sample.

@@ -220,6 +220,9 @@ def iter_samples(engine: Engine, path: Path) -> Iterator[tuple[dict, int, float,
                                 "deck": deck,
                                 "kind": sample_kind(f, label),
                                 "judge": score,
+                                "hlog_end": env.history_len(),  # recorded entries before this decision
+                                "me": env.player,  # acting seat, absolute
+                                "turn": int(obs["global"][2]),
                             }
                             out.append(({key: v.copy() for key, v in obs.items()}, choice, weight, meta))
                         obs = env.step(choice)
@@ -228,8 +231,13 @@ def iter_samples(engine: Engine, path: Path) -> Iterator[tuple[dict, int, float,
                         if end is not None:
                             obs_end, a_end = end
                             meta = {"line_id": rec["line_id"], "seed": seed, "k": len(rec["choices"]), "label": "end",
-                                    "deck": rec["line_id"].split("/")[0], "kind": sample_kind(f, "end"), "judge": None}
+                                    "deck": rec["line_id"].split("/")[0], "kind": sample_kind(f, "end"), "judge": None,
+                                    "hlog_end": env.history_len(), "me": env.player,
+                                    "turn": int(obs_end["global"][2])}
                             out.append((obs_end, a_end, LABEL_WEIGHT["end"], meta))
+                log = env.history_log()  # the record's full log, shared by all its samples (shards slice [:hlog_end])
+                for _, _, _, m in out:
+                    m["hlog"] = log
             except Exception as e:  # noqa: BLE001 - one bad record must not kill a shard build
                 print(f"iter_samples: skipping {rec.get('line_id')} in {f.name}: {e!r}"[:300], flush=True)
                 continue

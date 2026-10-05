@@ -250,6 +250,15 @@ HistoryEntry history_entry(const Board& board, const Option& opt, int msg_type, 
   return e;
 }
 
+void write_history_row(int32_t* o, const HistoryEntry& e, int me, int turn) {
+  std::copy(e.row.begin(), e.row.end(), o);
+  if (o[8] >= 0) o[8] ^= e.actor ^ me;
+  if (e.actor != me && !e.is_public) o[2] = o[3] = o[4] = 0;
+  o[10] = e.actor ^ me;
+  o[11] = turn - e.turn;
+  o[12] = e.phase;
+}
+
 // ---------------------------------------------------------------- Env
 
 Env::Env(Engine& engine, DuelConfig config, bool auto_single)
@@ -271,6 +280,19 @@ bool Env::step(int index, Obs& obs) {
   choices.push_back(index);
   take(index, true);
   return settle(obs);
+}
+
+std::vector<std::array<int32_t, HLOG_COLS>> Env::history_log() const {
+  std::vector<std::array<int32_t, HLOG_COLS>> out(history_.size());
+  for (size_t i = 0; i < history_.size(); ++i) {
+    const auto& e = history_[i];
+    std::copy(e.row.begin(), e.row.end(), out[i].begin());
+    out[i][10] = e.actor;
+    out[i][11] = e.turn;
+    out[i][12] = e.phase;
+    out[i][13] = e.is_public;
+  }
+  return out;
 }
 
 void Env::next_decision() {
@@ -332,14 +354,15 @@ bool Env::settle(Obs& obs) {
     size_t n = std::min<size_t>(history_.size(), HISTORY);
     for (size_t i = 0; i < n; ++i) {
       const auto& e = history_[history_.size() - 1 - i];
-      int32_t* o = &obs.history[i * HISTORY_COLS];
-      std::copy(e.row.begin(), e.row.end(), o);
-      if (o[8] >= 0) o[8] ^= e.actor ^ me;
-      if (e.actor != me && !e.is_public) o[2] = o[3] = o[4] = 0;
-      o[10] = e.actor ^ me;
-      o[11] = duel_->turn - e.turn;
-      o[12] = e.phase;
+      write_history_row(&obs.history[i * HISTORY_COLS], e, me, duel_->turn);
       obs.history_mask[i] = 1;
+    }
+    size_t m = 0;  // long window over salient entries only (most recent first)
+    for (size_t i = history_.size(); i-- > 0 && m < HISTORY_MAX;) {
+      const auto& e = history_[i];
+      if (!is_salient(static_cast<Kind>(e.row[0]))) continue;
+      write_history_row(&obs.hist_long[m * HISTORY_COLS], e, me, duel_->turn);
+      obs.hist_long_mask[m++] = 1;
     }
     return true;
   }

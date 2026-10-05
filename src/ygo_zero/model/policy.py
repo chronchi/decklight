@@ -88,9 +88,13 @@ class ActionEmbed(nn.Module):
 class PolicyNet(nn.Module):
     def __init__(
         self, emb: dict[str, np.ndarray], d: int = 256, layers: int = 4, heads: int = 4, dropout: float = 0.1,
-        card_dropout: float = 0.0,
+        card_dropout: float = 0.0, hist: int = 0,
     ):
+        """`hist`: long-memory window (obs v2, ADR 0005). 0 = v1 exactly (same parameters, old state dicts
+        load with strict=True); > 0 adds a learned recency-position embedding and widens the turns-ago
+        embedding to 32 buckets."""
         super().__init__()
+        self.hist = hist
         self.text = CardText(emb["codes"], emb["card"], emb["effects"], emb["n_effects"], d)
         self.text.p_unknown = card_dropout
         self.loc = nn.Embedding(16, d)
@@ -111,7 +115,11 @@ class PolicyNet(nn.Module):
         self.action = ActionEmbed(self.text, d)
         self.chain_ctrl = nn.Embedding(2, d)
         self.hist_actor = nn.Embedding(2, d)
-        self.hist_age = nn.Embedding(8, d)
+        if hist > 0:
+            self.hist_pos = nn.Embedding(hist, d)  # recency position: 0 = most recent
+            self.hist_age = nn.Embedding(32, d)  # turns ago, clamped
+        else:
+            self.hist_age = nn.Embedding(8, d)
         self.type_emb = nn.Embedding(4, d)  # token type: global, card, chain, history
         layer = nn.TransformerEncoderLayer(
             d, heads, 4 * d, dropout, batch_first=True, norm_first=True, activation="gelu"
@@ -170,9 +178,15 @@ class PolicyNet(nn.Module):
         ch = obs["chain"].long()
         chain_tok = self.text(ch[..., 1]) + self.chain_ctrl(ch[..., 4].clamp(0, 1)) + self.type_emb.weight[2]
         h = obs["history"].long()
+        if self.hist > 0:
+            age = self.hist_age(h[..., 11].clamp(0, 31))
+            pos = self.hist_pos.weight[: h.shape[1]]
+        else:
+            age = self.hist_age(h[..., 11].clamp(0, 7))
+            pos = 0.0
         hist_tok = (
-            self.action(h[..., :10]) + self.hist_actor(h[..., 10].clamp(0, 1)) + self.hist_age(h[..., 11].clamp(0, 7))
-            + self.type_emb.weight[3]
+            self.action(h[..., :10]) + self.hist_actor(h[..., 10].clamp(0, 1)) + age
+            + self.type_emb.weight[3] + pos
         )  # fmt: skip
         tokens = torch.cat([g.unsqueeze(1), card_tok, chain_tok, hist_tok], 1)
         keep = torch.cat(

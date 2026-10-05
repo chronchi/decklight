@@ -77,6 +77,48 @@ def equivalent_mask(
 _ENGINE = None
 
 
+def history_window(hlog, start, end, me, turn, H, salient=True):
+    """Rebuild history windows from a compact log (the env transform, vectorised within each sample).
+
+    hlog [S, 14]: concatenated per-record logs (obs.history_log format: stored option row in cols 0-9,
+    actor / turn / phase / public in cols 10-13). start/end/me/turn [B]: each sample's record slice
+    [start, end) and viewer (acting seat, duel turn). Returns (hist [B, H, 13] int32, mask [B, H] bool),
+    most-recent-first. `salient` skips PASS / PLACE entries (obs v2 `hist_long`); salient=False with H=32
+    reproduces the v1 `history` window exactly.
+    """
+    from ygo_zero.engine.obs import HISTORY_COLS, SALIENT_SKIP
+
+    hlog = np.asarray(hlog, dtype=np.int32)
+    start = np.asarray(start, dtype=np.int64)
+    end = np.asarray(end, dtype=np.int64)
+    me = np.asarray(me, dtype=np.int64)
+    turn = np.asarray(turn, dtype=np.int64)
+    skip = np.array([int(k) for k in SALIENT_SKIP])
+    n = len(start)
+    hist = np.zeros((n, H, HISTORY_COLS), np.int32)
+    mask = np.zeros((n, H), bool)
+    for i in range(n):
+        rows = hlog[start[i] : end[i]]
+        if salient and len(rows):
+            rows = rows[~np.isin(rows[:, 0], skip)]
+        take = rows[max(0, len(rows) - H) :][::-1]  # most recent first
+        k = len(take)
+        if not k:
+            continue
+        base = take[:, :10].copy()
+        actor, public = take[:, 10], take[:, 13]
+        flip = base[:, 8] >= 0
+        base[flip, 8] ^= actor[flip] ^ me[i]
+        hide = (actor != me[i]) & (public == 0)
+        base[np.ix_(hide, [2, 3, 4])] = 0
+        hist[i, :k, :10] = base
+        hist[i, :k, 10] = actor ^ me[i]
+        hist[i, :k, 11] = turn[i] - take[:, 11]
+        hist[i, :k, 12] = take[:, 12]
+        mask[i, :k] = True
+    return hist, mask
+
+
 def _init() -> None:
     global _ENGINE
     from ygo_zero.engine.duel import Engine
@@ -94,6 +136,12 @@ def _shard_one(job: tuple[str, str, str]) -> tuple[str, int]:
     src_file, out_file, src_tag = job
     cols: dict[str, list] = {k: [] for k in OBS_KEYS}
     action, weight, line, deck, kind, equiv = [], [], [], [], [], []
+    hlog_rows: list = []  # per-record logs in first-seen order (shared refs from iter_samples meta)
+    hlog_start, hlog_end, seath, turnh = [], [], [], []
+    log_off: dict[int, int] = {}
+    alive: list = []  # keeps every keyed log referenced: id() of a freed array can be reused by a later record's log
+    running = 0
+    has_log = True
     for obs, a, w, meta in iter_samples(_ENGINE, Path(src_file)):
         for k in OBS_KEYS:
             cols[k].append(obs[k])
@@ -103,8 +151,31 @@ def _shard_one(job: tuple[str, str, str]) -> tuple[str, int]:
         line.append(base_line(meta["line_id"]))
         deck.append(meta["deck"])
         kind.append(meta.get("kind", "unknown"))
+        log = meta.get("hlog")
+        if log is None or "hlog_end" not in meta:
+            has_log = False
+        else:
+            key = id(log)
+            if key not in log_off:
+                log_off[key] = running
+                alive.append(log)
+                hlog_rows.append(np.asarray(log, dtype=np.int32))
+                running += len(log)
+            hlog_start.append(log_off[key])
+            hlog_end.append(log_off[key] + int(meta["hlog_end"]))
+            seath.append(int(meta["me"]))
+            turnh.append(int(meta["turn"]))
     if not action:
         return out_file, 0
+    extra = {}
+    if has_log:
+        extra = {
+            "hlog": np.concatenate(hlog_rows) if hlog_rows else np.zeros((0, 14), np.int32),
+            "hlog_start": np.array(hlog_start, dtype=np.int64),
+            "hlog_end": np.array(hlog_end, dtype=np.int64),
+            "me": np.array(seath, dtype=np.int32),
+            "turn": np.array(turnh, dtype=np.int32),
+        }
     np.savez_compressed(
         out_file,
         **{k: np.stack(v) for k, v in cols.items()},
@@ -115,6 +186,7 @@ def _shard_one(job: tuple[str, str, str]) -> tuple[str, int]:
         deck=np.array(deck),
         kind=np.array(kind),
         src=np.array([src_tag] * len(action)),
+        **extra,
     )
     return out_file, len(action)
 
@@ -153,6 +225,16 @@ def load_shards(shard_dir: Path) -> dict[str, np.ndarray]:
             eq = np.zeros((n, p["actions"].shape[1]), dtype=bool)
             eq[np.arange(n), p["action"]] = True
             p["equiv"] = eq
+    if any("hlog" in p for p in parts) and not all("hlog" in p for p in parts):
+        raise ValueError("mixed shards with and without hlog in one directory: rebuild them together")
+    if "hlog" in parts[0]:  # offset each file's record-relative rows into the concatenated log
+        off, starts, ends = 0, [], []
+        for p in parts:
+            starts.append(p["hlog_start"] + off)
+            ends.append(p["hlog_end"] + off)
+            off += len(p["hlog"])
+        out = {"hlog_start": np.concatenate(starts), "hlog_end": np.concatenate(ends)}
+        return {**{k: np.concatenate([p[k] for p in parts]) for k in parts[0] if k not in out}, **out}
     return {k: np.concatenate([p[k] for p in parts]) for k in parts[0]}
 
 

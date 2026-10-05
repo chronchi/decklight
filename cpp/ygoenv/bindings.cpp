@@ -28,6 +28,8 @@ py::object to_dict(const Obs& o) {
   d["action_mask"] = arr(o.action_mask, {MAX_OPTIONS}).attr("astype")("bool");
   d["history"] = arr(o.history, {HISTORY, HISTORY_COLS});
   d["history_mask"] = arr(o.history_mask, {HISTORY}).attr("astype")("bool");
+  d["hist_long"] = arr(o.hist_long, {HISTORY_MAX, HISTORY_COLS});
+  d["hist_long_mask"] = arr(o.hist_long_mask, {HISTORY_MAX}).attr("astype")("bool");
   return d;
 }
 
@@ -104,6 +106,13 @@ PYBIND11_MODULE(_ygoenv, m) {
       })
       .def_property_readonly("player", &Env::player)
       .def_property_readonly("turn", [](const Env& e) { return e.duel().turn; })
+      .def("history_len", &Env::history_len)
+      .def("history_log", [](const Env& e) {
+        auto log = e.history_log();
+        py::array_t<int32_t> out({static_cast<py::ssize_t>(log.size()), static_cast<py::ssize_t>(HLOG_COLS)});
+        if (!log.empty()) std::memcpy(out.mutable_data(), log.data(), log.size() * sizeof(log[0]));
+        return out;
+      })
       .def_property_readonly("select_hint", [](const Env& e) { return e.duel().select_hint; })
       .def_property_readonly("errors", [](const Env& e) { return e.duel().errors; })
       .def_readonly("choices", &Env::choices)
@@ -158,6 +167,8 @@ PYBIND11_MODULE(_ygoenv, m) {
         d["action_mask"] = view(self, o, o[0].action_mask.data(), {MAX_OPTIONS}, "bool");
         d["history"] = view(self, o, o[0].history.data(), {HISTORY, HISTORY_COLS}, "int32");
         d["history_mask"] = view(self, o, o[0].history_mask.data(), {HISTORY}, "bool");
+        d["hist_long"] = view(self, o, o[0].hist_long.data(), {HISTORY_MAX, HISTORY_COLS}, "int32");
+        d["hist_long_mask"] = view(self, o, o[0].hist_long_mask.data(), {HISTORY_MAX}, "bool");
         d["player"] = py::array(py::dtype("int32"), {v.num_envs}, {4}, v.player.data(), self);
         d["winner"] = py::array(py::dtype("int32"), {v.num_envs}, {4}, v.winner.data(), self);
         d["done"] = py::array(py::dtype("bool"), {v.num_envs}, {1}, v.done.data(), self);

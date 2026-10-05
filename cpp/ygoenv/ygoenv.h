@@ -171,7 +171,12 @@ constexpr int MAX_CARDS = 160, CARD_COLS = 21;
 constexpr int MAX_CHAIN = 16, CHAIN_COLS = 5;
 constexpr int MAX_OPTIONS = 64, ACTION_COLS = 10;
 constexpr int HISTORY = 32, HISTORY_COLS = 13;
+constexpr int HISTORY_MAX = 512;  // long salient window (obs v2); v1 HISTORY stays the reference
+constexpr int HLOG_COLS = 14;     // history_log: stored option row (10) + actor, turn, phase, public
 constexpr int GLOBAL_COLS = 24;
+
+// Option kinds with no information for future decisions (obs.SALIENT_SKIP in Python).
+inline bool is_salient(Kind k) { return k != PASS && k != PLACE; }
 
 // One observation; the bindings expose these as numpy views.
 struct Obs {
@@ -184,6 +189,8 @@ struct Obs {
   std::array<uint8_t, MAX_OPTIONS> action_mask{};
   std::array<int32_t, HISTORY * HISTORY_COLS> history{};
   std::array<uint8_t, HISTORY> history_mask{};
+  std::array<int32_t, HISTORY_MAX * HISTORY_COLS> hist_long{};
+  std::array<uint8_t, HISTORY_MAX> hist_long_mask{};
   void clear() { *this = Obs{}; }
 };
 
@@ -220,6 +227,8 @@ class Board {
 };
 
 HistoryEntry history_entry(const Board& board, const Option& opt, int msg_type, int step, int turn, int phase);
+// One recorded entry as seen by `me` (shared by the v1 and the long salient window).
+void write_history_row(int32_t* o, const HistoryEntry& e, int me, int turn);
 
 // ---------------------------------------------------------------- env
 
@@ -231,10 +240,13 @@ class Env {
   bool step(int index, Obs& obs);
 
   bool done() const { return duel_->ended; }
-  int winner() const { return duel_->winner; }
-  int player() const { return dec_->player; }
-  int num_options() const { return static_cast<int>(opts_.size()); }
-  const Duel& duel() const { return *duel_; }
+   int winner() const { return duel_->winner; }
+   int player() const { return dec_->player; }
+   int num_options() const { return static_cast<int>(opts_.size()); }
+   const Duel& duel() const { return *duel_; }
+   int history_len() const { return static_cast<int>(history_.size()); }
+   // All recorded entries in absolute form: stored row (10) + actor, turn, phase, public.
+   std::vector<std::array<int32_t, HLOG_COLS>> history_log() const;
 
   std::vector<int> choices;
   int decisions = 0, truncated = 0;
