@@ -19,7 +19,7 @@ run() {  # <ckpt name>
   local v="$1" d="$OUT/$1/ck"; mkdir -p "$d"; cp "data/cache/rc/$v/best.pt" "data/cache/rc/$v/metrics.jsonl" "$d/"
   VS=(); [ "$v" = zero ] || VS=(--vs-ckpt data/cache/rc/zero/best.pt)
   timeout 50m uv run --no-sync python scripts/playtest.py --ckpt "$d/best.pt" --device cuda --threads 4 --seed 0 \
-    --decks 8 --hands 3 --seeds 2 --narrate 0 --samples 4 --ygoagent "${VS[@]}" > "$OUT/playtest-$v.txt" 2>&1
+    --decks 8 --hands 3 --seeds 2 --narrate 0 --samples 4 --ygoagent --newcards decks/newcards "${VS[@]}" > "$OUT/playtest-$v.txt" 2>&1
   rm -f "$d/best.pt"
 }
 # run the checkpoints in parallel, 4 VecEnv threads each

@@ -241,6 +241,8 @@ def main() -> None:
     ap.add_argument("--gauntlet-decks", type=Path, default=ROOT / "decks/gauntlet", help="ygo-agent's own lists")
     ap.add_argument("--ga-opps", type=int, default=4, help="vs ygo-agent: each gauntlet deck vs its next k decks")
     ap.add_argument("--vs-ckpt", type=Path, default=None, help="head-to-head vs this BC checkpoint (e.g. the base)")
+    ap.add_argument("--newcards", type=Path, default=None,
+                    help="new-card test (ADR 0007): matches on these unseen-archetype decks (decks/newcards) vs greedy and --vs-ckpt")
     ap.add_argument("--selfplay", type=int, default=0, help="full policy-vs-policy games saved for review")
     ap.add_argument("--selfplay-decks", nargs="*", default=None, help="deck pool for --selfplay (default: the sample)")
     ap.add_argument("--seed", type=int, default=0)
@@ -295,6 +297,11 @@ def main() -> None:
 
         gdecks = [load_ydk(f) for f in sorted(args.gauntlet_decks.glob("*.ydk"))]
         match("ygoagent", YgoAgentPolicy(seed=3), gdecks, 1, args.ga_opps)  # 31 lists x 4 opponents x 2 seats
+    if args.newcards:  # every deck plays every other new-card deck, both seats: generalization to unseen cards
+        ndecks = [load_ydk(f) for f in sorted(args.newcards.glob("*.ydk"))]
+        if args.vs_ckpt:
+            match("new_base", BCPolicy(args.vs_ckpt, args.emb, device=args.device), ndecks, args.seeds)
+        match("new_greedy", GreedyPolicy(2), ndecks, args.seeds)
     flush("matches", t)
 
     if args.selfplay:
