@@ -190,7 +190,7 @@ def wait_ready(instance_id: int, timeout_s: int = 900) -> tuple[str, int]:
             if ok.returncode == 0:
                 return host, port
         time.sleep(15)
-    raise VastError(f"instance {instance_id} not ready after {timeout_s}s")
+    raise HostFailed(f"instance {instance_id} not ready after {timeout_s}s")
 
 
 def ssh(host: str, port: int, command: str, timeout_s: float | None = None, log: Path | None = None) -> int:
