@@ -67,11 +67,14 @@ def sample_kind(source: str | Path, label: str) -> str:
     - files under `improved/` (not expanded) -> line_improved
     - files under `games/` -> game_interrupt if label == "interrupt" else game_plan
     - files under `gold/` -> gold_pass if label == "pass" else gold
+    - files under `teacher/` -> teacher_pass if label == "pass" else teacher
     - everything else -> line
     """
     parts = Path(source).parts
     if "gold" in parts:
         return "gold_pass" if label == "pass" else "gold"
+    if "teacher" in parts:
+        return "teacher_pass" if label == "pass" else "teacher"
     if any(p.startswith("expanded") for p in parts):
         return "line_expanded"
     if "improved" in parts:
@@ -176,7 +179,7 @@ def iter_samples(engine: Engine, path: Path) -> Iterator[tuple[dict, int, float,
     files = sorted(path.glob("*.jsonl")) if path.is_dir() else [path]
     for f in files:
         judges = load_judgements(f)
-        weights = GOLD_LABEL_WEIGHT if "gold" in f.parts else LABEL_WEIGHT
+        weights = GOLD_LABEL_WEIGHT if ("gold" in f.parts or "teacher" in f.parts) else LABEL_WEIGHT
         for rec in load_records(f):
             if starved_opening(rec):
                 continue
