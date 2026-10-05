@@ -5,7 +5,9 @@
 #   zero/     base evaluated as is (epoch -1 record only)
 #   ft-gold/  base fine-tuned on gold samples only
 #   ft-mix/   base fine-tuned on everything, gold repeated
-#   mix/      from scratch, recipe v2 + gold repeated (SKIP_SCRATCH=1 skips it)
+#   mix/      from scratch, recipe v2 + gold repeated
+#   lines-gold/ from scratch, engine-verified combo lines + gold only: the noisy LLM games (game_plan / game_interrupt)
+#             dropped (2026-10-04 user decision; SKIP_SCRATCH=1 skips both from-scratch runs)
 # then playtests the base and the variant with the best val gold accuracy on the same decks/seeds.
 # Usage: bash scripts/vast_bc_gold.sh <name> [smoke]. smoke = gold shards only, 1 epoch, no scratch run, tiny playtest
 # (ship --data data/demos for a real playtest: it samples decks that have verified lines; with only data/demos/gold it
@@ -46,13 +48,15 @@ train ft-mix --init "$BASE" --epochs "$EP_MIX" --lr 2e-4 \
   --kind-frac line_expanded=0.2 game_plan=1 game_interrupt=1 gold=20 gold_pass=10
 [ "$SKIP_SCRATCH" = "1" ] || train mix --epochs 8 --lr 5e-4 --merge-last 4 \
   --kind-frac line_expanded=0.2 game_plan=2 game_interrupt=2 gold=20 gold_pass=10
+[ "$SKIP_SCRATCH" = "1" ] || train lines-gold --epochs 8 --lr 5e-4 --merge-last 4 \
+  --kinds line line_improved line_expanded gold gold_pass --kind-frac line_expanded=0.2 gold=20 gold_pass=10
 # summary: per variant, best record by val gold acc (zero = its epoch -1 record)
 uv run --no-sync python - "$OUT" > "$OUT/summary.txt" <<'PY'
 import json, sys
 from pathlib import Path
 out = Path(sys.argv[1])
 best_v, best_s = "zero", -1.0
-for v in ("zero", "ft-gold", "ft-mix", "mix"):
+for v in ("zero", "ft-gold", "ft-mix", "mix", "lines-gold"):
     m = out / v / "metrics.jsonl"
     if not m.exists():
         continue
