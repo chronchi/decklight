@@ -120,7 +120,11 @@ class Board:
         r = self.row_of(opt.card)
         if r >= 0:
             return opt.code if self.rows[r].visible else 0
-        return opt.code if opt.card.controller == self.me else 0
+        # a card offered from a hidden pile (Deck, face-down Extra Deck) is revealed to the chooser by the effect
+        # (e.g. looking at the opponent's Extra Deck); face-down field cards are rows above and stay hidden
+        if opt.card.controller == self.me or opt.card.location in (C.LOCATION_DECK, C.LOCATION_EXTRA):
+            return opt.code
+        return 0
 
     def visible_codes(self) -> set[int]:
         return {r.card.code for r in self.rows if r.visible and r.card.code}

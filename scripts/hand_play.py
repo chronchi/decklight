@@ -9,8 +9,12 @@ so each command is a fresh process that replays the duel.
     uv run python scripts/hand_play.py do   g1 "ACT:Pre-Preparation SEL:Saji P END" --why "search the starter"
     uv run python scripts/hand_play.py undo g1 3
     uv run python scripts/hand_play.py save g1      # -> data/demos/gold/<d0>-vs-<d1>.jsonl
+    uv run python scripts/hand_play.py log  g1 [--turns N]  # compact public log of the duel so far
 
-Tokens: an option number; P (pass/no/cancel at a prompt); KIND:name-substring where KIND is a prefix of the
+Name matching ignores punctuation and case (apostrophes, hyphens, quotes, stars, slashes).
+
+Tokens: an option number; P (pass/cancel at a prompt — never answers YES/NO prompts, use YES or NO
+there); KIND:name-substring where KIND is a prefix of the
 option kind (ACT, SUM, SPS, REPOS, MSET, SSET, SEL, UNS (unselect), YES, NO, OPT (effect option),
 ATK (attack with), FIN (finish), CAN (cancel), POS:attack / POS:defense (positions), NUM:value
 (announce a number, e.g. NUM:5), DEC:name (declare a card), SORT:name (order a card first),
@@ -23,7 +27,9 @@ card); otherwise `do` stops with a prompt-changed message. Named tokens (SEL:nam
 across prompts as today. PASS* passes through chain windows that offer nothing new (per seat: only
 activations already on offer at that seat's first window of the run), for either seat, stopping at a
 non-chain message, chain length change, turn or phase change, a new activation for either seat
-(50 steps max); those answers are labeled `pass`. A `--hold "Card A,Card B"` list (per seat, expires
+(50 steps max); those answers are labeled `pass`. PASS* (and --auto-pass) continues across seat changes
+while the next seat's window offers no live option besides those it already declined this turn.
+A `--hold "Card A,Card B"` list (per seat, expires
 on turn change) additionally lets PASS* pass an EMPTY-chain window whose every live option is a held
 card; any window with chain length > 0 still stops. `do --auto-pass` appends PASS* after the last
 token. `do` prints a compact view (Extra Deck as a count; GY/banished/deck-count lines only when
@@ -35,6 +41,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -56,6 +63,7 @@ from ygo_zero.engine import constants as C
 from ygo_zero.engine.actions import Kind
 from ygo_zero.engine.cpp_env import CppEnv
 from ygo_zero.engine.duel import DuelConfig, Engine
+from ygo_zero.engine.resources import load_cards
 
 WORK = ROOT / "data" / "demos" / "gold_work"
 OUT = ROOT / "data" / "demos" / "gold"
@@ -243,15 +251,28 @@ def _prompt_key(obs) -> tuple:
     return tuple((k, code, option_desc(obs, i)) for i, (k, code) in enumerate(_opts(obs)))
 
 
+_P_CHOICE = (Kind.PASS, Kind.CANCEL, Kind.FINISH)  # what the `P` token may answer (never YES/NO)
+_YESNO_MSGS = (C.MSG_SELECT_YESNO, C.MSG_SELECT_EFFECTYN)
+
+# Name matching ignores punctuation and case (both sides reduce to alphanumerics): apostrophes,
+# hyphens, quotes, stars and slashes never break a match ("Fiendsmiths_Tract" finds "Fiendsmith's
+# Tract", "Tenyi_Spirit_Adhara" finds "Tenyi Spirit - Adhara", "D_D" finds "D/D").
+_NON_ALNUM = re.compile(r"[^a-z0-9]+")
+
+
+def _norm(s: str) -> str:
+    return _NON_ALNUM.sub("", s.lower())
+
+
 def _match(obs, tok: str, names: dict[int, str]) -> int | None:
     opts = _opts(obs)
     if tok.isdigit():
         i = int(tok)
         return i if i < len(opts) else None
     if tok.upper() == "P":
-        return next((i for i, (k, _) in enumerate(opts) if k in _PASSIVE), None)
+        return next((i for i, (k, _) in enumerate(opts) if k in _P_CHOICE), None)
     head, _, sub = tok.partition(":")
-    head, sub = head.upper(), sub.replace("_", " ").lower()
+    head, sub = head.upper(), _norm(sub)
     best = None  # (rank, index): exact name < name prefix < substring of name/description
     for i, (k, code) in enumerate(opts):
         kname = _kind(k)
@@ -261,18 +282,18 @@ def _match(obs, tok: str, names: dict[int, str]) -> int | None:
         if k == Kind.NUMBER:
             cands = [str(_arg_of(obs, i))]
         else:
-            nm = (names.get(code, "") if code else "").lower()
+            nm = _norm(names.get(code, "") if code else "")
             cands = [nm]
             loc = _loc_of(obs, i).lower()
             if nm and loc:
-                cands.append(f"{nm} ({loc})")
+                cands.append(_norm(f"{names.get(code, '')} ({loc})"))
                 short = loc.split()[-1]  # "opponent's GY" also matches " (GY)"
                 if short != loc:
-                    cands.append(f"{nm} ({short})")
+                    cands.append(_norm(f"{names.get(code, '')} ({short})"))
             zone = _zone_of(obs, i).lower()
             if nm and zone:
-                cands.append(f"{nm} ({zone})")
-        desc = option_desc(obs, i).lower()
+                cands.append(_norm(f"{names.get(code, '')} ({zone})"))
+        desc = _norm(option_desc(obs, i))
         rank = None
         for cand in cands:
             r = (
@@ -289,6 +310,42 @@ def _match(obs, tok: str, names: dict[int, str]) -> int | None:
         if rank is not None and (best is None or (rank, i) < (best[0], best[1])):
             best = (rank, i)
     return best[1] if best else None
+
+
+_SHORT_KIND = {
+    Kind.SUMMON: "SUM", Kind.SPSUMMON: "SPS", Kind.REPOS: "REPOS", Kind.MSET: "MSET",
+    Kind.SSET: "SSET", Kind.ACTIVATE: "ACT", Kind.ATTACK: "ATK", Kind.TO_BATTLE: "BP",
+    Kind.TO_MAIN2: "M2", Kind.TO_END: "END", Kind.PASS: "P", Kind.YES: "YES",
+    Kind.NO: "NO", Kind.OPTION: "OPT", Kind.SELECT: "SEL", Kind.UNSELECT: "UNS",
+    Kind.FINISH: "FIN", Kind.CANCEL: "CAN", Kind.POSITION: "POS", Kind.NUMBER: "NUM",
+    Kind.DECLARE: "DEC", Kind.SORT: "SORT", Kind.RACE: "RACE", Kind.ATTRIBUTE: "ATTR",
+    Kind.COUNTER: "COUNT", Kind.RPS: "RPS",
+}  # fmt: skip
+
+
+def _available_kinds(obs) -> list[str]:
+    """Short kind labels of the current options, in order (for the no-match message)."""
+    out = []
+    for k, _ in _opts(obs):
+        try:
+            s = _SHORT_KIND.get(Kind(k), _kind(k))
+        except ValueError:
+            s = str(k)
+        if s not in out:
+            out.append(s)
+    return out
+
+
+def _no_match_msg(obs, tok: str) -> str:
+    """The `!!` line when `tok` matches no option: which kinds are on offer (and a hint for BP)."""
+    if tok.upper() == "P" and int(obs["global"][21]) in _YESNO_MSGS:
+        return "!! P does not answer yes/no prompts: use YES or NO"
+    avail = ", ".join(_available_kinds(obs)) or "none"
+    extra = ""
+    head = tok.partition(":")[0].upper()
+    if head == "BP" and Kind.TO_BATTLE not in [k for k, _ in _opts(obs)]:
+        extra = " (no Battle Phase option now)"
+    return f"!! token {tok!r} matches no option; available: {avail}{extra}"
 
 
 def _auto(env, obs, st: dict):
@@ -596,25 +653,156 @@ def _check(engine: Engine, env, obs, st: dict, names: CardNames) -> None:
         print(line)
 
 
+def _why_at(notes: list, turns: list[int], actors: list[int], k: int) -> str:
+    """The note for decision `k`: latest start <= k within the same turn and seat, else ""."""
+    best, text = -1, ""
+    for s, t in notes:
+        if int(s) <= k and int(s) > best and turns[int(s)] == turns[k] and actors[int(s)] == actors[k]:
+            best, text = int(s), str(t)
+    return text
+
+
+def _log(st: dict, names: CardNames, engine: Engine, last_n: int | None = None) -> None:
+    """Compact public log of the duel so far (read-only): one turn header with LP per turn, one line per
+    non-pass (`gold`) decision: `T3 P0 SUMMON Snake-Eye Ash — why...`. It is what a fresh per-turn session
+    reads to continue. `--turns N` keeps only the last N turns."""
+    env = CppEnv(engine, _config(st))
+    obs = env.reset()
+    entries = []  # (turn, actor, line)
+    for k, ch in enumerate(st["choices"]):
+        if obs is None:
+            break
+        actor = env.player
+        g = obs["global"]
+        turn = int(g[2])
+        lp = (int(g[0]), int(g[1])) if actor == 0 else (int(g[1]), int(g[0]))  # absolute P0, P1
+        label = st["labels"][k] if k < len(st.get("labels", [])) else ""
+        if label == "gold" and obs is not None:
+            oo = _opts(obs)
+            kind, code = oo[int(ch)] if 0 <= int(ch) < len(oo) else (None, 0)
+            try:
+                kname = Kind(kind).name
+            except ValueError:
+                kname = str(kind)
+            if kind == Kind.NUMBER:
+                what = str(_arg_of(obs, int(ch)))
+            elif code:
+                what = names.names.get(code, f"#{code}")
+                desc = option_desc(obs, int(ch))
+                what = f'{what} "{desc}"' if desc else what
+            else:
+                what = option_desc(obs, int(ch))
+            line = f"T{turn} P{actor} {kname}" + (f" {what}" if what else "")
+            why = ""
+            if k < len(st.get("turns", [])) and k < len(st.get("actors", [])):
+                why = _why_at(st.get("notes", []), st["turns"], st["actors"], k)
+            if why:
+                line += f" — {why}"
+            entries.append((turn, lp, line))
+        obs = env.step(int(ch))
+    if last_n is not None:
+        turns_seen = sorted({t for t, _, _ in entries})
+        keep = set(turns_seen[-last_n:]) if last_n > 0 else set()
+        entries = [e for e in entries if e[0] in keep]
+    if obs is None:
+        print(f"DUEL OVER: winner {env.winner}")
+    cur = None
+    for turn, lp, line in entries:
+        if turn != cur:
+            cur = turn
+            print(f"== Turn {turn} — LP P0 {lp[0]}, P1 {lp[1]}")
+        print(line)
+    if not entries:
+        print("(no decisions yet)")
+
+
 _POS_SHORT = {1: "ATK", 2: "face-down ATK", 3: "DEF", 4: "face-down DEF", 5: "face-up", 6: "set"}
+
+_CARD_DB: dict | None = None
+
+
+def _card_db() -> dict:
+    """Card data by code (attack/type for the summon-then-attack scan), loaded once."""
+    global _CARD_DB
+    if _CARD_DB is None:
+        try:
+            _CARD_DB = load_cards()
+        except Exception:  # noqa: BLE001 - without card data the scan is skipped
+            _CARD_DB = {}
+    return _CARD_DB
+
+
+def _no_direct_attack(code: int) -> bool:
+    return "cannot attack directly" in _effect_text(code).lower()
+
+
+def _cannot_attack(code: int) -> bool:
+    t = _effect_text(code).lower()
+    return "cannot attack" in t and "cannot attack directly" not in t
+
+
+def _summon_attack_lines(obs, names: dict[int, str], direct: int) -> list[str]:
+    """Summon-then-attack scan (estimate): for each SUMMON/SPSUMMON option on offer whose card is a
+    monster (Extra Deck Link/Xyz/Synchro/Fusion or a hand monster), its ATK from the card data, so the
+    agent sees e.g. "Apollousa 2800 (+ remaining attackers) vs LP 3300". Materials are not modelled."""
+    out = []
+    cands = []  # (name, atk or None, loc)
+    for i, (k, code) in enumerate(_opts(obs)):
+        if k not in (Kind.SUMMON, Kind.SPSUMMON) or not code:
+            continue
+        d = _card_db().get(code)
+        if d is None or not (d.type & C.TYPE_MONSTER):
+            continue
+        loc = _loc_of(obs, i)
+        cands.append((names.get(code, f"#{code}"), d.attack if d.attack >= 0 else None, loc))
+    if not cands:
+        return out
+    lp = int(obs["global"][1])
+    out.append("  Summon-then-attack (estimate, materials not modelled):")
+    for n, atk, loc in cands:
+        where = f" ({loc})" if loc else ""
+        if atk is None:
+            out.append(f"    {n}{where}: ATK unknown")
+            continue
+        total = atk + direct
+        out.append(f"    {n}{where} [ATK {atk}] + remaining attackers {direct} = {total} vs LP {lp}"
+                   + (" (lethal)" if total >= lp else ""))
+    return out
 
 
 def _battle_lines(obs, names: dict[int, str]) -> list[str]:
     """Battle helper: own attackers (ATK, position), opponent monsters, direct-damage total, a greedy
-    attack assignment vs face-up monsters, and warnings for Attack Position monsters below the
-    opponent's best face-up ATK (or with 0 ATK)."""
+    attack assignment vs face-up monsters, a summon-then-attack scan, and warnings for Attack Position
+    monsters below the opponent's best face-up ATK (or with 0 ATK).
+
+    ATTACK options exist only in the Battle Phase, so in the Main Phase the attackers are estimated from
+    this seat's face-up Attack Position monsters on the board (clearly labelled as an estimate). The obs
+    does not expose whether a monster already attacked this turn, so the estimate assumes each one can
+    still attack. "Cannot attack directly" / "cannot attack" is a simple substring check of the card text.
+    """
     rows = list(obs["cards"][obs["card_mask"]])
 
     def nm(code: int) -> str:
         return names.get(code, f"#{code}") if code else "(hidden)"
 
     attackers = []  # (name, atk, direct_ok)
+    estimated = False
     for i, (k, code) in enumerate(_opts(obs)):
         if k != Kind.ATTACK:
             continue
         r = _opt_row(obs, i)
         atk = int(rows[r][14]) if 0 <= r < len(rows) else 0
         attackers.append((nm(code), atk, bool(_arg_of(obs, i))))
+    if not attackers:
+        # Main Phase (no ATTACK option): estimate from own face-up Attack Position monsters.
+        estimated = True
+        for r in rows:
+            if int(r[3]) != 0 or int(r[1]) != 3 or int(r[5]) != 1:
+                continue
+            code = int(r[0])
+            if not code or _cannot_attack(code):
+                continue
+            attackers.append((nm(code), int(r[14]), not _no_direct_attack(code)))
     foes = []  # (name, atk, dfn, pos, faceup)
     for r in rows:
         if int(r[3]) != 1 or int(r[1]) != 3:
@@ -624,9 +812,16 @@ def _battle_lines(obs, names: dict[int, str]) -> list[str]:
             foes.append((nm(code), int(r[14]), int(r[15]), pos, True))
         else:
             foes.append((nm(code), 0, 0, pos, False))
-    out = ["Battle:"]
+    out = ["Battle (estimate: no ATTACK option now — attackers from your face-up ATK monsters):"
+           if estimated else "Battle:"]
     if attackers:
-        out.append("  Your attackers: " + "; ".join(f"{n} [ATK {a}]" for n, a, _ in attackers))
+        bits = []
+        for n, a, direct_ok in attackers:
+            tag = "" if direct_ok else " (text: cannot attack directly)"
+            bits.append(f"{n} [ATK {a}]{tag}")
+        out.append("  Your attackers: " + "; ".join(bits))
+    elif estimated:
+        out.append("  Your attackers: none (no face-up Attack Position monsters)")
     else:
         out.append("  Your attackers: none (no ATTACK option right now)")
     if foes:
@@ -638,6 +833,7 @@ def _battle_lines(obs, names: dict[int, str]) -> list[str]:
         out.append("  Opponent monsters: none")
     direct = sum(a for _, a, _ in attackers)
     out.append(f"  Direct-damage total if the opponent's field were empty: {direct}")
+    out.extend(_summon_attack_lines(obs, names, direct))
     faceup = [t for t in foes if t[4]]
     if attackers and faceup:
         taken: set[int] = set()
@@ -689,11 +885,13 @@ def _battle_lines(obs, names: dict[int, str]) -> list[str]:
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("cmd", choices=["new", "show", "do", "undo", "save", "check"])
+    ap.add_argument("cmd", choices=["new", "show", "do", "undo", "save", "check", "log"])
     ap.add_argument("game")
     ap.add_argument("rest", nargs="*")
     ap.add_argument("--why", default="")
     ap.add_argument("--texts", action="store_true")
+    ap.add_argument("--turns", type=int, default=None,
+                    help="with log: only the last N turns (default: all turns)")
     ap.add_argument("--json", action="store_true", help="print the state as one JSON object (show/do)")
     ap.add_argument("--auto-pass", action="store_true", help="append PASS* after the last token (do)")
     ap.add_argument("--cross", action="store_true", help="let tokens continue after the acting seat changes")
@@ -736,6 +934,9 @@ def main() -> None:
     if a.cmd == "check":
         _check(engine, env, obs, st, names)
         return
+    if a.cmd == "log":
+        _log(st, names, engine, a.turns)
+        return
     if a.cmd == "do":
         start = len(st["choices"])
         actor = env.player if obs is not None else None
@@ -753,7 +954,9 @@ def main() -> None:
             if obs is None:
                 stopped = "duel over"
                 break
-            if env.player != actor and not a.cross:  # never let leftover tokens decide for the other seat
+            # PASS* may continue across seat changes: _pass_star still stops at any new decision
+            # (a seat with something undecided), a non-chain prompt, a chain change or a turn change.
+            if env.player != actor and not a.cross and tok.upper() != "PASS*":
                 print(f"!! player changed to P{env.player}; stopped before {tok!r}")
                 stopped = f"player changed to P{env.player}"
                 break
@@ -772,8 +975,10 @@ def main() -> None:
                 break
             i = _match(obs, tok, names.names)
             if i is None:
-                print(f"!! token {tok!r} matches no option; stopped here")
-                stopped = f"no match for {tok!r}"
+                msg = _no_match_msg(obs, tok)
+                print(msg)
+                stopped = ("P on a yes/no prompt" if msg.startswith("!! P does not answer")
+                           else f"no match for {tok!r}")
                 break
             k, code = _opts(obs)[i]
             nm = names.names.get(code, f"#{code}") if code else (hidden_card(obs, i) or "(no card)")

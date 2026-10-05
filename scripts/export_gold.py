@@ -4,9 +4,10 @@ Reads data/demos/gold/*.jsonl, replays each record (seed + decks + response list
 data/demos/gold_decisions.jsonl: one row per decision whose label is `gold` (real choices; `auto`
 zone answers and `pass` window passes are skipped).
 
-Row: {game_id, index, actor, deck, turn, msg, state, chain, options, choice, why, leak_suspect}; `why`
+Row: {game_id, index, actor, deck, turn, msg, state, chain, options, choice, why, leak_suspect, junk_why}; `why`
 is the note whose start index is the latest one <= index within the same turn and seat (notes are
-[start_index, text] pairs in the record).
+[start_index, text] pairs in the record). `junk_why` is true when the why is junk ("test", "placeholder",
+"x", ..., or under 3 chars): the why is then blanked (the decision is kept).
 
 Selection churn is dropped: within one multi-select prompt sequence (MSG_SELECT_CARD /
 SELECT_UNSELECT_CARD / SELECT_TRIBUTE / SELECT_SUM), a SELECT on card code X later followed by an
@@ -88,8 +89,17 @@ def _leak_suspect(why: str, hidden: set[int], visible: set[int], names: CardName
     return sorted(out)
 
 
-def export_game(engine: Engine, names: CardNames, rec: dict, out_f) -> tuple[int, int, int]:
-    """Returns (rows written, dropped churn/cancel rows, rows with leak_suspect)."""
+_JUNK_WHYS = frozenset({"test", "placeholder", "x", "tbd", "todo", "...", "-", "?", "temp", "asdf"})
+
+
+def _junk_why(why: str) -> bool:
+    """Whether a why carries no signal: a known placeholder or under 3 chars (u15 [11] "test")."""
+    w = why.strip().lower()
+    return bool(w) and (len(w) < 3 or w in _JUNK_WHYS)
+
+
+def export_game(engine: Engine, names: CardNames, rec: dict, out_f) -> tuple[int, int, int, int]:
+    """Returns (rows written, dropped churn/cancel rows, rows with leak_suspect, junk whys blanked)."""
     env = CppEnv(engine, record_config(rec), rec.get("auto_single", True))
     obs = env.reset()
     seen: set[int] = set()
@@ -153,18 +163,23 @@ def export_game(engine: Engine, names: CardNames, rec: dict, out_f) -> tuple[int
             elif kk == Kind.UNSELECT and unmatched.get(cc):
                 drop.add(unmatched[cc].pop(0))
                 drop.add(k)
-    n = n_leak = 0
+    n = n_leak = n_junk = 0
     for p in pending:
         if p["k"] in drop:
             continue
         k = p["k"]
         obs_k, _, _, _, _, opp_hidden = step_info[k]
+        junk = _junk_why(p["row"]["why"])
+        if junk:
+            p["row"]["why"] = ""
+            n_junk += 1
+        p["row"]["junk_why"] = junk
         leak = _leak_suspect(p["row"]["why"], opp_hidden, _visible_codes(obs_k), names)
         p["row"]["leak_suspect"] = leak
         out_f.write(json.dumps(p["row"]) + "\n")
         n += 1
         n_leak += bool(leak)
-    return n, len(drop), n_leak
+    return n, len(drop), n_leak, n_junk
 
 
 def main() -> None:
@@ -172,22 +187,24 @@ def main() -> None:
     ap.add_argument("--out", default=str(ROOT / "data" / "demos" / "gold_decisions.jsonl"))
     a = ap.parse_args()
     engine, names = Engine(), CardNames()
-    total = dropped = leaked = 0
+    total = dropped = leaked = junked = 0
     with open(a.out, "w") as f:
         for path in sorted(GOLD.glob("*.jsonl")):
             for line in path.read_text().splitlines():
                 if not line.strip():
                     continue
                 rec = json.loads(line)
-                n, d, le = export_game(engine, names, rec, f)
+                n, d, le, ju = export_game(engine, names, rec, f)
                 print(
                     f"{rec['game_id']} ({path.name}): {n} gold decisions "
-                    f"({d} churn/cancel dropped, {le} with leak_suspect)"
+                    f"({d} churn/cancel dropped, {le} with leak_suspect, {ju} junk whys blanked)"
                 )
                 total += n
                 dropped += d
                 leaked += le
-    print(f"total: {total} rows ({dropped} churn/cancel dropped, {leaked} with leak_suspect) -> {a.out}")
+                junked += ju
+    print(f"total: {total} rows ({dropped} churn/cancel dropped, {leaked} with leak_suspect, "
+          f"{junked} junk whys blanked) -> {a.out}")
 
 
 if __name__ == "__main__":

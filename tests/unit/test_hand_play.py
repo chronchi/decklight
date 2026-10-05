@@ -258,7 +258,7 @@ def test_check_battle_section_runs(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(sys, "argv", ["hand_play.py", "check", "g"])
     hand_play.main()
     out = capsys.readouterr().out
-    assert "Battle:" in out
+    assert "Battle" in out
     assert "Direct-damage total if the opponent's field were empty:" in out
 
 
@@ -319,4 +319,185 @@ def test_saved_gold_games_replay_unchanged():
                 obs = env.step(int(ch))
             n_choices += len(rec["choices"])
     assert n_choices > 0
+
+
+def _main_phase_battle_obs():
+    """Fake Main Phase window: no ATTACK options (they exist only in the Battle Phase), the turn
+    player controls two face-up Attack Position monsters and the foe one, plus an Extra Deck
+    SPSUMMON on offer (for the summon-then-attack scan)."""
+    import numpy as np
+
+    from ygo_zero.engine.actions import Kind
+
+    acts = [
+        [int(Kind.SPSUMMON), -1, 89631139, 0, 0, 0, 0xB, 7, 0, 0],  # Blue-Eyes, Extra Deck
+        [int(Kind.TO_END), -1, 0, 0, 0, 0, 0xB, 0, -1, 0],
+    ]
+    cards = np.zeros((3, 21), dtype=np.int32)
+    cards[0] = [12345, 3, 1, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 2500, 2000, 0, 0, 0, 0, 0]
+    cards[1] = [9024367, 3, 2, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 2000, 1200, 0, 0, 0, 0, 0]
+    cards[2] = [54321, 3, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 2000, 1500, 0, 0, 0, 0, 0]
+    g = [8000, 3300, 3, 4, 1, 1] + [0] * 18
+    g[21] = 0xB  # MSG_SELECT_IDLECMD
+    return {
+        "actions": acts, "action_mask": [1, 1],
+        "cards": cards, "card_mask": np.array([True, True, True]),
+        "global": g,
+    }
+
+
+_BATTLE_NAMES = {
+    12345: "Test Attacker", 9024367: "Galaxy Dragon", 54321: "Test Foe",
+    89631139: "Blue-Eyes White Dragon",
+}
+
+
+def test_battle_helper_lists_main_phase_attackers():
+    """The batch-3 defect: `check` in the Main Phase always printed "attackers: none". Attackers now
+    come from the seat's face-up Attack Position monsters (estimate, ATTACK options are Battle only)."""
+    lines = hand_play._battle_lines(_main_phase_battle_obs(), _BATTLE_NAMES)
+    text = "\n".join(lines)
+    assert "Your attackers: none" not in text
+    assert "Test Attacker [ATK 2500]" in text
+    assert "estimate" in lines[0]
+    assert "Direct-damage total if the opponent's field were empty: 4500" in text
+    assert "Test Attacker -> Test Foe (deals 500)" in text
+
+
+def test_battle_helper_flags_no_direct_attack_text():
+    """Galaxy Dragon's text bars direct attacks: flagged, and the greedy plan holds it."""
+    lines = hand_play._battle_lines(_main_phase_battle_obs(), _BATTLE_NAMES)
+    text = "\n".join(lines)
+    assert "Galaxy Dragon [ATK 2000] (text: cannot attack directly)" in text
+    assert "Galaxy Dragon holds (beats nothing face-up)" in text
+
+
+def test_battle_helper_summon_then_attack():
+    """Each SPSUMMON/SUMMON monster on offer lists its ATK plus remaining attackers vs LP."""
+    lines = hand_play._battle_lines(_main_phase_battle_obs(), _BATTLE_NAMES)
+    text = "\n".join(lines)
+    assert "Summon-then-attack (estimate" in text
+    assert "Blue-Eyes White Dragon (Extra Deck) [ATK 3000] + remaining attackers 4500" in text
+    assert "7500 vs LP 3300 (lethal)" in text
+
+
+def test_p_never_answers_yes_no_prompts():
+    from ygo_zero.engine.actions import Kind
+
+    obs = _fake_obs([(Kind.YES, 0), (Kind.NO, 0)])
+    assert hand_play._match(obs, "P", {}) is None
+    obs2 = _fake_obs([(Kind.ACTIVATE, 111), (Kind.PASS, 0)])
+    assert hand_play._match(obs2, "P", {111: "X"}) == 1
+
+
+def test_no_match_msg_for_p_on_yes_no_and_kinds():
+    from ygo_zero.engine.actions import Kind
+
+    g = [0] * 24
+    g[21] = 0xD  # MSG_SELECT_YESNO
+    obs = dict(_fake_obs([(Kind.YES, 0), (Kind.NO, 0)]))
+    obs["global"] = g
+    assert hand_play._no_match_msg(obs, "P") == "!! P does not answer yes/no prompts: use YES or NO"
+    g2 = [0] * 24
+    g2[21] = 0xB
+    obs2 = dict(_fake_obs_loc([(Kind.SUMMON, 111, 2, 0), (Kind.ACTIVATE, 222, 2, 0)]))
+    obs2["global"] = g2
+    msg = hand_play._no_match_msg(obs2, "BP")
+    assert msg == "!! token 'BP' matches no option; available: SUM, ACT (no Battle Phase option now)", msg
+
+
+def test_match_ignores_punctuation_and_case():
+    from ygo_zero.engine.actions import Kind
+
+    obs = _fake_obs([(Kind.SELECT, 111), (Kind.SELECT, 222), (Kind.SELECT, 333)])
+    names = {
+        111: "Fiendsmith's Tract",  # apostrophe
+        222: "Tenyi Spirit - Adhara",  # hyphen
+        333: "D/D Savant Kepler",  # slash
+    }
+    assert hand_play._match(obs, "SEL:Fiendsmiths_Tract", names) == 0
+    assert hand_play._match(obs, "SEL:Tenyi_Spirit_Adhara", names) == 1
+    assert hand_play._match(obs, "SEL:D_D_Savant_Kepler", names) == 2
+    assert hand_play._match(obs, "SEL:fiendsmiths_tract", names) == 0
+
+
+def test_pass_star_crosses_seats_with_only_declined_live(tmp_path, monkeypatch):
+    """PASS* continues across a seat change while the next seat's window offers no live option
+    besides those it already declined this turn (121/206 batch-3 uses stopped at the seat change)."""
+    KA, KB = 2526224, 14558127
+    hand_play._DECLINED.clear()
+
+    def obs_for(codes):
+        return _chain_obs(list(codes))
+
+    live_a = hand_play._live(obs_for([KA]))
+    live_b = hand_play._live(obs_for([KB]))
+    hand_play._DECLINED[0] = live_a | {("turn", 3)}
+    hand_play._DECLINED[1] = live_b | {("turn", 3)}
+
+    end = _chain_obs([KA])
+    end["global"][21] = 0xB  # MSG_SELECT_IDLECMD: PASS* stops here
+
+    class _TwoSeatEnv:
+        def __init__(self, states, players):
+            self.states, self.players = list(states), list(players)
+            self.player = self.players.pop(0)
+
+        def step(self, i):
+            self.player = self.players.pop(0)
+            return self.states.pop(0)
+
+    env = _TwoSeatEnv([obs_for([KB]), obs_for([KA]), end], [0, 1, 0, 0])
+    st = {"choices": [], "labels": [], "actors": [], "turns": []}
+    _, reason = hand_play._pass_star(env, obs_for([KA]), st, _hold_names([]))
+    assert st["labels"] == ["pass", "pass", "pass"]
+    assert st["actors"] == [0, 1, 0]  # the seat-1 window was answered, not stopped at
+    assert reason.startswith("P0 ") and "not a response window" in reason, reason
+
+
+def test_log_prints_turn_headers_and_decisions(tmp_path, monkeypatch, capsys):
+    """`hand_play.py log <game>`: one turn header with LP plus one line per gold decision."""
+    from ygo_zero.demos.names import CardNames
+    from ygo_zero.engine.duel import Engine
+
+    monkeypatch.setattr(hand_play, "WORK", tmp_path / "work")
+    monkeypatch.setattr(sys, "argv", ["hand_play.py", "new", "g", "snake-eye", "tenpai-dragon", "11"])
+    hand_play.main()
+    capsys.readouterr()
+    st = hand_play._load("g")
+    assert st["choices"] == []
+    hand_play._log(st, CardNames(), Engine(), None)  # fresh duel: header-less, no decisions yet
+    out = capsys.readouterr().out
+    assert "(no decisions yet)" in out
+    # one real decision, then the log shows a header plus the T1 line (read-only: no state change)
+    engine = Engine()
+    env, obs = hand_play._replay(engine, st)
+    st["choices"].append(0)
+    st["labels"].append("gold")
+    st["actors"].append(env.player)
+    st["turns"].append(int(obs["global"][2]))
+    hand_play._log(st, CardNames(), engine, None)
+    out = capsys.readouterr().out
+    assert "== Turn 1 — LP P0 8000, P1 8000" in out
+    assert "T1 P0 " in out
+    assert hand_play._load("g")["choices"] == []  # log changed no state
+
+
+def test_deck_sheet_brief_truncates_text():
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("deck_sheet", ROOT / "scripts" / "deck_sheet.py")
+    assert spec is not None and spec.loader is not None
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules["deck_sheet"] = mod
+    spec.loader.exec_module(mod)
+    full = mod.sheet("snake-eye")
+    brief = mod.sheet("snake-eye", brief=True)
+    assert len(brief) < len(full)
+    for line in brief.splitlines():
+        if line.startswith("== "):
+            continue
+        text = line.split(" — ", 1)[1]
+        assert len(text) <= 300, line[:80]
+    assert brief.splitlines()[0].startswith("== Main")
 

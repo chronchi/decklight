@@ -1,9 +1,10 @@
 """Print one deck's card texts once each: `Name [type/stats] — full text`, Main then Extra.
 
 Replaces many `txt.py` calls at the start of a hand-played game: the player reads both sheets once
-instead of fetching each card text mid-game.
+instead of fetching each card text mid-game. `--brief` prints only name, type/stats and the first
+300 chars of text per card (agents can still `txt.py` a card for full text).
 
-    uv run python scripts/deck_sheet.py snake-eye
+    uv run python scripts/deck_sheet.py snake-eye [--brief]
 """
 
 from __future__ import annotations
@@ -75,8 +76,8 @@ def _stats(code: int, cards: dict) -> str:
     return f"[Trap/{prop}]"
 
 
-def sheet(deck_name: str) -> str:
-    """The whole sheet as text (also used by tests)."""
+def sheet(deck_name: str, brief: bool = False) -> str:
+    """The whole sheet as text (also used by tests). With `brief`, only the first 300 chars of text."""
     deck = load_ydk(ROOT / "decks" / "pool" / f"{deck_name}.ydk")
     names, cards = CardNames(), load_cards()
     lines = []
@@ -88,15 +89,18 @@ def sheet(deck_name: str) -> str:
                 continue
             seen.add(code)
             nm = names.names.get(code, f"#{code}")
-            lines.append(f"{nm} {_stats(code, cards)} — {_effect_text(code)}")
+            text = _effect_text(code)
+            if brief:
+                text = text[:300]
+            lines.append(f"{nm} {_stats(code, cards)} — {text}")
     return "\n".join(lines)
 
 
 def main() -> None:
-    if len(sys.argv) != 2:
-        print("usage: deck_sheet.py <deck>", file=sys.stderr)
+    if len(sys.argv) not in (2, 3) or (len(sys.argv) == 3 and sys.argv[2] != "--brief"):
+        print("usage: deck_sheet.py <deck> [--brief]", file=sys.stderr)
         sys.exit(2)
-    print(sheet(sys.argv[1]))
+    print(sheet(sys.argv[1], brief=len(sys.argv) == 3))
 
 
 if __name__ == "__main__":

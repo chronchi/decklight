@@ -132,7 +132,11 @@ uint32_t Board::option_code(const Option& opt) const {
   if (!opt.has_card) return opt.code;
   int r = row_of(&opt.card);
   if (r >= 0) return rows[r].visible ? opt.code : 0;
-  return opt.card.controller == static_cast<uint32_t>(me) ? opt.code : 0;
+  // a card offered from a hidden pile (Deck, face-down Extra Deck) is revealed to the chooser by the effect
+  if (opt.card.controller == static_cast<uint32_t>(me) || opt.card.location == LOCATION_DECK ||
+      opt.card.location == LOCATION_EXTRA)
+    return opt.code;
+  return 0;
 }
 
 std::set<uint32_t> Board::visible_codes() const {
