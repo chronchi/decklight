@@ -7,8 +7,12 @@
 #   ft-mix/   base fine-tuned on everything, gold repeated
 #   mix/      from scratch, recipe v2 + gold repeated
 #   lines-gold/ from scratch, engine-verified combo lines + gold only: the noisy LLM games (game_plan / game_interrupt)
-#             dropped (2026-10-04 user decision; SKIP_SCRATCH=1 skips both from-scratch runs)
+#             dropped (2026-10-04 user decision)
+#   mix-l/    mix with a 3x larger model: d=384, 6 layers, 6 heads (~12M params vs ~4M; capacity axis, 2026-10-05)
+#   (SKIP_SCRATCH=1 skips the three from-scratch runs)
 # then playtests the base and the variant with the best val gold accuracy on the same decks/seeds.
+# Env: GOLD_GAMES=N trains on the first N gold games only (saturation curve; eval sets unchanged), PT_ZERO=0 skips the
+# base model's playtest (it is the same in every job of a curve).
 # Usage: bash scripts/vast_bc_gold.sh <name> [smoke]. smoke = gold shards only, 1 epoch, no scratch run, tiny playtest
 # (ship --data data/demos for a real playtest: it samples decks that have verified lines; with only data/demos/gold it
 # finds none and the match section fails, as in bcg-smoke-20261004-2142).
@@ -20,23 +24,30 @@ NAME="$1"; MODE="${2:-full}"; OUT="runs/$NAME"; mkdir -p "$OUT"
 read -r Q P < /sys/fs/cgroup/cpu.max 2>/dev/null || Q=max
 if [ "$Q" = "max" ]; then J=$(nproc); else J=$(( Q / P )); fi
 [ "$J" -lt 2 ] && J=2
-uv sync --group dev --group ml -q
-uv pip install -q --reinstall torch --index-url https://download.pytorch.org/whl/cu128 > "$OUT/torch.txt" 2>&1 || true
+# CUDA torch straight away (the lock pins the CPU wheel: skip it instead of downloading both; 2026-10-05)
+T0=$(date +%s)
+uv sync --group dev --group ml --group gauntlet -q --no-install-package torch
+uv pip install -q torch --index-url https://download.pytorch.org/whl/cu128 > "$OUT/torch.txt" 2>&1 || true
+echo "deps install $(( $(date +%s) - T0 ))s" >> "$OUT/torch.txt"
 { nvidia-smi --query-gpu=name,memory.total,compute_cap --format=csv,noheader; echo "jobs $J";
   uv run --no-sync python -c "import torch; print(torch.__version__, torch.cuda.is_available())"; } > "$OUT/machine.txt" 2>&1
+# GPU/CPU usage every 30 s (is a better GPU worth it? 2026-10-05): gpu util %, gpu mem MiB, load average
+( while true; do echo "$(date +%T) $(nvidia-smi --query-gpu=utilization.gpu,memory.used --format=csv,noheader,nounits 2>/dev/null | tr -d ' ') $(cut -d' ' -f1 /proc/loadavg)"; sleep 30; done ) > "$OUT/usage.txt" 2>&1 &
+USAGE_PID=$!
 T0=$SECONDS
 tick() { echo "$1 $((SECONDS - T0)) s" >> "$OUT/timing.txt"; }
 BASE=data/cache/bc_base/best.pt
 if [ "$MODE" = "smoke" ]; then
-  ONLY=(--only gold); EP_FT=1; EP_MIX=1; SKIP_SCRATCH=1; PT=(--decks 2 --hands 1 --seeds 1 --narrate 0 --samples 0); PT_CAP=8m
+  ONLY=(--only gold); EP_FT=1; EP_MIX=1; SKIP_SCRATCH=1; PT=(--decks 2 --hands 1 --seeds 1 --narrate 1 --samples 2 --ygoagent --selfplay 2); PT_CAP=12m
 else
-  ONLY=(); EP_FT=10; EP_MIX=3; SKIP_SCRATCH="${SKIP_SCRATCH:-0}"; PT=(--decks 8 --hands 3 --seeds 2 --narrate 2 --samples 4); PT_CAP=35m
+  ONLY=(); EP_FT=10; EP_MIX=3; SKIP_SCRATCH="${SKIP_SCRATCH:-0}"; PT=(--decks 8 --hands 3 --seeds 2 --narrate 2 --samples 4 --ygoagent --selfplay 10); PT_CAP=40m
 fi
 uv run --no-sync python scripts/build_bc_shards.py "${ONLY[@]}" --out data/cache/bc_shards --jobs "$J" > "$OUT/shards.txt" 2>&1
 tick shards
 HOLD="kewl-tune $( [ -f decks/pool/HOLDOUT ] && tr '\n' ' ' < decks/pool/HOLDOUT )"
 COMMON=(--shards data/cache/bc_shards --emb data/cards/emb/qwen3-0.6b-d512.npz --batch 512 --holdout $HOLD
         --val-frac-kind gold=0.25 gold_pass=0.25 --select-on val:gold)
+[ -n "${GOLD_GAMES:-}" ] && COMMON+=(--gold-games "$GOLD_GAMES")
 train() {  # <variant> <args...>
   local v="$1"; shift
   uv run --no-sync python scripts/train_bc.py "${COMMON[@]}" --out "$OUT/$v" "$@" > "$OUT/train-$v.txt" 2>&1
@@ -50,6 +61,8 @@ train ft-mix --init "$BASE" --epochs "$EP_MIX" --lr 2e-4 \
   --kind-frac line_expanded=0.2 game_plan=2 game_interrupt=2 gold=20 gold_pass=10
 [ "$SKIP_SCRATCH" = "1" ] || train lines-gold --epochs 8 --lr 5e-4 --merge-last 4 \
   --kinds line line_improved line_expanded gold gold_pass --kind-frac line_expanded=0.2 gold=20 gold_pass=10
+[ "$SKIP_SCRATCH" = "1" ] || train mix-l --epochs 8 --lr 3e-4 --merge-last 4 --d 384 --layers 6 --heads 6 \
+  --kind-frac line_expanded=0.2 game_plan=2 game_interrupt=2 gold=20 gold_pass=10
 # summary: per variant, best record by val gold acc (zero = its epoch -1 record)
 uv run --no-sync python - "$OUT" > "$OUT/summary.txt" <<'PY'
 import json, sys
@@ -57,7 +70,7 @@ from pathlib import Path
 out = Path(sys.argv[1])
 best_v, best_s = "zero", -1.0
 best_hv, best_h = "zero", -1.0  # also playtest the best on unseen-deck gold (bcg-20261004-2223: mix won there)
-for v in ("zero", "ft-gold", "ft-mix", "mix", "lines-gold"):
+for v in ("zero", "ft-gold", "ft-mix", "mix", "lines-gold", "mix-l"):
     m = out / v / "metrics.jsonl"
     if not m.exists():
         continue
@@ -80,13 +93,16 @@ BEST=$(tail -1 "$OUT/summary.txt" | cut -d' ' -f2-)
 tick "summary (playtest $BEST)"
 # playtest budget (bcg-20261004-2223): 10 decks x 6 hands x best-of-8 took the whole 25 min on combos, so the matches
 # (real games vs random/greedy) never ran; now 8 decks x 3 hands x best-of-4 to leave time for the matches
-for v in zero $BEST; do
+PLAY=($BEST); [ "${PT_ZERO:-1}" = "1" ] && PLAY=(zero "${PLAY[@]}")
+for v in "${PLAY[@]}"; do
   [ "$v" = zero ] && ck="$BASE" || ck="$OUT/$v/best.pt"
   [ -f "$ck" ] || continue
   # playtest writes to <ckpt>/../../playtest and reads the architecture from metrics.jsonl next to the checkpoint
   d="$OUT/pt-$v/ck"; mkdir -p "$d"; cp "$ck" "$d/best.pt"; cp "$OUT/$v/metrics.jsonl" "$d/"
+  VS=(); [ "$v" = zero ] || VS=(--vs-ckpt "$BASE")
   timeout "$PT_CAP" uv run --no-sync python scripts/playtest.py --ckpt "$d/best.pt" --device cuda --threads "$J" \
-    --seed 0 "${PT[@]}" > "$OUT/playtest-$v.txt" 2>&1
+    --seed 0 "${PT[@]}" "${VS[@]}" > "$OUT/playtest-$v.txt" 2>&1
   rm -f "$d/best.pt"; tick "playtest-$v"
 done
+kill "$USAGE_PID" 2>/dev/null
 echo done > "$OUT/DONE"

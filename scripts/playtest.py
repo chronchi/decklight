@@ -8,6 +8,13 @@
 2. matches: policy vs random and greedy (both seats, all ordered deck pairs of the sample) -> win rate (Wilson CI);
    `--ygoagent` adds the ygo-agent gauntlet opponent.
 3. narrate: N games policy vs greedy written turn by turn to runs/<run>/playtest/game-<k>.txt for a human audit.
+4. `--vs-ckpt`: head-to-head vs another BC checkpoint (e.g. the base model) on the same deck pairs, both seats.
+5. `--ygoagent`: matches vs ygo-agent 0546 on `--gauntlet-decks` (its 864-card vocabulary covers only those decks).
+6. `--selfplay K`: K full games policy vs itself (both seats), saved in hand_play's state format under
+   runs/<run>/playtest/selfplay/<name>/state.json, for the same muse review as the gold games (dump_game.py).
+The combo test runs the greedy run and the K samples of a hand in lockstep (one batched forward per step) and
+reports `stuck`: the share of runs that hit the 400-decision cap (the policy never ended its turn).
+Every section prints its wall time.
 Results: runs/<run>/playtest/report.json (+ printed). Laptop: cores 0-3, torch threads 2.
 """
 
@@ -82,22 +89,39 @@ def verified_end_boards(deck: str) -> list[int]:
     return sizes
 
 
-def _turn1_field(env, obs, act) -> tuple[int, int]:
-    """Run player 0's turn 1 with `act(obs) -> index` (opponent passive); return (cards p0 controls on the field at the
-    end of turn 1, p0 decisions)."""
-    passive, last, n = Responder(0), 0, 0
-    while obs is not None and int(obs["global"][2]) <= 1 and n < 400:
-        if env.player == 0:
-            last = my_field(obs)
-            a = act(obs)
-            n += 1
-        else:
-            a = passive.passive(obs)
-        obs = env.step(a)
-    if obs is not None:  # turn 2: the obs is from player 1's view; p0's cards are the opponent's (controller 1)
-        c, m = obs["cards"], obs["card_mask"]
-        last = int(sum(1 for i in np.flatnonzero(m) if int(c[i, 1]) in FIELD_LOCS and int(c[i, 3]) == 1))
-    return last, n
+def _turn1_fields(envs: list, pols: list) -> list[tuple[int, int]]:
+    """Player 0's turn 1 (opponent passive) for several envs in lockstep: pols[i] acts for envs[i]; envs sharing a policy object get one
+    batched forward per step. Returns [(end field, p0 decisions)] per env."""
+    passive = Responder(0)
+    obs = [e.reset() for e in envs]
+    last, n = [0] * len(envs), [0] * len(envs)
+    live = [True] * len(envs)
+    while any(live):
+        groups: dict[int, list[int]] = {}
+        for i, e in enumerate(envs):
+            if not live[i]:
+                continue
+            if obs[i] is None or int(obs[i]["global"][2]) > 1 or n[i] >= 400:
+                live[i] = False
+                continue
+            if e.player == 0:
+                last[i] = my_field(obs[i])
+                groups.setdefault(id(pols[i]), []).append(i)
+            else:
+                obs[i] = e.step(passive.passive(obs[i]))
+        for idx in groups.values():
+            buf = {k: np.stack([obs[i][k] for i in idx]) for k in obs[idx[0]]}
+            acts = pols[idx[0]](buf, np.arange(len(idx)))
+            for i, a in zip(idx, acts, strict=True):
+                n[i] += 1
+                obs[i] = envs[i].step(int(a))
+    out = []
+    for i in range(len(envs)):
+        if obs[i] is not None and int(obs[i]["global"][2]) > 1:  # p0's cards seen from player 1's view
+            c, m = obs[i]["cards"], obs[i]["card_mask"]
+            last[i] = int(sum(1 for j in np.flatnonzero(m) if int(c[j, 1]) in FIELD_LOCS and int(c[j, 3]) == 1))
+        out.append((last[i], n[i]))
+    return out
 
 
 def _replay_field(engine, rec: dict) -> int:
@@ -130,16 +154,13 @@ def combo_test(engine, pol: BCPolicy, deck_name: str, hands: int, sampler: BCPol
     pairs = []
     for r in verified_records(deck_name, limit=hands):
         try:
-            env = CppEnv(engine, record_config(r), r.get("auto_single", True))
-            mine, n = _turn1_field(env, env.reset(), lambda o: int(pol({k: v[None] for k, v in o.items()}, np.array([0]))[0]))
-            expert = _replay_field(engine, r)
-            best = mine
-            for _ in range(k if sampler is not None else 0):
-                env = CppEnv(engine, record_config(r), r.get("auto_single", True))
-                f, _n = _turn1_field(env, env.reset(),
-                                     lambda o: int(sampler({kk: v[None] for kk, v in o.items()}, np.array([0]))[0]))
-                best = max(best, f)
-            pairs.append((mine, expert, n, best))
+            kk = k if sampler is not None else 0
+            envs = [CppEnv(engine, record_config(r), r.get("auto_single", True)) for _ in range(1 + kk)]
+            res = _turn1_fields(envs, [pol] + [sampler] * kk)
+            (mine, n), expert = res[0], _replay_field(engine, r)
+            best = max(f for f, _ in res)
+            stuck = sum(nn >= 400 for _, nn in res) / len(res)
+            pairs.append((mine, expert, n, best, stuck))
         except Exception:  # noqa: BLE001, S112 - a record that no longer replays is skipped
             continue
     if not pairs:
@@ -154,6 +175,7 @@ def combo_test(engine, pol: BCPolicy, deck_name: str, hands: int, sampler: BCPol
         "best_of_k_end_board": round(statistics.mean(p[3] for p in pairs), 2) if k else None,
         "best_of_k_ge_expert": round(sum(p[3] >= p[1] for p in pairs) / len(pairs), 2) if k else None,
         "expert_lines": len(pairs),
+        "stuck": round(statistics.mean(p[4] for p in pairs), 3),
     }  # fmt: skip
 
 
@@ -182,6 +204,28 @@ def narrate(engine, pol, deck_a: str, deck_b: str, seed: int, names: dict, out: 
     out.write_text("\n".join(lines) + "\n")
 
 
+def selfplay_game(engine, pol, deck_a: str, deck_b: str, seed: int, out_dir: Path, max_steps: int = 3000) -> dict:
+    """One full game, the policy on both seats, saved as hand_play state (decks, seed, choices, labels, actors,
+    turns, notes) so `hand_play.py show/log` and `data/cache/dump_game.py` read it like a gold game. Every decision
+    is labelled "gold" (the review rubric skips single-option prompts itself). Stops at duel end or max_steps."""
+    da, db = (load_ydk(ROOT / "decks" / "pool" / f"{d}.ydk") for d in (deck_a, deck_b))
+    env = CppEnv(engine, DuelConfig(da, db, seed=seed))
+    obs = env.reset()
+    st = {"decks": [deck_a, deck_b], "seed": seed, "choices": [], "labels": [], "actors": [], "turns": [], "notes": []}
+    while obs is not None and len(st["choices"]) < max_steps:
+        a = int(pol({k: v[None] for k, v in obs.items()}, np.array([0]))[0])
+        st["choices"].append(a)
+        st["labels"].append("gold")
+        st["actors"].append(int(env.player))
+        st["turns"].append(int(obs["global"][2]))
+        obs = env.step(a)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    (out_dir / "state.json").write_text(json.dumps(st))
+    over = obs is None
+    return {"decks": [deck_a, deck_b], "seed": seed, "choices": len(st["choices"]), "over": over,
+            "winner": env.winner if over else None, "turns": st["turns"][-1] if st["turns"] else 0}  # fmt: skip
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--ckpt", type=Path, required=True)
@@ -191,7 +235,11 @@ def main() -> None:
     ap.add_argument("--seeds", type=int, default=3, help="match seeds per ordered deck pair")
     ap.add_argument("--narrate", type=int, default=2)
     ap.add_argument("--samples", type=int, default=0, help="best-of-K sampled turn-1 runs per hand (headroom)")
-    ap.add_argument("--ygoagent", action="store_true")
+    ap.add_argument("--ygoagent", action="store_true", help="matches vs ygo-agent 0546 on --gauntlet-decks")
+    ap.add_argument("--gauntlet-decks", type=Path, default=ROOT / "tests/fixtures/decks")
+    ap.add_argument("--vs-ckpt", type=Path, default=None, help="head-to-head vs this BC checkpoint (e.g. the base)")
+    ap.add_argument("--selfplay", type=int, default=0, help="full policy-vs-policy games saved for review")
+    ap.add_argument("--selfplay-decks", nargs="*", default=None, help="deck pool for --selfplay (default: the sample)")
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--device", default="cpu")
     ap.add_argument("--threads", type=int, default=2, help="VecEnv threads for matches")
@@ -209,7 +257,55 @@ def main() -> None:
     out_dir = args.ckpt.parent.parent / "playtest"
     out_dir.mkdir(parents=True, exist_ok=True)
     report: dict = {"ckpt": str(args.ckpt), "decks": sample, "holdout": sorted(set(sample) & hold)}
+    report["setup_seconds"] = round(time.time() - t0)
 
+    def flush(section: str, t: float) -> None:  # report.json after every section: a timeout keeps what finished
+        report.setdefault("section_seconds", {})[section] = round(time.time() - t)
+        print(f"[{section}: {time.time() - t:.0f} s]", flush=True)
+        (out_dir / "report.json").write_text(json.dumps(report, indent=1))
+
+    def match(name: str, opp, decks: list, n_seeds: int) -> None:
+        pairs = [(i, j) for i in range(len(decks)) for j in range(len(decks)) if i != j]
+        games = play_match(engine, decks, pol, opp, pairs, range(n_seeds), num_envs=64, num_threads=args.threads)
+        w = sum(g.winner_is_a for g in games)
+        lo, hi = wilson(w, len(games))
+        first = [g for g in games if g.a_first]
+        report["matches"][name] = {
+            "games": len(games), "win_rate": round(w / len(games), 3), "ci": [round(lo, 3), round(hi, 3)],
+            "win_rate_first": round(sum(g.winner_is_a for g in first) / max(len(first), 1), 3),
+            "mean_turns": round(statistics.mean(g.turns for g in games), 1),
+        }  # fmt: skip
+        print(f"vs {name:8s}: {w:.0f}/{len(games)} = {w / len(games):.1%}  [{lo:.1%}, {hi:.1%}]  "
+              f"mean turns {report['matches'][name]['mean_turns']}", flush=True)
+
+    # matches first (cheap, batched over VecEnv), then self-play games, then the slower combo test
+    t = time.time()
+    report["matches"] = {}
+    decks = [load_ydk(ROOT / "decks" / "pool" / f"{d}.ydk") for d in sample]
+    if args.vs_ckpt:
+        match("base", BCPolicy(args.vs_ckpt, args.emb, device=args.device), decks, args.seeds)
+    match("greedy", GreedyPolicy(2), decks, args.seeds)
+    match("random", RandomPolicy(1), decks, args.seeds)
+    if args.ygoagent:
+        from ygo_zero.eval.ygoagent import YgoAgentPolicy
+
+        gdecks = [load_ydk(f) for f in sorted(args.gauntlet_decks.glob("*.ydk"))]
+        match("ygoagent", YgoAgentPolicy(seed=3), gdecks, max(args.seeds, 3))
+    flush("matches", t)
+
+    if args.selfplay:
+        t = time.time()
+        sp_pool = args.selfplay_decks or sample
+        sp = []
+        for k in range(args.selfplay):
+            a, b = rng.sample(sp_pool, 2)
+            sp.append(selfplay_game(engine, pol, a, b, 700 + k, out_dir / "selfplay" / f"sp{k}"))
+            print(f"selfplay sp{k} {a} vs {b}: {sp[-1]['choices']} choices, turn {sp[-1]['turns']}, "
+                  f"{'winner ' + str(sp[-1]['winner']) if sp[-1]['over'] else 'UNFINISHED'}", flush=True)
+        report["selfplay"] = sp
+        flush("selfplay", t)
+
+    t = time.time()
     combos = []
     for d in sample:
         combos.append(combo_test(engine, pol, d, args.hands, sampler, args.samples) | {"holdout": d in hold})
@@ -217,27 +313,24 @@ def main() -> None:
         print(f"combo {c['deck'][:34]:34s} {'H' if c['holdout'] else ' '} same {c['hands']} hands: policy field "
               f"{c['policy_end_board']} vs expert {c['expert_end_board']}, policy >= expert on {c['ge_expert']} "
               f"({c['policy_decisions']} decisions); best-of-{args.samples} {c.get('best_of_k_end_board')} "
-              f">= expert on {c.get('best_of_k_ge_expert')}", flush=True)
-    report["combo"] = combos
+              f">= expert on {c.get('best_of_k_ge_expert')}; stuck {c.get('stuck')}", flush=True)
+        report["combo"] = combos
+    ok = [c for c in combos if c["hands"]]
+    if ok:
+        report["combo_mean"] = {
+            "policy": round(statistics.mean(c["policy_end_board"] for c in ok), 2),
+            "expert": round(statistics.mean(c["expert_end_board"] for c in ok), 2),
+            "best_of_k": round(statistics.mean(c["best_of_k_end_board"] for c in ok), 2) if args.samples else None,
+            "stuck": round(statistics.mean(c["stuck"] for c in ok), 3),
+        }  # fmt: skip
+        print(f"combo mean: {report['combo_mean']}", flush=True)
+    flush("combo", t)
 
-    decks = [load_ydk(ROOT / "decks" / "pool" / f"{d}.ydk") for d in sample]
-    pairs = [(i, j) for i in range(len(decks)) for j in range(len(decks)) if i != j]
-    opps = [("random", RandomPolicy(1)), ("greedy", GreedyPolicy(2))]
-    if args.ygoagent:
-        from ygo_zero.eval.ygoagent import YgoAgentPolicy
-
-        opps.append(("ygoagent", YgoAgentPolicy(seed=3)))
-    report["matches"] = {}
-    for name, opp in opps:
-        games = play_match(engine, decks, pol, opp, pairs, range(args.seeds), num_envs=64, num_threads=args.threads)
-        w = sum(g.winner_is_a for g in games)
-        lo, hi = wilson(w, len(games))
-        report["matches"][name] = {"games": len(games), "win_rate": round(w / len(games), 3), "ci": [round(lo, 3), round(hi, 3)]}
-        print(f"vs {name:8s}: {w:.0f}/{len(games)} = {w / len(games):.1%}  [{lo:.1%}, {hi:.1%}]", flush=True)
-
+    t = time.time()
     for k in range(args.narrate):
         a, b = rng.sample(sample, 2)
         narrate(engine, pol, a, b, 900 + k, names, out_dir / f"game-{k}.txt")
+    flush("narrate", t)
     report["seconds"] = round(time.time() - t0)
     (out_dir / "report.json").write_text(json.dumps(report, indent=1))
     print(f"report: {out_dir / 'report.json'} ({report['seconds']} s)")

@@ -119,3 +119,18 @@ def test_select_score():
     assert train_bc.select_score(rec, "val:gold", -1) == 0.6
     assert train_bc.select_score(rec, "val:gold_pass", -1) == -1
     assert train_bc.select_score(rec, "holdout", -2) == -2
+
+
+def test_limit_gold_games_keeps_first_n_by_number():
+    train_bc = _load("train_bc")
+    assert train_bc.gold_game_number("a-vs-b/gold-u24") == 24
+    assert train_bc.gold_game_number("a-vs-b/gold-g1") == 1
+    assert train_bc.gold_game_number("snake-eye/line-3") == -1
+    lines = np.array(["x/gold-g1", "x/gold-g2", "x/gold-m3", "x/gold-u10", "x/gold-u10", "d/line-1"])
+    data = {"line": lines, "kind": np.array(["gold", "gold_pass", "gold", "gold", "gold", "line"])}
+    train = np.arange(6)
+    idx, kept = train_bc.limit_gold_games(data, train, 2)
+    assert list(idx) == [0, 1, 5] and kept == 2  # non-gold kinds untouched
+    # the cut counts games in every split: g2 in val still uses up one of the n slots
+    idx, kept = train_bc.limit_gold_games(data, np.array([0, 2, 3, 5]), 2)
+    assert list(idx) == [0, 5] and kept == 1

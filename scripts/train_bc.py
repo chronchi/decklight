@@ -15,6 +15,8 @@ Fine-tuning: --init runs/<run>/bc/best.pt starts from those weights (architectur
 and logs an "epoch": -1 record (the starting point's metrics) first; --epochs 0 --init = evaluate only.
 --val-frac-kind gold=0.25 gold_pass=0.25 keeps a larger share of a scarce kind's lines in val;
 --select-on val:gold picks best.pt by one kind's val accuracy.
+--gold-games N (saturation curves): train only on the gold games among the first N by game number (g1, g2, m3 ... u103);
+val/holdout stay the same for every N, so points of a curve share one evaluation set.
 """
 
 from __future__ import annotations
@@ -22,6 +24,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import re
 import time
 from pathlib import Path
 
@@ -150,6 +153,28 @@ def epoch_train_idx(data, train_idx: np.ndarray, kind_frac: dict[str, float], rn
     return np.concatenate(parts)
 
 
+def gold_game_number(line: str) -> int:
+    """Game number of a gold line id ("<d0>-vs-<d1>/gold-u24" -> 24, "gold-g1" -> 1); -1 when it has none."""
+    m = re.search(r"gold-[a-z]*(\d+)$", line)
+    return int(m.group(1)) if m else -1
+
+
+def limit_gold_games(data, train_idx: np.ndarray, n: int) -> tuple[np.ndarray, int]:
+    """Drop training samples of gold kinds whose game is not among the first n gold games (by game number, counted
+    over every split so the cut is the same whatever the val/holdout membership). Returns (indices, games kept in
+    train)."""
+    kind = data["kind"]
+    gold = np.isin(kind, ["gold", "gold_pass"])
+    nums = sorted({gold_game_number(str(x)) for x in np.unique(data["line"][gold])} - {-1})
+    allowed = set(nums[:n])
+    tr_gold = gold[train_idx]
+    keep_gold = np.array([gold_game_number(str(x)) in allowed for x in data["line"][train_idx[tr_gold]]], bool)
+    keep = np.ones(len(train_idx), bool)
+    keep[np.flatnonzero(tr_gold)] = keep_gold
+    kept_games = {gold_game_number(str(x)) for x in data["line"][train_idx[tr_gold][keep_gold]]}
+    return train_idx[keep], len(kept_games)
+
+
 def select_score(rec: dict, select_on: str, default: float) -> float:
     """--select-on value of a metrics record: "<split>" -> its acc, "<split>:<kind>" -> that kind's acc in the split."""
     split, _, kind = select_on.partition(":")
@@ -200,6 +225,7 @@ def main() -> None:
                     help="per-epoch share of each kind's train samples (<1 subsample, >1 repeat)")
     ap.add_argument("--merge-last", type=int, default=0, help="also evaluate the average of the last K epochs")
     ap.add_argument("--init", type=Path, default=None, help="start from this checkpoint (fine-tune)")
+    ap.add_argument("--gold-games", type=int, default=None, help="train on the first N gold games only (by number)")
     ap.add_argument("--val-frac-kind", nargs="*", default=None, metavar="KIND=FRAC",
                     help="val share for these kinds' lines (default 0.1 for every kind)")
     ap.add_argument("--limit", type=int, default=None, help="use only the first N samples (smoke)")
@@ -222,6 +248,9 @@ def main() -> None:
         data = {k: v[: args.limit] for k, v in data.items()}
     masks = split_masks(data, holdout_decks=tuple(args.holdout), kind_val_frac=parse_kind_frac(args.val_frac_kind))
     idx = select_train_idx(data, masks, args.kinds)
+    if args.gold_games is not None:
+        idx["train"], kept = limit_gold_games(data, idx["train"], args.gold_games)
+        print(f"--gold-games {args.gold_games}: training on {kept} gold games (their train split)", flush=True)
     print({k: len(v) for k, v in idx.items()}, "decks:", sorted(set(map(str, data["deck"]))), flush=True)
 
     if args.init:  # the starting checkpoint fixes the architecture
