@@ -89,3 +89,32 @@ def test_transient_error_retries(tmp_path, monkeypatch):
     assert rc == 1
     assert log.read_text().count("transient error, retry") == 1
     assert len(_rows(briefs)) == 2
+
+
+def test_prologue_sheets_only_first_session(tmp_path, monkeypatch):
+    """The prologue is built and passed to every session: full deck sheets in the first
+    session, the one-liner afterwards (the per-turn cost driver)."""
+    briefs = _setup(tmp_path, monkeypatch)
+    cap = tmp_path / "caps.txt"
+    template = f"cat {{prologue}} >> {cap} && echo '===SEP===' >> {cap} && true"
+    assert play_game.play("g", "brief.md", "M", 2, template) == "no-progress"
+    parts = cap.read_text().split("===SEP===")
+    assert len(parts) == 3, parts[-1:]  # two prologues + trailing empty
+    first, second, _ = parts
+    assert "== Main" in first  # full deck sheets in session 1
+    assert "do not re-run log/show unless something changed" in first
+    assert "== Main" not in second
+    assert "Deck sheets: run `deck_sheet.py" in second
+    # the cap binds the common (sheet-less) session: sheet sessions carry two --brief
+    # sheets (~20k) and stay above it, same as today's agent-run equivalent
+    assert len(second) <= play_game.MAX_PROLOGUE_CHARS
+    assert (briefs / "play-g.t1.prologue.md").exists()
+
+
+def test_prologue_turn_multiple_of_ten_has_sheets(tmp_path, monkeypatch):
+    """Turns that are multiples of 10 re-attach the deck sheets."""
+    _setup(tmp_path, monkeypatch)
+    with_sheets = play_game.build_prologue("g", 10, True)
+    without = play_game.build_prologue("g", 3, False)
+    assert "== Main" in with_sheets
+    assert "== Main" not in without

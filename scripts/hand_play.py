@@ -21,6 +21,12 @@ ATK (attack with), FIN (finish), CAN (cancel), POS:attack / POS:defense (positio
 RACE:/ATTR: (announce race/attribute by name fragment), COUNT:/RPS:/PLA: (rare: counters,
 rock-paper-scissors, places — numbers usually suffice)) or one of END (TO_END), BP (TO_BATTLE),
 M2 (TO_MAIN2). `do` stops at the first token that matches no option and prints the state.
+Commands are case-insensitive (`CHECK`, `Show`). `SEL:face-down` (also `opponents_face-down`,
+`set`, `facedown`) picks the unique face-down option, else lists them for an option-number pick.
+`CAN`, `CANCEL` and `NO` answer the passive option at any prompt that offers one (YES/NO prompts
+still need explicit YES/NO). `BP` works only where a Battle Phase option is on offer (the idle
+prompt). Several `ATK:` tokens may share one `do` (one attack each; empty chain windows between
+attacks are passed like --auto-pass).
 A numeric token is only valid while the current prompt's option list still equals the option list of the
 prompt the command started on (numbers re-index after every pick, so a stale number would hit the wrong
 card); otherwise `do` stops with a prompt-changed message. Named tokens (SEL:name, P, ...) keep working
@@ -178,6 +184,52 @@ def _zone_of(obs, i: int) -> str:
     return f"{name} {zone}"
 
 
+_FACE_DOWN_POS = (2, 4, 6)  # obs position col: face-down ATK / face-down DEF / set
+
+
+def _is_face_down(obs, i: int) -> bool:
+    """Whether option `i` names a face-down card in the acting seat's view (own set cards and the
+    opponent's face-down cards, whose code is 0 and whose label says "face-down")."""
+    try:
+        row = list(obs["actions"])[i]
+    except (IndexError, TypeError):
+        return False
+    try:
+        lbl = hidden_card(obs, i)
+    except (IndexError, TypeError):
+        lbl = ""
+    if lbl and "face-down" in lbl:
+        return True
+    try:
+        r = int(row[1])
+        cards = list(obs["cards"][obs["card_mask"]])
+        pos = int(cards[r][5]) if 0 <= r < len(cards) else 0
+    except (IndexError, TypeError):
+        return False
+    return pos in _FACE_DOWN_POS
+
+
+def _facedown_cands(obs, head: str) -> list[int]:
+    """Option indices matching kind `head` whose card is face-down (for SEL:face-down)."""
+    out = []
+    for i, (k, _) in enumerate(_opts(obs)):
+        kname = _kind(k)
+        ok_kind = (k == _ALIASES[head]) if head in _ALIASES else kname.startswith(head)
+        if ok_kind and _is_face_down(obs, i):
+            out.append(i)
+    return out
+
+
+def _link_rating(code: int) -> int | None:
+    """The Link rating of card `code` (None when not a Link monster or unknown)."""
+    if not code:
+        return None
+    d = _card_db().get(code)
+    if d is None or not (d.type & C.TYPE_LINK):
+        return None
+    return int(d.level)
+
+
 def _display_names(obs, names: dict[int, str]) -> list[str]:
     """Base card name of each option (NUMBER options show their announced value). Duplicates get a
     " (loc)" suffix; duplicates that share the location also get the zone index, e.g. two Attack
@@ -273,6 +325,23 @@ def _match(obs, tok: str, names: dict[int, str]) -> int | None:
         return next((i for i, (k, _) in enumerate(opts) if k in _P_CHOICE), None)
     head, _, sub = tok.partition(":")
     head, sub = head.upper(), _norm(sub)
+    if head in ("CAN", "CANCEL", "NO"):
+        # bare cancel words (and CAN:/CANCEL:/NO: forms) mean the passive option at any prompt that
+        # offers one — except YES/NO prompts, where NO is a real decision and P still refuses.
+        msg = int(obs["global"][21]) if "global" in obs else -1
+        if msg not in _YESNO_MSGS:
+            j = next((i for i, (k, _) in enumerate(opts) if k in _P_CHOICE), None)
+            if j is not None:
+                return j
+        if head in ("CAN", "CANCEL"):
+            return None
+    if sub == "set" or "facedown" in sub:
+        # SEL:face-down (also opponents_face-down / opponent's face-down card / set / facedown):
+        # the unique face-down option of that kind; several face-downs need the option number.
+        cands = _facedown_cands(obs, head)
+        if len(cands) == 1:
+            return cands[0]
+        return None
     best = None  # (rank, index): exact name < name prefix < substring of name/description
     for i, (k, code) in enumerate(opts):
         kname = _kind(k)
@@ -336,15 +405,35 @@ def _available_kinds(obs) -> list[str]:
     return out
 
 
-def _no_match_msg(obs, tok: str) -> str:
+def _no_match_msg(obs, tok: str, names: dict[int, str] | None = None) -> str:
     """The `!!` line when `tok` matches no option: which kinds are on offer (and a hint for BP)."""
     if tok.upper() == "P" and int(obs["global"][21]) in _YESNO_MSGS:
         return "!! P does not answer yes/no prompts: use YES or NO"
+    msg = int(obs["global"][21])
+    head, _, sub = tok.partition(":")
+    if (sub and _norm(sub) == "set") or "facedown" in _norm(sub):
+        cands = _facedown_cands(obs, head.upper())
+        if len(cands) > 1:
+            try:
+                disp = _display_names(obs, names or {})
+            except (IndexError, TypeError):
+                disp = [f"option {i}" for i in cands]
+            listed = "; ".join(f"{i}: {disp[i]}" for i in cands)
+            return (
+                f"!! token {tok!r} matches several face-down cards: {listed} — "
+                "pick one with SEL:<card> (zone suffix) or the option number"
+            )
+        if not cands:
+            return f"!! token {tok!r} matches no face-down card at this prompt"
     avail = ", ".join(_available_kinds(obs)) or "none"
     extra = ""
-    head = tok.partition(":")[0].upper()
-    if head == "BP" and Kind.TO_BATTLE not in [k for k, _ in _opts(obs)]:
-        extra = " (no Battle Phase option now)"
+    if head.upper() == "BP" and Kind.TO_BATTLE not in [k for k, _ in _opts(obs)]:
+        extra = f" (no Battle Phase option at this prompt ({_MSGS.get(msg, msg)}); answer it first)"
+    if head.upper() == "BP" and extra:
+        return (
+            f"!! BP: no Battle Phase option at this prompt ({_MSGS.get(msg, msg)}); "
+            f"answer it first (available: {avail})"
+        )
     return f"!! token {tok!r} matches no option; available: {avail}{extra}"
 
 
@@ -584,8 +673,24 @@ def _show(env, obs, st: dict, names: CardNames, texts: bool, compact: bool = Fal
         print(f"Selected so far: {', '.join(sel) if sel else 'none'}")
     seen = set(st.setdefault("seen", []))
     disp = _display_names(obs, names.names)
+    material = int(g[21]) in _MULTI_MSGS  # card-pick prompts: every line names its card + zone
     for i, (k, code) in enumerate(_opts(obs)):
         nm = disp[i]
+        if material and k in (Kind.SELECT, Kind.UNSELECT):
+            # Link/material picks (e.g. Promethean Princess): always name the card with its
+            # location/zone suffix (not just on duplicates) plus the Link rating, so name
+            # tokens work and the agent need not guess indices.
+            base = names.names.get(code, f"#{code}") if code else (hidden_card(obs, i) or "(no card)")
+            zone = _zone_of(obs, i)
+            loc = _loc_of(obs, i)
+            suffix = zone or loc
+            if suffix:
+                nm = f"{base} ({suffix})"
+            else:
+                nm = base
+            lr = _link_rating(code)
+            if lr is not None:
+                nm = f"{nm} [Link-{lr}]"
         what = option_desc(obs, i)
         nm = f'{nm} "{what}"' if what else nm
         txt = ""
@@ -649,8 +754,17 @@ def _check(engine: Engine, env, obs, st: dict, names: CardNames) -> None:
         f"({'lethal' if atk >= int(g[1]) and not opp_mons else 'not lethal' if not opp_mons else 'blocked'}); "
         f"opponent controls monsters: {'yes' if opp_mons else 'no'}"
     )
-    for line in _battle_lines(obs, names.names):
+    for line in _battle_lines(obs, names.names, _probe_for_check(engine, obs, st)):
         print(line)
+
+
+def _probe_for_check(engine: Engine, obs, st: dict) -> list[tuple[int, int, bool]] | None:
+    """The engine attacker probe for `check`: only at a MSG_SELECT_IDLECMD offering TO_BATTLE."""
+    if obs is None or int(obs["global"][21]) != C.MSG_SELECT_IDLECMD:
+        return None
+    if Kind.TO_BATTLE not in [k for k, _ in _opts(obs)]:
+        return None
+    return _probe_battle_attackers(engine, st)
 
 
 def _why_at(notes: list, turns: list[int], actors: list[int], k: int) -> str:
@@ -770,15 +884,73 @@ def _summon_attack_lines(obs, names: dict[int, str], direct: int) -> list[str]:
     return out
 
 
-def _battle_lines(obs, names: dict[int, str]) -> list[str]:
+_PROBE_STEPS = 20  # max passive answers while stepping a scratch duel into its Battle Phase
+
+
+def _probe_battle_attackers(engine: Engine, st: dict) -> list[tuple[int, int, bool]] | None:
+    """Engine-true attackers behind a Main Phase TO_BATTLE option: replay the duel in a scratch env
+    (read-only: `st` is never mutated), step TO_BATTLE, answer any chain/yes-no windows with the
+    passive option, and read the MSG_SELECT_BATTLECMD ATTACK options.
+
+    Returns [(code, atk, direct_ok)] (direct_ok = the engine's direct-attack flag, obs arg col 5),
+    or None when there is no TO_BATTLE on offer, the Battle Phase cannot be reached passively, or
+    the duel ends on the way. There is no hidden-info issue: nothing is printed from the other
+    seat's view (only this seat already sees)."""
+    try:
+        env = CppEnv(engine, _config(st))
+        obs = env.reset()
+        # exact replay: recorded choices already include the auto-answered zone prompts
+        for ch in st["choices"]:
+            if obs is None:
+                return None
+            obs = env.step(int(ch))
+        if obs is None or int(obs["global"][21]) != C.MSG_SELECT_IDLECMD:
+            return None
+        tb = next((i for i, (k, _) in enumerate(_opts(obs)) if k == Kind.TO_BATTLE), None)
+        if tb is None:
+            return None
+        obs = env.step(tb)
+        for _ in range(_PROBE_STEPS):
+            while obs is not None and int(obs["global"][21]) == C.MSG_SELECT_PLACE:
+                obs = env.step(0)
+            if obs is None:
+                return None
+            if int(obs["global"][21]) == C.MSG_SELECT_BATTLECMD:
+                break
+            j = next((i for i, (k, _) in enumerate(_opts(obs)) if k in _PASSIVE), None)
+            if j is None:
+                return None
+            obs = env.step(j)
+        else:
+            return None
+        if obs is None or int(obs["global"][21]) != C.MSG_SELECT_BATTLECMD:
+            return None
+        rows = list(obs["cards"][obs["card_mask"]])
+        out = []
+        for i, (k, code) in enumerate(_opts(obs)):
+            if k != Kind.ATTACK:
+                continue
+            r = _opt_row(obs, i)
+            atk = int(rows[r][14]) if 0 <= r < len(rows) else 0
+            out.append((code, atk, bool(_arg_of(obs, i))))
+        return out
+    except Exception:  # noqa: BLE001 - any replay failure falls back to the text estimate
+        return None
+
+
+def _battle_lines(
+    obs, names: dict[int, str], engine_attackers: list[tuple[int, int, bool]] | None = None
+) -> list[str]:
     """Battle helper: own attackers (ATK, position), opponent monsters, direct-damage total, a greedy
     attack assignment vs face-up monsters, a summon-then-attack scan, and warnings for Attack Position
     monsters below the opponent's best face-up ATK (or with 0 ATK).
 
-    ATTACK options exist only in the Battle Phase, so in the Main Phase the attackers are estimated from
-    this seat's face-up Attack Position monsters on the board (clearly labelled as an estimate). The obs
-    does not expose whether a monster already attacked this turn, so the estimate assumes each one can
-    still attack. "Cannot attack directly" / "cannot attack" is a simple substring check of the card text.
+    ATTACK options exist only in the Battle Phase. In the Main Phase `check` probes the engine
+    (`engine_attackers`: the ATTACK options behind TO_BATTLE, with the engine's direct-attack flag),
+    so per-turn "cannot attack directly" clauses applied by other cards are modelled; only when no
+    TO_BATTLE is on offer do the attackers fall back to an estimate from this seat's face-up Attack
+    Position monsters (text heuristic, clearly labelled). The obs does not expose whether a monster
+    already attacked this turn, so the estimate assumes each one can still attack.
     """
     rows = list(obs["cards"][obs["card_mask"]])
 
@@ -787,14 +959,19 @@ def _battle_lines(obs, names: dict[int, str]) -> list[str]:
 
     attackers = []  # (name, atk, direct_ok)
     estimated = False
+    probed = False
     for i, (k, code) in enumerate(_opts(obs)):
         if k != Kind.ATTACK:
             continue
         r = _opt_row(obs, i)
         atk = int(rows[r][14]) if 0 <= r < len(rows) else 0
         attackers.append((nm(code), atk, bool(_arg_of(obs, i))))
+    if not attackers and engine_attackers is not None:
+        # Main Phase with TO_BATTLE on offer: the engine's own attacker list (u33 Cooky class).
+        probed = True
+        attackers = [(nm(code), atk, direct_ok) for code, atk, direct_ok in engine_attackers]
     if not attackers:
-        # Main Phase (no ATTACK option): estimate from own face-up Attack Position monsters.
+        # No ATTACK option and no probe (e.g. first turn, no Battle Phase): text-heuristic estimate.
         estimated = True
         for r in rows:
             if int(r[3]) != 0 or int(r[1]) != 3 or int(r[5]) != 1:
@@ -812,12 +989,29 @@ def _battle_lines(obs, names: dict[int, str]) -> list[str]:
             foes.append((nm(code), int(r[14]), int(r[15]), pos, True))
         else:
             foes.append((nm(code), 0, 0, pos, False))
-    out = ["Battle (estimate: no ATTACK option now — attackers from your face-up ATK monsters):"
-           if estimated else "Battle:"]
+    if probed:
+        out = ["Battle (engine: attackers and direct flags from the Battle Phase behind TO_BATTLE):"]
+    else:
+        out = ["Battle (estimate: no ATTACK option now — attackers from your face-up ATK monsters):"
+               if estimated else "Battle:"]
+    no_bp = estimated and int(obs["global"][2]) == 1
+    if no_bp:
+        out.append("  No Battle Phase on the first turn of the duel (attackers are hypothetical).")
+    # The engine's direct flag is only meaningful when the opponent controls no monsters (with
+    # blockers on board every flag reads 0); the text heuristic has no such caveat.
+    engine_flags = not estimated
+    field_empty = not any(int(r[3]) == 1 and int(r[1]) == 3 for r in rows)
     if attackers:
         bits = []
         for n, a, direct_ok in attackers:
-            tag = "" if direct_ok else " (text: cannot attack directly)"
+            if direct_ok:
+                tag = ""
+            elif engine_flags and field_empty:
+                tag = " (engine: cannot attack directly)"
+            elif estimated:
+                tag = " (text: cannot attack directly)"
+            else:
+                tag = ""
             bits.append(f"{n} [ATK {a}]{tag}")
         out.append("  Your attackers: " + "; ".join(bits))
     elif estimated:
@@ -831,7 +1025,12 @@ def _battle_lines(obs, names: dict[int, str]) -> list[str]:
         out.append("  Opponent monsters: " + "; ".join(bits))
     else:
         out.append("  Opponent monsters: none")
-    direct = sum(a for _, a, _ in attackers)
+    if engine_flags and field_empty:
+        # engine-true lethal math (u33 Cooky): attackers the engine bars from direct attacks
+        # do not count toward the direct total
+        direct = sum(a for _, a, ok in attackers if ok)
+    else:
+        direct = sum(a for _, a, _ in attackers)
     out.append(f"  Direct-damage total if the opponent's field were empty: {direct}")
     out.extend(_summon_attack_lines(obs, names, direct))
     faceup = [t for t in foes if t[4]]
@@ -885,7 +1084,7 @@ def _battle_lines(obs, names: dict[int, str]) -> list[str]:
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("cmd", choices=["new", "show", "do", "undo", "save", "check", "log"])
+    ap.add_argument("cmd", type=str.lower, choices=["new", "show", "do", "undo", "save", "check", "log"])
     ap.add_argument("game")
     ap.add_argument("rest", nargs="*")
     ap.add_argument("--why", default="")
@@ -941,6 +1140,7 @@ def main() -> None:
         start = len(st["choices"])
         actor = env.player if obs is not None else None
         stopped = "ok"
+        prev_attack = False  # the last choice applied in this command declared an attack
         first_opts = _prompt_key(obs) if obs is not None else ()
         toks = " ".join(a.rest).split()
         if a.auto_pass:
@@ -954,6 +1154,16 @@ def main() -> None:
             if obs is None:
                 stopped = "duel over"
                 break
+            # Attack bridge: several ATK: tokens in one `do` (one attack per token). After an
+            # attack resolves the prompt may leave the seat (opponent chain windows) and come
+            # back to MSG_SELECT_BATTLECMD for the same seat; pass those empty windows the same
+            # way --auto-pass does. Every other safety stop still applies below.
+            if (prev_attack and tok.partition(":")[0].upper() == "ATK" and obs is not None
+                    and int(obs["global"][21]) == C.MSG_SELECT_CHAIN):
+                n0 = len(st["choices"])
+                obs, reason = _pass_star(env, obs, st, names)
+                if len(st["choices"]) != n0:
+                    print(f"attack bridge passed {len(st['choices']) - n0} windows: {reason}")
             # PASS* may continue across seat changes: _pass_star still stops at any new decision
             # (a seat with something undecided), a non-chain prompt, a chain change or a turn change.
             if env.player != actor and not a.cross and tok.upper() != "PASS*":
@@ -965,6 +1175,7 @@ def main() -> None:
                 obs, reason = _pass_star(env, obs, st, names)
                 print(f"PASS* answered {len(st['choices']) - n0} windows: {reason}")
                 stopped = f"PASS*: {reason}"
+                prev_attack = False
                 continue
             if tok.isdigit() and _prompt_key(obs) != first_opts:
                 print(
@@ -975,7 +1186,7 @@ def main() -> None:
                 break
             i = _match(obs, tok, names.names)
             if i is None:
-                msg = _no_match_msg(obs, tok)
+                msg = _no_match_msg(obs, tok, names.names)
                 print(msg)
                 stopped = ("P on a yes/no prompt" if msg.startswith("!! P does not answer")
                            else f"no match for {tok!r}")
@@ -990,6 +1201,7 @@ def main() -> None:
             st["labels"].append("gold")
             st["actors"].append(env.player)
             st["turns"].append(int(obs["global"][2]))
+            prev_attack = (k == Kind.ATTACK)
             obs = env.step(i)
             obs = _auto(env, obs, st)
         if a.why and len(st["choices"]) > start:

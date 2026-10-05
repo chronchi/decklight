@@ -2,23 +2,28 @@
 
     uv run python scripts/play_game.py <game> <brief> [--model M]
 
-Loop: run `opencode run --auto -m M --dir . "<msg>" -f <brief>` under `taskset -c 0-3`, where msg =
-"Play ONLY turn <t> of duel <game> (both seats) following the attached brief. First run
-`hand_play.py log <game>` and `show`. Stop as soon as the turn number changes or the duel is over;
-do not write the report." After the duel is over, one final session: "The duel <game> is over: run
+Loop: run `opencode run --auto -m M --dir . "<msg>" -f <brief> -f <prologue>` under `taskset -c 0-3`, where msg =
+"Play ONLY turn <t> of duel <game> (both seats) following the attached brief. The current log and
+state are attached; do not re-run log/show unless something changed. Stop as soon as the turn number
+changes or the duel is over; do not write the report." <prologue> is a temp file built by
+`build_prologue` (log tail + show + deck sheets on the first session and every 10th turn).
+After the duel is over, one final session: "The duel <game> is over: run
 `save` once and write the report per the brief." Stops on duel over, on no progress twice in a row
 (no new choices), or after 60 sessions. Transient API errors (overloaded / rate limit) are retried
 like `delegate.sh`. Per-session rows go to `data/cache/briefs/runs.tsv` (tag `<game>.t<turn>`).
 Never starts if `<game>` has a live pid file (`data/cache/briefs/play-<game>.pid`).
 
 `--cmd-template` (or the YGO_PLAY_CMD env var) overrides the opencode command for tests: a shell
-template with {msg} {brief} {model} {game} {turn} {state} placeholders ({state} = the game's
-state.json path).
+template with {msg} {brief} {model} {game} {turn} {state} {prologue} {prologue_args} {tag}
+placeholders ({state} = the game's state.json path, {prologue} = the prologue file path,
+{prologue_args} = " -f <prologue>" or "").
 """
 
 from __future__ import annotations
 
 import argparse
+import contextlib
+import io
 import os
 import re
 import shlex
@@ -31,14 +36,19 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(ROOT / "scripts"))
 
+import deck_sheet
 import hand_play
 
+from ygo_zero.demos.names import CardNames
 from ygo_zero.engine.duel import Engine
 
 BRIEFS = ROOT / "data" / "cache" / "briefs"
 RUNS = BRIEFS / "runs.tsv"
 DEFAULT_MODEL = "opencode-go/muse-spark-1.3-contributor"
 MAX_SESSIONS = 60
+PROLOGUE_TURNS = 3  # `log` tail per session: the last 3 turns (full log stays available on demand)
+PROLOGUE_SHEET_EVERY = 10  # full deck sheets in the first session + every 10th turn
+MAX_PROLOGUE_CHARS = 12_000  # truncate the log head first, never the state
 _TRANSIENT = re.compile(r"overloaded|rate limit|ECONNRESET|503|502", re.IGNORECASE)
 
 
@@ -67,6 +77,52 @@ def _result_status(log_path: Path) -> str:
     return m[-1] if m else "none"
 
 
+def build_prologue(game: str, turn: int, include_sheets: bool) -> str:
+    """The turn's opening context, so the session needs no tool call before its first decision: the
+    `log` tail (last PROLOGUE_TURNS turns) + the current `show`, then both decks' `--brief` sheets
+    (first session of a game + every PROLOGUE_SHEET_EVERY-th turn; other sessions get the one-liner).
+    Kept under MAX_PROLOGUE_CHARS by truncating the log head first, never the state."""
+    st = hand_play._load(game)
+    engine = Engine()
+    names = CardNames()
+    env, obs = hand_play._replay(engine, st)
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        hand_play._log(st, names, engine, PROLOGUE_TURNS)
+    log_text = buf.getvalue().strip()
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        hand_play._show(env, obs, st, names, False)
+    show_text = buf.getvalue().strip()
+    if include_sheets:
+        sheets = "\n\n".join(
+            deck_sheet.sheet(deck, brief=True) for deck in st["decks"]
+        )
+    else:
+        sheets = (
+            "Deck sheets: run `deck_sheet.py <deck> --brief` if you need them "
+            f"({st['decks'][0]}, {st['decks'][1]})."
+        )
+    head = (
+        f"Turn {turn} of duel {game} ({st['decks'][0]} vs {st['decks'][1]}). "
+        "The current log and state are attached; do not re-run log/show unless something "
+        "changed."
+    )
+    prologue = head + "\n\n## Recent log (last 3 turns)\n" + log_text
+    prologue += "\n\n## Current state\n" + show_text + "\n\n## Deck sheets\n" + sheets
+    if len(prologue) <= MAX_PROLOGUE_CHARS:
+        return prologue
+    # truncate the log head first, never the state: drop whole lines until it fits (or the log
+    # is exhausted — sheet sessions stay above the cap: two --brief sheets alone are ~20k).
+    lines = log_text.splitlines()
+    marker = "[... earlier log truncated; run `hand_play.py log` for the full log ...]\n"
+    tail = "\n\n## Current state\n" + show_text + "\n\n## Deck sheets\n" + sheets
+    while lines and len(head) + len(marker) + len("\n".join(lines)) + len(tail) + 60 > MAX_PROLOGUE_CHARS:
+        lines.pop(0)
+    log_text = marker + "\n".join(lines) if lines else marker.strip()
+    return head + "\n\n## Recent log (last 3 turns)\n" + log_text + tail
+
+
 def run_session(
     *,
     game: str,
@@ -77,6 +133,7 @@ def run_session(
     final: bool = False,
     cmd_template: str | None = None,
     tries: int = 4,
+    prologue_path: str | None = None,
 ) -> tuple[int, Path]:
     """Run one opencode session; return (exit code, log path). Retries transient API errors."""
     if final:
@@ -85,16 +142,21 @@ def run_session(
         assert turn is not None
         msg = (
             f"Play ONLY turn {turn} of duel {game} (both seats) following the attached brief. "
-            f"First run `hand_play.py log {game}` and `show`. Stop as soon as the turn number "
-            "changes or the duel is over; do not write the report."
+            "The current log and state are attached; do not re-run log/show unless something "
+            "changed. Stop as soon as the turn number changes or the duel is over; "
+            "do not write the report."
         )
     template = cmd_template or (
-        "taskset -c 0-3 opencode run --auto -m {model} --dir . {msg} -f {brief}"
+        "taskset -c 0-3 opencode run --auto -m {model} --dir . {msg} -f {brief}{prologue_args}"
     )
+    prologue_args = f" -f {shlex.quote(prologue_path)}" if prologue_path else ""
     cmd = template.format(
         msg=shlex.quote(msg), brief=shlex.quote(brief), model=shlex.quote(model),
         game=shlex.quote(game), turn=shlex.quote(str(turn)),
         state=shlex.quote(str(hand_play.WORK / game / "state.json")),
+        prologue=shlex.quote(prologue_path) if prologue_path else "",
+        prologue_args=prologue_args,
+        tag=shlex.quote(tag),
     )
     log_path = BRIEFS / f"play-{tag}.log"
     rc = 1
@@ -157,8 +219,13 @@ def play(game: str, brief: str, model: str, max_sessions: int, cmd_template: str
                 return "over"
             if sessions >= max_sessions:
                 return "max-sessions"
+            tag = f"{game}.t{turn}"
+            include_sheets = sessions == 0 or turn % PROLOGUE_SHEET_EVERY == 0
+            prologue_file = BRIEFS / f"play-{tag}.prologue.md"
+            prologue_file.write_text(build_prologue(game, turn, include_sheets))
             run_session(game=game, turn=turn, brief=brief, model=model,
-                        tag=f"{game}.t{turn}", cmd_template=cmd_template)
+                        tag=tag, cmd_template=cmd_template,
+                        prologue_path=str(prologue_file))
             sessions += 1
             _, _, n1 = duel_status(game)
             stagnant = 0 if n1 != n0 else stagnant + 1

@@ -403,7 +403,10 @@ def test_no_match_msg_for_p_on_yes_no_and_kinds():
     obs2 = dict(_fake_obs_loc([(Kind.SUMMON, 111, 2, 0), (Kind.ACTIVATE, 222, 2, 0)]))
     obs2["global"] = g2
     msg = hand_play._no_match_msg(obs2, "BP")
-    assert msg == "!! token 'BP' matches no option; available: SUM, ACT (no Battle Phase option now)", msg
+    assert msg == (
+        "!! BP: no Battle Phase option at this prompt (MSG_SELECT_IDLECMD); "
+        "answer it first (available: SUM, ACT)"
+    ), msg
 
 
 def test_match_ignores_punctuation_and_case():
@@ -500,4 +503,261 @@ def test_deck_sheet_brief_truncates_text():
         text = line.split(" — ", 1)[1]
         assert len(text) <= 300, line[:80]
     assert brief.splitlines()[0].startswith("== Main")
+
+
+def _idle_obs_with(items, msg=0xB, turn=3):
+    """Fake window with full 10-col option rows: items = (kind, code, board_row, arg)."""
+    from ygo_zero.engine.actions import Kind  # noqa: F401
+
+    actions = [[int(k), row, code, 0, 0, arg, 0, 0, -1, 0] for k, code, row, arg in items]
+    g = [0] * 24
+    g[2], g[21] = turn, msg
+    return {"actions": actions, "action_mask": [1] * len(actions), "global": g}
+
+
+def test_battle_lines_use_probed_attackers_not_text():
+    """`check` battle section comes from the probed ATTACK options: a monster whose own text is
+    clean but whose engine direct flag is 0 is flagged engine-true (u33 Cooky class)."""
+    import numpy as np
+
+    from ygo_zero.engine.actions import Kind
+
+    code = 12345
+    cards = np.zeros((1, 21), dtype=np.int32)
+    cards[0, 0], cards[0, 1], cards[0, 2] = code, 3, 1
+    cards[0, 3], cards[0, 5], cards[0, 14] = 0, 1, 1000
+    obs = _idle_obs_with([(Kind.SPSUMMON, 999, -1, 0)])
+    obs["cards"] = cards
+    obs["card_mask"] = np.array([True])
+    lines = hand_play._battle_lines(obs, {code: "Cooky", 999: "Other"}, [(code, 1000, False)])
+    text = "\n".join(lines)
+    assert text.startswith("Battle (engine:")
+    assert "Cooky [ATK 1000] (engine: cannot attack directly)" in text
+
+
+def test_probe_returns_none_with_no_battle_option(tmp_path, monkeypatch):
+    """First-turn graceful path: a fresh duel (turn 1, no Battle Phase) probes to None."""
+    from ygo_zero.engine.duel import Engine
+
+    monkeypatch.setattr(hand_play, "WORK", tmp_path / "work")
+    monkeypatch.setattr(sys, "argv", ["hand_play.py", "new", "g", "snake-eye", "tenpai-dragon", "11"])
+    hand_play.main()
+    st = hand_play._load("g")
+    assert hand_play._probe_battle_attackers(Engine(), st) is None
+
+
+def test_check_uses_engine_attacker_list(tmp_path, monkeypatch, capsys):
+    """`check` prints the probed attacker list (monkeypatched probe)."""
+    monkeypatch.setattr(hand_play, "WORK", tmp_path / "work")
+    monkeypatch.setattr(sys, "argv", ["hand_play.py", "new", "g", "snake-eye", "tenpai-dragon", "11"])
+    hand_play.main()
+    capsys.readouterr()
+    monkeypatch.setattr(hand_play, "_probe_for_check", lambda engine, obs, st: [(424, 1000, False)])
+    monkeypatch.setattr(sys, "argv", ["hand_play.py", "check", "g"])
+    hand_play.main()
+    out = capsys.readouterr().out
+    assert "Battle (engine:" in out
+    assert "(engine: cannot attack directly)" in out
+
+
+def _facedown_obs():
+    """Two SELECT options: a set S/T (face-down) and a face-up monster."""
+    import numpy as np
+
+    from ygo_zero.engine.actions import Kind
+
+    cards = np.zeros((2, 21), dtype=np.int32)
+    cards[0, 0], cards[0, 1], cards[0, 2] = 1111, 4, 1
+    cards[0, 3], cards[0, 5] = 0, 6  # own set spell/trap
+    cards[1, 0], cards[1, 1], cards[1, 2] = 2222, 3, 1
+    cards[1, 3], cards[1, 5], cards[1, 14] = 0, 1, 2500
+    g = [0] * 24
+    g[21] = 0xF  # MSG_SELECT_CARD
+    return {
+        "actions": [
+            [int(Kind.SELECT), 0, 1111, 0, 0, 0, 0, 4, 0, 0],
+            [int(Kind.SELECT), 1, 2222, 0, 0, 0, 0, 3, 0, 0],
+        ],
+        "action_mask": [1, 1],
+        "cards": cards, "card_mask": np.array([True, True]),
+        "global": g,
+    }
+
+
+def test_sel_face_down_picks_unique():
+    names = {1111: "Infinite Impermanence", 2222: "Blue-Eyes White Dragon"}
+    for tok in ("SEL:face-down", "SEL:opponents_face-down", "SEL:set", "SEL:facedown"):
+        assert hand_play._match(_facedown_obs(), tok, names) == 0, tok
+
+
+def test_sel_face_down_lists_several(capsys):
+    obs = _facedown_obs()
+    cards = obs["cards"].copy()
+    cards[1, 1], cards[1, 5] = 4, 6  # both face-down now
+    obs["cards"] = cards
+    names = {1111: "Infinite Impermanence", 2222: "Infinite Impermanence"}
+    assert hand_play._match(obs, "SEL:face-down", names) is None
+    msg = hand_play._no_match_msg(obs, "SEL:face-down", names)
+    assert msg.startswith("!! token 'SEL:face-down' matches several face-down cards"), msg
+    assert "0:" in msg and "1:" in msg
+
+
+def test_cancel_words_answer_passive():
+    from ygo_zero.engine.actions import Kind
+
+    g = [0] * 24
+    g[21] = 0xF  # MSG_SELECT_CARD, not a yes/no prompt
+    obs = dict(_fake_obs([(Kind.SELECT, 111), (Kind.CANCEL, 0)]))
+    obs["global"] = g
+    assert hand_play._match(obs, "CAN", {}) == 1
+    assert hand_play._match(obs, "CANCEL", {}) == 1
+    assert hand_play._match(obs, "NO", {}) == 1
+    assert hand_play._match(obs, "CAN:cancel", {}) == 1
+    # at a YES/NO prompt NO is still a real decision and P still refuses
+    g2 = [0] * 24
+    g2[21] = 0xD
+    obs2 = dict(_fake_obs([(Kind.YES, 0), (Kind.NO, 0)]))
+    obs2["global"] = g2
+    assert hand_play._match(obs2, "NO", {}) == 1
+    assert hand_play._match(obs2, "P", {}) is None
+
+
+def test_commands_are_case_insensitive(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(hand_play, "WORK", tmp_path / "work")
+    monkeypatch.setattr(sys, "argv", ["hand_play.py", "new", "g", "snake-eye", "tenpai-dragon", "11"])
+    hand_play.main()
+    capsys.readouterr()
+    monkeypatch.setattr(sys, "argv", ["hand_play.py", "CHECK", "g"])
+    hand_play.main()
+    assert "Unused options:" in capsys.readouterr().out
+
+
+def test_bp_no_match_names_the_prompt():
+    from ygo_zero.engine.actions import Kind
+
+    g = [0] * 24
+    g[21] = 0x10  # MSG_SELECT_CHAIN
+    obs = dict(_fake_obs([(Kind.ACTIVATE, 111), (Kind.PASS, 0)]))
+    obs["global"] = g
+    msg = hand_play._no_match_msg(obs, "BP")
+    assert msg.startswith("!! BP: no Battle Phase option at this prompt (MSG_SELECT_CHAIN)"), msg
+
+
+def _battle_obs(actions, card_rows, msg=0xA, turn=3, phase=0x40, my_turn=1):
+    """Fake battle-phase window: actions = (kind, code, board_row, arg); card_rows = 21-col rows."""
+    import numpy as np
+
+    cards = np.zeros((len(card_rows), 21), dtype=np.int32)
+    for r, row in enumerate(card_rows):
+        cards[r] = row
+    acts = [[int(k), row, code, 0, 0, arg, 0, 3, 0, 0] for k, code, row, arg in actions]
+    g = [8000, 4000, turn, phase, 0, my_turn] + [0] * 18
+    g[21] = msg
+    return {
+        "actions": acts, "action_mask": [1] * len(acts),
+        "cards": cards, "card_mask": np.array([True] * len(card_rows)),
+        "global": g, "chain_mask": [], "chain": [],
+    }
+
+
+def _mon_row(code, seq, atk):
+    import numpy as np
+
+    row = np.zeros(21, dtype=np.int32)
+    row[0], row[1], row[2] = code, 3, seq
+    row[3], row[5], row[14], row[15] = 0, 1, atk, 1000
+    return row
+
+
+def test_multi_attack_tokens_bridge_chain_windows(tmp_path, monkeypatch, capsys):
+    """Several ATK: tokens in one `do`: after each attack the empty chain windows on the way back
+    to MSG_SELECT_BATTLECMD are passed (like --auto-pass); both attacks land in one command."""
+    from ygo_zero.demos.names import CardNames
+    from ygo_zero.engine.actions import Kind
+
+    hand_play._DECLINED.clear()
+    codes = CardNames()
+    cA = next(c for c, n in codes.names.items() if n == "Blue-Eyes White Dragon")
+    cB = next(c for c, n in codes.names.items() if n == "Dark Magician")
+    nA = codes.names[cA].replace(" ", "_")
+    nB = codes.names[cB].replace(" ", "_")
+    obs0 = _battle_obs(
+        [(Kind.ATTACK, cA, 0, 1), (Kind.TO_END, 0, -1, 0)],
+        [_mon_row(cA, 1, 3000), _mon_row(cB, 2, 2500)],
+    )
+    chain_obs = _battle_obs([(Kind.PASS, 0, -1, 0)], [], msg=0x10, my_turn=0)
+    obs1 = _battle_obs(
+        [(Kind.ATTACK, cB, 1, 1), (Kind.TO_END, 0, -1, 0)],
+        [_mon_row(cA, 1, 3000), _mon_row(cB, 2, 2500)],
+    )
+    idle_obs = _battle_obs([(Kind.TO_END, 0, -1, 0)], [_mon_row(cB, 2, 2500)], msg=0xB)
+
+    class _SeqEnv:
+        select_hint = 0
+        winner = None
+
+        def __init__(self):
+            self.player = 0
+            self.script = [(1, chain_obs), (0, obs1), (0, idle_obs)]
+
+        def step(self, i):
+            self.player, obs = self.script.pop(0)
+            return obs
+
+    monkeypatch.setattr(hand_play, "WORK", tmp_path / "work")
+    monkeypatch.setattr(sys, "argv", ["hand_play.py", "new", "g", "snake-eye", "tenpai-dragon", "11"])
+    hand_play.main()
+    capsys.readouterr()
+    monkeypatch.setattr(hand_play, "_replay", lambda engine, st: (_SeqEnv(), obs0))
+    monkeypatch.setattr(sys, "argv", ["hand_play.py", "do", "g", f"ATK:{nA} ATK:{nB}"])
+    hand_play.main()
+    out = capsys.readouterr().out
+    assert "attack bridge passed 1 windows" in out
+    st = hand_play._load("g")
+    assert st["labels"] == ["gold", "pass", "gold"], st["labels"]
+    assert st["actors"] == [0, 1, 0], st["actors"]
+
+
+def test_material_lines_show_zone_and_link_rating(tmp_path, monkeypatch, capsys):
+    """Link-material SELECT/UNSELECT lines name the card with its zone plus Link rating."""
+    import numpy as np
+
+    from ygo_zero.demos.names import CardNames
+    from ygo_zero.engine.actions import Kind
+
+    monkeypatch.setattr(hand_play, "WORK", tmp_path / "work")
+    monkeypatch.setattr(sys, "argv", ["hand_play.py", "new", "g", "snake-eye", "tenpai-dragon", "11"])
+    hand_play.main()
+    st = hand_play._load("g")
+    capsys.readouterr()
+    codes = CardNames()
+    sp = next(c for c, n in codes.names.items() if n == "S:P Little Knight")
+    baron = next(c for c, n in codes.names.items() if "Barong" in n)
+    cards = np.zeros((2, 21), dtype=np.int32)
+    cards[0, 0], cards[0, 1], cards[0, 2] = baron, 3, 1
+    cards[0, 3], cards[0, 5], cards[0, 14] = 0, 1, 1800
+    cards[1, 0], cards[1, 1], cards[1, 2] = sp, 3, 6
+    cards[1, 3], cards[1, 5], cards[1, 14] = 0, 1, 1600
+    g = [8000, 8000, 2, 0x100, 1, 1] + [0] * 18
+    g[21] = 0x1A  # MSG_SELECT_UNSELECT_CARD
+    obs = {
+        "actions": [
+            [int(Kind.SELECT), 0, baron, 0, 0, 0, 0x1A, 3, 0, 0],
+            [int(Kind.SELECT), 1, sp, 0, 0, 0, 0x1A, 3, 0, 0],
+        ],
+        "action_mask": [1, 1],
+        "cards": cards, "card_mask": np.array([True, True]),
+        "global": g, "chain_mask": [], "chain": [],
+    }
+
+    class _Env:
+        player = 0
+        select_hint = 0
+
+    hand_play._show(_Env(), obs, st, codes, False)
+    out = capsys.readouterr().out
+    assert "Monster Zone" in out
+    assert "[Link-2]" in out
+    assert hand_play._link_rating(sp) == 2
+    assert hand_play._link_rating(baron) is None
 
