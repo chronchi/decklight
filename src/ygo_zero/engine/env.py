@@ -51,6 +51,10 @@ class PyEnv:
     def player(self) -> int:
         return self.dec.msg.player
 
+    @property
+    def knowledge_resyncs(self) -> int:
+        return self.duel.knowledge_resyncs
+
     def history_log(self) -> np.ndarray:
         """All recorded entries in absolute form [n, 14] (see `obs.history_log`)."""
         return O.history_log(self.history)
@@ -127,6 +131,7 @@ class PyEnv:
     def _observe(self) -> Obs:
         b, dec, me = self.board, self.dec, self.player
         cards, card_mask = b.cards(dec.selected)
+        card_known, known_code = b.knowledge(self.duel.memory)
         chain, chain_mask = b.chain_array()
         actions, action_mask = O.actions_array(b, dec, self.opts)
         history, history_mask = O.history_array(self.history, me, self.duel.turn)
@@ -135,6 +140,7 @@ class PyEnv:
         )
         return {
             "cards": cards, "card_mask": card_mask,
+            "card_known": card_known, "known_code": known_code,
             "global": b.global_array(self.duel, dec.msg.type),
             "chain": chain, "chain_mask": chain_mask,
             "actions": actions, "action_mask": action_mask,

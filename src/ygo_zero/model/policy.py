@@ -88,15 +88,20 @@ class ActionEmbed(nn.Module):
 class PolicyNet(nn.Module):
     def __init__(
         self, emb: dict[str, np.ndarray], d: int = 256, layers: int = 4, heads: int = 4, dropout: float = 0.1,
-        card_dropout: float = 0.0, hist: int = 0,
+        card_dropout: float = 0.0, hist: int = 0, known: bool = False,
     ):
         """`hist`: long-memory window (obs v2, ADR 0005). 0 = v1 exactly (same parameters, old state dicts
         load with strict=True); > 0 adds a learned recency-position embedding and widens the turns-ago
-        embedding to 32 buckets."""
+        embedding to 32 buckets. `known`: card-knowledge memory (obs v2). False = exactly the step-A
+        parameters (old state dicts load with strict=True); True adds a card_known embedding and feeds
+        `known_code` to CardText where `card_known == 1`."""
         super().__init__()
         self.hist = hist
+        self.known = known
         self.text = CardText(emb["codes"], emb["card"], emb["effects"], emb["n_effects"], d)
         self.text.p_unknown = card_dropout
+        if known:
+            self.known_emb = nn.Embedding(3, d)  # card_known flag (0 unknown/hidden, 1 remembered, 2 revealed)
         self.loc = nn.Embedding(16, d)
         self.seq = nn.Embedding(33, d)
         self.ctrl = nn.Embedding(2, d)
@@ -129,8 +134,17 @@ class PolicyNet(nn.Module):
         self.act_norm = nn.LayerNorm(d)
         self.head = nn.Sequential(nn.Linear(3 * d, d), nn.GELU(), nn.Linear(d, 1))
 
-    def encode_cards(self, cards: torch.Tensor) -> torch.Tensor:
+    def encode_cards(self, cards: torch.Tensor, card_known: torch.Tensor | None = None,
+                       known_code: torch.Tensor | None = None) -> torch.Tensor:
         c = cards.long()
+        code = c[..., 0]
+        extra = 0.0
+        if self.known:
+            if card_known is None or known_code is None:
+                raise KeyError("this PolicyNet was built with known=True: the obs needs card_known/known_code")
+            k = card_known.long().clamp(0, 2)
+            code = torch.where(k == 1, known_code.long(), code)  # remembered identity, not "hidden"
+            extra = self.known_emb(k)
         stats = torch.stack(
             [c[..., 14], c[..., 15], c[..., 16], c[..., 17], c[..., 18] & 0xFF, (c[..., 18] >> 8) & 0xFF], -1
         ).float()
@@ -148,7 +162,7 @@ class PolicyNet(nn.Module):
             -1,
         )
         return (
-            self.text(c[..., 0])
+            self.text(code)
             + self.loc(c[..., 1].clamp(0, 15))
             + self.seq(c[..., 2].clamp(0, 32))
             + self.ctrl(c[..., 3].clamp(0, 1))
@@ -161,12 +175,13 @@ class PolicyNet(nn.Module):
             + self.bits(bits)
             + self.stats(stats)
             + self.sel(c[..., 20].clamp(0, 1))
+            + extra
         )
 
     def forward(self, obs: dict[str, torch.Tensor]) -> torch.Tensor:
         cards, glob = obs["cards"], obs["global"].long()
         B = cards.shape[0]
-        card_tok = self.encode_cards(cards) + self.type_emb.weight[1]
+        card_tok = self.encode_cards(cards, obs.get("card_known"), obs.get("known_code")) + self.type_emb.weight[1]
         num = glob[:, :22].float()
         num = torch.cat([num[:, :2] / 8000.0, num[:, 2:20] / 40.0, num[:, 20:22] / 64.0], -1)
         g = (

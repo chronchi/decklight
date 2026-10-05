@@ -148,6 +148,27 @@ class Board:
                 out[i, 20] = 1
         return out, mask
 
+    def knowledge(self, memory) -> tuple[np.ndarray, np.ndarray]:
+        """Card-knowledge memory (obs v2, docs/obs_spec.md): per card row, `card_known` uint8 [160]
+        (1 = opponent's hidden card whose identity I remember, 2 = my own hidden card the
+        opponent knows, else 0) and `known_code` int32 [160] (the remembered passcode for
+        `card_known == 1` rows, else 0)."""
+        known = np.zeros(MAX_CARDS, np.uint8)
+        code = np.zeros(MAX_CARDS, np.int32)
+        for i, r in enumerate(self.rows):
+            c = r.card
+            if c.location != C.LOCATION_HAND:
+                continue
+            hk = memory.known[c.controller]
+            if not (0 <= c.sequence < len(hk) and hk[c.sequence]):
+                continue
+            if c.controller == self.me:
+                known[i] = 2  # my own hand is visible to me; the flag is about the opponent
+            elif not r.visible:
+                known[i] = 1
+                code[i] = c.code
+        return known, code
+
     def _card_row(self, r: Row) -> list[int]:
         c, me = r.card, self.me
         loc = c.location

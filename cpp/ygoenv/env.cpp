@@ -207,6 +207,20 @@ void Board::fill(Obs& obs, const Duel& duel, int msg_type, const std::vector<Car
     int i = row_of(&ref);
     if (i >= 0) obs.cards[i * CARD_COLS + 20] = 1;
   }
+  // Card-knowledge memory (obs v2): per card row, 1 = opponent's hidden card whose identity the
+  // viewer remembers (with the remembered passcode), 2 = own hidden card known to the opponent.
+  for (size_t i = 0; i < rows.size(); ++i) {
+    const auto& c = rows[i].card;
+    if (c.location != LOCATION_HAND || c.controller > 1) continue;
+    const auto& hk = duel.hand_known_[c.controller];
+    if (c.sequence >= hk.size() || !hk[c.sequence]) continue;
+    if (static_cast<int>(c.controller) == me) {
+      obs.card_known[i] = 2;  // my own hand is visible to me; the flag is about the opponent
+    } else if (!rows[i].visible) {
+      obs.card_known[i] = 1;
+      obs.known_code[i] = static_cast<int32_t>(c.code);
+    }
+  }
   for (size_t i = 0; i < std::min<size_t>(chain_.size(), MAX_CHAIN); ++i) {
     const auto& ch = chain_[i];
     CardRef ref{ch.code, ch.controller, ch.location, ch.sequence, ch.position};

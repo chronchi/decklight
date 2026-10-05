@@ -113,3 +113,153 @@ def test_policy_hist0_loads_v1_strict_and_hist128_runs():
     with torch.no_grad():
         out = big(_batch(b=4, h=128))
     assert out.shape == (4, 64) and torch.isfinite(out[:, :2]).all()
+
+
+# --- memory v2 step B: card-knowledge tracker, shards, known model (no engine needed) ---
+
+def _move(code, fc, fl, fs, fp, tc, tl, ts, tp=0xA):
+    import struct
+
+    from ygo_zero.engine import constants as C
+
+    return bytes([C.MSG_MOVE]) + struct.pack("<I", code) + bytes([fc, fl]) + struct.pack(
+        "<II", fs, fp) + bytes([tc, tl]) + struct.pack("<II", ts, tp) + struct.pack("<I", 0)
+
+
+def _draw(player, codes, positions=None):
+    import struct
+
+    from ygo_zero.engine import constants as C
+
+    positions = positions if positions is not None else [0x2] * len(codes)
+    out = bytes([C.MSG_DRAW, player]) + struct.pack("<I", len(codes))
+    for c, p in zip(codes, positions, strict=True):
+        out += struct.pack("<II", c, p)
+    return out
+
+
+def _confirm(viewer, entries):
+    import struct
+
+    from ygo_zero.engine import constants as C
+
+    out = bytes([C.MSG_CONFIRM_CARDS, viewer]) + struct.pack("<I", len(entries))
+    for code, con, loc, seq in entries:
+        out += struct.pack("<I", code) + bytes([con, loc]) + struct.pack("<I", seq)
+    return out
+
+
+def _shuffle(player, codes):
+    import struct
+
+    from ygo_zero.engine import constants as C
+
+    out = bytes([C.MSG_SHUFFLE_HAND, player]) + struct.pack("<I", len(codes))
+    for c in codes:
+        out += struct.pack("<I", c)
+    return out
+
+
+def test_hand_memory_messages():
+    from ygo_zero.engine import constants as C
+    from ygo_zero.engine.knowledge import HandMemory
+
+    m = HandMemory()
+    assert m.note(_draw(0, [101, 102]))  # opening draw: unknown
+    assert m.known == [[False, False], []]
+    # search: Deck -> hand (still unknown), then confirmed to player 1
+    assert m.note(_move(103, 0, C.LOCATION_DECK, 30, 0x8, 0, C.LOCATION_HAND, 2, 0xA))
+    assert m.known[0] == [False, False, False] and m.codes[0][2] == 103
+    assert m.note(_confirm(1, [(103, 0, C.LOCATION_HAND, 2)]))
+    assert m.known[0] == [False, False, True]
+    # confirm-to-self does not count
+    assert m.note(_confirm(0, [(101, 0, C.LOCATION_HAND, 0)]))
+    assert m.known[0] == [False, False, True]
+    # bounce: face-up field -> hand is known at once; face-down is not
+    assert m.note(_move(104, 0, C.LOCATION_MZONE, 1, 0x1, 0, C.LOCATION_HAND, 3, 0xA))
+    assert m.note(_move(105, 0, C.LOCATION_SZONE, 0, 0x8, 0, C.LOCATION_HAND, 4, 0xA))
+    assert m.known[0] == [False, False, True, True, False]
+    # leaving drops the flag and shifts later seqs down
+    assert m.note(_move(103, 0, C.LOCATION_HAND, 2, 0xA, 0, C.LOCATION_MZONE, 4, 0x1))
+    assert m.known[0] == [False, False, True, False]
+    # GY -> hand is public; banished face-down -> hand is not
+    assert m.note(_move(106, 0, C.LOCATION_GRAVE, 5, 0x5, 0, C.LOCATION_HAND, 4, 0xA))
+    assert m.note(_move(107, 0, C.LOCATION_REMOVED, 0, 0xA, 0, C.LOCATION_HAND, 5, 0xA))
+    assert m.known[0] == [False, False, True, False, True, False]
+    # shuffle re-aligns by code: the known 106 moves with its code
+    assert m.note(_shuffle(0, [107, 101, 102, 104, 105, 106]))
+    assert m.known[0] == [False, False, False, True, False, True]
+    assert m.codes[0] == [107, 101, 102, 104, 105, 106]
+    # malformed messages are ignored, not fatal
+    assert m.note(bytes([C.MSG_MOVE, 1, 2, 3]))
+    assert m.note(b"")
+    assert m.known[0] == [False, False, False, True, False, True]
+    # resync guard rebuilds a drifted list as unknown and reports False
+    assert not m.guard((5, 3))
+    assert m.known == [[False] * 5, [False] * 3]
+    assert m.guard((5, 3))
+
+
+def test_hand_memory_setup_hands():
+    from ygo_zero.engine.knowledge import HandMemory
+
+    m = HandMemory(([111, 112], [113]))
+    assert m.known == [[False, False], [False]] and m.codes == [[111, 112], [113]]
+
+
+def test_load_shards_known_mixed_raises_and_absent_ok(tmp_path):
+    import numpy as np
+
+    from ygo_zero.model.bc_data import load_shards
+
+    def shard(name, known):
+        d = {"action": np.zeros(2, dtype=np.int64)}
+        if known:
+            d["card_known"] = np.zeros((2, 160), np.uint8)
+            d["known_code"] = np.zeros((2, 160), np.int32)
+        np.savez(tmp_path / f"{name}.npz", **d)
+
+    shard("a", True)
+    shard("b", False)
+    try:
+        load_shards(tmp_path)
+    except ValueError as e:
+        assert "card_known" in str(e)
+    else:
+        raise AssertionError("mixed shards with/without card_known must raise")
+    (tmp_path / "a.npz").unlink()
+    data = load_shards(tmp_path)  # uniform without the keys: tolerated
+    assert "card_known" not in data
+
+
+def test_policy_known_false_loads_step_a_strict_and_known_runs():
+    from ygo_zero.model.policy import PolicyNet
+
+    emb = _emb()
+    step_a = PolicyNet(emb, d=16, layers=1, heads=2, hist=128)
+    sd = step_a.state_dict()
+    assert "known_emb.weight" not in sd
+    fresh = PolicyNet(emb, d=16, layers=1, heads=2, hist=128, known=False)
+    fresh.load_state_dict(sd, strict=True)  # step-A checkpoints keep working bit-for-bit
+    step_a.eval()
+    fresh.eval()
+    with torch.no_grad():
+        assert torch.equal(step_a(_batch(b=2, h=128)), fresh(_batch(b=2, h=128)))
+
+    assert "known_emb.weight" in PolicyNet(emb, d=16, layers=1, heads=2, known=True).state_dict()
+    big = PolicyNet(emb, d=16, layers=1, heads=2, hist=128, known=True)
+    big.eval()
+    batch = _batch(b=2, h=128)
+    batch["card_known"] = torch.zeros(2, 160, dtype=torch.long)
+    batch["known_code"] = torch.zeros(2, 160, dtype=torch.long)
+    batch["card_known"][0, 3] = 1
+    batch["known_code"][0, 3] = 5  # a remembered code must change the card token, not stay "hidden"
+    with torch.no_grad():
+        out = big(batch)
+    assert out.shape == (2, 64) and torch.isfinite(out[:, :2]).all()
+    batch["card_known"][0, 3] = 0
+    batch["known_code"][0, 3] = 0
+    with torch.no_grad():
+        out2 = big(batch)
+    assert not torch.equal(out, out2)
+

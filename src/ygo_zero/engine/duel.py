@@ -20,6 +20,7 @@ from ygo_zero.engine import constants as C
 from ygo_zero.engine import messages as M
 from ygo_zero.engine import ocgapi as api
 from ygo_zero.engine import query as Q
+from ygo_zero.engine.knowledge import HandMemory
 from ygo_zero.engine.resources import CORE_LIB, CardData, index_scripts, load_cards
 
 TCG_FLAGS = C.DUEL_MODE_MR5 | C.DUEL_TCG_SEGOC_NONPUBLIC
@@ -192,6 +193,15 @@ class Duel:
         self.first_player: int | None = None
         self.phase = 0
         self._ended = False
+        # Card-knowledge memory (docs/obs_spec.md v2 annex): per hand seq, whether the other
+        # player knows the card's identity. Seeded with puzzle-setup hands (no messages announce
+        # them); everything else arrives via MSG_MOVE / DRAW / CONFIRM_CARDS / SHUFFLE_HAND.
+        setup_hands: list[list[int]] = [[], []]
+        for pl in config.setup:
+            if pl.location == C.LOCATION_HAND:
+                setup_hands[pl.team].append(pl.code)
+        self.memory = HandMemory((setup_hands[0], setup_hands[1]))
+        self.knowledge_resyncs = 0  # guard rebuilds; must stay 0 on clean replays (tests assert it)
 
         # Per-duel callbacks so script errors land in this duel's log.
         self._script_reader = api.OCG_ScriptReader(self._read_script)
@@ -272,6 +282,8 @@ class Duel:
             buf = ctypes.string_at(ptr, length.value) if ptr and length.value else b""
             for raw in M.split_buffer(buf):
                 self.trace.append(raw)
+                if not self.memory.note(raw):
+                    self.knowledge_resyncs += 1
                 t = raw[0]
                 if t == C.MSG_RETRY:
                     last = self.responses[-1].hex() if self.responses else None
@@ -294,7 +306,17 @@ class Duel:
                 self._ended = True
             elif status == api.DUEL_STATUS_AWAITING and self.pending is None and not self._ended:
                 raise RuntimeError("core is awaiting a response but sent no select message")
+        if self.pending is not None:
+            self._guard_knowledge()
         return self.pending
+
+    def _guard_knowledge(self) -> None:
+        """Resync guard: at every decision the tracked hand lengths must match the core's."""
+        sizes = tuple(
+            len([c for c in self.query_location(p, C.LOCATION_HAND) if c is not None]) for p in (0, 1)
+        )
+        if not self.memory.guard(sizes):
+            self.knowledge_resyncs += 1
 
     def respond(self, response: bytes) -> None:
         if self.pending is None:

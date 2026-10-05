@@ -145,6 +145,11 @@ Duel::Duel(Engine& engine, const DuelConfig& config) : engine(engine), config(co
     if (pl.position) pos = pl.position;
     OCG_NewCardInfo info{pl.team, 0, pl.code, pl.team, pl.location, pl.sequence, pos};
     OCG_DuelNewCard(handle_, &info);
+    // Puzzle-setup hands announce no messages: seed the knowledge lists (unknown to the opponent).
+    if (pl.location == LOCATION_HAND) {
+      hand_known_[pl.team].push_back(0);
+      hand_codes_[pl.team].push_back(pl.code);
+    }
   }
   OCG_StartDuel(handle_);
 }
@@ -198,6 +203,7 @@ const Bytes* Duel::advance() {
       pos += size;
       if (!size) continue;
       uint8_t t = m[0];
+      track_message(m, size);  // card-knowledge memory sees every message, CONTINUE and AWAITING
       if (t == MSG_RETRY) throw std::runtime_error("core rejected response at step " + std::to_string(responses.size()));
       if (t == MSG_NEW_TURN) {
         ++turn;
@@ -225,6 +231,7 @@ const Bytes* Duel::advance() {
     else if (status == OCG_DUEL_STATUS_AWAITING && !has_pending_ && !ended)
       throw std::runtime_error("core is awaiting a response but sent no select message");
   }
+  if (has_pending_) guard_knowledge();  // resync guard at every decision
   return has_pending_ ? &pending_ : nullptr;
 }
 
@@ -233,6 +240,124 @@ void Duel::respond(const Bytes& response) {
   OCG_DuelSetResponse(handle_, response.data(), static_cast<uint32_t>(response.size()));
   responses.push_back(response);
   has_pending_ = false;
+}
+
+// ---------------------------------------------------------------- card knowledge
+
+namespace {
+
+uint32_t rd32(const uint8_t* p) {
+  uint32_t v;
+  std::memcpy(&v, p, 4);
+  return v;
+}
+
+// Was a card leaving (from_loc, from_pos) public to a player other than its holder?
+// Mirrors Board::is_public: face-up field, GY, face-up banished / face-up Extra Deck, and
+// overlay materials (always public) count.
+bool source_public(uint32_t from_loc, uint32_t from_pos) {
+  if (from_loc & LOCATION_OVERLAY) return true;
+  if (from_loc == LOCATION_GRAVE) return true;
+  if (from_loc == LOCATION_REMOVED || from_loc == LOCATION_EXTRA) return (from_pos & POS_FACEUP) != 0;
+  if (from_loc == LOCATION_MZONE || from_loc == LOCATION_SZONE) return (from_pos & POS_FACEUP) != 0;
+  return false;
+}
+
+}  // namespace
+
+void Duel::track_message(const uint8_t* m, uint32_t size) {
+  uint8_t t = m[0];
+  if (t == MSG_MOVE) {
+    // code u32 + from loc_info + to loc_info + reason u32 (always 29 bytes; from.seq is the
+    // pre-removal index, to.seq the post-insertion index; hand adds append).
+    if (size != 29) return;
+    uint32_t code = rd32(m + 1);
+    uint8_t fc = m[5], fl = m[6];
+    uint32_t fs = rd32(m + 7), fp = rd32(m + 11);
+    uint8_t tc = m[15], tl = m[16];
+    uint32_t ts = rd32(m + 17), tp = rd32(m + 21);
+    bool from_hand = fl == LOCATION_HAND && fc < 2;
+    bool to_hand = tl == LOCATION_HAND && tc < 2;
+    if (!from_hand && !to_hand) return;
+    uint8_t old = 0;
+    if (from_hand && fs < hand_known_[fc].size()) {
+      old = hand_known_[fc][fs];
+      hand_known_[fc].erase(hand_known_[fc].begin() + fs);
+      hand_codes_[fc].erase(hand_codes_[fc].begin() + fs);
+    }
+    if (to_hand) {
+      uint8_t known;
+      if (from_hand && fc == tc)
+        known = old;  // same-player reorder (defensive; move_card refuses these)
+      else if (from_hand)
+        known = 1;  // a card changing hands: the previous holder knows what they gave
+      else
+        known = ((tp & POS_FACEUP) || source_public(fl, fp)) ? 1 : 0;
+      uint32_t at = std::min<uint32_t>(ts, hand_known_[tc].size());
+      hand_known_[tc].insert(hand_known_[tc].begin() + at, known);
+      hand_codes_[tc].insert(hand_codes_[tc].begin() + at, code);
+    }
+  } else if (t == MSG_DRAW) {
+    // player u8 + drawn u32 + drawn x (code u32, position u32), in hand-append order.
+    if (size < 6) return;
+    uint8_t player = m[1];
+    uint32_t drawn = rd32(m + 2);
+    if (player > 1 || size != 6 + 8 * drawn) return;
+    for (uint32_t i = 0; i < drawn; ++i) {
+      hand_codes_[player].push_back(rd32(m + 6 + 8 * i));
+      hand_known_[player].push_back((rd32(m + 6 + 8 * i + 4) & POS_FACEUP) ? 1 : 0);
+    }
+  } else if (t == MSG_CONFIRM_CARDS) {
+    // viewer u8 + count u32 + count x (code u32, controller u8, location u8, sequence u32).
+    if (size < 6) return;
+    uint8_t viewer = m[1];
+    uint32_t count = rd32(m + 2);
+    if (viewer > 1 || size != 6 + 10 * count) return;
+    for (uint32_t i = 0; i < count; ++i) {
+      const uint8_t* e = m + 6 + 10 * i;
+      uint8_t con = e[4], loc = e[5];
+      uint32_t seq = rd32(e + 6);
+      if (loc == LOCATION_HAND && con < 2 && viewer != con && seq < hand_known_[con].size())
+        hand_known_[con][seq] = 1;
+    }
+  } else if (t == MSG_SHUFFLE_HAND) {
+    // player u8 + count u32 + count x code u32 in the new hand order. Identical copies are
+    // interchangeable: per code, keep the number of known instances, assign to first positions.
+    if (size < 6) return;
+    uint8_t player = m[1];
+    uint32_t count = rd32(m + 2);
+    if (player > 1 || size != 6 + 4 * count) return;
+    std::vector<uint32_t> codes(count);
+    for (uint32_t i = 0; i < count; ++i) codes[i] = rd32(m + 6 + 4 * i);
+    auto& known = hand_known_[player];
+    auto& hc = hand_codes_[player];
+    if (codes.size() != known.size() || hc.size() != known.size()) {
+      known.assign(codes.size(), 0);
+      hc = codes;
+      ++knowledge_resyncs_;
+      return;
+    }
+    std::unordered_map<uint32_t, uint32_t> keep;
+    for (size_t i = 0; i < known.size(); ++i)
+      if (known[i]) ++keep[hc[i]];
+    for (size_t i = 0; i < codes.size(); ++i) {
+      auto it = keep.find(codes[i]);
+      known[i] = (it != keep.end() && it->second > 0) ? 1 : 0;
+      if (known[i]) --it->second;
+    }
+    hc = codes;
+  }
+}
+
+void Duel::guard_knowledge() {
+  for (uint8_t p = 0; p < 2; ++p) {
+    size_t n = query_location(p, LOCATION_HAND).size();
+    if (hand_known_[p].size() != n) {
+      hand_known_[p].assign(n, 0);
+      hand_codes_[p].assign(n, 0);
+      ++knowledge_resyncs_;
+    }
+  }
 }
 
 // ---------------------------------------------------------------- queries

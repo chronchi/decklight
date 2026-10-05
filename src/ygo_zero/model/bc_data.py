@@ -27,6 +27,9 @@ OBS_KEYS = (
     "history_mask",
 )
 
+# Card-knowledge memory (obs v2, docs/obs_spec.md): stored in shards when the env produced it.
+KNOWN_KEYS = ("card_known", "known_code")
+
 # Option-row columns (docs/action_spec.md): 0 kind, 1 card row, 2 code, 3 effect_code,
 # 4 effect_idx, 5 arg, 6 msg, 7 location, 8 controller, 9 step.
 PLACE_KIND = 19
@@ -136,6 +139,8 @@ def _shard_one(job: tuple[str, str, str]) -> tuple[str, int]:
 
     src_file, out_file, src_tag = job
     cols: dict[str, list] = {k: [] for k in OBS_KEYS}
+    known_cols: dict[str, list] = {k: [] for k in KNOWN_KEYS}
+    has_known: bool | None = None  # all samples of one file either carry the keys or not
     action, weight, line, deck, kind, equiv = [], [], [], [], [], []
     hlog_rows: list = []  # per-record logs in first-seen order (shared refs from iter_samples meta)
     hlog_start, hlog_end, seath, turnh = [], [], [], []
@@ -146,6 +151,14 @@ def _shard_one(job: tuple[str, str, str]) -> tuple[str, int]:
     for obs, a, w, meta in iter_samples(_ENGINE, Path(src_file)):
         for k in OBS_KEYS:
             cols[k].append(obs[k])
+        hk = all(k in obs for k in KNOWN_KEYS)
+        if has_known is None:
+            has_known = hk
+        elif hk != has_known:
+            raise ValueError(f"mixed obs with/without {KNOWN_KEYS} in one file: {src_file}")
+        if hk:
+            for k in KNOWN_KEYS:
+                known_cols[k].append(obs[k])
         equiv.append(equivalent_mask(obs["actions"], a, obs.get("action_mask")))
         action.append(a)
         weight.append(w)
@@ -169,14 +182,17 @@ def _shard_one(job: tuple[str, str, str]) -> tuple[str, int]:
     if not action:
         return out_file, 0
     extra = {}
+    if has_known:
+        extra.update({k: np.stack(v).astype({"card_known": np.uint8, "known_code": np.int32}[k])
+                      for k, v in known_cols.items()})
     if has_log:
-        extra = {
+        extra.update({
             "hlog": np.concatenate(hlog_rows) if hlog_rows else np.zeros((0, 14), np.int32),
             "hlog_start": np.array(hlog_start, dtype=np.int64),
             "hlog_end": np.array(hlog_end, dtype=np.int64),
             "me": np.array(seath, dtype=np.int32),
             "turn": np.array(turnh, dtype=np.int32),
-        }
+        })
     np.savez_compressed(
         out_file,
         **{k: np.stack(v) for k, v in cols.items()},
@@ -262,6 +278,10 @@ def load_shards(shard_dir: Path) -> dict[str, np.ndarray]:
             p["equiv"] = eq
     if any("hlog" in p for p in parts) and not all("hlog" in p for p in parts):
         raise ValueError("mixed shards with and without hlog in one directory: rebuild them together")
+    if any("card_known" in p for p in parts) and not all(
+        all(k in p for k in KNOWN_KEYS) for p in parts
+    ):
+        raise ValueError(f"mixed shards with and without {KNOWN_KEYS} in one directory: rebuild them together")
     if "hlog" in parts[0]:  # offset each file's record-relative rows into the concatenated log
         off, starts, ends = 0, [], []
         for p in parts:

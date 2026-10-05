@@ -12,7 +12,7 @@ from pathlib import Path
 import numpy as np
 import torch
 
-from ygo_zero.model.bc_data import OBS_KEYS
+from ygo_zero.model.bc_data import KNOWN_KEYS, OBS_KEYS
 from ygo_zero.model.policy import PolicyNet
 
 
@@ -33,8 +33,9 @@ class BCPolicy:
         a = _run_args(ckpt)
         torch.set_num_threads(threads)
         self.hist = int(a.get("hist", 0) or 0)
+        self.known = bool(a.get("known", False))
         self.model = PolicyNet(dict(np.load(emb)), d=a.get("d", 256), layers=a.get("layers", 4),
-                               heads=a.get("heads", 4), hist=self.hist)  # fmt: skip
+                               heads=a.get("heads", 4), hist=self.hist, known=self.known)  # fmt: skip
         state = torch.load(ckpt, map_location="cpu")
         state = state.get("model", state)
         self.model.load_state_dict({k: v.float() if v.is_floating_point() else v for k, v in state.items()})
@@ -46,6 +47,8 @@ class BCPolicy:
 
     @torch.no_grad()
     def logits(self, obs: dict[str, np.ndarray]) -> np.ndarray:
+        if self.known and not all(k in obs for k in KNOWN_KEYS):
+            raise KeyError("this checkpoint was trained with --known: the obs needs card_known/known_code")
         if self.hist > 0:
             if "hist_long" not in obs:
                 raise KeyError("this checkpoint was trained with --hist: the obs needs hist_long/hist_long_mask")
@@ -53,12 +56,17 @@ class BCPolicy:
                  if k not in ("history", "history_mask")}
             t["history"] = torch.from_numpy(np.ascontiguousarray(obs["hist_long"][:, : self.hist])).to(self.device)
             t["history_mask"] = torch.from_numpy(np.ascontiguousarray(obs["hist_long_mask"][:, : self.hist])).to(self.device)
+            if self.known:
+                for k in KNOWN_KEYS:
+                    t[k] = torch.from_numpy(np.ascontiguousarray(obs[k])).to(self.device)
         else:
-            t = {k: torch.from_numpy(np.ascontiguousarray(obs[k])).to(self.device) for k in OBS_KEYS}
+            keys = tuple(OBS_KEYS) + (tuple(KNOWN_KEYS) if self.known else ())
+            t = {k: torch.from_numpy(np.ascontiguousarray(obs[k])).to(self.device) for k in keys}
         return self.model(t).float().cpu().numpy()
 
     def __call__(self, buf: dict[str, np.ndarray], rows: np.ndarray) -> np.ndarray:
         keys = tuple(OBS_KEYS) + (("hist_long", "hist_long_mask") if self.hist > 0 else ())
+        keys += tuple(KNOWN_KEYS) if self.known else ()
         out = np.zeros(len(rows), np.int32)
         for i in range(0, len(rows), self.batch):
             r = rows[i : i + self.batch]

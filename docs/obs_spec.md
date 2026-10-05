@@ -113,3 +113,34 @@ like every other obs key. v1 `history` / `history_mask` are unchanged (32, unfil
 this log once per record (`hlog`, concatenated) plus per-sample `hlog_start` / `hlog_end` (rows in the
 shard's `hlog`), `me` (acting seat) and `turn`; the trainer rebuilds any window with
 `bc_data.history_window` instead of stacking 512-row windows per sample.
+
+## card knowledge (v2, ADR 0005 §2)
+
+`card_known` uint8 [MAX_CARDS=160], `known_code` int32 [160], aligned with the `cards` rows. For each
+card row: 1 if it is an opponent's hidden card whose identity the viewer remembers (an opponent's hand
+card known to the viewer), 2 if it is the viewer's own hidden card known to the opponent, else 0.
+`known_code` holds the remembered passcode for rows with `card_known == 1`, else 0 (the viewer's own
+codes are already in `cards`). `card_known == 1` is only emitted on currently-hidden rows: an opponent
+hand card that is public right now (revealed in the hand by an effect) shows its code in `cards`
+already, so it carries no flag; the underlying memory is kept, and the flag reappears if the card
+becomes hidden again while still held. v1 keys are bit-for-bit unchanged.
+
+Tracking rules (per card instance in each player's hand, "known to the other player"; the reference is
+`engine/knowledge.py`, the C++ duel mirrors it and the lockstep test compares these keys exactly):
+
+- A card entering a hand is known when its source was public to the other player: face-up field,
+  GY, face-up banished, face-up Extra Deck, an overlay unit (always public), or the hand card arriving
+  face-up (e.g. a public draw). Moves from the Deck or from face-down cards are unknown.
+- A card leaving a hand drops its flag; later hand sequences shift down with the core's resequence.
+- A MSG_CONFIRM_CARDS entry showing a player's hand card to the other player marks that sequence
+  known (confirm-to-self does not count). A searched card (Deck → hand, then confirmed) becomes
+  known through this message, not the move.
+- MSG_SHUFFLE_HAND re-aligns flags by code (identical copies are interchangeable: per code, the
+  number of known instances is kept and assigned to the first positions holding it).
+- Resync guard: at every decision the tracked lengths must equal the queried hand sizes, else they
+  are rebuilt as all-unknown and `knowledge_resyncs` counts up (exposed on both duels; 0 on clean
+  replays). MSG_SWAP_GRAVE_DECK never touches hands; MSG_TAG_SWAP only exists in tag duels.
+- Not tracked: face-down Set cards on the field whose identity was public before being Set
+  (returned to hand while known, then Set) — setting a known hand card drops the flag, and the
+  field card itself carries no memory. A searched card that is Set straight from the search
+  (Deck → field) is likewise unknown: it never sat known in the hand.

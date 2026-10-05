@@ -32,19 +32,24 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 
-from ygo_zero.model.bc_data import OBS_KEYS, history_window, load_shards, split_masks
+from ygo_zero.model.bc_data import KNOWN_KEYS, OBS_KEYS, history_window, load_shards, split_masks
 from ygo_zero.model.policy import PolicyNet
 
 
-def batches(data, idx, bs, device, shuffle, rng, hist=0, hist_salient=True):
+def batches(data, idx, bs, device, shuffle, rng, hist=0, hist_salient=True, known=False):
     if shuffle:
         idx = rng.permutation(idx)
     has_equiv = "equiv" in data
     if hist > 0 and "hlog" not in data:
         raise ValueError("--hist needs shards built with history logs (hlog): rebuild the shards")
+    if known and not all(k in data for k in KNOWN_KEYS):
+        raise ValueError("--known needs shards built with card knowledge (card_known/known_code): rebuild the shards")
     for i in range(0, len(idx), bs):
         j = idx[i : i + bs]
         obs = {k: torch.from_numpy(data[k][j]).to(device, non_blocking=True) for k in OBS_KEYS}
+        if known:
+            for k in KNOWN_KEYS:
+                obs[k] = torch.from_numpy(data[k][j]).to(device, non_blocking=True)
         if hist > 0:
             h, m = history_window(
                 data["hlog"], data["hlog_start"][j], data["hlog_end"][j],
@@ -74,7 +79,7 @@ def set_loss(logits: torch.Tensor, equiv: torch.Tensor) -> torch.Tensor:
     )
 
 
-def evaluate(model, data, idx, bs, device, amp, set_target=True, hist=0, hist_salient=True):
+def evaluate(model, data, idx, bs, device, amp, set_target=True, hist=0, hist_salient=True, known=False):
     model.eval()
     tot = {
         "n": 0, "loss": 0.0, "acc": 0.0, "acc_exact": 0.0,
@@ -86,7 +91,7 @@ def evaluate(model, data, idx, bs, device, amp, set_target=True, hist=0, hist_sa
     has_kind = "kind" in data
     has_turn = "turn" in data
     with torch.no_grad():
-        for obs, act, w, eq, j in batches(data, idx, bs, device, False, None, hist, hist_salient):
+        for obs, act, w, eq, j in batches(data, idx, bs, device, False, None, hist, hist_salient, known):
             with torch.autocast(device.type, dtype=torch.bfloat16, enabled=amp):
                 logits = model(obs)
             logits = logits.float()
@@ -251,6 +256,7 @@ def main() -> None:
     ap.add_argument("--limit", type=int, default=None, help="use only the first N samples (smoke)")
     ap.add_argument("--hist", type=int, default=0, help="long salient history window H (0 = v1 stored history)")
     ap.add_argument("--hist-all", action="store_true", help="with --hist: use all entries, not just salient ones")
+    ap.add_argument("--known", action="store_true", help="card-knowledge memory: feed card_known/known_code (model + shards need them)")
     ap.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     ap.add_argument("--threads", type=int, default=None, help="torch CPU threads (laptop: <= 2)")
     ap.add_argument("--seed", type=int, default=0)
@@ -279,10 +285,11 @@ def main() -> None:
         src_args = _run_args(args.init)
         args.d, args.layers, args.heads = src_args.get("d", args.d), src_args.get("layers", args.layers), src_args.get("heads", args.heads)
         args.hist = src_args.get("hist", args.hist or 0)
+        args.known = src_args.get("known", args.known or False)
     emb = dict(np.load(args.emb))
     model = PolicyNet(
         emb, d=args.d, layers=args.layers, heads=args.heads, dropout=args.dropout,
-        card_dropout=args.card_dropout, hist=args.hist,
+        card_dropout=args.card_dropout, hist=args.hist, known=args.known,
     ).to(device)
     if args.init:
         state = torch.load(args.init, map_location="cpu")
@@ -309,7 +316,7 @@ def main() -> None:
         for split in ("val", "holdout"):
             if len(idx[split]):
                 rec[split] = evaluate(model, data, idx[split], args.batch * 2, device, amp, args.set_target,
-                                      args.hist, not args.hist_all)
+                                      args.hist, not args.hist_all, args.known)
         print(json.dumps(rec), flush=True)
         log.write(json.dumps(rec) + "\n")
         log.flush()
@@ -319,7 +326,7 @@ def main() -> None:
         run = {"loss": 0.0, "n": 0}
         ep_idx = epoch_train_idx(data, idx["train"], kind_frac, rng)
         for obs, act, w, eq, j in batches(data, ep_idx, args.batch, device, True, rng,
-                                            args.hist, not args.hist_all):
+                                            args.hist, not args.hist_all, args.known):
             with torch.autocast(device.type, dtype=torch.bfloat16, enabled=amp):
                 logits = model(obs)
             if args.set_target:
@@ -345,7 +352,7 @@ def main() -> None:
             if len(idx[split]):
                 rec[split] = evaluate(
                     model, data, idx[split], args.batch * 2, device, amp, args.set_target,
-                    args.hist, not args.hist_all,
+                    args.hist, not args.hist_all, args.known,
                 )
         print(json.dumps(rec), flush=True)
         log.write(json.dumps(rec) + "\n")
@@ -373,7 +380,8 @@ def main() -> None:
         rec = {"merged_last": len(recent)}
         for split in ("val", "holdout"):
             if len(idx[split]):
-                rec[split] = evaluate(model, data, idx[split], args.batch * 2, device, amp, args.set_target)
+                rec[split] = evaluate(model, data, idx[split], args.batch * 2, device, amp, args.set_target,
+                                      args.hist, not args.hist_all, args.known)
         print(json.dumps(rec), flush=True)
         log.write(json.dumps(rec) + "\n")
         log.flush()

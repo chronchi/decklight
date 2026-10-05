@@ -103,19 +103,28 @@ class Duel {
 
   Engine& engine;
   DuelConfig config;
-  std::vector<Bytes> responses;
-  std::vector<std::string> errors;
-  bool ended = false;
-  int winner = -1, win_reason = 0;
-  int turn = 0, turn_player = 0, first_player = -1, phase = 0;
-  uint64_t select_hint = 0;  // HINT_SELECTMSG sent just before the pending select message (0 = none)
+   std::vector<Bytes> responses;
+   std::vector<std::string> errors;
+   bool ended = false;
+   int winner = -1, win_reason = 0;
+   int turn = 0, turn_player = 0, first_player = -1, phase = 0;
+   uint64_t select_hint = 0;  // HINT_SELECTMSG sent just before the pending select message (0 = none)
+   // Card-knowledge memory (docs/obs_spec.md v2 annex): per hand seq, whether the other player
+   // knows the card's identity (+ the true codes, for the shuffle realignment). Lockstep with
+   // HandMemory in src/ygo_zero/engine/knowledge.py.
+   std::vector<uint8_t> hand_known_[2];
+   std::vector<uint32_t> hand_codes_[2];
+   int knowledge_resyncs_ = 0;
+   int knowledge_resyncs() const { return knowledge_resyncs_; }
 
- private:
-  OCG_Duel handle_ = nullptr;
-  uint64_t hint_ = 0;
-  Bytes pending_;
-  bool has_pending_ = false;
-  void add_cards(uint8_t team, uint32_t location, const std::vector<uint32_t>& codes);
+  private:
+   OCG_Duel handle_ = nullptr;
+   uint64_t hint_ = 0;
+   Bytes pending_;
+   bool has_pending_ = false;
+   void add_cards(uint8_t team, uint32_t location, const std::vector<uint32_t>& codes);
+   void track_message(const uint8_t* m, uint32_t size);  // fold one raw message into hand_known_
+   void guard_knowledge();  // resync guard: lengths vs queried hand sizes at every decision
   bool load_script(const std::string& name);
   static int read_script(void* payload, OCG_Duel duel, const char* name);
   static void read_card(void* payload, uint32_t code, OCG_CardData* data);
@@ -182,6 +191,8 @@ inline bool is_salient(Kind k) { return k != PASS && k != PLACE; }
 struct Obs {
   std::array<int32_t, MAX_CARDS * CARD_COLS> cards{};
   std::array<uint8_t, MAX_CARDS> card_mask{};
+  std::array<uint8_t, MAX_CARDS> card_known{};  // obs v2: 1 = remembered opp hidden card, 2 = own known to opp
+  std::array<int32_t, MAX_CARDS> known_code{};  // obs v2: remembered passcode for card_known == 1 rows
   std::array<int32_t, GLOBAL_COLS> global{};
   std::array<int32_t, MAX_CHAIN * CHAIN_COLS> chain{};
   std::array<uint8_t, MAX_CHAIN> chain_mask{};
@@ -244,6 +255,7 @@ class Env {
    int player() const { return dec_->player; }
    int num_options() const { return static_cast<int>(opts_.size()); }
    const Duel& duel() const { return *duel_; }
+   int knowledge_resyncs() const { return duel_->knowledge_resyncs(); }
    int history_len() const { return static_cast<int>(history_.size()); }
    // All recorded entries in absolute form: stored row (10) + actor, turn, phase, public.
    std::vector<std::array<int32_t, HLOG_COLS>> history_log() const;
