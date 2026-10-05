@@ -13,6 +13,9 @@ short=${model##*/}
 tag=${3:-$(basename "$brief" .md).$short}
 dir=data/cache/briefs
 runs=$dir/runs.tsv
+if [ -f "$dir/$tag.pid" ] && kill -0 "$(cat "$dir/$tag.pid")" 2>/dev/null; then
+  echo "refusing: $tag is already running (pid $(cat "$dir/$tag.pid"))" >&2; exit 1
+fi
 [ -f "$runs" ] || printf 'tag\tmodel\tbrief\tstart\tend\tseconds\texit\tstatus\n' > "$runs"
 (
   t0=$(date +%s)
