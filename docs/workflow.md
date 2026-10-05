@@ -105,3 +105,9 @@ Decision:
   about equal; the box only wins once verification is parallel.**
 - Some hosts drop ssh in the first minutes ("closed by remote host", tar exit 141/255); the launcher retries transfers
   and runs jobs detached. Smoke attempts total ≈ $X.
+
+## Muse acceptance checks are smoke-sized (2026-10-05)
+Muse cannot run on vast (the OpenCode Go key never leaves the laptop), and its sessions are mostly API wait, so the
+laptop's 4-core cap only bites when a brief's acceptance check is really a data job (the scenarios brief asked for a
+window search over 60 games: ~90 s/game, ~1.5 h). Rule: acceptance checks use a handful of games / tiny inputs and
+finish in < 5 min; the full run is a command in the report that Claude launches on vast.

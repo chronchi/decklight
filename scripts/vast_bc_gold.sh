@@ -86,6 +86,13 @@ want ft-teach-h && train ft-teach-h --init "$BASE" --epochs "$EP_MIX" --lr 2e-4 
 # M2 (ADR 0006): distill the turn-1 search teacher (data/demos/search, scripts/gen_search.py); teacher games excluded
 want ft-search && train ft-search --init "$BASE" --epochs "$EP_MIX" --lr 2e-4 --kind-frac line_expanded=0.2 game_plan=1 \
   game_interrupt=1 gold=20 gold_pass=10 teacher=0 teacher_pass=0 search=3
+# M3 mix (ADR 0006/0007): from BASE = ft-teach-h, teacher games + DAgger labels + mid-game window search (+ search)
+# ft-dw: responses only (window_own excluded: own-turn targets use the heuristic score, ADR 0007 collapse risk)
+want ft-dw && train ft-dw --init "$BASE" --epochs "$EP_MIX" --lr 2e-4 --kind-frac line_expanded=0.2 game_plan=1 \
+  game_interrupt=1 gold=20 gold_pass=10 teacher=1 teacher_pass=1 dagger=1 dagger_pass=1 window=1 window_own=0 search=0
+# ft-all: every teacher, own-turn window targets and turn-1 search at a reduced share
+want ft-all && train ft-all --init "$BASE" --epochs "$EP_MIX" --lr 2e-4 --kind-frac line_expanded=0.2 game_plan=1 \
+  game_interrupt=1 gold=20 gold_pass=10 teacher=1 teacher_pass=1 dagger=1 dagger_pass=1 window=1 window_own=0.5 search=1
 for V in mix-h32 mix-h128 mix-h256 mix-h512 mix-h32k mix-h128k mix-h256k mix-h512k mix-k; do
   want "$V" || continue
   H=${V#mix-h}; H=${H%k}; [ "$V" = mix-k ] && H=0
@@ -102,7 +109,7 @@ from pathlib import Path
 out = Path(sys.argv[1])
 best_v, best_s = "zero", -1.0
 best_hv, best_h = "zero", -1.0  # also playtest the best on unseen-deck gold (bcg-20261004-2223: mix won there)
-for v in ("zero", "ft-gold", "ft-mix", "ft-teach", "ft-teach-h", "ft-search", "mix", "lines-gold", "mix-l", "mix-h32", "mix-h128", "mix-h256", "mix-h512",
+for v in ("zero", "ft-gold", "ft-mix", "ft-teach", "ft-teach-h", "ft-search", "ft-dw", "ft-all", "mix", "lines-gold", "mix-l", "mix-h32", "mix-h128", "mix-h256", "mix-h512",
           "mix-h32k", "mix-h128k", "mix-h256k", "mix-h512k", "mix-k"):
     m = out / v / "metrics.jsonl"
     if not m.exists():
