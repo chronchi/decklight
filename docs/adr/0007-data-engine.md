@@ -44,8 +44,10 @@ and then what … basically we need labelled data"). Extends ADR 0006 (the loop 
 **3. Gates (keep a data source only if it earns it)**
 - Every new mix is judged on the report card (ADR 0006): vs previous base, vs ygo-agent, holdout decks, combo test,
   take rates. A source that does not move it is dropped or down-weighted.
-- **New-card test** (added to the report card): a *card-level holdout*: a few archetypes whose cards never appear in
-  any training data (states, labels, scenarios). Win rate and agreement on them measure "new cards come, then what".
+- **New-card test** (added to the report card): decks built from archetypes whose cards appear in NO training data
+  (`decks/newcards/`; the audit found 89 such archetypes, while the old HOLDOUT decks turned out ≥ 93% seen).
+  No generator may use them (`scripts/card_holdout.py check`). Win rate and combo score on them measure "new cards
+  come, then what"; muse's card-text lines on them rehearse the new-deck bootstrap.
 - Label quality probes: agreement between labellers on shared states (search vs ygo-agent on its decks, search v1 vs
   v2), and spot audits by muse on disagreements.
 
