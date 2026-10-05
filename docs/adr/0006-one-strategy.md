@@ -50,6 +50,6 @@ Never self-play win rate. A step "worked" only if the report card says so.
 - Deeper card knowledge (Phase 2 effect tokens): **paused** while the frozen text embeddings are not the bottleneck
   (check holdout vs train gap on the report card).
 
-## Budget (credit ≈ $X, floor $X → ≈ $X to spend)
+## Budget (credit ≈ $X, floor $X since 2026-10-05 15:30; warn the user near $X)
 M0-M1 ≈ $X (GPU evals + RL v0 + teacher BC); M2-M3 ≈ $X (search is CPU: many-core boxes, distill on GPU);
 M4 the rest. Search and engine work are developed on the laptop (no ML there); every ML run is a capped vast job.
