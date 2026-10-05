@@ -515,6 +515,11 @@ def run_job(spec: JobSpec, reserve: float = 0.25, max_hosts: int = 3) -> JobResu
     res = JobResult(spec.name)
     log = ROOT / "runs" / spec.name / "launcher.log"
     log.parent.mkdir(parents=True, exist_ok=True)
+    # register this job's label first, so another launcher's stray sweep spares our box (2026-10-05: a launch
+    # destroyed the running bct-20261005-1431 box because its label had not been added by hand)
+    ALLOWED_FILE.parent.mkdir(parents=True, exist_ok=True)
+    with open(ALLOWED_FILE, "a") as f:
+        f.write(LABEL_PREFIX + spec.name + "\n")
     strays = destroy_strays()
     if strays:
         print(f"destroyed stray instances {strays}")
