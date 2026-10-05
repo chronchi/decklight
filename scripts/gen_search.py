@@ -133,6 +133,7 @@ def main() -> None:
     ap.add_argument("--hands", type=int, default=100)
     ap.add_argument("--width", type=int, default=64, help="hands searched concurrently (one batched forward per step)")
     ap.add_argument("--batch", type=int, default=512, help="max obs per forward")
+    ap.add_argument("--bf16", type=int, default=1, help="bf16 autocast on CUDA")
     ap.add_argument("--combo", type=int, default=0, help="combo-test mode on this many decks")
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--out", type=Path, required=True)
@@ -141,7 +142,14 @@ def main() -> None:
     if args.policy == "bc":
         from ygo_zero.eval.bc_policy import BCPolicy
 
-        logits = BCPolicy(args.ckpt, args.emb, threads=args.threads, device=args.device, batch=args.batch).logits
+        pol = BCPolicy(args.ckpt, args.emb, threads=args.threads, device=args.device, batch=args.batch)
+        logits = pol.logits
+        if args.device.startswith("cuda") and args.bf16:
+            import torch
+
+            def logits(buf, _f=pol.logits):  # bf16 autocast: ~2-3x cheaper forwards; argmax/top-k barely move
+                with torch.autocast("cuda", dtype=torch.bfloat16):
+                    return _f(buf)
     else:
         logits = greedy_logits
     search = Turn1Search(engine, logits, k=args.k, batch=args.batch)

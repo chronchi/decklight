@@ -2,26 +2,27 @@
 # Turn-1 search teacher (ADR 0006 M2) on a many-core GPU box. Usage: bash scripts/vast_search.sh <name>
 # 1. combo check: BC policy greedy vs searched (top-K rollouts) vs expert on the playtest combo hands (CPU procs)
 # 2. generate HANDS searched turn-1 records over PROCS processes sharing the GPU (WIDTH hands per process searched in
-#    lockstep, one batched forward per step; s1-20261005-1445 ran 1-thread CPU forwards: 20 min per hand)
+#    lockstep, one batched forward per step; s1-20261005-1445 ran 1-thread CPU forwards: 20 min per hand;
+#    s1-20261005-1523 ran 24 GPU processes: CUDA illegal-address crashes in 14 of them and 100% GPU contention)
 # 3. distill: vast_bc_gold.sh with VARIANTS="zero ft-search" (BASE = $BASE), report cards for both
-# Env: BASE (default data/cache/rl_init/best.pt), HANDS (default 3000), K (default 4), PROCS (default min(cores - 4, 24)), WIDTH (default 32),
+# Env: BASE (default data/cache/rl_init/best.pt), HANDS (default 1200), K (default 4), PROCS (default 8), WIDTH (default 64),
 # DISTILL=0 stops after step 2. Results: runs/<name>/{combo-*.json,search.txt,search/p<k>/,...}.
 set -uo pipefail
 export PATH="$HOME/.local/bin:$PATH"
 NAME="$1"; OUT="runs/$NAME"; mkdir -p "$OUT/search"
-BASE="${BASE:-data/cache/rl_init/best.pt}"; K="${K:-4}"; HANDS="${HANDS:-3000}"
+BASE="${BASE:-data/cache/rl_init/best.pt}"; K="${K:-4}"; HANDS="${HANDS:-1200}"
 uv sync --group dev --group ml --group gauntlet -q --no-install-package torch
 export UV_HTTP_TIMEOUT=300
 for try in 1 2 3; do
   uv pip install -q torch --index-url https://download.pytorch.org/whl/cu128 >> "$OUT/torch.txt" 2>&1 && break
   echo "torch install attempt $try failed" >> "$OUT/torch.txt"; sleep 10
 done
-N=$(nproc); P=${PROCS:-$(( N - 4 < 24 ? N - 4 : 24 ))}; [ "$P" -lt 1 ] && P=1; PER=$(( (HANDS + P - 1) / P ))
-W="${WIDTH:-32}"
+N=$(nproc); P=${PROCS:-8}; [ "$P" -lt 1 ] && P=1; PER=$(( (HANDS + P - 1) / P ))
+W="${WIDTH:-64}"
 echo "procs $P hands/proc $PER width $W cores $N k $K base $BASE" > "$OUT/search.txt"
 T0=$SECONDS
 # 1. combo check, 8 decks split over 4 procs by seed-sampled decks: one proc per (seed) sample of 8 decks x 3 hands
-for s in 0 1 2 3; do
+for s in 0 1; do
   timeout 40m uv run --no-sync python scripts/gen_search.py --ckpt "$BASE" --k "$K" --combo 8 --hands 3 --seed "$s" --device cuda --width "$W" \
     --out "$OUT/combo-s$s.json" > "$OUT/combo-s$s.txt" 2>&1 &
 done
