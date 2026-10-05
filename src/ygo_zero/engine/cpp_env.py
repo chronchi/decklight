@@ -63,6 +63,8 @@ class VecEnv:
     overwrites in place: the obs arrays plus `player` (to act), `done` and `winner` (episode just ended in that
     env; its obs row already shows the next episode). Finished games: `pop_finished()` → replayable records."""
 
+    TRUNCATED = 3  # Episode.winner of a game cut by set_max_decisions
+
     def __init__(
         self,
         engine: Engine,
@@ -90,6 +92,10 @@ class VecEnv:
         """Evaluation mode: play exactly these (deck0 index, deck1 index, seed) games, then idle (player -1).
         Call before `reset`. Finished episodes carry `.index` into this list."""
         self._v.set_schedule(list(games))
+
+    def set_max_decisions(self, n: int) -> None:
+        """Cut every episode after n decisions (0 = never); it finishes with winner `TRUNCATED` (RL rollouts)."""
+        self._v.set_max_decisions(n)
 
     @property
     def remaining(self) -> int:

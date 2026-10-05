@@ -155,6 +155,8 @@ PYBIND11_MODULE(_ygoenv, m) {
              for (auto& [d0, d1, seed] : games) eps.push_back(Episode{d0, d1, seed, -1, -1, 0, {}});
              v.set_schedule(std::move(eps));
            })
+      .def("set_max_decisions", &VecEnv::set_max_decisions)
+      .def_readonly_static("TRUNCATED_WINNER", &VecEnv::TRUNCATED_WINNER)
       .def_property_readonly("remaining", &VecEnv::remaining)
       .def_readonly("num_envs", &VecEnv::num_envs)
       .def("buffers", [](py::object self) {

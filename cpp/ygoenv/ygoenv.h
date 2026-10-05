@@ -311,6 +311,9 @@ class VecEnv {
   // Idle envs have player = -1 and an empty action mask, and ignore their action. Call before reset().
   void set_schedule(std::vector<Episode> games);
   int64_t remaining() const;  // scheduled games not finished yet
+  // Cut an episode after n decisions (0 = never): it finishes with winner TRUNCATED_WINNER (RL rollouts).
+  void set_max_decisions(int n);
+  static constexpr int TRUNCATED_WINNER = 3;
 
   const int num_envs;
   std::vector<Obs> obs;          // obs[i]: the decision now pending in env i
@@ -334,6 +337,7 @@ class VecEnv {
   std::vector<std::exception_ptr> errors_;
   const int32_t* actions_ = nullptr;
   bool resetting_ = false;
+  int max_decisions_ = 0;
 
   // pool
   std::vector<std::thread> workers_;

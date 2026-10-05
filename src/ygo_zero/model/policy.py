@@ -88,13 +88,14 @@ class ActionEmbed(nn.Module):
 class PolicyNet(nn.Module):
     def __init__(
         self, emb: dict[str, np.ndarray], d: int = 256, layers: int = 4, heads: int = 4, dropout: float = 0.1,
-        card_dropout: float = 0.0, hist: int = 0, known: bool = False,
+        card_dropout: float = 0.0, hist: int = 0, known: bool = False, value: bool = False,
     ):
         """`hist`: long-memory window (obs v2, ADR 0005). 0 = v1 exactly (same parameters, old state dicts
         load with strict=True); > 0 adds a learned recency-position embedding and widens the turns-ago
         embedding to 32 buckets. `known`: card-knowledge memory (obs v2). False = exactly the step-A
         parameters (old state dicts load with strict=True); True adds a card_known embedding and feeds
-        `known_code` to CardText where `card_known == 1`."""
+        `known_code` to CardText where `card_known == 1`. `value`: adds a state-value head on the global token
+        (RL); `forward` is unchanged, `forward_value` returns (logits, value in [-1, 1])."""
         super().__init__()
         self.hist = hist
         self.known = known
@@ -133,6 +134,8 @@ class PolicyNet(nn.Module):
         self.cross = nn.MultiheadAttention(d, heads, dropout=dropout, batch_first=True)
         self.act_norm = nn.LayerNorm(d)
         self.head = nn.Sequential(nn.Linear(3 * d, d), nn.GELU(), nn.Linear(d, 1))
+        if value:
+            self.value_head = nn.Sequential(nn.LayerNorm(d), nn.Linear(d, d), nn.GELU(), nn.Linear(d, 1), nn.Tanh())
 
     def encode_cards(self, cards: torch.Tensor, card_known: torch.Tensor | None = None,
                        known_code: torch.Tensor | None = None) -> torch.Tensor:
@@ -179,6 +182,13 @@ class PolicyNet(nn.Module):
         )
 
     def forward(self, obs: dict[str, torch.Tensor]) -> torch.Tensor:
+        return self._run(obs)[0]
+
+    def forward_value(self, obs: dict[str, torch.Tensor]) -> tuple[torch.Tensor, torch.Tensor]:
+        logits, enc = self._run(obs)
+        return logits, self.value_head(enc[:, 0]).squeeze(-1)
+
+    def _run(self, obs: dict[str, torch.Tensor]) -> tuple[torch.Tensor, torch.Tensor]:
         cards, glob = obs["cards"], obs["global"].long()
         B = cards.shape[0]
         card_tok = self.encode_cards(cards, obs.get("card_known"), obs.get("known_code")) + self.type_emb.weight[1]
@@ -226,4 +236,4 @@ class PolicyNet(nn.Module):
         att, _ = self.cross(q, enc, enc, key_padding_mask=~keep)
         glob_ctx = enc[:, :1].expand(-1, a.shape[1], -1)
         logits = self.head(torch.cat([q + att, card_ctx, glob_ctx], -1)).squeeze(-1)
-        return logits.masked_fill(~obs["action_mask"], float("-inf"))
+        return logits.masked_fill(~obs["action_mask"], float("-inf")), enc

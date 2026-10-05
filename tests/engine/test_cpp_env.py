@@ -64,3 +64,23 @@ def test_vecenv_episodes_replay_and_are_thread_independent(engine, decks):
     assert all(np.array_equal(first[k], first1[k]) for k in first)
     key = [(e.deck0, e.deck1, e.seed, e.winner, tuple(e.choices)) for e in eps]
     assert sorted(key) == sorted((e.deck0, e.deck1, e.seed, e.winner, tuple(e.choices)) for e in eps1)
+
+
+def test_vecenv_max_decisions_truncates(engine, decks):
+    deck_list = [decks[k] for k in sorted(decks)]
+    vec = cpp_env.VecEnv(engine, deck_list, num_envs=4, num_threads=2, seed=3)
+    vec.set_max_decisions(20)
+    buf, rng, eps = vec.reset(), np.random.default_rng(0), []
+    for _ in range(200):
+        counts = buf["action_mask"].sum(1)
+        vec.step((rng.random(4) * counts).astype(np.int32))
+        done = buf["done"].copy()
+        new = vec.pop_finished()
+        assert len(new) == int(done.sum())
+        eps += new
+    assert eps and all(e.winner in (0, 1, 2, cpp_env.VecEnv.TRUNCATED) for e in eps)
+    cut = [e for e in eps if e.winner == cpp_env.VecEnv.TRUNCATED]
+    assert cut, "no game reached the 20-decision cap"
+    for ep in cut[:3]:  # a cut game is a prefix of a real one: replays without ending
+        env = PyEnv.replay(engine, vec.episode_config(ep), ep.choices)
+        assert not env.done

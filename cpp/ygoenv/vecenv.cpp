@@ -59,6 +59,8 @@ void VecEnv::set_schedule(std::vector<Episode> games) {
 
 int64_t VecEnv::remaining() const { return unfinished_; }
 
+void VecEnv::set_max_decisions(int n) { max_decisions_ = n; }
+
 void VecEnv::start_episode(int i) {
   Episode& ep = current_[i];
   if (scheduled_) {
@@ -100,10 +102,11 @@ void VecEnv::work(int i) {
       start_episode(i);
     } else if (idle_[i]) {
       // scheduled games exhausted: ignore the action
-    } else if (!envs_[i]->step(actions_[i], obs[i])) {
+    } else if (bool over = !envs_[i]->step(actions_[i], obs[i]);
+               over || (max_decisions_ > 0 && envs_[i]->decisions >= max_decisions_)) {
       Env& env = *envs_[i];
       Episode& ep = current_[i];
-      ep.winner = env.winner();
+      ep.winner = over ? env.winner() : TRUNCATED_WINNER;
       ep.turns = env.duel().turn;
       ep.choices = env.choices;
       done[i] = 1;
