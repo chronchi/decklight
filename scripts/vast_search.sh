@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # Turn-1 search teacher (ADR 0006 M2) on a many-core GPU box. Usage: bash scripts/vast_search.sh <name>
 # 1. combo check: BC policy greedy vs searched (top-K rollouts) vs expert on the playtest combo hands (CPU procs)
-# 2. generate HANDS searched turn-1 records over PROCS processes (CPU, 1 torch thread each)
+# 2. generate HANDS searched turn-1 records over PROCS processes sharing the GPU (WIDTH hands per process searched in
+#    lockstep, one batched forward per step; s1-20261005-1445 ran 1-thread CPU forwards: 20 min per hand)
 # 3. distill: vast_bc_gold.sh with VARIANTS="zero ft-search" (BASE = $BASE), report cards for both
-# Env: BASE (default data/cache/rl_init/best.pt), HANDS (default 3000), K (default 4), PROCS (default cores - 2),
+# Env: BASE (default data/cache/rl_init/best.pt), HANDS (default 3000), K (default 4), PROCS (default min(cores - 4, 24)), WIDTH (default 32),
 # DISTILL=0 stops after step 2. Results: runs/<name>/{combo-*.json,search.txt,search/p<k>/,...}.
 set -uo pipefail
 export PATH="$HOME/.local/bin:$PATH"
@@ -15,17 +16,18 @@ for try in 1 2 3; do
   uv pip install -q torch --index-url https://download.pytorch.org/whl/cu128 >> "$OUT/torch.txt" 2>&1 && break
   echo "torch install attempt $try failed" >> "$OUT/torch.txt"; sleep 10
 done
-N=$(nproc); P=${PROCS:-$(( N - 2 ))}; [ "$P" -lt 1 ] && P=1; PER=$(( (HANDS + P - 1) / P ))
-echo "procs $P hands/proc $PER cores $N k $K base $BASE" > "$OUT/search.txt"
+N=$(nproc); P=${PROCS:-$(( N - 4 < 24 ? N - 4 : 24 ))}; [ "$P" -lt 1 ] && P=1; PER=$(( (HANDS + P - 1) / P ))
+W="${WIDTH:-32}"
+echo "procs $P hands/proc $PER width $W cores $N k $K base $BASE" > "$OUT/search.txt"
 T0=$SECONDS
 # 1. combo check, 8 decks split over 4 procs by seed-sampled decks: one proc per (seed) sample of 8 decks x 3 hands
 for s in 0 1 2 3; do
-  timeout 40m uv run --no-sync python scripts/gen_search.py --ckpt "$BASE" --k "$K" --combo 8 --hands 3 --seed "$s" \
+  timeout 40m uv run --no-sync python scripts/gen_search.py --ckpt "$BASE" --k "$K" --combo 8 --hands 3 --seed "$s" --device cuda --width "$W" \
     --out "$OUT/combo-s$s.json" > "$OUT/combo-s$s.txt" 2>&1 &
 done
 # 2. generation (runs alongside the combo check)
-for p in $(seq 0 $((P - 5))); do
-  timeout 90m uv run --no-sync python scripts/gen_search.py --ckpt "$BASE" --k "$K" --hands "$PER" \
+for p in $(seq 0 $((P - 1))); do
+  timeout 70m uv run --no-sync python scripts/gen_search.py --ckpt "$BASE" --k "$K" --hands "$PER" --device cuda --width "$W" \
     --seed $(( 1000000 + p * 10000 )) --out "$OUT/search/p$p" > "$OUT/search-$p.txt" 2>&1 &
 done
 wait

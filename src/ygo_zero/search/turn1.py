@@ -68,10 +68,14 @@ class Turn1Result:
 
 
 class Turn1Search:
+    """The search is written as generators that yield lists of obs needing policy logits and receive the logits back
+    (`*_gen`), so many hands can share one batched forward (`run_many`, GPU on a box); `run` / `greedy` /
+    `rollouts` drive a single hand with `self.logits`."""
+
     def __init__(self, engine: Engine, logits: LogitsFn, k: int = 4, max_decisions: int = 300,
-                 auto_single: bool = True) -> None:  # fmt: skip
+                 auto_single: bool = True, batch: int = 512) -> None:  # fmt: skip
         self.engine, self.logits, self.k = engine, logits, k
-        self.max_decisions, self.auto_single = max_decisions, auto_single
+        self.max_decisions, self.auto_single, self.batch = max_decisions, auto_single, batch
 
     def _env(self, config: DuelConfig, prefix: list[int]):
         env = CppEnv(self.engine, config, self.auto_single)
@@ -80,9 +84,21 @@ class Turn1Search:
             obs = env.step(c)
         return env, obs
 
-    def rollouts(self, config: DuelConfig, prefixes: list[list[int]], n0: int) -> list[float]:
+    def _forward(self, obs_list: list[dict]) -> np.ndarray:
+        out = [self.logits(_batch(obs_list[i : i + self.batch])) for i in range(0, len(obs_list), self.batch)]
+        return np.concatenate(out)
+
+    def _drive(self, gen):
+        try:
+            req = next(gen)
+            while True:
+                req = gen.send(self._forward(req))
+        except StopIteration as stop:
+            return stop.value
+
+    def rollouts_gen(self, config: DuelConfig, prefixes: list[list[int]], n0: int):
         """Play each prefix out to the end of turn 1 (policy argmax for player 0, passive player 1) in lockstep,
-        one batched forward per step. n0 = player-0 decisions already in the prefixes (shared decision cap)."""
+        one logits request per step. n0 = player-0 decisions already in the prefixes (shared decision cap)."""
         envs, obs = zip(*(self._env(config, p) for p in prefixes), strict=True)
         envs, obs = list(envs), list(obs)
         last = [0.0] * len(envs)
@@ -104,14 +120,14 @@ class Turn1Search:
                 mine.append(i)
             if not mine:
                 break
-            lg = self.logits(_batch([obs[i] for i in mine]))
+            lg = yield [obs[i] for i in mine]
             for i, row in zip(mine, lg, strict=True):
                 n[i] += 1
                 obs[i] = envs[i].step(int(np.argmax(_masked(row, obs[i]))))
         return last
 
-    def run(self, config: DuelConfig) -> Turn1Result:
-        """Search player 0's whole turn 1 on this config (player 0 goes first)."""
+    def run_gen(self, config: DuelConfig):
+        """Search player 0's whole turn 1 on this config (player 0 goes first). Returns a Turn1Result."""
         env = CppEnv(self.engine, config, self.auto_single)
         obs = env.reset()
         res = Turn1Result([], [], [], 0.0, 0, 0, 0)
@@ -119,12 +135,12 @@ class Turn1Search:
             if env.player == 1:
                 a, label = passive_choice(obs), "opp"
             else:
-                z = _masked(self.logits(_batch([obs]))[0], obs)
+                z = _masked((yield [obs])[0], obs)
                 legal = np.flatnonzero(np.isfinite(z))
                 cands = [int(i) for i in legal[np.argsort(-z[legal], kind="stable")][: self.k]]
                 a, label = cands[0], "search"
                 if len(cands) > 1:
-                    scores = self.rollouts(config, [res.choices + [c] for c in cands], res.decisions + 1)
+                    scores = yield from self.rollouts_gen(config, [res.choices + [c] for c in cands], res.decisions + 1)
                     best = max(range(len(cands)), key=lambda j: (scores[j], -j))  # ties: policy order
                     a = cands[best]
                     res.searched += 1
@@ -140,6 +156,64 @@ class Turn1Search:
             res.end_score = board_score(obs, 0 if env.player == 0 else 1)
         return res
 
-    def greedy(self, config: DuelConfig) -> float:
+    def greedy_gen(self, config: DuelConfig):
         """The policy's own turn 1 (argmax, no search): its end-of-turn board score."""
-        return self.rollouts(config, [[]], 0)[0]
+        return (yield from self.rollouts_gen(config, [[]], 0))[0]
+
+    def both_gen(self, config: DuelConfig):
+        """(greedy score, searched Turn1Result) for one hand."""
+        g = yield from self.greedy_gen(config)
+        r = yield from self.run_gen(config)
+        return g, r
+
+    def rollouts(self, config: DuelConfig, prefixes: list[list[int]], n0: int) -> list[float]:
+        return self._drive(self.rollouts_gen(config, prefixes, n0))
+
+    def run(self, config: DuelConfig) -> Turn1Result:
+        return self._drive(self.run_gen(config))
+
+    def greedy(self, config: DuelConfig) -> float:
+        return self._drive(self.greedy_gen(config))
+
+    def run_many(self, jobs, width: int = 64):
+        """Drive many hand generators at once: `jobs` is an iterable of (key, generator); up to `width` run
+        concurrently and every step's requests from all of them go through one batched forward. Yields
+        (key, result) as hands finish (completion order)."""
+        jobs = iter(jobs)
+        live: dict[int, tuple] = {}  # slot -> (key, gen, pending request)
+        slot = 0
+
+        def start(key, gen):
+            nonlocal slot
+            try:
+                live[slot] = (key, gen, next(gen))
+                slot += 1
+                return None
+            except StopIteration as stop:
+                return key, stop.value
+
+        exhausted = False
+        while True:
+            while not exhausted and len(live) < width:
+                nxt = next(jobs, None)
+                if nxt is None:
+                    exhausted = True
+                    break
+                done = start(*nxt)
+                if done is not None:
+                    yield done
+            if not live:
+                return
+            slots = list(live)
+            reqs = [live[s][2] for s in slots]
+            lg = self._forward([o for r in reqs for o in r])
+            off = 0
+            for s, r in zip(slots, reqs, strict=True):
+                key, gen, _ = live[s]
+                part = lg[off : off + len(r)]
+                off += len(r)
+                try:
+                    live[s] = (key, gen, gen.send(part))
+                except StopIteration as stop:
+                    del live[s]
+                    yield key, stop.value

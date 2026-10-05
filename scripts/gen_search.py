@@ -57,24 +57,28 @@ def gen(search: Turn1Search, args) -> None:
     train = [d for d in pool if d not in hold]
     rng = random.Random(args.seed)
     args.out.mkdir(parents=True, exist_ok=True)
-    t0, gains, ov, srch = time.time(), [], 0, 0
+    hands = []
     for i in range(args.hands):
         d0, d1 = rng.choice(train), rng.choice(pool)
+        hands.append((d0, d1, args.seed + i))
+    jobs = ((h, search.both_gen(DuelConfig(load_ydk(ROOT / "decks/pool" / f"{h[0]}.ydk"),
+                                           load_ydk(ROOT / "decks/pool" / f"{h[1]}.ydk"), seed=h[2])))
+            for h in hands)  # fmt: skip
+    t0, gains, ov, srch = time.time(), [], 0, 0
+    for (d0, d1, seed), (g, r) in search.run_many(jobs, args.width):
         cfg = DuelConfig(load_ydk(ROOT / "decks/pool" / f"{d0}.ydk"), load_ydk(ROOT / "decks/pool" / f"{d1}.ydk"),
-                         seed=args.seed + i)  # fmt: skip
-        g = search.greedy(cfg)
-        r = search.run(cfg)
+                         seed=seed)  # fmt: skip
         gains.append(r.end_score - g)
         ov, srch = ov + r.overrides, srch + r.searched
-        rec = {"game_id": f"s1-{args.seed + i}", "line_id": f"{d0}/s1-{args.seed + i}", "level": "L4", "decks": [d0, d1],
+        rec = {"game_id": f"s1-{seed}", "line_id": f"{d0}/s1-{seed}", "level": "L4", "decks": [d0, d1],
                "config": config_dict(cfg), "auto_single": True, "choices": r.choices, "labels": r.labels,
                "actors": r.actors, "turns": [1] * len(r.choices), "notes": [], "greedy_score": g,
                "end_score": r.end_score, "search": r.log, "k": args.k,
                "source": f"turn-1 search k={args.k} over {args.policy}"}  # fmt: skip
         with (args.out / f"{d0}.jsonl").open("a") as f:
             f.write(json.dumps(rec) + "\n")
-        print(f"hand {i} {d0}: greedy {g:.2f} searched {r.end_score:.2f} ({r.decisions} decisions, {r.searched} "
-              f"searched, {r.overrides} overrides) {time.time() - t0:.0f} s", flush=True)  # fmt: skip
+        print(f"hand {len(gains)} {d0}: greedy {g:.2f} searched {r.end_score:.2f} ({r.decisions} decisions, "
+              f"{r.searched} searched, {r.overrides} overrides) {time.time() - t0:.0f} s", flush=True)  # fmt: skip
     if gains:
         print(f"hands {len(gains)}: mean gain {statistics.mean(gains):.2f}, improved {sum(x > 0 for x in gains)}, "
               f"worse {sum(x < 0 for x in gains)}, overrides {ov}/{srch}, wall {time.time() - t0:.0f} s", flush=True)  # fmt: skip
@@ -90,20 +94,23 @@ def combo(search: Turn1Search, engine, args) -> None:
     train_d = [d for d in pool if d not in hold and verified_end_boards(d)]
     hold_d = [d for d in pool if d in hold and verified_end_boards(d)]
     sample = rng.sample(train_d, min(args.combo // 2, len(train_d))) + rng.sample(hold_d, min(args.combo // 2, len(hold_d)))
-    rows, t0 = [], time.time()
+    hands = []
     for d in sample:
         for r in verified_records(d, limit=args.hands):
             try:
-                cfg = record_config(r)
-                g, s = search.greedy(cfg), search.run(cfg)
-                e = _replay_field(engine, r)
+                hands.append((d, r, record_config(r), _replay_field(engine, r)))
             except Exception as ex:  # noqa: BLE001 - a record that no longer replays is skipped
                 print(f"skip {r.get('line_id')}: {ex!r}"[:200], flush=True)
-                continue
-            rows.append({"deck": d, "holdout": d in hold, "line_id": r["line_id"], "greedy": int(g), "search": int(s.end_score),
-                         "expert": e, "overrides": s.overrides, "searched": s.searched})  # fmt: skip
-            print(f"combo {d[:30]:30s} {'H' if d in hold else ' '} greedy {int(g)} search {int(s.end_score)} expert {e} "
-                  f"({s.overrides}/{s.searched} overrides) {time.time() - t0:.0f} s", flush=True)  # fmt: skip
+    rows, t0 = [], time.time()
+    args.out.parent.mkdir(parents=True, exist_ok=True)
+    jobs = ((i, search.both_gen(h[2])) for i, h in enumerate(hands))
+    for i, (g, s) in search.run_many(jobs, args.width):
+        d, r, _, e = hands[i]
+        rows.append({"deck": d, "holdout": d in hold, "line_id": r["line_id"], "greedy": int(g), "search": int(s.end_score),
+                     "expert": e, "overrides": s.overrides, "searched": s.searched})  # fmt: skip
+        print(f"combo {d[:30]:30s} {'H' if d in hold else ' '} greedy {int(g)} search {int(s.end_score)} expert {e} "
+              f"({s.overrides}/{s.searched} overrides) {time.time() - t0:.0f} s", flush=True)  # fmt: skip
+        args.out.write_text(json.dumps({"summary": None, "rows": rows, "k": args.k}, indent=1))  # a timeout keeps rows
     summ = {}
     if rows:
         summ = {k: round(statistics.mean(r[k] for r in rows), 2) for k in ("greedy", "search", "expert")}
@@ -112,7 +119,6 @@ def combo(search: Turn1Search, engine, args) -> None:
                  "search_ge_expert": sum(r["search"] >= r["expert"] for r in rows),
                  "greedy_ge_expert": sum(r["greedy"] >= r["expert"] for r in rows)}  # fmt: skip
     print(f"combo summary: {summ}", flush=True)
-    args.out.parent.mkdir(parents=True, exist_ok=True)
     args.out.write_text(json.dumps({"summary": summ, "rows": rows, "k": args.k}, indent=1))
 
 
@@ -125,6 +131,8 @@ def main() -> None:
     ap.add_argument("--threads", type=int, default=1, help="torch threads")
     ap.add_argument("--k", type=int, default=4, help="candidates (policy top-k) per decision")
     ap.add_argument("--hands", type=int, default=100)
+    ap.add_argument("--width", type=int, default=64, help="hands searched concurrently (one batched forward per step)")
+    ap.add_argument("--batch", type=int, default=512, help="max obs per forward")
     ap.add_argument("--combo", type=int, default=0, help="combo-test mode on this many decks")
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--out", type=Path, required=True)
@@ -133,10 +141,10 @@ def main() -> None:
     if args.policy == "bc":
         from ygo_zero.eval.bc_policy import BCPolicy
 
-        logits = BCPolicy(args.ckpt, args.emb, threads=args.threads, device=args.device).logits
+        logits = BCPolicy(args.ckpt, args.emb, threads=args.threads, device=args.device, batch=args.batch).logits
     else:
         logits = greedy_logits
-    search = Turn1Search(engine, logits, k=args.k)
+    search = Turn1Search(engine, logits, k=args.k, batch=args.batch)
     if args.combo:
         combo(search, engine, args)
     else:

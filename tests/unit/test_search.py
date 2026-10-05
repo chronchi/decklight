@@ -83,3 +83,18 @@ def test_records_replay_and_map_to_search_kind(engine, tmp_path):
     assert {m["kind"] for _, _, _, m in samples} == {"search"}
     assert all(m["me"] == 0 for _, _, _, m in samples)
     assert all(int(np.asarray(o["action_mask"])[a]) for o, a, _, _ in samples)
+
+
+def test_run_many_matches_one_by_one(engine):
+    """The batched driver gives the same results as driving each hand alone (any completion order)."""
+    from ygo_zero.search.turn1 import Turn1Search
+
+    s = Turn1Search(engine, gen_search.greedy_logits, k=3, batch=7)
+    cfgs = _configs(5)
+    many = dict(s.run_many(((i, s.both_gen(c)) for i, c in enumerate(cfgs)), width=3))
+    assert sorted(many) == list(range(5))
+    for i, c in enumerate(cfgs):
+        g, r = many[i]
+        assert g == s.greedy(c)
+        one = s.run(c)
+        assert (r.choices, r.end_score, r.overrides) == (one.choices, one.end_score, one.overrides)
