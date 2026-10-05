@@ -9,7 +9,8 @@ for both seats when a game hits `--max-decisions`. Value head new (trained alone
 Loss: clipped PPO + value MSE - entropy + `--kl-coef` * KL(pi || pi_BC) over legal options.
 
 Progress is measured only on the fixed gauntlet every `--eval-every` iterations (and at iteration 0 / the end):
-greedy learner vs greedy BC (both seats, 4 train + 4 holdout decks) and vs ygo-agent 0546 (its 4 decks), via the same
+greedy learner vs greedy BC (both seats, 4 train + 4 holdout decks) and vs ygo-agent 0546 (its 31 lists in
+decks/gauntlet, each vs its next 4), via the same
 play_match/BCPolicy path as scripts/playtest.py. Never read the training win rates as progress.
 
 Output (`--out`): metrics.jsonl (first record "args" carries the BC architecture so BCPolicy/playtest load the
@@ -31,7 +32,7 @@ from ygo_zero.decks import load_ydk
 from ygo_zero.engine.cpp_env import VecEnv
 from ygo_zero.engine.duel import Engine
 from ygo_zero.eval.bc_policy import BCPolicy, _run_args
-from ygo_zero.eval.match import play_match, wilson
+from ygo_zero.eval.match import play_match, ring_pairs, wilson
 from ygo_zero.model.policy import PolicyNet
 from ygo_zero.rl.ppo import SlotStore, gae, gather, masked_log_softmax, ppo_loss, to_torch
 
@@ -86,7 +87,10 @@ def main() -> None:
     ap.add_argument("--value-warmup", type=int, default=2, help="first iterations train the value head only")
     ap.add_argument("--eval-every", type=int, default=10)
     ap.add_argument("--eval-seeds", type=int, default=2, help="vs BC: seeds per ordered deck pair")
-    ap.add_argument("--ga-seeds", type=int, default=3, help="vs ygo-agent: seeds per ordered deck pair")
+    ap.add_argument("--ga-seeds", type=int, default=1, help="vs ygo-agent: seeds per deck pair")
+    ap.add_argument("--gauntlet-decks", type=Path, default=ROOT / "decks/gauntlet",
+                    help="ygo-agent's own lists (in its 864-card vocabulary); also in the training pool")
+    ap.add_argument("--ga-opps", type=int, default=4, help="vs ygo-agent: each gauntlet deck vs its next k decks")
     ap.add_argument("--no-ygoagent", action="store_true")
     ap.add_argument("--hours", type=float, default=1.0, help="stop (then final eval) after this much training")
     ap.add_argument("--iters", type=int, default=0, help="stop after this many iterations (0 = by --hours)")
@@ -104,7 +108,7 @@ def main() -> None:
     # decks: training pool = pool - holdout + gauntlet; eval = fixed 4 train + 4 holdout sample
     hold = set((ROOT / "decks/pool/HOLDOUT").read_text().split()) | {"kewl-tune"}
     pool = sorted((ROOT / "decks/pool").glob("*.ydk"))
-    gfiles = sorted((ROOT / "tests/fixtures/decks").glob("*.ydk"))
+    gfiles = sorted(args.gauntlet_decks.glob("*.ydk"))
     train_decks = [load_ydk(p) for p in pool if p.stem not in hold] + [load_ydk(p) for p in gfiles]
     r = random.Random(1234)
     ev_names = r.sample([p.stem for p in pool if p.stem not in hold], 4) + r.sample(sorted(hold & {p.stem for p in pool}), 4)
@@ -153,7 +157,7 @@ def main() -> None:
                                  "cut": sum(g.truncated for g in gs)}  # fmt: skip
         if ga is not None:
             ga._states.clear()  # LSTM states are keyed by schedule index, which restarts at 0 every match
-            gp = [(i, j) for i in range(len(g_decks)) for j in range(len(g_decks)) if i != j]
+            gp = ring_pairs(len(g_decks), args.ga_opps)
             games = play_match(engine, g_decks, pol, ga, gp, range(args.ga_seeds), num_envs=64, num_threads=args.threads)
             w = sum(g.winner_is_a for g in games)
             lo, hi = wilson(w, len(games))

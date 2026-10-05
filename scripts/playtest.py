@@ -9,7 +9,9 @@
    `--ygoagent` adds the ygo-agent gauntlet opponent.
 3. narrate: N games policy vs greedy written turn by turn to runs/<run>/playtest/game-<k>.txt for a human audit.
 4. `--vs-ckpt`: head-to-head vs another BC checkpoint (e.g. the base model) on the same deck pairs, both seats.
-5. `--ygoagent`: matches vs ygo-agent 0546 on `--gauntlet-decks` (its 864-card vocabulary covers only those decks).
+5. `--ygoagent`: matches vs ygo-agent 0546 on `--gauntlet-decks` (default decks/gauntlet: its own 31 lists, inside its
+   864-card vocabulary), each deck vs its next `--ga-opps` decks, both seats (248 games; was 4 decks/72 games until
+   2026-10-05).
 6. `--selfplay K`: K full games policy vs itself (both seats), saved in hand_play's state format under
    runs/<run>/playtest/selfplay/<name>/state.json, for the same muse review as the gold games (dump_game.py).
 The combo test runs the greedy run and the K samples of a hand in lockstep (one batched forward per step) and
@@ -36,7 +38,7 @@ from ygo_zero.engine.actions import Kind
 from ygo_zero.engine.cpp_env import CppEnv
 from ygo_zero.engine.duel import DuelConfig, Engine
 from ygo_zero.eval.bc_policy import BCPolicy
-from ygo_zero.eval.match import play_match, wilson
+from ygo_zero.eval.match import play_match, ring_pairs, wilson
 from ygo_zero.eval.policies import GreedyPolicy, RandomPolicy
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -236,7 +238,8 @@ def main() -> None:
     ap.add_argument("--narrate", type=int, default=2)
     ap.add_argument("--samples", type=int, default=0, help="best-of-K sampled turn-1 runs per hand (headroom)")
     ap.add_argument("--ygoagent", action="store_true", help="matches vs ygo-agent 0546 on --gauntlet-decks")
-    ap.add_argument("--gauntlet-decks", type=Path, default=ROOT / "tests/fixtures/decks")
+    ap.add_argument("--gauntlet-decks", type=Path, default=ROOT / "decks/gauntlet", help="ygo-agent's own lists")
+    ap.add_argument("--ga-opps", type=int, default=4, help="vs ygo-agent: each gauntlet deck vs its next k decks")
     ap.add_argument("--vs-ckpt", type=Path, default=None, help="head-to-head vs this BC checkpoint (e.g. the base)")
     ap.add_argument("--selfplay", type=int, default=0, help="full policy-vs-policy games saved for review")
     ap.add_argument("--selfplay-decks", nargs="*", default=None, help="deck pool for --selfplay (default: the sample)")
@@ -264,8 +267,8 @@ def main() -> None:
         print(f"[{section}: {time.time() - t:.0f} s]", flush=True)
         (out_dir / "report.json").write_text(json.dumps(report, indent=1))
 
-    def match(name: str, opp, decks: list, n_seeds: int) -> None:
-        pairs = [(i, j) for i in range(len(decks)) for j in range(len(decks)) if i != j]
+    def match(name: str, opp, decks: list, n_seeds: int, k: int = 0) -> None:
+        pairs = ring_pairs(len(decks), k or len(decks))
         games = play_match(engine, decks, pol, opp, pairs, range(n_seeds), num_envs=64, num_threads=args.threads)
         w = sum(g.winner_is_a for g in games)
         lo, hi = wilson(w, len(games))
@@ -291,7 +294,7 @@ def main() -> None:
         from ygo_zero.eval.ygoagent import YgoAgentPolicy
 
         gdecks = [load_ydk(f) for f in sorted(args.gauntlet_decks.glob("*.ydk"))]
-        match("ygoagent", YgoAgentPolicy(seed=3), gdecks, max(args.seeds, 3))
+        match("ygoagent", YgoAgentPolicy(seed=3), gdecks, 1, args.ga_opps)  # 31 lists x 4 opponents x 2 seats
     flush("matches", t)
 
     if args.selfplay:

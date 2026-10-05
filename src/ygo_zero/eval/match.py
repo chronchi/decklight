@@ -37,6 +37,13 @@ def wilson(wins: float, n: int, z: float = 1.96) -> tuple[float, float]:
     return max(0.0, c - h), min(1.0, c + h)
 
 
+def ring_pairs(n: int, k: int) -> list[tuple[int, int]]:
+    """Each of n decks vs its next k decks (cyclic): n*k ordered pairs instead of n*(n-1), every deck equally often
+    on both sides. k >= n-1 gives all pairs."""
+    k = min(k, n - 1)
+    return [(i, (i + d) % n) for i in range(n) for d in range(1, k + 1)]
+
+
 def play_match(
     engine: Engine,
     decks: Sequence,
