@@ -3,6 +3,23 @@
 Goal: give the system a `.ydk`; it learns to pilot that deck at (eventually) beyond-pro level,
 and a *new* deck should need little or no extra training. Planned 2026-10-01.
 
+## 0. Current strategy (2026-10-05, ADR 0006 — read this first; §1-5 below are the original plan and background)
+
+**One loop:** policy → **search teacher** (our policy + engine look-ahead, hidden cards determinized) → better
+decisions → **distill** (BC) → **RL** fine-tune (PPO, KL to BC; league: snapshots + BC + ygo-agent) → stronger policy
+→ repeat (expert iteration). ygo-agent = one-time bootstrap data (its 31 lists) + fixed opponent.
+
+**One yardstick** (report card per checkpoint): vs ygo-agent on its 31 lists (248 games) · vs previous best on pool
+train + holdout decks · turn-1 combo test (greedy + best-of-K) · per-card take rates (interruptions, payoffs) and
+cut rate. Never self-play win rate.
+
+**Milestones:** M0 report card on the BC candidates → pick one base · M1 RL v0 + ygo-agent teacher BC · M2 turn-1
+search teacher + distill · M3 response-window (interrupt fire/hold) teacher + distill · M4 RL + league + periodic
+ExIt (exit: > 50% vs ygo-agent, no holdout regression) · M5 test-time search.
+
+**Stopped/paused:** more gold LLM games (saturated), memory/LSTM/bigger-model sweeps, card-knowledge runs, muse
+DAgger, hand-variant expansions, old datagen driver. Code stays; revisit only if the report card points there.
+
 ## 1. What we have, and why it didn't generalize
 
 | Project | What it is | Useful parts | Why it stalled |
