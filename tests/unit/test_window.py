@@ -124,3 +124,30 @@ def test_window_samples_are_targets_with_window_kinds(engine, tmp_path):
     for _, a, w, m in samples:
         assert m["kind"] in ("window", "window_own") and w == 1.0
         assert a == want[(m["line_id"], m["k"])]
+
+
+def test_value_scoring_constant_value_keeps_pass(engine, tmp_path):
+    """With a learned value that is 0 everywhere, every unfinished branch ties, so a window keeps PASS (ranked
+    first) unless a branch ends the duel; scores stay within [-1, 1]."""
+    from ygo_zero.demos.dataset import record_config
+    from ygo_zero.engine.duel import Engine
+    from ygo_zero.search.window import WindowSearch
+
+    src = _random_games(engine, tmp_path, n=2)
+    calls = []
+
+    def zero_value(obs):
+        calls.append(len(obs["global"]))
+        return np.zeros(len(obs["global"]), np.float32)
+
+    ws = WindowSearch(Engine(), gen_search.greedy_logits, own_frac=0.2, value=zero_value)
+    recs = [json.loads(x) for x in src.read_text().splitlines()]
+    jobs = ((i, ws.game_gen(r, record_config(r), i)) for i, r in enumerate(recs))
+    n = 0
+    for _, res in ws.run_many(jobs, 4):
+        for e in res.log:
+            n += 1
+            assert all(-1.0 <= s <= 1.0 for s in e["scores"])
+            if e["kind"] == "window" and max(e["scores"]) == 0.0:
+                assert not e["fired"]
+    assert n > 0 and calls

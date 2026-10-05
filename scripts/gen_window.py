@@ -60,6 +60,7 @@ def main() -> None:
     ap.add_argument("--games", type=int, default=0, help="games sampled over all processes (0 = all)")
     ap.add_argument("--proc", type=int, default=0)
     ap.add_argument("--nproc", type=int, default=1)
+    ap.add_argument("--value", type=Path, default=None, help="learned value checkpoint (ADR 0007 v2) to score branch ends")
     ap.add_argument("--k", type=int, default=4)
     ap.add_argument("--horizon", type=int, default=1, help="turns played out (1 = to the end of the current turn)")
     ap.add_argument("--own-frac", type=float, default=0.1, help="share of own-turn decisions (turn >= 2) searched")
@@ -81,8 +82,13 @@ def main() -> None:
                     return _f(buf)
     else:
         logits = greedy_logits
+    value = None
+    if args.value:
+        from ygo_zero.eval.value import ValueNet
+
+        value = ValueNet(args.value, args.emb, device=args.device, batch=args.batch).values
     ws = WindowSearch(Engine(), logits, k=args.k, horizon=args.horizon, own_frac=args.own_frac, batch=args.batch,
-                      seed=args.seed)  # fmt: skip
+                      seed=args.seed, value=value)  # fmt: skip
     games = load_games(args.records, args.games, args.seed, args.proc, args.nproc)
     args.out.mkdir(parents=True, exist_ok=True)
     jobs = ((i, ws.game_gen(rec, record_config(rec), i)) for i, (_, rec) in enumerate(games))
@@ -107,7 +113,8 @@ def main() -> None:
         out = {k: rec[k] for k in KEEP if k in rec} | {
             "game_id": f"w-{gid}", "line_id": f"{rec.get('line_id', gid)}/w", "source_game": gid,
             "targets": targets, "labels": labels, "notes": [], "search": res.log,
-            "source": f"window search k={args.k} h={args.horizon} over {args.policy}",
+            "source": f"window search k={args.k} h={args.horizon} over {args.policy}"
+                      + (f", value {args.value}" if args.value else ""),
         }  # fmt: skip
         with (args.out / src).open("a") as f:
             f.write(json.dumps(out) + "\n")

@@ -7,8 +7,10 @@ until `horizon` turns have ended (1 = the end of the current turn). The candidat
 becomes the decision's target; ties keep the policy's order (at a chain window PASS is ranked first, so firing must
 earn its card).
 
-Position score for `me` (no learned value yet): field cards (mzone + szone) mine − theirs, + 0.5 x (hand mine −
-theirs), + (LP mine − theirs) / 2000; a finished duel scores ±50. The rollouts see the true hidden state (perfect
+Position score for `me`, default: field cards (mzone + szone) mine − theirs, + 0.5 x (hand mine − theirs),
++ (LP mine − theirs) / 2000; a finished duel scores ±50. With `value` (a learned value, ADR 0007 v2: P(the acting
+player wins) in [-1, 1], e.g. `ValueNet.values`) the branch end is scored by the value from `me`'s view instead and a
+finished duel scores ±1, so the target captures long-term effects a board count misses. The rollouts see the true hidden state (perfect
 information): the target is "what would have worked here", which the student learns in expectation.
 
 Selected decisions: `window` = a chain window (MSG_SELECT_CHAIN) on the opponent's turn where `me` can ACTIVATE;
@@ -31,6 +33,7 @@ from ygo_zero.engine.duel import DuelConfig, Engine
 from ygo_zero.search.turn1 import _batch, _masked, drive_many
 
 LogitsFn = Callable[[dict[str, np.ndarray]], np.ndarray]
+ValueFn = Callable[[dict[str, np.ndarray]], np.ndarray]  # batched obs -> value in [-1, 1], actor's view
 WIN = 50.0
 
 
@@ -62,8 +65,9 @@ class WindowResult:
 
 class WindowSearch:
     def __init__(self, engine: Engine, logits: LogitsFn, k: int = 4, horizon: int = 1, own_frac: float = 0.0,
-                 max_rollout: int = 300, batch: int = 512, seed: int = 0) -> None:  # fmt: skip
+                 max_rollout: int = 300, batch: int = 512, seed: int = 0, value: ValueFn | None = None) -> None:  # fmt: skip
         self.engine, self.logits, self.k, self.horizon = engine, logits, k, horizon
+        self.value, self.win = value, (1.0 if value is not None else WIN)
         self.own_frac, self.max_rollout, self.batch = own_frac, max_rollout, batch
         self.seed = seed
 
@@ -95,6 +99,7 @@ class WindowSearch:
         score = [0.0] * len(envs)
         n = [0] * len(envs)
         live = [True] * len(envs)
+        pending: list[tuple[int, dict, int]] = []  # branch ends scored by the learned value in one call
         while any(live):
             act = []
             for i, e in enumerate(envs):
@@ -103,11 +108,14 @@ class WindowSearch:
                 if obs[i] is None:
                     live[i] = False
                     w = int(e.winner)
-                    score[i] = WIN if w == me else -WIN if w in (0, 1) else 0.0
+                    score[i] = self.win if w == me else -self.win if w in (0, 1) else 0.0
                     continue
                 if int(obs[i]["global"][2]) > end_turn or n[i] >= self.max_rollout:
                     live[i] = False
-                    score[i] = position_score(obs[i], int(e.player), me)
+                    if self.value is None:
+                        score[i] = position_score(obs[i], int(e.player), me)
+                    else:
+                        pending.append((i, obs[i], int(e.player)))
                     continue
                 act.append(i)
             if not act:
@@ -116,6 +124,10 @@ class WindowSearch:
             for i, row in zip(act, lg, strict=True):
                 n[i] += 1
                 obs[i] = envs[i].step(int(np.argmax(_masked(row, obs[i]))))
+        if pending:
+            v = self.value(_batch([o for _, o, _ in pending]))
+            for (i, _, actor), x in zip(pending, v, strict=True):
+                score[i] = float(x) if actor == me else -float(x)
         return score
 
     def game_gen(self, rec: dict, config: DuelConfig, game_seed: int = 0):
