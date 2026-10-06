@@ -51,6 +51,8 @@ fi
 [ -n "${PT_ARGS:-}" ] && read -ra PT <<< "$PT_ARGS"
 uv run --no-sync python scripts/build_bc_shards.py "${ONLY[@]}" --out data/cache/bc_shards --jobs "$J" > "$OUT/shards.txt" 2>&1
 tick shards
+# fail loud: a data source that mostly produced empty shards means a dataset bug; never train on it
+if grep -q "^ALERT" "$OUT/shards.txt"; then grep -h "^ALERT" "$OUT/shards.txt" >> "$OUT/ALERT"; exit 3; fi
 HOLD="kewl-tune $( [ -f decks/pool/HOLDOUT ] && tr '\n' ' ' < decks/pool/HOLDOUT )"
 COMMON=(--shards data/cache/bc_shards --emb data/cards/emb/qwen3-0.6b-d512.npz --batch 512 --holdout $HOLD
         --val-frac-kind gold=0.25 gold_pass=0.25 --select-on val:gold)

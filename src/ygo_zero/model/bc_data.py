@@ -232,10 +232,19 @@ def build_shards(sources: dict[str, list[Path]], out_dir: Path, jobs: int) -> in
             flat = "~".join(rel.with_suffix("").parts[-6:])
             work.append((str(f), str(out_dir / f"{tag}__{flat}.npz"), tag))
     total = 0
+    per_tag: dict[str, list[int]] = {}  # tag -> [files, samples, files with 0 samples]
     with mp.get_context("fork").Pool(max(1, jobs), initializer=_init) as pool:
         for out, n in pool.imap_unordered(_shard_one, work):
             total += n
             print(f"{Path(out).name}: {n}", flush=True)
+            st = per_tag.setdefault(Path(out).name.split("__", 1)[0], [0, 0, 0])
+            st[0], st[1], st[2] = st[0] + 1, st[1] + n, st[2] + (n == 0)
+    for tag, (nf, ns, nz) in sorted(per_tag.items()):
+        print(f"source {tag}: {nf} files, {ns} samples, {nz} files with 0 samples", flush=True)
+        # fail loud: in a good build every source has <= 5% empty files (games); 5988 teacher files silently gave
+        # 0 samples on 2026-10-06 (a kind rule matched their file names)
+        if ns == 0 or nz > 0.25 * nf:
+            print(f"ALERT shards: source {tag} has {nz} of {nf} files with 0 samples ({ns} samples)", flush=True)
     return total
 
 

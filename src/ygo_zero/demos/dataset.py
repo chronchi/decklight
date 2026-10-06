@@ -81,7 +81,9 @@ def sample_kind(source: str | Path, label: str) -> str:
     - everything else -> line
     """
     parts = Path(source).parts
-    sw = next((p for p in parts if p.startswith("sw-")), None)
+    # directories only: a FILE named sw-… (the round-1 teacher copies) is not a window labelling (2026-10-06: it
+    # turned 5988 teacher games into weight-0 samples)
+    sw = next((p for p in parts[:-1] if p.startswith("sw-")), None)
     if sw is not None:
         return f"{sw}_own" if label == "own" else sw
     if "gold" in parts:
@@ -203,7 +205,7 @@ def iter_samples(engine: Engine, path: Path) -> Iterator[tuple[dict, int, float,
         judges = load_judgements(f)
         weights = GOLD_LABEL_WEIGHT if ("gold" in f.parts or "teacher" in f.parts or "dagger" in f.parts) else LABEL_WEIGHT
         weights = SEARCH_LABEL_WEIGHT if "search" in f.parts else weights
-        weights = WINDOW_LABEL_WEIGHT if ("window" in f.parts or any(q.startswith("sw-") for q in f.parts)) else weights
+        weights = WINDOW_LABEL_WEIGHT if ("window" in f.parts or any(q.startswith("sw-") for q in f.parts[:-1])) else weights
         for rec in load_records(f):
             if starved_opening(rec):
                 continue

@@ -47,3 +47,7 @@ def test_relabel_cli(tmp_path):
     bad = subprocess.run([sys.executable, str(ROOT / "scripts/relabel_window.py"), "--src", str(tmp_path / "window/p*"),
                           "--select", "nope@h9", "--name", "t", "--out-root", str(tmp_path)], capture_output=True, text=True, check=False)
     assert bad.returncode != 0 and "ALERT" in bad.stderr
+
+
+def test_sw_prefix_on_a_file_name_is_not_a_kind():
+    assert sample_kind("data/demos/teacher/sw-p0-a-vs-b.jsonl", "gold") == "teacher"
