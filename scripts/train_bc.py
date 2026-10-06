@@ -366,6 +366,10 @@ def main() -> None:
             {"model": model.state_dict(), "opt": opt.state_dict(), "epoch": ep, "args": vars(args)},
             args.out / "last.pt",
         )
+        if args.select_on == "last":
+            # every epoch is a candidate for the report card (fp16, ~9 MB): a later epoch can regress
+            torch.save({k: v.half() if v.is_floating_point() else v for k, v in model.state_dict().items()},
+                       args.out / f"ep{ep}.pt")
         score = select_score(rec, args.select_on, -rec["train_loss"])
         if score > best:
             best = score
