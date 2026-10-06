@@ -54,3 +54,21 @@ def test_relay_alerts_appends_only_new_lines(tmp_path, monkeypatch):
     seen = vast.relay_alerts("h", 1, "/r", log, seen)
     lines = log.read_text().splitlines()
     assert seen == 2 and lines == ["ALERT train-ft-dw: best.pt is the --init weights", "ALERT playtest-ft-dw skipped"]
+
+
+def test_stall_check_alerts_once_and_clears(tmp_path, monkeypatch):
+    from ygo_zero.infra import vast
+
+    recent = {"out": ""}  # find's output: empty = nothing changed recently
+
+    def fake_run(*a, **k):
+        return subprocess.CompletedProcess(a, 0, stdout=recent["out"], stderr="")
+
+    monkeypatch.setattr(vast.subprocess, "run", fake_run)
+    log = tmp_path / "launcher.log"
+    st = vast.stall_check("h", 1, "/r", log, False)
+    st = vast.stall_check("h", 1, "/r", log, st)
+    recent["out"] = "/r/window-0.txt\n"
+    st = vast.stall_check("h", 1, "/r", log, st)
+    lines = log.read_text().splitlines()
+    assert not st and len(lines) == 2 and lines[0].startswith("ALERT stall") and lines[1] == "stall over: output resumed"

@@ -242,9 +242,13 @@ def run_detached(host: str, port: int, name: str, job: str, cap: int, log: Path,
         raise VastError("could not start the job on the instance")
     deadline = time.time() + cap + 300
     alerts_seen = 0
+    polls, stalled = 0, False
     while time.time() < deadline:
         time.sleep(poll_s)
         alerts_seen = relay_alerts(host, port, rdir, log, alerts_seen)
+        polls += 1
+        if polls % max(1, 300 // poll_s) == 0:  # every ~5 min
+            stalled = stall_check(host, port, rdir, log, stalled)
         try:
             out = subprocess.run(
                 ["ssh", *SSH_OPTS, "-p", str(port), f"root@{host}", f"cat {rdir}/EXIT 2>/dev/null"],
@@ -256,6 +260,28 @@ def run_detached(host: str, port: int, name: str, job: str, cap: int, log: Path,
             relay_alerts(host, port, rdir, log, alerts_seen)
             return int(out.stdout.strip())
     return 124
+
+
+STALL_MIN = 40  # longer than any quiet stage (data loading ~15 min, one training epoch ~25 min)
+
+
+def stall_check(host: str, port: int, rdir: str, log: Path, stalled: bool, minutes: int = STALL_MIN) -> bool:
+    """Fail loud on a hang: ALERT once when no file under runs/<name> (except the usage logger's) changed for
+    `minutes` (sw-20261005-2323 sat 20 min in a bare `wait` with nothing in the launcher log); a note when output
+    resumes. Returns the current stalled state."""
+    cmd = f"find {rdir} -type f ! -name usage.txt -mmin -{minutes} 2>/dev/null | head -1"
+    try:
+        out = subprocess.run(["ssh", *SSH_OPTS, "-p", str(port), f"root@{host}", cmd],
+                             capture_output=True, text=True, timeout=60, check=False)
+    except subprocess.TimeoutExpired:
+        return stalled
+    if out.returncode != 0:
+        return stalled  # ssh trouble is not a stall
+    now = not out.stdout.strip()
+    if now != stalled:
+        with open(log, "a") as f:
+            f.write(f"ALERT stall: no output under {rdir} for {minutes} min\n" if now else "stall over: output resumed\n")
+    return now
 
 
 def relay_alerts(host: str, port: int, rdir: str, log: Path, seen: int) -> int:
