@@ -33,9 +33,11 @@ tick() { echo "$1 $((SECONDS - T0)) s" >> "$OUT/selfwin.txt"; }
 
 # 2. teacher games in the background (CPU only)
 TPER=$(( (TG + TP - 1) / TP ))
+T_PIDS=()
 for p in $(seq 0 $((TP - 1))); do
   timeout 150m uv run --no-sync python scripts/gen_teacher.py --out "$OUT/teacher/p$p" --games "$TPER" \
     --seed $(( 7000000 + p * 100000 )) --threads 2 --sample-frac 0.5 > "$OUT/teacher-$p.txt" 2>&1 &
+  T_PIDS+=($!)
 done
 
 # 1. self-play
@@ -56,14 +58,17 @@ grep -h "Traceback" "$OUT"/selfplay-*.txt | head -3 | sed 's/^/ALERT selfplay: /
 [ "$n_sp" -ge $(( SPG / 2 )) ] || { alert "selfplay wrote $n_sp of $SPG games"; }
 
 # 3. multi-score window search over the self-play games
+# never a bare `wait`: it also waits for the usage logger, which never exits (sw-20261005-2323 hung 20 min)
 if [ "$n_sp" -gt 0 ]; then
+  W_PIDS=()
   for p in $(seq 0 $((WP - 1))); do
     timeout 120m uv run --no-sync python scripts/gen_window.py --ckpt "$BASE" --value "$VALUE" --device cuda --width 32 \
       --records "$OUT/selfplay/p*/*.jsonl" --games "$WG" --proc "$p" --nproc "$WP" --k 4 --horizons 1 3 \
       --samples "$S" --rollout-temp 1.0 --select value@h1 --own-frac 0.1 --seed 11 \
       --out "$OUT/window/p$p" > "$OUT/window-$p.txt" 2>&1 &
+    W_PIDS+=($!)
   done
-  wait  # also waits for the teacher games
+  wait "${W_PIDS[@]}"
   tick window
   grep -h "^done\|Traceback" "$OUT"/window-*.txt >> "$OUT/selfwin.txt"
   n_w=$(cat "$OUT"/window/p*/*.jsonl 2>/dev/null | wc -l)
@@ -72,9 +77,8 @@ if [ "$n_sp" -gt 0 ]; then
   n_done=$(grep -l "^done" "$OUT"/window-*.txt | wc -l)
   [ "$n_done" -eq "$WP" ] || alert "window: $n_done of $WP procs finished (cap or crash)"
   [ "$n_w" -ge $(( WG / 2 )) ] || alert "window wrote $n_w of $WG games"
-else
-  wait
 fi
+wait "${T_PIDS[@]}"
 tick teacher
 n_t=$(cat "$OUT"/teacher/p*/*.jsonl 2>/dev/null | wc -l)
 echo "teacher records $n_t" >> "$OUT/selfwin.txt"
