@@ -147,7 +147,7 @@ def main() -> None:
         with (args.out / src).open("a") as f:
             f.write(json.dumps(out) + "\n")
         if tot["games"] % 20 == 0:
-            print(f"{tot} {time.time() - t0:.0f} s", flush=True)
+            print(f"{tot} capped rollouts {ws.capped} {time.time() - t0:.0f} s", flush=True)
     w = max(tot["window"], 1)
     per_key = {kk: f"{v / max(agree_n, 1):.3f}" for kk, v in sorted(agree.items())}
     mean_conf = conf_sum / max(conf_n, 1)
@@ -155,6 +155,7 @@ def main() -> None:
     print(f"done: {tot}; fire rate {tot['fired'] / w:.3f}, agreement with the played move at windows "
           f"{tot['agree_window'] / w:.3f}, own {tot['agree_own'] / max(tot['own'], 1):.3f}; "
           f"per-key agreement with target {per_key}, mean conf {mean_conf:.3f}, mean set {mean_set:.2f}; "
+          f"capped rollouts {ws.capped} (scored as losses); "
           f"wall {time.time() - t0:.0f} s",
           flush=True)  # fmt: skip
 

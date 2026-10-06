@@ -96,6 +96,9 @@ def _turn1_fields(envs: list, pols: list) -> list[tuple[int, int]]:
     """Player 0's turn 1 (opponent passive) for several envs in lockstep: pols[i] acts for envs[i]; envs sharing a policy object get one
     batched forward per step. Returns [(end field, p0 decisions)] per env."""
     passive = Responder(0)
+    for p in {id(p): p for p in pols}.values():  # each call is a fresh set of games for the loop guard
+        if getattr(p, "guard", None) is not None:
+            p.guard.reset()
     obs = [e.reset() for e in envs]
     last, n = [0] * len(envs), [0] * len(envs)
     live = [True] * len(envs)
@@ -114,7 +117,7 @@ def _turn1_fields(envs: list, pols: list) -> list[tuple[int, int]]:
                 obs[i] = e.step(passive.passive(obs[i]))
         for idx in groups.values():
             buf = {k: np.stack([obs[i][k] for i in idx]) for k in obs[idx[0]]}
-            acts = pols[idx[0]](buf, np.arange(len(idx)))
+            acts = pols[idx[0]](buf, np.arange(len(idx)), slots=np.array(idx))
             for i, a in zip(idx, acts, strict=True):
                 n[i] += 1
                 obs[i] = envs[i].step(int(a))
@@ -195,6 +198,8 @@ def narrate(engine, pol, deck_a: str, deck_b: str, seed: int, names: dict, out: 
     da, db = (load_ydk(ROOT / "decks" / "pool" / f"{d}.ydk") for d in (deck_a, deck_b))
     env = CppEnv(engine, DuelConfig(da, db, seed=seed))
     greedy = GreedyPolicy(seed)
+    if getattr(pol, "guard", None) is not None:
+        pol.guard.reset()
     obs, lines, last_lp = env.reset(), [f"{deck_a} (policy, p0) vs {deck_b} (greedy, p1), seed {seed}"], None
     keep = {Kind.SUMMON, Kind.SPSUMMON, Kind.MSET, Kind.SSET, Kind.ACTIVATE, Kind.ATTACK, Kind.TO_BATTLE, Kind.TO_END}
     while obs is not None and int(obs["global"][2]) <= max_turns:
@@ -222,6 +227,8 @@ def selfplay_game(engine, pol, deck_a: str, deck_b: str, seed: int, out_dir: Pat
     is labelled "gold" (the review rubric skips single-option prompts itself). Stops at duel end or max_steps."""
     da, db = (load_ydk(ROOT / "decks" / "pool" / f"{d}.ydk") for d in (deck_a, deck_b))
     env = CppEnv(engine, DuelConfig(da, db, seed=seed))
+    if getattr(pol, "guard", None) is not None:
+        pol.guard.reset()
     obs = env.reset()
     st = {"decks": [deck_a, deck_b], "seed": seed, "choices": [], "labels": [], "actors": [], "turns": [], "notes": []}
     while obs is not None and len(st["choices"]) < max_steps:

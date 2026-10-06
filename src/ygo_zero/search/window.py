@@ -30,6 +30,7 @@ from ygo_zero.engine import constants as C
 from ygo_zero.engine.actions import Kind
 from ygo_zero.engine.cpp_env import CppEnv
 from ygo_zero.engine.duel import DuelConfig, Engine
+from ygo_zero.eval.loopguard import LoopGuard
 from ygo_zero.search.turn1 import _batch, _masked, drive_many
 
 LogitsFn = Callable[[dict[str, np.ndarray]], np.ndarray]
@@ -95,6 +96,7 @@ class WindowSearch:
         self.rollout_temp = rollout_temp
         self.select = select
         self.tie_eps = tie_eps
+        self.capped = 0  # rollout branches that hit max_rollout (scored as a loss); gen_window prints it
 
     def _hs(self) -> tuple[int, ...]:
         return self.horizons if self.horizons is not None else (self.horizon,)
@@ -130,6 +132,9 @@ class WindowSearch:
         samples 1..S-1 sample from softmax(logits / rollout_temp) with a Random seeded from
         (seed, game_seed, k, candidate, sample). When the turn number first exceeds `turn_start + h - 1` the
         branch's scores for h are snapshotted; a branch that ended earlier keeps its terminal scores.
+        Rollouts run under a LoopGuard (exact repeats within a turn mask the options already taken), and a branch
+        that still hits max_rollout is scored as a loss for `me`: a candidate that sends play into a loop must not
+        look as good as the position it froze in (round 1 learned such loops, NOTEBOOK 2026-10-06).
         """
         hs = self._hs()
         # Legacy call: list of prefixes -> one argmax branch each, single horizon ending at end_turn.
@@ -161,11 +166,12 @@ class WindowSearch:
         snap_vterm: list[list[float | None]] = [[None] * H for _ in range(B)]
         n = [0] * B
         live = [True] * B
+        guard = LoopGuard()
         rngs = [random.Random(f"{self.seed}:{game_seed}:{decision_k}:{a}:{s}") for _, _, a, s in branches]
 
-        def _snapshot(i: int, h_idx: int, terminal: bool) -> None:
+        def _snapshot(i: int, h_idx: int, terminal: bool, lost: bool = False) -> None:
             if terminal:
-                w = int(envs[i].winner)
+                w = 1 - me if lost else int(envs[i].winner)
                 b = BOARD_WIN if w == me else -BOARD_WIN if w in (0, 1) else 0.0
                 d = 1.0 if w == me else -1.0 if w in (0, 1) else 0.0
                 snap_board[i][h_idx] = b
@@ -203,9 +209,10 @@ class WindowSearch:
                     live[i] = False
                     continue
                 if n[i] >= self.max_rollout:
+                    self.capped += 1
                     for h_idx in range(H):
                         if snap_board[i][h_idx] is None:
-                            _snapshot(i, h_idx, False)
+                            _snapshot(i, h_idx, True, lost=True)
                     live[i] = False
                     continue
                 act.append(i)
@@ -214,7 +221,7 @@ class WindowSearch:
             lg = yield [obs[i] for i in act]
             for i, row in zip(act, lg, strict=True):
                 n[i] += 1
-                z = _masked(row, obs[i])
+                z, key = guard.mask(i, obs[i], _masked(row, obs[i]))
                 s = branches[i][3]
                 if s == 0:
                     a = int(np.argmax(z))
@@ -233,6 +240,7 @@ class WindowSearch:
                         if r < cum:
                             a = int(li)
                             break
+                guard.note(i, key, a)
                 obs[i] = envs[i].step(a)
         # Any branch still live (should not happen) gets its current position for remaining horizons.
         for i in range(B):

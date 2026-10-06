@@ -6,7 +6,8 @@
 #    board / value / done (won within h turns) / cards at horizons 1 and 3; targets select value@h1, and the search
 #    log keeps every score so other labellings are derived offline (scripts/relabel_window.py)
 # Env: BASE (policy best.pt, required), VALUE (default data/cache/value_v2/best.pt), SP_GAMES (4000), SP_PROCS (16),
-#   TEACHER_GAMES (10000), TEACHER_PROCS (cores/4), WINDOW_GAMES (1500), WPROCS (12), SAMPLES (2).
+#   TEACHER_GAMES (10000; 0 skips the stage), TEACHER_PROCS (cores/4), WINDOW_GAMES (1500), WPROCS (12), SAMPLES (2),
+#   WCAP (window stage timeout, 120m).
 # Usage: bash scripts/vast_selfwin.sh <name>. Results: runs/<name>/{selfplay,teacher,window}/p<k>/, selfwin.txt, ALERT
 set -uo pipefail
 export PATH="$HOME/.local/bin:$PATH"
@@ -15,7 +16,7 @@ NAME="$1"; OUT="runs/$NAME"; mkdir -p "$OUT"
 VALUE="${VALUE:-data/cache/value_v2/best.pt}"
 SPG=${SP_GAMES:-4000}; SPP=${SP_PROCS:-16}; TG=${TEACHER_GAMES:-10000}
 TP=${TEACHER_PROCS:-$(( $(nproc) / 4 ))}; [ "$TP" -lt 1 ] && TP=1
-WG=${WINDOW_GAMES:-1500}; WP=${WPROCS:-12}; S=${SAMPLES:-2}
+WG=${WINDOW_GAMES:-1500}; WP=${WPROCS:-12}; S=${SAMPLES:-2}; WCAP=${WCAP:-120m}
 alert() { echo "ALERT $*" | tee -a "$OUT/ALERT"; }
 uv sync --group dev --group ml --group gauntlet -q --no-install-package torch
 export UV_HTTP_TIMEOUT=300
@@ -34,7 +35,7 @@ tick() { echo "$1 $((SECONDS - T0)) s" >> "$OUT/selfwin.txt"; }
 # 2. teacher games in the background (CPU only)
 TPER=$(( (TG + TP - 1) / TP ))
 T_PIDS=()
-for p in $(seq 0 $((TP - 1))); do
+[ "$TG" -gt 0 ] && for p in $(seq 0 $((TP - 1))); do
   timeout 150m uv run --no-sync python scripts/gen_teacher.py --out "$OUT/teacher/p$p" --games "$TPER" \
     --seed $(( 7000000 + p * 100000 )) --threads 2 --sample-frac 0.5 > "$OUT/teacher-$p.txt" 2>&1 &
   T_PIDS+=($!)
@@ -62,7 +63,7 @@ grep -h "Traceback" "$OUT"/selfplay-*.txt | head -3 | sed 's/^/ALERT selfplay: /
 if [ "$n_sp" -gt 0 ]; then
   W_PIDS=()
   for p in $(seq 0 $((WP - 1))); do
-    timeout 120m uv run --no-sync python scripts/gen_window.py --ckpt "$BASE" --value "$VALUE" --device cuda --width 32 \
+    timeout "$WCAP" uv run --no-sync python scripts/gen_window.py --ckpt "$BASE" --value "$VALUE" --device cuda --width 32 \
       --records "$OUT/selfplay/p*/*.jsonl" --games "$WG" --proc "$p" --nproc "$WP" --k 4 --horizons 1 3 \
       --samples "$S" --rollout-temp 1.0 --select value@h1 --own-frac 0.1 --seed 11 \
       --out "$OUT/window/p$p" > "$OUT/window-$p.txt" 2>&1 &
@@ -78,12 +79,12 @@ if [ "$n_sp" -gt 0 ]; then
   [ "$n_done" -eq "$WP" ] || alert "window: $n_done of $WP procs finished (cap or crash)"
   [ "$n_w" -ge $(( WG / 2 )) ] || alert "window wrote $n_w of $WG games"
 fi
-wait "${T_PIDS[@]}"
+[ "${#T_PIDS[@]}" -gt 0 ] && wait "${T_PIDS[@]}"
 tick teacher
 n_t=$(cat "$OUT"/teacher/p*/*.jsonl 2>/dev/null | wc -l)
 echo "teacher records $n_t" >> "$OUT/selfwin.txt"
 grep -h "Traceback" "$OUT"/teacher-*.txt | head -3 | sed 's/^/ALERT teacher: /' >> "$OUT/ALERT"
-[ "$n_t" -ge $(( TG / 2 )) ] || alert "teacher wrote $n_t of $TG games"
+[ "$TG" -eq 0 ] || [ "$n_t" -ge $(( TG / 2 )) ] || alert "teacher wrote $n_t of $TG games"
 du -sh "$OUT"/selfplay "$OUT"/window "$OUT"/teacher >> "$OUT/selfwin.txt" 2>&1
 kill "$USAGE_PID" 2>/dev/null
 echo done > "$OUT/DONE"

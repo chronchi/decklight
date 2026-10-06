@@ -21,6 +21,7 @@ import numpy as np
 from ygo_zero.engine.actions import Kind
 from ygo_zero.engine.cpp_env import CppEnv
 from ygo_zero.engine.duel import DuelConfig, Engine
+from ygo_zero.eval.loopguard import LoopGuard
 
 LogitsFn = Callable[[dict[str, np.ndarray]], np.ndarray]
 FIELD_LOCS = (3, 4)  # obs card column 1: 3 mzone, 4 szone (docs/obs_spec.md)
@@ -104,6 +105,7 @@ class Turn1Search:
         last = [0.0] * len(envs)
         n = [n0] * len(envs)
         live = [True] * len(envs)
+        guard = LoopGuard()  # exact repeats (SELECT/UNSELECT, summon/cancel) must not eat the decision cap
         while any(live):
             mine = []
             for i, e in enumerate(envs):
@@ -123,7 +125,10 @@ class Turn1Search:
             lg = yield [obs[i] for i in mine]
             for i, row in zip(mine, lg, strict=True):
                 n[i] += 1
-                obs[i] = envs[i].step(int(np.argmax(_masked(row, obs[i]))))
+                z, key = guard.mask(i, obs[i], _masked(row, obs[i]))
+                a = int(np.argmax(z))
+                guard.note(i, key, a)
+                obs[i] = envs[i].step(a)
         return last
 
     def run_gen(self, config: DuelConfig):
@@ -131,11 +136,12 @@ class Turn1Search:
         env = CppEnv(self.engine, config, self.auto_single)
         obs = env.reset()
         res = Turn1Result([], [], [], 0.0, 0, 0, 0)
+        guard = LoopGuard()
         while obs is not None and int(obs["global"][2]) <= 1 and res.decisions < self.max_decisions:
             if env.player == 1:
                 a, label = passive_choice(obs), "opp"
             else:
-                z = _masked((yield [obs])[0], obs)
+                z, key = guard.mask(0, obs, _masked((yield [obs])[0], obs))
                 legal = np.flatnonzero(np.isfinite(z))
                 cands = [int(i) for i in legal[np.argsort(-z[legal], kind="stable")][: self.k]]
                 a, label = cands[0], "search"
@@ -147,6 +153,7 @@ class Turn1Search:
                     res.overrides += best != 0
                     res.log.append({"k": len(res.choices), "cands": cands, "scores": [round(s, 2) for s in scores],
                                     "chosen": a})  # fmt: skip
+                guard.note(0, key, a)
                 res.decisions += 1
             res.choices.append(a)
             res.actors.append(int(env.player))
