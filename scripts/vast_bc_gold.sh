@@ -113,6 +113,13 @@ R1=(--init "$BASE" --epochs "$EP_MIX" --lr 2e-4 --select-on last --kind-frac lin
 want ft-t13 && train ft-t13 "${R1[@]}" sw-v=0 sw-v_own=0 sw-d3=0 sw-d3_own=0
 want ft-swv && train ft-swv "${R1[@]}" sw-v=2 sw-v_own=1 sw-d3=0 sw-d3_own=0 --require-kinds sw-v sw-v_own
 want ft-swd && train ft-swd "${R1[@]}" sw-v=0 sw-v_own=0 sw-d3=2 sw-d3_own=1 --require-kinds sw-d3 sw-d3_own
+# round 2 (ADR 0007): from ft-swv, round-1 + round-2 value@h1 labels (sw-v2: self-play of ft-swv under the loop guard,
+# 4 rollout samples); ft-r2 keeps teacher at 0.5/epoch, ft-r2t halves it (all round-1 variants lost ~0.3 combo)
+R2=(--init "$BASE" --epochs "$EP_MIX" --lr 2e-4 --select-on last --kind-frac line_expanded=0.2 game_plan=1 game_interrupt=1
+    gold=20 gold_pass=10 dagger=1 dagger_pass=1 window=1 window_own=0 search=1 sw-v=2 sw-v_own=1 sw-v2=2 sw-v2_own=1
+    sw-d3=0 sw-d3_own=0)
+want ft-r2 && train ft-r2 "${R2[@]}" teacher=0.5 teacher_pass=0.5 --require-kinds sw-v2 sw-v2_own
+want ft-r2t && train ft-r2t "${R2[@]}" teacher=0.25 teacher_pass=0.25 --require-kinds sw-v2 sw-v2_own
 for V in mix-h32 mix-h128 mix-h256 mix-h512 mix-h32k mix-h128k mix-h256k mix-h512k mix-k; do
   want "$V" || continue
   H=${V#mix-h}; H=${H%k}; [ "$V" = mix-k ] && H=0
@@ -129,7 +136,7 @@ from pathlib import Path
 out = Path(sys.argv[1])
 best_v, best_s = "zero", -1.0
 best_hv, best_h = "zero", -1.0  # also playtest the best on unseen-deck gold (bcg-20261004-2223: mix won there)
-for v in ("zero", "ft-gold", "ft-mix", "ft-teach", "ft-teach-h", "ft-search", "ft-dw", "ft-all", "ft-t13", "ft-swv", "ft-swd", "mix", "lines-gold", "mix-l", "mix-h32", "mix-h128", "mix-h256", "mix-h512",
+for v in ("zero", "ft-gold", "ft-mix", "ft-teach", "ft-teach-h", "ft-search", "ft-dw", "ft-all", "ft-t13", "ft-swv", "ft-swd", "ft-r2", "ft-r2t", "mix", "lines-gold", "mix-l", "mix-h32", "mix-h128", "mix-h256", "mix-h512",
           "mix-h32k", "mix-h128k", "mix-h256k", "mix-h512k", "mix-k"):
     m = out / v / "metrics.jsonl"
     if not m.exists():
