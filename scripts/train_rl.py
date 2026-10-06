@@ -21,10 +21,12 @@ from __future__ import annotations
 
 import argparse
 import contextlib
+import copy
 import json
 import os
 import random
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -90,6 +92,152 @@ def policy_state(model: PolicyNet) -> dict:
             if not k.startswith("value_head.")}  # fmt: skip
 
 
+class CollectTask:
+    """One `col.collect(n)` in a background thread; `join` re-raises the original error, never hangs."""
+
+    def __init__(self, col: Collector, n_samples: int) -> None:
+        self.col = col
+        self.n = n_samples
+        self.finished = None
+        self.stats = None
+        self.elapsed = 0.0
+        self._exc = None
+        self._thread = threading.Thread(target=self._run, daemon=True)
+
+    def start(self) -> "CollectTask":
+        self._thread.start()
+        return self
+
+    def _run(self) -> None:
+        t0 = time.time()
+        # Own CUDA stream, so rollout forwards can run alongside the update's kernels on the
+        # default stream (collect syncs each forward to the host via .cpu() before using it).
+        try:
+            dev = getattr(self.col, "device", None)
+            cuda = dev is not None and dev.type == "cuda"
+            with torch.cuda.stream(torch.cuda.Stream(dev)) if cuda else contextlib.nullcontext():
+                finished, stats = self.col.collect(self.n)
+        except BaseException:
+            self._exc = sys.exc_info()
+            return
+        self.finished, self.stats = finished, stats
+        self.elapsed = time.time() - t0
+
+    def join(self, timeout: float | None = None):
+        self._thread.join(timeout)
+        if self._thread.is_alive():
+            raise TimeoutError("collect thread did not finish")
+        if self._exc is not None:
+            _, exc, tb = self._exc
+            raise exc.with_traceback(tb)
+        return self.finished, self.stats
+
+
+def sync_actor(actor: PolicyNet, model: PolicyNet) -> None:
+    """Copy fresh training weights into the rollout actor (call only with no collect running)."""
+    actor.load_state_dict(model.state_dict())
+    actor.eval()
+
+
+def gae_batch(store: SlotStore, finished: list, lam: float):
+    """GAE per finished seat trajectory. Returns (slots, adv, ret, adv_n)."""
+    slots = np.concatenate([np.array(s, np.int64) for s, _ in finished])
+    advs, rets = [], []
+    for s, rew in finished:
+        ad, rt = gae(store.value[np.array(s)], rew, lam)
+        advs.append(ad)
+        rets.append(rt)
+    adv, ret = np.concatenate(advs), np.concatenate(rets)
+    adv_n = (adv - adv.mean()) / (adv.std() + 1e-8)
+    return slots, adv, ret, adv_n
+
+
+def ppo_update(model: PolicyNet, upd_model, opt, vopt, store: SlotStore, slots: np.ndarray,
+               adv_n: np.ndarray, ret: np.ndarray, rng: np.random.Generator, dev: torch.device,
+               *, clip: float, vf_coef: float, kl_coef: float, ent_coef: float, epochs: int,
+               minibatch: int, warm: bool, precision: str, max_upload_gb: float, compile: bool) -> dict:
+    """Upload-once + PPO epochs over one batch. Returns per-iteration mean stats (raises on non-finite)."""
+    if dev.type == "cuda":
+        torch.cuda.empty_cache()
+    per_slot = (sum(int(np.prod(v.shape[1:], dtype=np.int64)) * np.dtype(v.dtype).itemsize
+                    for v in store.obs.values()) + 8 + 4 + 4 + 64 * 2 + 4 + 4)
+    upload_once = per_slot * len(slots) <= max_upload_gb * 1e9
+    obs_dev = act_dev = olp_dev = ref_dev = adv_dev = ret_dev = perm_dev = None
+    if upload_once:
+        obs_dev = {k: torch.from_numpy(np.ascontiguousarray(store.obs[k][slots])).to(dev)
+                   for k in store.obs}
+        act_dev = torch.from_numpy(np.ascontiguousarray(store.action[slots])).to(dev)
+        olp_dev = torch.from_numpy(np.ascontiguousarray(store.logp[slots])).to(dev)
+        ref_dev = torch.from_numpy(np.ascontiguousarray(store.ref_lp[slots])).to(dev)
+        adv_dev = torch.from_numpy(np.ascontiguousarray(adv_n)).to(dev)
+        ret_dev = torch.from_numpy(np.ascontiguousarray(ret)).to(dev)
+        perm_dev = torch.from_numpy(rng.permutation(len(slots))).to(dev)
+    t_up = time.time()
+    model.train()
+    if compile:
+        upd_model.train()
+    agg_sum: dict[str, torch.Tensor] = {}
+    agg_n = 0
+    bad_loss = False
+    for _ in range(epochs):
+        finite_epoch = torch.ones((), dtype=torch.bool, device=dev)
+        perm = rng.permutation(len(slots))
+        mb_dev = torch.from_numpy(perm).to(dev) if upload_once else None
+        for k in range(0, len(perm), minibatch):
+            if upload_once:
+                idx = mb_dev[k : k + minibatch]
+                obs = {key: v[idx] for key, v in obs_dev.items()}
+                act, olp = act_dev[idx], olp_dev[idx]
+                rl = ref_dev[idx] if kl_coef > 0 else None
+                a_t = adv_dev[idx]
+                r_t = ret_dev[idx]
+            else:
+                mb = perm[k : k + minibatch]
+                sl = slots[mb]
+                obs = to_torch({key: v[sl] for key, v in store.obs.items()}, dev)
+                act = torch.from_numpy(store.action[sl]).to(dev)
+                olp = torch.from_numpy(store.logp[sl]).to(dev)
+                rl = torch.from_numpy(store.ref_lp[sl]).to(dev) if kl_coef > 0 else None
+                a_t = torch.from_numpy(adv_n[mb]).to(dev)
+                r_t = torch.from_numpy(ret[mb]).to(dev)
+            if warm:
+                with _autocast(dev, precision):
+                    with torch.no_grad():  # value head only: no graph through the trunk
+                        _, enc = upd_model._run(obs)
+                    v = upd_model.value_head(enc[:, 0]).squeeze(-1)
+                    loss = torch.nn.functional.mse_loss(v.float(), r_t)
+                finite_epoch = finite_epoch & torch.isfinite(loss).detach()
+                vopt.zero_grad(set_to_none=True)
+                loss.backward()
+                vopt.step()
+                s = {"vf": loss.detach()}
+            else:
+                with _autocast(dev, precision):
+                    loss, s = ppo_loss(upd_model, rl, obs, act, olp, a_t, r_t, clip, vf_coef,
+                                       kl_coef, ent_coef)  # fmt: skip
+                finite_epoch = finite_epoch & torch.isfinite(loss).detach()
+                opt.zero_grad(set_to_none=True)
+                loss.backward()
+                torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+                opt.step()
+            for key, val in s.items():
+                t = val.detach()
+                if key in agg_sum:
+                    agg_sum[key] = agg_sum[key] + t
+                else:
+                    agg_sum[key] = t.clone()
+            agg_n += 1
+        if not bool(finite_epoch.item()):  # single host sync per epoch
+            bad_loss = True
+            break
+    if bad_loss:
+        raise RuntimeError("non-finite loss")
+    agg_mean = {k: float((v / agg_n).item()) for k, v in agg_sum.items()} if agg_n else {}
+    t_update = time.time() - t_up
+    model.eval()
+    return agg_mean, t_update
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--init", type=Path, required=True, help="BC checkpoint (its metrics.jsonl gives the architecture)")
@@ -135,6 +283,8 @@ def main() -> None:
                     help="fused AdamW kernels (default: on when --device is cuda)")
     ap.add_argument("--compile", action="store_true", default=False,
                     help="torch.compile(model, dynamic=True) for the update forward only (rollout stays eager)")
+    ap.add_argument("--overlap", action="store_true", default=False,
+                    help="overlap the next rollout with the PPO update (background collect, one-iteration lag)")
     args = ap.parse_args()
     t_start = time.time()
     torch.manual_seed(args.seed)
@@ -244,11 +394,126 @@ def main() -> None:
     vec = VecEnv(engine, train_decks, N, args.threads, seed=args.seed)
     vec.set_max_decisions(args.max_decisions)
     store = SlotStore(args.store, gather(vec.buf, np.arange(1), hist, known))
-    col = Collector(vec, model, ref, store, hist, known, dev, args.p_bc, args.trunc_reward,
-                    args.recv_batch, rng, args.precision)
+    actor = None
+    col_rng = rng
+    if args.overlap:
+        # The collector runs in a background thread while the main thread updates `model`,
+        # so it forwards a private actor copy (synced after each update, never mid-collect).
+        # It also gets its own RNG: np Generators are not thread-safe and the main thread
+        # keeps using `rng` for minibatch permutations during the update.
+        actor = copy.deepcopy(model).eval()
+        col_rng = np.random.default_rng(args.seed + 0x1234)
+    col = Collector(vec, actor if actor is not None else model, ref, store, hist, known, dev,
+                    args.p_bc, args.trunc_reward, args.recv_batch, col_rng, args.precision)
     it, t_train = 0, time.time()
     tot = {"games": 0, "trunc": 0, "decisions": 0}
-    while True:
+    if args.overlap:
+        t0 = time.time()
+        pending = col.collect(args.rollout)
+        pending_roll = time.time() - t0
+        if not pending[0]:
+            fail("iteration 1: collected 0 samples")
+        while True:
+            it += 1
+            t_it = time.time()
+            finished, st = pending
+            t_roll = pending_roll
+            # Start the next batch in the background (actor weights: one update behind
+            # after the first sync); the last --iters iteration has no next batch.
+            task = None
+            if not (args.iters and it >= args.iters):
+                task = CollectTask(col, args.rollout).start()
+            slots, adv, ret, adv_n = gae_batch(store, finished, args.lam)
+            if len(slots) == 0:
+                fail(f"iteration {it}: collected 0 samples")
+            warm = it <= args.value_warmup
+            try:
+                agg_mean, t_update = ppo_update(
+                    model, upd_model, opt, vopt, store, slots, adv_n, ret, rng, dev,
+                    clip=args.clip, vf_coef=args.vf_coef, kl_coef=args.kl_coef,
+                    ent_coef=args.ent_coef, epochs=args.epochs, minibatch=args.minibatch,
+                    warm=warm, precision=args.precision, max_upload_gb=args.max_upload_gb,
+                    compile=args.compile)
+            except RuntimeError:
+                fail(f"iteration {it}: non-finite loss")
+            wait_s = 0.0
+            if task is not None:
+                t_join = time.time()
+                try:
+                    pending = task.join()
+                except BaseException as e:
+                    line = f"ALERT train_rl: overlap collect failed at iteration {it}: {e!r}"
+                    print(line, flush=True)
+                    try:
+                        with open(args.out / "ALERT", "a") as f:
+                            f.write(line + "\n")
+                    except OSError:
+                        pass
+                    raise
+                wait_s = time.time() - t_join
+                pending_roll = task.elapsed
+                if not pending[0]:
+                    fail(f"iteration {it}: collected 0 samples")
+            for s, _ in finished:
+                store.release(s)
+            assert actor is not None
+            sync_actor(actor, model)
+
+            if not warm and args.kl_coef > 0 and agg_mean.get("kl_bc") is not None and agg_mean["kl_bc"] == 0.0:
+                fail(f"iteration {it}: kl_bc exactly 0.0 with --kl-coef {args.kl_coef}")
+            dt = time.time() - t_it
+            tot["games"] += st["games"]
+            tot["trunc"] += st["trunc"]
+            tot["decisions"] += st["decisions"]
+            rec = {
+                "iter": it, "warmup": warm, "samples": len(slots), "games": st["games"],
+                "trunc_rate": round(st["trunc"] / max(st["games"], 1), 3),
+                "mean_game_decisions": round(float(np.mean(st["lengths"])) if st["lengths"] else 0.0, 1),
+                "train_vs_bc_sampled": round(st["bc_wins"] / max(st["bc_games"], 1), 3), "bc_games": st["bc_games"],
+                "adv_std": round(float(adv.std()), 3), "ret_mean": round(float(ret.mean()), 3),
+                "dps": round(st["decisions"] / t_roll), "rollout_s": round(t_roll, 1), "iter_s": round(dt, 1),
+                "t_env": round(st["t_env"], 1), "t_fwd": round(st["t_fwd"], 1),
+                "update_s": round(t_update, 1), "sps": round(len(slots) / dt, 1),
+                "store_free": store.free, "hours": round((time.time() - t_train) / 3600, 3),
+                "overlap": True, "wait_s": round(wait_s, 2),
+                **{k: round(v, 4) for k, v in agg_mean.items()},
+            }  # fmt: skip
+            print(json.dumps(rec), flush=True)
+            log.write(json.dumps(rec) + "\n")
+            log.flush()
+            out_of_time = (time.time() - t_train) / 3600 >= args.hours or (args.iters and it >= args.iters)
+            if args.eval_mode == "async":
+                assert asev is not None
+                relay(asev.poll())
+            if it % args.eval_every == 0 or out_of_time:
+                torch.save({"model": model.state_dict(), "opt": opt.state_dict(), "iter": it}, args.out / "last.pt")
+                if args.eval_mode == "sync":
+                    evaluate(it)
+                    recorded.add(it)
+                    eval_started.add(it)
+                else:
+                    assert asev is not None
+                    ck = args.out / f"iter-{it:04d}.pt"
+                    torch.save(policy_state(model), ck)
+                    if asev.maybe_start(it, ck):
+                        eval_started.add(it)
+                    else:
+                        print(f"[eval it {it}] skipped (previous eval running)", flush=True)
+            if out_of_time:
+                if task is not None:
+                    # Speculatively collected one batch too many: discard it, free its slots.
+                    for s, _ in pending[0]:
+                        store.release(s)
+                if args.eval_mode == "async":
+                    assert asev is not None
+                    relay(asev.poll())
+                    relay(asev.wait())
+                    if it not in recorded and it not in eval_started:
+                        evaluate(it)  # final eval was skipped: run it blocking so it is never missing
+                        recorded.add(it)
+                        eval_started.add(it)
+                break
+    while not args.overlap:
         it += 1
         t_it = time.time()
         finished, st = col.collect(args.rollout)

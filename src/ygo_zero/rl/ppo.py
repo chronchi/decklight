@@ -8,6 +8,8 @@ policy: the PPO ratio corrects for that).
 
 from __future__ import annotations
 
+import threading
+
 import numpy as np
 import torch
 import torch.nn.functional as F
@@ -49,16 +51,19 @@ class SlotStore:
         self.value = np.zeros(capacity, np.float32)
         self.ref_lp = np.zeros((capacity, 64), np.float16)
         self._free = list(range(capacity - 1, -1, -1))
+        self._lock = threading.Lock()
 
     @property
     def free(self) -> int:
-        return len(self._free)
+        with self._lock:
+            return len(self._free)
 
     def put(self, obs: dict[str, np.ndarray], action, logp, value, ref_lp=None) -> np.ndarray:
         n = len(action)
-        if n > len(self._free):
-            raise MemoryError("slot store full: raise --store or lower --rollout")
-        slots = np.array([self._free.pop() for _ in range(n)], np.int64)
+        with self._lock:
+            if n > len(self._free):
+                raise MemoryError("slot store full: raise --store or lower --rollout")
+            slots = np.array([self._free.pop() for _ in range(n)], np.int64)
         for k, v in obs.items():
             self.obs[k][slots] = v
         self.action[slots], self.logp[slots], self.value[slots] = action, logp, value
@@ -69,7 +74,8 @@ class SlotStore:
         return slots
 
     def release(self, slots) -> None:
-        self._free.extend(int(s) for s in slots)
+        with self._lock:
+            self._free.extend(int(s) for s in slots)
 
 
 def gae(values: np.ndarray, reward: float, lam: float) -> tuple[np.ndarray, np.ndarray]:

@@ -1,5 +1,10 @@
 """Collector (async rollout) over tiny PolicyNets on the fixture decks (CPU, fp32)."""
 
+import copy
+import importlib.util
+import time
+from pathlib import Path
+
 import numpy as np
 import torch
 
@@ -9,9 +14,20 @@ from ygo_zero.model.policy import PolicyNet
 from ygo_zero.rl.ppo import SlotStore, gather, masked_log_softmax, to_torch
 from ygo_zero.rl.rollout import Collector
 
-from pathlib import Path
-
 FIXTURES = Path(__file__).resolve().parents[1] / "fixtures" / "decks"
+
+_TRAIN_RL = None
+
+
+def _train_rl_mod():
+    global _TRAIN_RL
+    if _TRAIN_RL is None:
+        p = Path(__file__).resolve().parents[2] / "scripts" / "train_rl.py"
+        spec = importlib.util.spec_from_file_location("train_rl_overlap_mod", p)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        _TRAIN_RL = mod
+    return _TRAIN_RL
 
 
 def _tiny(decks, value: bool):
@@ -68,3 +84,74 @@ def test_bc_seat_decisions_never_stored(engine):
     assert total >= 500
     # only the learner seat is stored: finished samples are ~half of all decisions sent
     assert 0.2 < total / st["decisions"] < 0.75
+
+
+def test_overlap_pipeline_three_iterations(engine):
+    """train_rl's overlap building blocks, 3 iterations on the tiny VecEnv config above:
+    background collect + GAE + PPO update, actor synced to the model after each update."""
+    tr = _train_rl_mod()
+    decks = [load_ydk(p) for p in sorted(FIXTURES.glob("*.ydk"))]
+    dev = torch.device("cpu")
+    model, ref = _tiny(decks, True), _tiny(decks, False)
+    actor = copy.deepcopy(model).eval()
+    vec = VecEnv(engine, decks, 8, 2, seed=0)
+    vec.set_max_decisions(60)
+    store = SlotStore(8000, gather(vec.buf, np.arange(1), 0, False))
+    rng = np.random.default_rng(0)
+    col = Collector(vec, actor, ref, store, 0, False, dev, 0.3, -0.5, 2,
+                    np.random.default_rng(1234), "fp32")
+    trunk = [p for n, p in model.named_parameters() if not n.startswith("value_head.")]
+    opt = torch.optim.AdamW([{"params": trunk}, {"params": list(model.value_head.parameters()), "lr": 1e-3}],
+                            lr=1e-3, weight_decay=0.0)
+    vopt = torch.optim.AdamW(model.value_head.parameters(), lr=1e-3)
+    recs = []
+    t0 = time.time()
+    pending = col.collect(200)
+    for it in (1, 2, 3):
+        task = tr.CollectTask(col, 200).start()
+        slots, adv, ret, adv_n = tr.gae_batch(store, pending[0], 0.95)
+        assert len(slots) > 0
+        agg, t_update = tr.ppo_update(
+            model, model, opt, vopt, store, slots, adv_n, ret, rng, dev,
+            clip=0.2, vf_coef=0.5, kl_coef=0.1, ent_coef=0.003, epochs=1,
+            minibatch=64, warm=(it == 1), precision="fp32", max_upload_gb=6.0, compile=False)
+        assert agg and all(np.isfinite(v) for v in agg.values())
+        finished_next, _ = task.join()
+        for s, _ in pending[0]:
+            store.release(s)
+        tr.sync_actor(actor, model)
+        for k, v in model.state_dict().items():
+            assert torch.equal(actor.state_dict()[k].cpu(), v.cpu()), k
+        pending = (finished_next, None)
+        recs.append({"iter": it, "overlap": True, "samples": len(slots),
+                     **{k: float(v) for k, v in agg.items()}})
+    assert [r["iter"] for r in recs] == [1, 2, 3]
+    assert all(r["overlap"] is True for r in recs)
+    assert all(np.isfinite(r["samples"]) and r["samples"] > 0 for r in recs)
+    assert time.time() - t0 < 300
+
+
+def test_overlap_thread_exception_propagates():
+    """A collect that raises on its 2nd call surfaces in the joining thread within seconds."""
+    tr = _train_rl_mod()
+    calls = {"n": 0}
+
+    class _Col:
+        def collect(self, n):
+            calls["n"] += 1
+            if calls["n"] == 2:
+                raise RuntimeError("boom-2nd-collect")
+            return [([0], 1.0)], {"games": 1}
+
+    col = _Col()
+    first = tr.CollectTask(col, 10).start()
+    assert first.join()[0] == [([0], 1.0)]
+    bad = tr.CollectTask(col, 10).start()
+    t0 = time.time()
+    try:
+        bad.join(timeout=30)
+    except RuntimeError as e:
+        assert "boom-2nd-collect" in str(e)
+    else:
+        raise AssertionError("collect exception did not propagate")
+    assert time.time() - t0 < 30

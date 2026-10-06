@@ -143,3 +143,38 @@ def test_slot_store_put_release():
     assert np.allclose(st.ref_lp[s].astype(np.float32), -0.5, atol=1e-2)
     st.release(s)
     assert st.free == 5
+
+
+def test_slot_store_concurrent_put_release():
+    """Two threads x 2,000 put/release cycles: no duplicate handouts, no lost slots."""
+    import threading
+
+    cap = 256
+    st = SlotStore(cap, {"x": np.zeros((1, 3), np.int32)})
+    in_use: set[int] = set()
+    mu = threading.Lock()
+    errors: list[BaseException] = []
+
+    def worker(n: int) -> None:
+        try:
+            for _ in range(n):
+                s = st.put({"x": np.ones((1, 3), np.int32)}, np.array([1]), np.zeros(1),
+                           np.zeros(1), np.full((1, 64), -0.5, np.float32))
+                sid = int(s[0])
+                with mu:
+                    assert sid not in in_use, f"duplicate slot {sid}"
+                    in_use.add(sid)
+                with mu:
+                    in_use.discard(sid)
+                st.release(s)
+        except BaseException as e:  # noqa: BLE001 - re-raised in the main thread
+            with mu:
+                errors.append(e)
+
+    threads = [threading.Thread(target=worker, args=(2000,)) for _ in range(2)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert not errors, errors[0] if errors else None
+    assert not in_use and st.free == cap

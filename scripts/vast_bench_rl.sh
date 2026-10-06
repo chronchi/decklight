@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # GPU throughput benchmark for every RL stage (scripts/bench_rl.py) on one GPU box.
-# Env: BASE (BC checkpoint best.pt, required).
+# Env: BASE (BC checkpoint best.pt, required), SECTIONS, BENCH_S, RL_ITERS, RL_ARGS (extra train_rl flags).
 # Usage: bash scripts/vast_bench_rl.sh <name>. Results: runs/<name>/bench.jsonl, bench.txt, ALERT, DONE.
 set -uo pipefail
 export PATH="$HOME/.local/bin:$PATH"
@@ -26,7 +26,7 @@ timeout 30m uv run --no-sync python scripts/bench_rl.py --ckpt "$BASE" --out "$O
 grep -E "^ALERT|Traceback" "$OUT/bench.txt" >> "$OUT/ALERT" || true
 # end-to-end: a few real PPO iterations (rollout + update + final eval vs BC), as train_rl runs them
 timeout 30m uv run --no-sync python scripts/train_rl.py --init "$BASE" --out "$OUT/rl" --threads "$TH" \
-  --iters "${RL_ITERS:-4}" --value-warmup 1 --eval-every 1000 --no-ygoagent > "$OUT/rl.txt" 2>&1 \
+  --iters "${RL_ITERS:-4}" --value-warmup 1 --eval-every 1000 --no-ygoagent ${RL_ARGS:-} > "$OUT/rl.txt" 2>&1 \
   || echo "ALERT train_rl exit $?" >> "$OUT/ALERT"
 grep -E "^ALERT|Traceback" "$OUT/rl.txt" >> "$OUT/ALERT" || true
 kill "$USAGE_PID" 2>/dev/null || true
