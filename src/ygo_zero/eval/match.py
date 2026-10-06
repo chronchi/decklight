@@ -54,10 +54,16 @@ def play_match(
     num_envs: int = 32,
     num_threads: int = 8,
     max_decisions: int = 3000,
+    mode: str = "async",
+    recv_batch: int | None = None,
 ) -> list[Game]:
     """`max_decisions`: a game still running after that many decisions (both seats) is cut and scored as a draw:
     two deterministic policies can loop for tens of thousands of decisions, and one such game stalls the whole
-    match (RL smoke and playtests, 2026-10-05). 0 = no cap."""
+    match (RL smoke and playtests, 2026-10-05). 0 = no cap.
+    `mode`: "sync" steps every env in lockstep (one barrier per decision); "async" collects ready envs via
+    `recv_batch` (default `max(1, num_envs // 4)`) so slow engine steps don't stall the rest."""
+    if mode not in ("sync", "async"):
+        raise ValueError(f"mode must be 'sync' or 'async', got {mode!r}")
     schedule, meta = [], []
     for da, db in pairs:
         for s in seeds:
@@ -68,27 +74,67 @@ def play_match(
     vec = VecEnv(engine, decks, min(num_envs, len(schedule)), num_threads, seed=0)
     vec.set_schedule(schedule)
     vec.set_max_decisions(max_decisions)
-    buf = vec.reset()
     seat_of_a = np.array([0 if m[3] else 1 for m in meta] + [-2], np.int32)  # [-1] → -2: idle env
     games: list[Game] = []
 
-    while vec.remaining > 0:
-        player = buf["player"]
-        a_seat = seat_of_a[buf["game"]]
-        actions = np.zeros(vec.num_envs, np.int32)
-        live = player >= 0
-        mine = np.flatnonzero(live & (player == a_seat))
-        theirs = np.flatnonzero(live & (player != a_seat))
-        if len(mine):
-            actions[mine] = a(buf, mine)
-        if len(theirs):
-            actions[theirs] = b(buf, theirs)
-        vec.step(actions)
-        for ep in vec.pop_finished():
+    if mode == "sync":
+        buf = vec.reset()
+        while vec.remaining > 0:
+            player = buf["player"]
+            a_seat = seat_of_a[buf["game"]]
+            actions = np.zeros(vec.num_envs, np.int32)
+            live = player >= 0
+            mine = np.flatnonzero(live & (player == a_seat))
+            theirs = np.flatnonzero(live & (player != a_seat))
+            if len(mine):
+                actions[mine] = a(buf, mine)
+            if len(theirs):
+                actions[theirs] = b(buf, theirs)
+            vec.step(actions)
+            for ep in vec.pop_finished():
+                da, db, s, a_first = meta[ep.index]
+                seat = 0 if a_first else 1
+                win = 0.5 if ep.winner not in (0, 1) else float(ep.winner == seat)
+                games.append(Game(da, db, s, a_first, win, ep.turns, ep.winner == VecEnv.TRUNCATED))
+    else:
+        buf = vec.async_reset()
+        n = vec.num_envs
+        batch = recv_batch if recv_batch is not None else max(1, n // 4)
+        while True:
+            ids = np.asarray(vec.recv(batch, n), dtype=np.int64)
+            for ep in vec.pop_finished():
+                da, db, s, a_first = meta[ep.index]
+                seat = 0 if a_first else 1
+                win = 0.5 if ep.winner not in (0, 1) else float(ep.winner == seat)
+                games.append(Game(da, db, s, a_first, win, ep.turns, ep.winner == VecEnv.TRUNCATED))
+            if len(ids) == 0:  # nothing in flight: every env received and idle
+                if vec.remaining != 0:
+                    raise RuntimeError(
+                        f"play_match async stalled: recv empty with {vec.remaining} games remaining"
+                    )
+                break
+            live = np.ascontiguousarray(ids[buf["player"][ids] != -1])  # idle rows are never sent again
+            if len(live) == 0:
+                if vec.remaining == 0:
+                    break
+                continue
+            a_seat = seat_of_a[buf["game"][live]]
+            player = buf["player"][live]
+            mine_pos = np.flatnonzero(player == a_seat)
+            theirs_pos = np.flatnonzero(player != a_seat)
+            send_ids = np.ascontiguousarray(live)
+            send_acts = np.zeros(len(live), np.int32)
+            if len(mine_pos):
+                send_acts[mine_pos] = a(buf, np.ascontiguousarray(live[mine_pos]))
+            if len(theirs_pos):
+                send_acts[theirs_pos] = b(buf, np.ascontiguousarray(live[theirs_pos]))
+            vec.send(send_ids, send_acts)
+        for ep in vec.pop_finished():  # games that finished in the last in-flight batch
             da, db, s, a_first = meta[ep.index]
             seat = 0 if a_first else 1
             win = 0.5 if ep.winner not in (0, 1) else float(ep.winner == seat)
             games.append(Game(da, db, s, a_first, win, ep.turns, ep.winner == VecEnv.TRUNCATED))
+    games.sort(key=lambda g: (g.deck_a, g.deck_b, g.seed, g.a_first))
     return games
 
 
