@@ -110,9 +110,11 @@ def ppo_loss(model, ref_lp, obs, action, old_logp, adv, ret, clip: float, vf_coe
         ref_lp = ref_lp.to(device=logits.device, dtype=torch.float32)
         kl = (p.float() * (lp_all - ref_lp)).sum(1).mean()  # KL(pi || pi_BC), exact over the legal options
         loss = loss + kl_coef * kl
+    # Detached 0-d tensors (no host sync here): callers accumulate on-device and
+    # convert once per iteration. Same keys/values as the old per-minibatch .item() path.
     stats = {
-        "pg": pg.item(), "vf": vf.item(), "ent": ent.item(), "kl_bc": kl.item(),
-        "clipfrac": ((ratio - 1).abs() > clip).float().mean().item(),
-        "approx_kl": ((ratio - 1) - torch.log(ratio)).mean().item(),
+        "pg": pg.detach(), "vf": vf.detach(), "ent": ent.detach(), "kl_bc": kl.detach(),
+        "clipfrac": ((ratio - 1).abs() > clip).float().mean().detach(),
+        "approx_kl": ((ratio - 1) - torch.log(ratio)).mean().detach(),
     }  # fmt: skip
     return loss, stats

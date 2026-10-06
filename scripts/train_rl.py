@@ -131,6 +131,10 @@ def main() -> None:
     ap.add_argument("--hours", type=float, default=1.0, help="stop (then final eval) after this much training")
     ap.add_argument("--iters", type=int, default=0, help="stop after this many iterations (0 = by --hours)")
     ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--fused-adam", dest="fused_adam", action=argparse.BooleanOptionalAction, default=None,
+                    help="fused AdamW kernels (default: on when --device is cuda)")
+    ap.add_argument("--compile", action="store_true", default=False,
+                    help="torch.compile(model, dynamic=True) for the update forward only (rollout stays eager)")
     args = ap.parse_args()
     t_start = time.time()
     torch.manual_seed(args.seed)
@@ -140,6 +144,8 @@ def main() -> None:
         args.recv_batch = max(1, args.envs // 4)
     if args.precision is None:
         args.precision = "bf16" if dev.type == "cuda" else "fp32"
+    if args.fused_adam is None:
+        args.fused_adam = dev.type == "cuda"
 
     def fail(msg: str):
         line = f"ALERT train_rl: {msg}"
@@ -174,8 +180,13 @@ def main() -> None:
         p.requires_grad_(False)
     vparams = list(model.value_head.parameters())
     trunk = [p for n, p in model.named_parameters() if not n.startswith("value_head.")]
-    opt = torch.optim.AdamW([{"params": trunk}, {"params": vparams, "lr": 1e-4}], lr=args.lr, weight_decay=0.0)
-    vopt = torch.optim.AdamW(model.value_head.parameters(), lr=3e-4)
+    _fused = {"fused": True} if args.fused_adam and dev.type == "cuda" else {}
+    opt = torch.optim.AdamW([{"params": trunk}, {"params": vparams, "lr": 1e-4}], lr=args.lr,
+                            weight_decay=0.0, **_fused)
+    vopt = torch.optim.AdamW(model.value_head.parameters(), lr=3e-4, **_fused)
+    # Update forward only: rollout Collector keeps the eager `model`; the compiled
+    # module shares parameters with it, so optimizer steps and saved state_dicts are unchanged.
+    upd_model = torch.compile(model, dynamic=True) if args.compile else model
 
     log = (args.out / "metrics.jsonl").open("a")
     arch = {k: a.get(k) for k in ("d", "layers", "heads", "hist", "known")}
@@ -275,9 +286,15 @@ def main() -> None:
             perm_dev = torch.from_numpy(rng.permutation(len(slots))).to(dev)
         t_up = time.time()
         model.train()
-        agg: dict[str, list] = {}
-        bad_loss = None
+        if args.compile:
+            upd_model.train()
+        # On-device accumulation: ppo_loss returns detached 0-d tensors (no per-minibatch
+        # host sync); sums stay on-device and convert once per iteration below.
+        agg_sum: dict[str, torch.Tensor] = {}
+        agg_n = 0
+        bad_loss = False
         for _ in range(args.epochs):
+            finite_epoch = torch.ones((), dtype=torch.bool, device=dev)
             perm = rng.permutation(len(slots))
             mb_dev = torch.from_numpy(perm).to(dev) if upload_once else None
             for k in range(0, len(perm), args.minibatch):
@@ -300,39 +317,43 @@ def main() -> None:
                 if warm:
                     with _autocast(dev, args.precision):
                         with torch.no_grad():  # value head only: no graph through the trunk
-                            _, enc = model._run(obs)
-                        v = model.value_head(enc[:, 0]).squeeze(-1)
+                            _, enc = upd_model._run(obs)
+                        v = upd_model.value_head(enc[:, 0]).squeeze(-1)
                         loss = torch.nn.functional.mse_loss(v.float(), r_t)
-                    if not bool(torch.isfinite(loss).item()):
-                        bad_loss = loss.item()
-                        break
+                    finite_epoch = finite_epoch & torch.isfinite(loss).detach()
                     vopt.zero_grad(set_to_none=True)
                     loss.backward()
                     vopt.step()
-                    s = {"vf": loss.item()}
+                    s = {"vf": loss.detach()}
                 else:
                     with _autocast(dev, args.precision):
-                        loss, s = ppo_loss(model, rl, obs, act, olp, a_t, r_t, args.clip, args.vf_coef,
+                        loss, s = ppo_loss(upd_model, rl, obs, act, olp, a_t, r_t, args.clip, args.vf_coef,
                                            args.kl_coef, args.ent_coef)  # fmt: skip
-                    if not bool(torch.isfinite(loss).item()):
-                        bad_loss = loss.item()
-                        break
+                    finite_epoch = finite_epoch & torch.isfinite(loss).detach()
                     opt.zero_grad(set_to_none=True)
                     loss.backward()
                     torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
                     opt.step()
                 for key, val in s.items():
-                    agg.setdefault(key, []).append(val)
-            if bad_loss is not None:
+                    t = val.detach()
+                    if key in agg_sum:
+                        agg_sum[key] = agg_sum[key] + t
+                    else:
+                        agg_sum[key] = t.clone()
+                agg_n += 1
+            if not bool(finite_epoch.item()):  # single host sync per epoch
+                bad_loss = True
                 break
-        if bad_loss is not None:
-            fail(f"iteration {it}: non-finite loss {bad_loss}")
+        if bad_loss:
+            fail(f"iteration {it}: non-finite loss")
+        # One host sync per key per iteration (same values as the old per-minibatch .item() means).
+        agg_mean = {k: float((v / agg_n).item()) for k, v in agg_sum.items()} if agg_n else {}
         t_update = time.time() - t_up
         model.eval()
         for s, _ in finished:
             store.release(s)
 
-        if not warm and args.kl_coef > 0 and agg.get("kl_bc") and float(np.mean(agg["kl_bc"])) == 0.0:
+        if not warm and args.kl_coef > 0 and agg_mean.get("kl_bc") is not None and agg_mean["kl_bc"] == 0.0:
             fail(f"iteration {it}: kl_bc exactly 0.0 with --kl-coef {args.kl_coef}")
         dt = time.time() - t_it
         tot["games"] += st["games"]
@@ -348,7 +369,7 @@ def main() -> None:
             "t_env": round(st["t_env"], 1), "t_fwd": round(st["t_fwd"], 1),
             "update_s": round(t_update, 1), "sps": round(len(slots) / dt, 1),
             "store_free": store.free, "hours": round((time.time() - t_train) / 3600, 3),
-            **{k: round(float(np.mean(v)), 4) for k, v in agg.items()},
+            **{k: round(v, 4) for k, v in agg_mean.items()},
         }  # fmt: skip
         print(json.dumps(rec), flush=True)
         log.write(json.dumps(rec) + "\n")

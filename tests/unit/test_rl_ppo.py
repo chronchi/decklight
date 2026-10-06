@@ -80,6 +80,60 @@ def test_cached_ref_kl_matches_module_path():
     assert abs(st["kl_bc"] - old_kl) <= 1e-5
 
 
+def test_device_accumulated_means_match_item_path():
+    """New stats path (detached 0-d tensors, summed on-device, one .item() per key per
+    iteration) gives the same per-iteration means as the old per-minibatch .item() path."""
+    torch.manual_seed(7)
+    emb = _emb()
+    net = PolicyNet(emb, d=16, layers=1, heads=2, value=True, dropout=0.0)
+    net.eval()
+    old: dict[str, list[float]] = {}
+    sums: dict[str, torch.Tensor] = {}
+    n = 0
+    for i in range(4):
+        g = torch.Generator().manual_seed(100 + i)
+        obs = _batch(b=4, h=32)
+        act = torch.randint(0, 2, (4,), generator=g)
+        olp = torch.full((4,), -0.69)
+        adv = torch.randn(4, generator=g)
+        ret = torch.ones(4)
+        with torch.no_grad():
+            ref_lp = masked_log_softmax(net.forward_value(obs)[0])
+        loss, st = ppo_loss(net, ref_lp, obs, act, olp, adv, ret, 0.2, 0.5, 0.1, 0.01)
+        assert torch.isfinite(loss)
+        for k, v in st.items():
+            assert isinstance(v, torch.Tensor) and v.dim() == 0 and not v.requires_grad
+            old.setdefault(k, []).append(float(v.item()))  # old path: sync per minibatch
+            sums[k] = v.detach().clone() if k not in sums else sums[k] + v.detach()
+        n += 1
+    new = {k: float((v / n).item()) for k, v in sums.items()}
+    assert set(new) == {"pg", "vf", "ent", "kl_bc", "clipfrac", "approx_kl"}
+    for k in new:
+        assert abs(new[k] - float(np.mean(old[k]))) <= 1e-6, (k, new[k], np.mean(old[k]))
+
+
+def test_compile_keeps_state_dict_keys():
+    """torch.compile(model, dynamic=True) must not change saved state_dict keys
+    (train_rl saves the original module's state_dict). Build only, no GPU."""
+    try:
+        import torch._dynamo as _dynamo  # noqa: F401
+        compile = torch.compile
+    except (ImportError, AttributeError):
+        import pytest
+        pytest.skip("torch.compile unavailable")
+    emb = _emb()
+    net = PolicyNet(emb, d=16, layers=1, heads=2, value=True, dropout=0.0)
+    eager_keys = list(net.state_dict().keys())
+    try:
+        compiled = compile(net, dynamic=True)
+        wrapped_keys = list(compiled._orig_mod.state_dict().keys())
+    except Exception:
+        import pytest
+        pytest.skip("torch.compile unavailable on CPU")
+    assert wrapped_keys == eager_keys
+    assert not any(k.startswith("_orig_mod.") for k in eager_keys)
+
+
 def test_slot_store_put_release():
     st = SlotStore(5, {"x": np.zeros((1, 3), np.int32)})
     s = st.put({"x": np.ones((2, 3), np.int32)}, np.array([1, 2]), np.zeros(2), np.zeros(2),

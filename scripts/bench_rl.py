@@ -39,7 +39,7 @@ from ygo_zero.rl.rollout import Collector
 
 ROOT = Path(__file__).resolve().parents[1]
 POOL_N = 8192  # capture pool rows (numpy, host), shared by infer and update
-SECTIONS = ("env", "infer", "rollout", "update")
+SECTIONS = ("env", "infer", "rollout", "update", "profile")
 
 
 def _sync(dev: torch.device) -> None:
@@ -199,7 +199,7 @@ def main() -> None:
 
     # Capture: random legal play (256 envs) until POOL_N gathered rows (numpy, host).
     pool: dict[str, np.ndarray] | None = None
-    if "infer" in args.sections or "update" in args.sections:
+    if "infer" in args.sections or "update" in args.sections or "profile" in args.sections:
         rng = np.random.default_rng(999)
         vec = VecEnv(engine, decks, 256, args.threads, seed=999)
         buf = vec.reset()
@@ -326,15 +326,56 @@ def main() -> None:
                         except torch.cuda.OutOfMemoryError:
                             torch.cuda.empty_cache()
                             emit({"section": "update",
-                                  "config": {"minibatch": mb, "trim": trim, "precision": prec, "kl": kl},
+                                  "config": {"minibatch": mb, "trim": trim, "precision": prec, "kl": kl,
+                                             "fused": False, "compile": False},
                                   "rate": None, "unit": "samples/s", "seconds": 0.0,
                                   "peak_gpu_mb": _peak_mb(dev), "rss_mb": _rss_mb(), "skipped": "oom"})  # fmt: skip
+        # Speed knobs, one point only (mb1024 + trim + bf16 + KL on): fused x compile.
+        # (Smoke: the smoke minibatch + trim + fp32 + KL on, same idea, no grid blowup.)
+        mb_f = 1024 if 1024 in update_mbs else update_mbs[-1]
+        prec_f = "bf16" if dev.type == "cuda" else "fp32"
+        model.trim = True
+        ref.trim = True
+        with torch.no_grad():
+            parts = []
+            for j in range(0, len(pool["action_mask"]), 1024):
+                sl = {k: v[j:j + 1024] for k, v in pool.items()}
+                parts.append(masked_log_softmax(ref(to_torch(sl, dev))).float().cpu().numpy())
+            ref_pool_f = np.concatenate(parts).astype(np.float16)
+        for fused in (False, True):
+            for compiled in (False, True):
+                try:
+                    kw = {"fused": True} if fused and dev.type == "cuda" else {}
+                    opt = torch.optim.AdamW(model.parameters(), lr=1e-5, **kw)
+                except (RuntimeError, TypeError, ValueError):
+                    emit({"section": "update",
+                          "config": {"minibatch": mb_f, "trim": True, "precision": prec_f, "kl": "on",
+                                     "fused": fused, "compile": compiled},
+                          "rate": None, "unit": "samples/s", "seconds": 0.0,
+                          "peak_gpu_mb": _peak_mb(dev), "rss_mb": _rss_mb(), "skipped": "unsupported"})  # fmt: skip
+                    continue
+                try:
+                    _update_one(mb_f, True, prec_f, "on", model, ref_pool_f, pool, log1p, rng, opt,
+                                dev, seconds, emit, nan_flag := [False], fused=fused, compiled=compiled)
+                    if nan_flag[0]:
+                        nan_loss = True
+                except torch.cuda.OutOfMemoryError:
+                    torch.cuda.empty_cache()
+                    emit({"section": "update",
+                          "config": {"minibatch": mb_f, "trim": True, "precision": prec_f, "kl": "on",
+                                     "fused": fused, "compile": compiled},
+                          "rate": None, "unit": "samples/s", "seconds": 0.0,
+                          "peak_gpu_mb": _peak_mb(dev), "rss_mb": _rss_mb(), "skipped": "oom"})  # fmt: skip
+
+    if "profile" in args.sections:
+        assert pool is not None
+        _run_profile(model, pool, dev, args.smoke, out, emit)
 
     fh.close()
     problems = []
     for raw in out.read_text().splitlines()[pre_lines:]:
         rec = json.loads(raw)
-        if "skipped" in rec:
+        if "skipped" in rec or rec.get("section") == "profile":
             continue
         if not rec.get("rate") or rec["rate"] <= 0:
             problems.append(f"{rec.get('section')}/{rec.get('config')} rate={rec.get('rate')}")
@@ -346,9 +387,23 @@ def main() -> None:
 
 
 def _update_one(mb: int, trim: bool, prec: str, kl: str, model: PolicyNet, ref_pool, pool, log1p, rng,
-                opt, dev: torch.device, seconds: float, emit, nan_flag: list) -> None:
+                opt, dev: torch.device, seconds: float, emit, nan_flag: list,
+                fused: bool = False, compiled: bool = False) -> None:
     n_pool = len(pool["action_mask"])
     model.trim = trim
+    # Update forward only (train_rl --compile semantics); the eager model keeps the params/optimizer.
+    upd = torch.compile(model, dynamic=True) if compiled else model
+    if compiled:
+        upd.train()
+        try:
+            upd.trim = trim
+        except (AttributeError, TypeError):
+            pass
+    # On-device accumulation (no per-minibatch host sync): stats sums + a finite flag stay
+    # on-device; converted once after the timed loop.
+    sums: dict[str, torch.Tensor] = {}
+    n_mb = [0]
+    finite = [torch.ones((), dtype=torch.bool, device=dev)]
 
     def ustep() -> int:
         idx = rng.integers(0, n_pool, mb)
@@ -367,9 +422,12 @@ def _update_one(mb: int, trim: bool, prec: str, kl: str, model: PolicyNet, ref_p
         opt.zero_grad(set_to_none=True)
         with _autocast(dev, prec):
             # train_rl defaults: clip 0.2, vf 0.5, kl 0.1, ent 0.003
-            loss, _st = ppo_loss(model, ref_t, tob, act_t, olp_t, adv_t, ret_t, 0.2, 0.5, 0.1, 0.003)
-        if not bool(torch.isfinite(loss).item()):
-            nan_flag[0] = True
+            loss, st = ppo_loss(upd, ref_t, tob, act_t, olp_t, adv_t, ret_t, 0.2, 0.5, 0.1, 0.003)
+        finite[0] = finite[0] & torch.isfinite(loss).detach()
+        for k, v in st.items():
+            t = v.detach()
+            sums[k] = t.clone() if k not in sums else sums[k] + t
+        n_mb[0] += 1
         loss.backward()
         torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
         opt.step()
@@ -377,9 +435,90 @@ def _update_one(mb: int, trim: bool, prec: str, kl: str, model: PolicyNet, ref_p
 
     _reset_peak(dev)
     units, dt = _measure(ustep, seconds, dev)
-    emit({"section": "update", "config": {"minibatch": mb, "trim": trim, "precision": prec, "kl": kl},
+    if not bool(finite[0].item()):  # single host sync for the whole measurement
+        nan_flag[0] = True
+    if n_mb[0]:  # one sync per key for the whole measurement (values mirror train_rl's agg means)
+        {k: float((v / n_mb[0]).item()) for k, v in sums.items()}
+    emit({"section": "update",
+          "config": {"minibatch": mb, "trim": trim, "precision": prec, "kl": kl,
+                     "fused": fused, "compile": compiled},
           "rate": units / dt, "unit": "samples/s", "seconds": round(dt, 3),
           "peak_gpu_mb": _peak_mb(dev), "rss_mb": _rss_mb()})  # fmt: skip
+
+
+def _run_profile(model: PolicyNet, pool: dict, dev: torch.device, smoke: bool, out: Path, emit) -> None:
+    """torch.profiler over 20 update minibatches (mb1024/trim/bf16/cached-ref KL, 5 warm-up).
+
+    Smoke (CPU, tiny net): mb64/fp32. Writes key_averages().table() to <out dir>/profile.txt
+    plus one {"section": "profile", "top": [...]} jsonl line (top 15 ops).
+    """
+    mb = 64 if smoke else 1024
+    prec = "bf16" if dev.type == "cuda" else "fp32"
+    model.train()
+    model.trim = True
+    ref = copy.deepcopy(model).eval()
+    for p in ref.parameters():
+        p.requires_grad_(False)
+    ref.trim = True
+    with torch.no_grad():
+        parts = []
+        for j in range(0, len(pool["action_mask"]), 1024):
+            sl = {k: v[j:j + 1024] for k, v in pool.items()}
+            parts.append(masked_log_softmax(ref(to_torch(sl, dev))).float().cpu().numpy())
+        ref_pool = np.concatenate(parts).astype(np.float16)
+    counts = pool["action_mask"].sum(1).clip(min=1)
+    log1p = np.log(1.0 / counts).astype(np.float32)
+    rng = np.random.default_rng(202607)
+    n_pool = len(pool["action_mask"])
+    opt = torch.optim.AdamW(model.parameters(), lr=1e-5)
+
+    def mb_step() -> None:
+        idx = rng.integers(0, n_pool, mb)
+        obs_np = {k: v[idx] for k, v in pool.items()}
+        act_np = _random_legal(obs_np["action_mask"], rng)
+        tob = to_torch(obs_np, dev)
+        act_t = torch.from_numpy(act_np).to(dev)
+        olp_t = torch.from_numpy(log1p[idx]).to(dev)
+        adv_t = torch.from_numpy(rng.standard_normal(mb).astype(np.float32)).to(dev)
+        ret_t = torch.from_numpy(rng.uniform(-1, 1, mb).astype(np.float32)).to(dev)
+        ref_t = torch.from_numpy(ref_pool[idx]).to(dev)
+        opt.zero_grad(set_to_none=True)
+        with _autocast(dev, prec):
+            loss, _ = ppo_loss(model, ref_t, tob, act_t, olp_t, adv_t, ret_t, 0.2, 0.5, 0.1, 0.003)
+        loss.backward()
+        torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+        opt.step()
+
+    for _ in range(5):  # warm-up (compile/recompile + autotune settle before profiling)
+        mb_step()
+    acts = [torch.profiler.ProfilerActivity.CPU]
+    if dev.type == "cuda":
+        acts.append(torch.profiler.ProfilerActivity.CUDA)
+    with torch.profiler.profile(activities=acts) as prof:
+        for _ in range(20):
+            mb_step()
+    _sync(dev)
+    ka = prof.key_averages()
+    sort_by = "cuda_time_total" if dev.type == "cuda" else "cpu_time_total"
+    try:
+        table = ka.table(sort_by=sort_by, row_limit=30)
+    except (AssertionError, KeyError, RuntimeError):
+        table = ka.table(sort_by="cpu_time_total", row_limit=30)
+
+    def _cuda_ms(e) -> float:
+        for attr in ("cuda_time_total", "device_time_total"):
+            v = getattr(e, attr, None)
+            if v:
+                return round(float(v) / 1000, 3)
+        return 0.0
+
+    on_cuda = dev.type == "cuda"
+    rows = sorted(ka, key=lambda e: (_cuda_ms(e) if on_cuda else float(e.cpu_time_total)), reverse=True)
+    top = [[e.key, _cuda_ms(e), round(float(e.cpu_time_total) / 1000, 3), int(e.count)] for e in rows[:15]]
+    prof_path = out.parent / "profile.txt"
+    prof_path.write_text(f"# bench_rl profile: mb={mb} trim=True precision={prec} kl=on ({dev.type})\n" + table)
+    emit({"section": "profile", "config": {"minibatch": mb, "trim": True, "precision": prec, "kl": "on"},
+          "top": top, "profile_txt": str(prof_path)})  # fmt: skip
 
 
 if __name__ == "__main__":
