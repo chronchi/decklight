@@ -123,7 +123,10 @@ for v in ("zero", "ft-gold", "ft-mix", "ft-teach", "ft-teach-h", "ft-search", "f
     recs = [r for r in map(json.loads, filter(str.strip, m.read_text().splitlines())) if "val" in r]
     if not recs:
         continue
-    r = max(recs, key=lambda r: r["val"]["per_kind"].get("gold", -1))
+    # the record best.pt holds: the last epoch under --select-on last (mix-20261005-2016 summary showed epoch -1 by gold
+    # while best.pt was the final epoch)
+    sel = next((r["args"].get("select_on") for r in recs if "args" in r), None)
+    r = recs[-1] if sel == "last" else max(recs, key=lambda r: r["val"]["per_kind"].get("gold", -1))
     g = r["val"]["per_kind"].get("gold", -1)
     hk = r.get("holdout", {}).get("per_kind", {})
     print(f"{v:8s} at {r.get('epoch', 'merged')}: val gold {g:.4f} gold_pass {r['val']['per_kind'].get('gold_pass', -1):.4f} "
