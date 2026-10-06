@@ -18,7 +18,16 @@ uv run --no-sync python -c "import torch; assert torch.cuda.is_available()" || {
 ( while true; do echo "$(date +%T) $(nvidia-smi --query-gpu=utilization.gpu,memory.used --format=csv,noheader,nounits 2>/dev/null | tr -d ' ') $(cut -d' ' -f1 /proc/loadavg)"; sleep 30; done ) > "$OUT/usage.txt" 2>&1 &
 USAGE_PID=$!
 { echo "cpus $(nproc)"; echo "--- free -g ---"; free -g; echo "--- gpus ---"; nvidia-smi --query-gpu=name,memory.total --format=csv; } > "$OUT/machine.txt" 2>&1
-timeout 40m uv run --no-sync python scripts/bench_rl.py --ckpt "$BASE" --out "$OUT/bench.jsonl" > "$OUT/bench.txt" 2>&1
+read -r Q P < /sys/fs/cgroup/cpu.max 2>/dev/null || Q=max
+TH=$(nproc); [ "$Q" != max ] && TH=$(( Q / P )); echo "threads $TH" >> "$OUT/machine.txt"
+SECTIONS=${SECTIONS:-rollout update}
+timeout 30m uv run --no-sync python scripts/bench_rl.py --ckpt "$BASE" --out "$OUT/bench.jsonl" --threads "$TH" \
+  --seconds "${BENCH_S:-30}" --sections $SECTIONS > "$OUT/bench.txt" 2>&1
 grep -E "^ALERT|Traceback" "$OUT/bench.txt" >> "$OUT/ALERT" || true
+# end-to-end: a few real PPO iterations (rollout + update + final eval vs BC), as train_rl runs them
+timeout 30m uv run --no-sync python scripts/train_rl.py --init "$BASE" --out "$OUT/rl" --threads "$TH" \
+  --iters "${RL_ITERS:-4}" --value-warmup 1 --eval-every 1000 --no-ygoagent > "$OUT/rl.txt" 2>&1 \
+  || echo "ALERT train_rl exit $?" >> "$OUT/ALERT"
+grep -E "^ALERT|Traceback" "$OUT/rl.txt" >> "$OUT/ALERT" || true
 kill "$USAGE_PID" 2>/dev/null || true
 echo done > "$OUT/DONE"

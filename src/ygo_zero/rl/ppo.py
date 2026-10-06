@@ -47,13 +47,14 @@ class SlotStore:
         self.action = np.zeros(capacity, np.int64)
         self.logp = np.zeros(capacity, np.float32)
         self.value = np.zeros(capacity, np.float32)
+        self.ref_lp = np.zeros((capacity, 64), np.float16)
         self._free = list(range(capacity - 1, -1, -1))
 
     @property
     def free(self) -> int:
         return len(self._free)
 
-    def put(self, obs: dict[str, np.ndarray], action, logp, value) -> np.ndarray:
+    def put(self, obs: dict[str, np.ndarray], action, logp, value, ref_lp=None) -> np.ndarray:
         n = len(action)
         if n > len(self._free):
             raise MemoryError("slot store full: raise --store or lower --rollout")
@@ -61,6 +62,10 @@ class SlotStore:
         for k, v in obs.items():
             self.obs[k][slots] = v
         self.action[slots], self.logp[slots], self.value[slots] = action, logp, value
+        if ref_lp is None:
+            self.ref_lp[slots] = 0
+        else:
+            self.ref_lp[slots] = np.asarray(ref_lp, dtype=np.float16)
         return slots
 
     def release(self, slots) -> None:
@@ -87,7 +92,7 @@ def masked_log_softmax(logits: torch.Tensor) -> torch.Tensor:
     return torch.where(torch.isfinite(logits), lp, torch.zeros_like(lp))
 
 
-def ppo_loss(model, ref, obs, action, old_logp, adv, ret, clip: float, vf_coef: float, kl_coef: float,
+def ppo_loss(model, ref_lp, obs, action, old_logp, adv, ret, clip: float, vf_coef: float, kl_coef: float,
              ent_coef: float) -> tuple[torch.Tensor, dict]:  # fmt: skip
     logits, value = model.forward_value(obs)
     lp_all = masked_log_softmax(logits)
@@ -100,10 +105,10 @@ def ppo_loss(model, ref, obs, action, old_logp, adv, ret, clip: float, vf_coef: 
     ent = -(p * lp_all).sum(1).mean()
     loss = pg + vf_coef * vf - ent_coef * ent
     kl = torch.zeros((), device=logits.device)
-    if ref is not None and kl_coef > 0:
-        with torch.no_grad():
-            ref_lp = masked_log_softmax(ref(obs))
-        kl = (p * (lp_all - ref_lp)).sum(1).mean()  # KL(pi || pi_BC), exact over the legal options
+    if ref_lp is not None and kl_coef > 0:
+        ref_lp = ref_lp.to(dtype=torch.float32) if torch.is_tensor(ref_lp) else torch.as_tensor(ref_lp)
+        ref_lp = ref_lp.to(device=logits.device, dtype=torch.float32)
+        kl = (p.float() * (lp_all - ref_lp)).sum(1).mean()  # KL(pi || pi_BC), exact over the legal options
         loss = loss + kl_coef * kl
     stats = {
         "pg": pg.item(), "vf": vf.item(), "ent": ent.item(), "kl_bc": kl.item(),

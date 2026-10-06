@@ -53,16 +53,39 @@ def test_value_head_keeps_bc_loading_and_ppo_step_runs():
     logits, v = net.forward_value(obs)
     assert logits.shape == (4, 64) and v.shape == (4,) and (v.abs() <= 1).all()
     act = torch.zeros(4, dtype=torch.long)
-    loss, st = ppo_loss(net, bc.eval(), obs, act, torch.full((4,), -0.69), torch.randn(4), torch.ones(4), 0.2, 0.5,
+    with torch.no_grad():
+        ref_lp = masked_log_softmax(bc.eval()(obs))
+    loss, st = ppo_loss(net, ref_lp, obs, act, torch.full((4,), -0.69), torch.randn(4), torch.ones(4), 0.2, 0.5,
                         0.1, 0.01)  # fmt: skip
     loss.backward()
     assert torch.isfinite(loss) and st["kl_bc"] >= -1e-6
     assert net.value_head[1].weight.grad is not None
 
 
+def test_cached_ref_kl_matches_module_path():
+    emb = _emb()
+    bc = PolicyNet(emb, d=16, layers=1, heads=2).eval()
+    net = PolicyNet(emb, d=16, layers=1, heads=2, value=True, dropout=0.0).eval()
+    obs = _batch(b=4, h=32)
+    act = torch.zeros(4, dtype=torch.long)
+    with torch.no_grad():
+        cached = masked_log_softmax(bc(obs))
+    _, st = ppo_loss(net, cached, obs, act, torch.full((4,), -0.69), torch.randn(4), torch.ones(4), 0.2, 0.5,
+                     0.1, 0.01)  # fmt: skip
+    with torch.no_grad():  # the old module path, computed inline
+        logits, _ = net.forward_value(obs)
+        lp_all = masked_log_softmax(logits)
+        p = lp_all.exp() * torch.isfinite(logits)
+        old_kl = (p * (lp_all - masked_log_softmax(bc(obs)))).sum(1).mean().item()
+    assert abs(st["kl_bc"] - old_kl) <= 1e-5
+
+
 def test_slot_store_put_release():
     st = SlotStore(5, {"x": np.zeros((1, 3), np.int32)})
-    s = st.put({"x": np.ones((2, 3), np.int32)}, np.array([1, 2]), np.zeros(2), np.zeros(2))
+    s = st.put({"x": np.ones((2, 3), np.int32)}, np.array([1, 2]), np.zeros(2), np.zeros(2),
+               np.full((2, 64), -0.5, np.float32))
     assert st.free == 3 and (st.obs["x"][s] == 1).all()
+    assert st.ref_lp.shape == (5, 64) and st.ref_lp.dtype == np.float16
+    assert np.allclose(st.ref_lp[s].astype(np.float32), -0.5, atol=1e-2)
     st.release(s)
     assert st.free == 5

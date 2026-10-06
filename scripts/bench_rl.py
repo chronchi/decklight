@@ -27,14 +27,15 @@ import numpy as np
 import torch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from train_rl import load_net, sample  # architecture + rollout sampler, as in train_rl
+from train_rl import load_net  # architecture, as in train_rl
 
 from ygo_zero.decks import load_ydk
 from ygo_zero.engine.cpp_env import VecEnv
 from ygo_zero.engine.duel import Engine
 from ygo_zero.eval.bc_policy import _run_args
 from ygo_zero.model.policy import PolicyNet
-from ygo_zero.rl.ppo import SlotStore, gather, ppo_loss, to_torch
+from ygo_zero.rl.ppo import SlotStore, gather, masked_log_softmax, ppo_loss, to_torch
+from ygo_zero.rl.rollout import Collector
 
 ROOT = Path(__file__).resolve().parents[1]
 POOL_N = 8192  # capture pool rows (numpy, host), shared by infer and update
@@ -135,43 +136,6 @@ def _make_h2d_step(model: PolicyNet, pool: dict, batch: int, prec: str, dev: tor
         return batch
 
     return h2d
-
-
-def _make_rollout_step(vec: VecEnv, buf: dict, rows: np.ndarray, store: SlotStore, traj: list,
-                       hist: int, known: bool, model: PolicyNet, prec: str, dev: torch.device,
-                       ph: dict, count_ph: list):
-    """train_rl's rollout inner loop, self-play only (every row is the learner). Returns decisions done."""
-
-    def rstep() -> int:
-        t = time.perf_counter()
-        ob = gather(buf, rows, hist, known)
-        if count_ph[0]:
-            ph["gather"] += time.perf_counter() - t
-        t = time.perf_counter()
-        tob = to_torch(ob, dev)
-        with torch.no_grad(), _autocast(dev, prec):
-            logits, v = model.forward_value(tob)
-            act, lp = sample(logits)
-        if count_ph[0]:
-            ph["h2d_fwd"] += time.perf_counter() - t
-        t = time.perf_counter()
-        slots = store.put(ob, act, lp, v.float().cpu().numpy())
-        for i, s in zip(rows, slots):
-            traj[int(i)].append(int(s))
-        if count_ph[0]:
-            ph["store"] += time.perf_counter() - t
-        t = time.perf_counter()
-        vec.step(act)
-        for i in np.flatnonzero(buf["done"]):
-            if traj[int(i)]:
-                store.release(traj[int(i)])
-                traj[int(i)] = []
-        vec.pop_finished()
-        if count_ph[0]:
-            ph["env"] += time.perf_counter() - t
-        return len(rows)
-
-    return rstep
 
 
 def main() -> None:
@@ -292,59 +256,71 @@ def main() -> None:
 
     if "rollout" in args.sections:
         model.eval()
+        ref_roll = copy.deepcopy(model).eval()
+        for p in ref_roll.parameters():
+            p.requires_grad_(False)
+        tgt = 256 if args.smoke else 2048
         for nenv in rollout_envs:
             for trim, use_bf16 in ((False, False), (True, True)):
                 prec = "bf16" if (use_bf16 and dev.type == "cuda") else "fp32"
                 model.trim = trim
+                ref_roll.trim = trim
                 vec = VecEnv(engine, decks, nenv, args.threads, seed=4242)
                 vec.set_max_decisions(1500)  # train_rl's --max-decisions default
-                buf = vec.reset()
-                store = SlotStore(store_cap, gather(buf, np.arange(1), hist, known))
-                traj: list[list[int]] = [[] for _ in range(nenv)]
-                ph = {"gather": 0.0, "h2d_fwd": 0.0, "store": 0.0, "env": 0.0}
-                count_ph = [False]
-                rows = np.arange(nenv)
-                rstep = _make_rollout_step(vec, buf, rows, store, traj, hist, known, model, prec, dev, ph, count_ph)
-                for _ in range(3):
-                    rstep()
-                count_ph[0] = True
+                store = SlotStore(store_cap, gather(vec.buf, np.arange(1), hist, known))
+                col = Collector(vec, model, ref_roll, store, hist, known, dev, 0.0, -0.5,
+                                max(1, nenv // 4), np.random.default_rng(4242), prec)
+                warm, _ = col.collect(min(tgt, 64))
+                for s, _ in warm:
+                    store.release(s)
                 _reset_peak(dev)
                 _sync(dev)
                 t0 = time.perf_counter()
-                units = 0
+                units = t_env = t_fwd = 0.0
+                units_n = 0
                 while True:
-                    units += rstep()
+                    finished, st = col.collect(tgt)
+                    units_n += st["decisions"]
+                    t_env += st["t_env"]
+                    t_fwd += st["t_fwd"]
+                    for s, _ in finished:
+                        store.release(s)
                     if time.perf_counter() - t0 >= seconds:
                         break
                 _sync(dev)
                 dt = time.perf_counter() - t0
+                units = units_n
                 emit({"section": "rollout", "config": {"envs": nenv, "trim": trim, "precision": prec},
                       "rate": units / dt, "unit": "decisions/s", "seconds": round(dt, 3),
                       "peak_gpu_mb": _peak_mb(dev), "rss_mb": _rss_mb(),
-                      "t_gather": round(ph["gather"], 3), "t_h2d_forward_sample": round(ph["h2d_fwd"], 3),
-                      "t_store": round(ph["store"], 3), "t_env": round(ph["env"], 3)})  # fmt: skip
+                      "t_env": round(t_env, 3), "t_fwd": round(t_fwd, 3)})  # fmt: skip
 
     if "update" in args.sections:
         assert pool is not None
         model.train()
-        ref = None
+        # frozen copy of the learner: its log-probs are cached once per trim (no ref forward in the update)
+        ref = copy.deepcopy(model).eval()
+        for p in ref.parameters():
+            p.requires_grad_(False)
         counts = pool["action_mask"].sum(1).clip(min=1)
         log1p = np.log(1.0 / counts).astype(np.float32)
         rng = np.random.default_rng(2026)
         for mb in update_mbs:
             for trim in (False, True):
                 model.trim = trim
+                ref.trim = trim
+                with torch.no_grad():
+                    parts = []
+                    for j in range(0, len(pool["action_mask"]), 1024):
+                        sl = {k: v[j:j + 1024] for k, v in pool.items()}
+                        parts.append(masked_log_softmax(ref(to_torch(sl, dev))).float().cpu().numpy())
+                    ref_pool = np.concatenate(parts).astype(np.float16)  # cached KL reference (POOL_N, 64)
                 for prec in _precisions(dev):
                     for kl in ("on", "off"):
-                        if kl == "on" and ref is None:
-                            # frozen copy of the learner (ppo_loss only calls ref(obs) -> forward)
-                            ref = copy.deepcopy(model).eval()
-                            for p in ref.parameters():
-                                p.requires_grad_(False)
                         opt = torch.optim.AdamW(model.parameters(), lr=1e-5)
                         try:
-                            _update_one(mb, trim, prec, kl, model, ref, pool, log1p, rng, opt, dev, seconds, emit,
-                                        nan_flag := [False])
+                            _update_one(mb, trim, prec, kl, model, ref_pool if kl == "on" else None,
+                                        pool, log1p, rng, opt, dev, seconds, emit, nan_flag := [False])
                             if nan_flag[0]:
                                 nan_loss = True
                         except torch.cuda.OutOfMemoryError:
@@ -369,14 +345,9 @@ def main() -> None:
         raise SystemExit(2)
 
 
-def _update_one(mb: int, trim: bool, prec: str, kl: str, model: PolicyNet, ref, pool, log1p, rng,
+def _update_one(mb: int, trim: bool, prec: str, kl: str, model: PolicyNet, ref_pool, pool, log1p, rng,
                 opt, dev: torch.device, seconds: float, emit, nan_flag: list) -> None:
     n_pool = len(pool["action_mask"])
-    use_ref = None
-    if kl == "on":
-        use_ref = ref
-        if use_ref is not None:
-            use_ref.trim = trim
     model.trim = trim
 
     def ustep() -> int:
@@ -391,10 +362,12 @@ def _update_one(mb: int, trim: bool, prec: str, kl: str, model: PolicyNet, ref, 
         olp_t = torch.from_numpy(olp_np).to(dev)
         adv_t = torch.from_numpy(adv_np).to(dev)
         ret_t = torch.from_numpy(ret_np).to(dev)
+        # cached KL reference (None = no KL); no ref forward inside the timed update
+        ref_t = torch.from_numpy(ref_pool[idx]).to(dev) if kl == "on" and ref_pool is not None else None
         opt.zero_grad(set_to_none=True)
         with _autocast(dev, prec):
             # train_rl defaults: clip 0.2, vf 0.5, kl 0.1, ent 0.003
-            loss, _st = ppo_loss(model, use_ref, tob, act_t, olp_t, adv_t, ret_t, 0.2, 0.5, 0.1, 0.003)
+            loss, _st = ppo_loss(model, ref_t, tob, act_t, olp_t, adv_t, ret_t, 0.2, 0.5, 0.1, 0.003)
         if not bool(torch.isfinite(loss).item()):
             nan_flag[0] = True
         loss.backward()

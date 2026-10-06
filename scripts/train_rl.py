@@ -20,7 +20,9 @@ checkpoints), iter-NNNN.pt (fp16 policy weights at each eval, no value head), la
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
+import os
 import random
 import time
 from pathlib import Path
@@ -35,8 +37,32 @@ from ygo_zero.eval.bc_policy import BCPolicy, _run_args
 from ygo_zero.eval.match import play_match, ring_pairs, wilson
 from ygo_zero.model.policy import PolicyNet
 from ygo_zero.rl.ppo import SlotStore, gae, gather, masked_log_softmax, ppo_loss, to_torch
+from ygo_zero.rl.rollout import Collector
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def _effective_cores() -> int:
+    """Usable CPUs: sched affinity count, capped by the cgroup quota when set."""
+    try:
+        n = len(os.sched_getaffinity(0))
+    except (AttributeError, OSError):
+        n = os.cpu_count() or 4
+    try:
+        parts = Path("/sys/fs/cgroup/cpu.max").read_text().split()
+        if len(parts) == 2 and parts[0] != "max":
+            quota, period = int(parts[0]), int(parts[1])
+            if period > 0:
+                n = min(n, max(1, quota // period))
+    except (OSError, ValueError):
+        pass
+    return max(1, n)
+
+
+def _autocast(dev: torch.device, prec: str):
+    if prec == "bf16" and dev.type == "cuda":
+        return torch.autocast(dev.type, dtype=torch.bfloat16)
+    return contextlib.nullcontext()
 
 
 def load_net(ckpt: Path, emb: dict, a: dict, value: bool) -> PolicyNet:
@@ -69,15 +95,18 @@ def main() -> None:
     ap.add_argument("--out", type=Path, required=True)
     ap.add_argument("--emb", type=Path, default=ROOT / "data/cards/emb/qwen3-0.6b-d512.npz")
     ap.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
-    ap.add_argument("--envs", type=int, default=256)
-    ap.add_argument("--threads", type=int, default=8)
+    ap.add_argument("--envs", type=int, default=512)  # open trajectories must fit --store (≈ envs × 550)
+    ap.add_argument("--threads", type=int, default=_effective_cores())
+    ap.add_argument("--recv-batch", type=int, default=None, help="async recv batch (default: envs // 4)")
+    ap.add_argument("--precision", default=None, help="fp32|bf16 (default: bf16 on cuda, fp32 on cpu)")
+    ap.add_argument("--max-upload-gb", type=float, default=6.0, help="device-upload-once budget per iteration")
     ap.add_argument("--max-decisions", type=int, default=1500, help="per game, both seats")
     ap.add_argument("--trunc-reward", type=float, default=-0.5)
     ap.add_argument("--p-bc", type=float, default=0.3, help="share of episodes vs the frozen BC policy")
     ap.add_argument("--rollout", type=int, default=32768, help="finished samples per PPO iteration")
     ap.add_argument("--store", type=int, default=400_000, help="sample slots (open + finished trajectories)")
     ap.add_argument("--epochs", type=int, default=2)
-    ap.add_argument("--minibatch", type=int, default=256)
+    ap.add_argument("--minibatch", type=int, default=1024)
     ap.add_argument("--lr", type=float, default=2e-5)
     ap.add_argument("--clip", type=float, default=0.2)
     ap.add_argument("--lam", type=float, default=0.95)
@@ -100,6 +129,20 @@ def main() -> None:
     torch.manual_seed(args.seed)
     rng = np.random.default_rng(args.seed)
     dev = torch.device(args.device)
+    if args.recv_batch is None:
+        args.recv_batch = max(1, args.envs // 4)
+    if args.precision is None:
+        args.precision = "bf16" if dev.type == "cuda" else "fp32"
+
+    def fail(msg: str):
+        line = f"ALERT train_rl: {msg}"
+        print(line, flush=True)
+        try:
+            with open(args.out / "ALERT", "a") as f:
+                f.write(line + "\n")
+        except OSError:
+            pass
+        raise SystemExit(3)
     if dev.type == "cuda":
         torch.backends.cuda.matmul.allow_tf32 = True
         torch.backends.cudnn.allow_tf32 = True
@@ -172,64 +215,27 @@ def main() -> None:
 
     evaluate(0)
 
-    # rollout state
+    # rollout state: async collector owns the envs + trajectory bookkeeping
     N = args.envs
     vec = VecEnv(engine, train_decks, N, args.threads, seed=args.seed)
     vec.set_max_decisions(args.max_decisions)
-    buf = vec.reset()
-    store = SlotStore(args.store, gather(buf, np.arange(1), hist, known))
-    traj = [[[], []] for _ in range(N)]  # traj[env][seat] = slots
-    vs_bc = rng.random(N) < args.p_bc
-    lseat = rng.integers(0, 2, N)
-    finished: list[tuple[list[int], float]] = []
-    n_fin = 0
+    store = SlotStore(args.store, gather(vec.buf, np.arange(1), hist, known))
+    col = Collector(vec, model, ref, store, hist, known, dev, args.p_bc, args.trunc_reward,
+                    args.recv_batch, rng, args.precision)
     it, t_train = 0, time.time()
     tot = {"games": 0, "trunc": 0, "decisions": 0}
     while True:
         it += 1
         t_it = time.time()
-        st = {"games": 0, "trunc": 0, "bc_games": 0, "bc_wins": 0.0, "decisions": 0, "lengths": []}
-        while n_fin < args.rollout:
-            actor = buf["player"].copy()
-            learner = ~vs_bc | (actor == lseat)
-            lrows, brows = np.flatnonzero(learner), np.flatnonzero(~learner)
-            actions = np.zeros(N, np.int32)
-            with torch.no_grad():
-                if len(lrows):
-                    ob = gather(buf, lrows, hist, known)
-                    logits, v = model.forward_value(to_torch(ob, dev))
-                    act, lp = sample(logits)
-                    actions[lrows] = act
-                    slots = store.put(ob, act, lp, v.float().cpu().numpy())
-                    for i, s in zip(lrows, slots):
-                        traj[i][actor[i]].append(int(s))
-                if len(brows):
-                    act, _ = sample(ref(to_torch(gather(buf, brows, hist, known), dev)))
-                    actions[brows] = act
-            vec.step(actions)
-            st["decisions"] += N
-            for i in np.flatnonzero(buf["done"]):
-                w = int(buf["winner"][i])
-                st["games"] += 1
-                st["trunc"] += w == VecEnv.TRUNCATED
-                st["lengths"].append(len(traj[i][0]) + len(traj[i][1]))
-                for seat in (0, 1):
-                    sl = traj[i][seat]
-                    rew = args.trunc_reward if w == VecEnv.TRUNCATED else (0.0 if w == 2 else (1.0 if w == seat else -1.0))
-                    if sl:
-                        finished.append((sl, rew))
-                        n_fin += len(sl)
-                    traj[i][seat] = []
-                if vs_bc[i]:
-                    st["bc_games"] += 1
-                    st["bc_wins"] += 0.5 if w not in (0, 1) else float(w == lseat[i])
-                vs_bc[i] = rng.random() < args.p_bc
-                lseat[i] = rng.integers(0, 2)
-            vec.pop_finished()
+        finished, st = col.collect(args.rollout)
         t_roll = time.time() - t_it
+        if not finished:
+            fail(f"iteration {it}: collected 0 samples")
 
         # GAE per finished seat trajectory, then PPO epochs
         slots = np.concatenate([np.array(s, np.int64) for s, _ in finished])
+        if len(slots) == 0:
+            fail(f"iteration {it}: collected 0 samples")
         advs, rets = [], []
         for s, rew in finished:
             ad, rt = gae(store.value[np.array(s)], rew, args.lam)
@@ -240,41 +246,81 @@ def main() -> None:
         warm = it <= args.value_warmup
         if dev.type == "cuda":
             torch.cuda.empty_cache()
+        # upload the iteration's samples to the device ONCE, index minibatches there
+        per_slot = (sum(int(np.prod(v.shape[1:], dtype=np.int64)) * np.dtype(v.dtype).itemsize
+                        for v in store.obs.values()) + 8 + 4 + 4 + 64 * 2 + 4 + 4)
+        upload_once = per_slot * len(slots) <= args.max_upload_gb * 1e9
+        obs_dev = act_dev = olp_dev = ref_dev = adv_dev = ret_dev = perm_dev = None
+        if upload_once:
+            obs_dev = {k: torch.from_numpy(np.ascontiguousarray(store.obs[k][slots])).to(dev)
+                       for k in store.obs}
+            act_dev = torch.from_numpy(np.ascontiguousarray(store.action[slots])).to(dev)
+            olp_dev = torch.from_numpy(np.ascontiguousarray(store.logp[slots])).to(dev)
+            ref_dev = torch.from_numpy(np.ascontiguousarray(store.ref_lp[slots])).to(dev)
+            adv_dev = torch.from_numpy(np.ascontiguousarray(adv_n)).to(dev)
+            ret_dev = torch.from_numpy(np.ascontiguousarray(ret)).to(dev)
+            perm_dev = torch.from_numpy(rng.permutation(len(slots))).to(dev)
+        t_up = time.time()
         model.train()
         agg: dict[str, list] = {}
+        bad_loss = None
         for _ in range(args.epochs):
             perm = rng.permutation(len(slots))
+            mb_dev = torch.from_numpy(perm).to(dev) if upload_once else None
             for k in range(0, len(perm), args.minibatch):
-                mb = perm[k : k + args.minibatch]
-                sl = slots[mb]
-                obs = to_torch({key: v[sl] for key, v in store.obs.items()}, dev)
-                act = torch.from_numpy(store.action[sl]).to(dev)
-                olp = torch.from_numpy(store.logp[sl]).to(dev)
-                a_t = torch.from_numpy(adv_n[mb]).to(dev)
-                r_t = torch.from_numpy(ret[mb]).to(dev)
+                if upload_once:
+                    idx = mb_dev[k : k + args.minibatch]
+                    obs = {key: v[idx] for key, v in obs_dev.items()}
+                    act, olp = act_dev[idx], olp_dev[idx]
+                    rl = ref_dev[idx] if args.kl_coef > 0 else None
+                    a_t = adv_dev[idx]
+                    r_t = ret_dev[idx]
+                else:
+                    mb = perm[k : k + args.minibatch]
+                    sl = slots[mb]
+                    obs = to_torch({key: v[sl] for key, v in store.obs.items()}, dev)
+                    act = torch.from_numpy(store.action[sl]).to(dev)
+                    olp = torch.from_numpy(store.logp[sl]).to(dev)
+                    rl = torch.from_numpy(store.ref_lp[sl]).to(dev) if args.kl_coef > 0 else None
+                    a_t = torch.from_numpy(adv_n[mb]).to(dev)
+                    r_t = torch.from_numpy(ret[mb]).to(dev)
                 if warm:
-                    with torch.no_grad():  # value head only: no graph through the trunk
-                        _, enc = model._run(obs)
-                    v = model.value_head(enc[:, 0]).squeeze(-1)
-                    loss = torch.nn.functional.mse_loss(v.float(), r_t)
+                    with _autocast(dev, args.precision):
+                        with torch.no_grad():  # value head only: no graph through the trunk
+                            _, enc = model._run(obs)
+                        v = model.value_head(enc[:, 0]).squeeze(-1)
+                        loss = torch.nn.functional.mse_loss(v.float(), r_t)
+                    if not bool(torch.isfinite(loss).item()):
+                        bad_loss = loss.item()
+                        break
                     vopt.zero_grad(set_to_none=True)
                     loss.backward()
                     vopt.step()
                     s = {"vf": loss.item()}
                 else:
-                    loss, s = ppo_loss(model, ref, obs, act, olp, a_t, r_t, args.clip, args.vf_coef, args.kl_coef,
-                                       args.ent_coef)  # fmt: skip
+                    with _autocast(dev, args.precision):
+                        loss, s = ppo_loss(model, rl, obs, act, olp, a_t, r_t, args.clip, args.vf_coef,
+                                           args.kl_coef, args.ent_coef)  # fmt: skip
+                    if not bool(torch.isfinite(loss).item()):
+                        bad_loss = loss.item()
+                        break
                     opt.zero_grad(set_to_none=True)
                     loss.backward()
                     torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
                     opt.step()
                 for key, val in s.items():
                     agg.setdefault(key, []).append(val)
+            if bad_loss is not None:
+                break
+        if bad_loss is not None:
+            fail(f"iteration {it}: non-finite loss {bad_loss}")
+        t_update = time.time() - t_up
         model.eval()
         for s, _ in finished:
             store.release(s)
-        finished, n_fin = [], 0
 
+        if not warm and args.kl_coef > 0 and agg.get("kl_bc") and float(np.mean(agg["kl_bc"])) == 0.0:
+            fail(f"iteration {it}: kl_bc exactly 0.0 with --kl-coef {args.kl_coef}")
         dt = time.time() - t_it
         tot["games"] += st["games"]
         tot["trunc"] += st["trunc"]
@@ -286,6 +332,8 @@ def main() -> None:
             "train_vs_bc_sampled": round(st["bc_wins"] / max(st["bc_games"], 1), 3), "bc_games": st["bc_games"],
             "adv_std": round(float(adv.std()), 3), "ret_mean": round(float(ret.mean()), 3),
             "dps": round(st["decisions"] / t_roll), "rollout_s": round(t_roll, 1), "iter_s": round(dt, 1),
+            "t_env": round(st["t_env"], 1), "t_fwd": round(st["t_fwd"], 1),
+            "update_s": round(t_update, 1), "sps": round(len(slots) / dt, 1),
             "store_free": store.free, "hours": round((time.time() - t_train) / 3600, 3),
             **{k: round(float(np.mean(v)), 4) for k, v in agg.items()},
         }  # fmt: skip
