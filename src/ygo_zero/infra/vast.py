@@ -173,9 +173,11 @@ def disable_auto_tmux(host: str, port: int) -> None:
         pass
 
 
-def wait_ready(instance_id: int, timeout_s: int = 900) -> tuple[str, int]:
-    """Wait until the instance runs and answers ssh."""
+def wait_ready(instance_id: int, timeout_s: int = 900, ssh_grace_s: int = 300) -> tuple[str, int]:
+    """Wait until the instance runs and answers ssh. A box that runs but refuses ssh for `ssh_grace_s` is failed
+    early (val-20261005-1820: publickey denied for the full 15 min)."""
     t0 = time.time()
+    running_since: float | None = None
     while time.time() - t0 < timeout_s:
         inst = cli("show", "instance", str(instance_id))
         msg = inst.get("status_msg") or ""
@@ -189,6 +191,9 @@ def wait_ready(instance_id: int, timeout_s: int = 900) -> tuple[str, int]:
             )
             if ok.returncode == 0:
                 return host, port
+            running_since = running_since or time.time()
+            if time.time() - running_since > ssh_grace_s:
+                raise HostFailed(f"instance {instance_id}: running but ssh refused for {ssh_grace_s}s")
         time.sleep(15)
     raise HostFailed(f"instance {instance_id} not ready after {timeout_s}s")
 
@@ -236,8 +241,10 @@ def run_detached(host: str, port: int, name: str, job: str, cap: int, log: Path,
     else:
         raise VastError("could not start the job on the instance")
     deadline = time.time() + cap + 300
+    alerts_seen = 0
     while time.time() < deadline:
         time.sleep(poll_s)
+        alerts_seen = relay_alerts(host, port, rdir, log, alerts_seen)
         try:
             out = subprocess.run(
                 ["ssh", *SSH_OPTS, "-p", str(port), f"root@{host}", f"cat {rdir}/EXIT 2>/dev/null"],
@@ -246,8 +253,27 @@ def run_detached(host: str, port: int, name: str, job: str, cap: int, log: Path,
         except subprocess.TimeoutExpired:
             continue  # transient: keep polling until the deadline
         if out.returncode == 0 and out.stdout.strip():
+            relay_alerts(host, port, rdir, log, alerts_seen)
             return int(out.stdout.strip())
     return 124
+
+
+def relay_alerts(host: str, port: int, rdir: str, log: Path, seen: int) -> int:
+    """Fail loud: copy new lines of the job's runs/<name>/ALERT file into the launcher log as they appear (job
+    scripts append one line per failure there), so a broken variant is visible within one poll instead of at the
+    end of the job. Returns the number of lines relayed so far."""
+    try:
+        out = subprocess.run(
+            ["ssh", *SSH_OPTS, "-p", str(port), f"root@{host}", f"cat {rdir}/ALERT 2>/dev/null"],
+            capture_output=True, text=True, timeout=60, check=False,
+        )  # fmt: skip
+    except subprocess.TimeoutExpired:
+        return seen
+    lines = [x for x in out.stdout.splitlines() if x.strip()]
+    if len(lines) > seen:
+        with open(log, "a") as f:
+            f.writelines(f"ALERT {x}\n" if not x.startswith("ALERT") else f"{x}\n" for x in lines[seen:])
+    return max(seen, len(lines))
 
 
 def push_code(host: str, port: int, data_paths: tuple[str, ...] = ()) -> None:

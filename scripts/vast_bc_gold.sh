@@ -58,8 +58,12 @@ COMMON=(--shards data/cache/bc_shards --emb data/cards/emb/qwen3-0.6b-d512.npz -
 train() {  # <variant> <args...>
   local v="$1"; shift
   uv run --no-sync python scripts/train_bc.py "${COMMON[@]}" --out "$OUT/$v" "$@" > "$OUT/train-$v.txt" 2>&1
+  local rc=$?
   rm -f "$OUT/$v/last.pt"
-  grep -q "^done in" "$OUT/train-$v.txt" || echo "FAILED train-$v (exit before 'done in': OOM?)" >> "$OUT/timing.txt"
+  # fail loud: ALERT lines reach the launcher log within one poll (src/ygo_zero/infra/vast.py run_detached)
+  grep -q "^done in" "$OUT/train-$v.txt" || echo "ALERT train-$v died before 'done in' (exit $rc; OOM?)" >> "$OUT/ALERT"
+  grep -h "^ALERT" "$OUT/train-$v.txt" >> "$OUT/ALERT"
+  [ $rc -eq 0 ] || echo "FAILED train-$v exit $rc" >> "$OUT/timing.txt"
   tick "train-$v"
 }
 # VARIANTS: which trainings run (default: the gold-BC set). Memory sweep (ADR 0005): mix-h<H> = mix with the salient
@@ -140,11 +144,15 @@ PLAY=($BEST); [ "${PT_ZERO:-1}" = "1" ] && PLAY=(zero "${PLAY[@]}")
 for v in "${PLAY[@]}"; do
   [ "$v" = zero ] && ck="$BASE" || ck="$OUT/$v/best.pt"
   [ -f "$ck" ] || continue
+  if grep -q "train-$v \|ALERT $v:" "$OUT/ALERT" 2>/dev/null; then  # a failed variant is never playtested
+    echo "ALERT playtest-$v skipped (training alert)" >> "$OUT/ALERT"; continue
+  fi
   # playtest writes to <ckpt>/../../playtest and reads the architecture from metrics.jsonl next to the checkpoint
   d="$OUT/pt-$v/ck"; mkdir -p "$d"; cp "$ck" "$d/best.pt"; cp "$OUT/$v/metrics.jsonl" "$d/"
   VS=(); [ "$v" = zero ] || VS=(--vs-ckpt "$BASE")
   timeout "$PT_CAP" uv run --no-sync python scripts/playtest.py --ckpt "$d/best.pt" --device cuda --threads "$J" \
     --seed 0 "${PT[@]}" "${VS[@]}" > "$OUT/playtest-$v.txt" 2>&1
+  grep -h "^ALERT\|Traceback" "$OUT/playtest-$v.txt" | sed "s/^/ALERT playtest-$v: /" >> "$OUT/ALERT"
   rm -f "$d/best.pt"; tick "playtest-$v"
 done
 kill "$USAGE_PID" 2>/dev/null

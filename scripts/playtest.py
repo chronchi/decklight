@@ -30,6 +30,7 @@ import time
 from pathlib import Path
 
 import numpy as np
+import torch
 
 from ygo_zero.decks import load_ydk
 from ygo_zero.demos.game import Responder
@@ -148,6 +149,15 @@ def _replay_field(engine, rec: dict) -> int:
     return last
 
 
+def same_weights(a: Path, b: Path) -> bool:
+    """True when two checkpoints hold identical tensors (fp16 best.pt or {"model": ...} files)."""
+    sa, sb = (torch.load(x, map_location="cpu") for x in (a, b))
+    sa, sb = sa.get("model", sa), sb.get("model", sb)
+    if sa.keys() != sb.keys():
+        return False
+    return all(torch.equal(sa[k].float(), sb[k].float()) for k in sa)
+
+
 def combo_test(engine, pol: BCPolicy, deck_name: str, hands: int, sampler: BCPolicy | None = None, k: int = 0) -> dict:
     """Paired test on the expert's own hands: for each verified going-first line record (same config and seed, so the
     same opening hand), the policy plays turn 1 from scratch; compare its end field with the expert line's."""
@@ -249,6 +259,10 @@ def main() -> None:
     ap.add_argument("--device", default="cpu")
     ap.add_argument("--threads", type=int, default=2, help="VecEnv threads for matches")
     args = ap.parse_args()
+    if args.vs_ckpt and same_weights(args.ckpt, args.vs_ckpt):
+        # fail loud (mix-20261005-1738): playing a checkpoint against an identical copy is a wasted report card
+        print(f"ALERT {args.ckpt} has the same weights as --vs-ckpt {args.vs_ckpt}: wrong checkpoint", flush=True)
+        raise SystemExit(2)
     t0 = time.time()
     rng = random.Random(args.seed)
     pool = sorted(p.stem for p in (ROOT / "decks" / "pool").glob("*.ydk"))

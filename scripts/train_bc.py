@@ -314,6 +314,7 @@ def main() -> None:
     t0 = time.time()
     args_rec = {k: str(v) if isinstance(v, Path) else v for k, v in vars(args).items()}
     recent: list[dict] = []
+    best_epoch = None  # epoch of best.pt; -1 = the --init weights
     if args.init:
         rec = {"epoch": -1, "init": str(args.init), "args": args_rec}
         for split in ("val", "holdout"):
@@ -324,6 +325,7 @@ def main() -> None:
         log.write(json.dumps(rec) + "\n")
         log.flush()
         best = select_score(rec, args.select_on, -1.0)
+        best_epoch = -1
         torch.save({k: v.half() if v.is_floating_point() else v for k, v in model.state_dict().items()}, args.out / "best.pt")
     for ep in range(args.epochs):
         run = {"loss": 0.0, "n": 0}
@@ -367,6 +369,7 @@ def main() -> None:
         score = select_score(rec, args.select_on, -rec["train_loss"])
         if score > best:
             best = score
+            best_epoch = ep
             bad = 0
             torch.save(
                 {k: v.half() if v.is_floating_point() else v for k, v in model.state_dict().items()},
@@ -392,11 +395,21 @@ def main() -> None:
         if score > best:
             print(f"merge of last {len(recent)} beats best ({score:.4f} > {best:.4f}): merged.pt + best.pt", flush=True)
             best = score
+            best_epoch = "merged"
             half = {k: v.half() if v.is_floating_point() else v for k, v in model.state_dict().items()}
             torch.save(half, args.out / "merged.pt")
             torch.save(half, args.out / "best.pt")
         model.load_state_dict(live)
+    # final weights always kept (fp16, small): best.pt may be an earlier epoch, and jobs delete last.pt
+    torch.save({k: v.half() if v.is_floating_point() else v for k, v in model.state_dict().items()}, args.out / "final.pt")
     print(f"done in {time.time() - t0:.0f}s, best {args.select_on} acc {best:.4f}", flush=True)
+    if args.init and args.epochs > 0 and best_epoch == -1:
+        # fail loud (mix-20261005-1738): a fine-tune whose best.pt is still the --init weights would be playtested as
+        # a copy of its base and waste the whole report card
+        msg = (f"ALERT {args.out.name}: best.pt is the --init weights: --select-on {args.select_on} never beat the "
+               f"starting point ({best:.4f}); trained weights are in final.pt")
+        print(msg, flush=True)
+        raise SystemExit(3)
 
 
 if __name__ == "__main__":
