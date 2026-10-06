@@ -201,7 +201,10 @@ def limit_gold_games(data, train_idx: np.ndarray, n: int) -> tuple[np.ndarray, i
 
 
 def select_score(rec: dict, select_on: str, default: float) -> float:
-    """--select-on value of a metrics record: "<split>" -> its acc, "<split>:<kind>" -> that kind's acc in the split."""
+    """--select-on value of a metrics record: "<split>" -> its acc, "<split>:<kind>" -> that kind's acc in the split,
+    "last" -> the epoch number (best.pt = the final epoch; never the --init weights)."""
+    if select_on == "last":
+        return float(rec.get("epoch", -1)) if "epoch" in rec else default
     split, _, kind = select_on.partition(":")
     m = rec.get(split, {})
     v = m.get("per_kind", {}).get(kind) if kind else m.get("acc")
