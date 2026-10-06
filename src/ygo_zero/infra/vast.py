@@ -242,10 +242,12 @@ def run_detached(host: str, port: int, name: str, job: str, cap: int, log: Path,
         raise VastError("could not start the job on the instance")
     deadline = time.time() + cap + 300
     alerts_seen = 0
+    progress_seen = 0
     polls, stalled = 0, False
     while time.time() < deadline:
         time.sleep(poll_s)
         alerts_seen = relay_alerts(host, port, rdir, log, alerts_seen)
+        progress_seen = relay_alerts(host, port, rdir, log, progress_seen, "PROGRESS", "PROGRESS ")
         polls += 1
         if polls % max(1, 300 // poll_s) == 0:  # every ~5 min
             stalled = stall_check(host, port, rdir, log, stalled)
@@ -258,6 +260,7 @@ def run_detached(host: str, port: int, name: str, job: str, cap: int, log: Path,
             continue  # transient: keep polling until the deadline
         if out.returncode == 0 and out.stdout.strip():
             relay_alerts(host, port, rdir, log, alerts_seen)
+            relay_alerts(host, port, rdir, log, progress_seen, "PROGRESS", "PROGRESS ")
             return int(out.stdout.strip())
     return 124
 
@@ -284,21 +287,26 @@ def stall_check(host: str, port: int, rdir: str, log: Path, stalled: bool, minut
     return now
 
 
-def relay_alerts(host: str, port: int, rdir: str, log: Path, seen: int) -> int:
-    """Fail loud: copy new lines of the job's runs/<name>/ALERT file into the launcher log as they appear (job
-    scripts append one line per failure there), so a broken variant is visible within one poll instead of at the
-    end of the job. Returns the number of lines relayed so far."""
+def relay_alerts(
+    host: str, port: int, rdir: str, log: Path, seen: int, filename: str = "ALERT", prefix: str = "ALERT "
+) -> int:
+    """Fail loud: copy new lines of the job's runs/<name>/<filename> file into the launcher log as they appear,
+    each prefixed with `prefix` (unless already prefixed), so a broken variant (ALERT) or training progress
+    (PROGRESS, eval lines tailed by vast_rl.sh) is visible within one poll instead of at the end of the job.
+    A missing file is normal (other job types have no PROGRESS): no error. Returns the number of lines
+    relayed so far."""
     try:
         out = subprocess.run(
-            ["ssh", *SSH_OPTS, "-p", str(port), f"root@{host}", f"cat {rdir}/ALERT 2>/dev/null"],
+            ["ssh", *SSH_OPTS, "-p", str(port), f"root@{host}", f"cat {rdir}/{filename} 2>/dev/null"],
             capture_output=True, text=True, timeout=60, check=False,
         )  # fmt: skip
     except subprocess.TimeoutExpired:
         return seen
     lines = [x for x in out.stdout.splitlines() if x.strip()]
     if len(lines) > seen:
+        tag = prefix.strip()
         with open(log, "a") as f:
-            f.writelines(f"ALERT {x}\n" if not x.startswith("ALERT") else f"{x}\n" for x in lines[seen:])
+            f.writelines(f"{x}\n" if x.startswith(tag) else f"{prefix}{x}\n" for x in lines[seen:])
     return max(seen, len(lines))
 
 

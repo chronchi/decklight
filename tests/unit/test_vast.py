@@ -76,3 +76,60 @@ def test_ssh_target_prefers_direct():
     assert vast._ssh_target(direct) == ("1.2.3.4", 51234)
     proxy = {"ssh_host": "ssh9.vast.ai", "ssh_port": "12345"}
     assert vast._ssh_target(proxy) == ("ssh9.vast.ai", 12345)
+
+
+class FakeSSH:
+    """Fake subprocess.run for relay tests: serves cat <rdir>/<file> from a dict."""
+
+    def __init__(self, files):
+        self.files = files
+
+    def __call__(self, cmd, **kwargs):
+        class Out:
+            pass
+
+        out = Out()
+        last = cmd[-1]  # "cat <rdir>/<filename> 2>/dev/null"
+        name = "ALERT" if "/ALERT " in last or last.rstrip().endswith("/ALERT") else (
+            "PROGRESS" if "/PROGRESS" in last else last.split("/")[-1].split()[0]
+        )
+        out.stdout = self.files.get(name, "")
+        out.returncode = 0
+        return out
+
+
+def test_relay_alerts_prefix_and_incremental(tmp_path, monkeypatch):
+    import subprocess
+
+    log = tmp_path / "launcher.log"
+    log.write_text("")
+    fake = FakeSSH({"ALERT": "boom 1\nALERT boom 2\n"})
+    monkeypatch.setattr(vast.subprocess, "run", fake)
+    seen = vast.relay_alerts("h", 22, "runs/t", log, 0)
+    assert seen == 2
+    assert log.read_text().splitlines() == ["ALERT boom 1", "ALERT boom 2"]
+    fake.files["ALERT"] += "boom 3\n"
+    seen = vast.relay_alerts("h", 22, "runs/t", log, seen)
+    assert seen == 3
+    assert log.read_text().splitlines()[-1] == "ALERT boom 3"
+
+
+def test_relay_progress_prefixed_and_missing_is_normal(tmp_path, monkeypatch):
+    log = tmp_path / "launcher.log"
+    log.write_text("")
+    fake = FakeSSH({"PROGRESS": "[eval it 10] wr 0.6\n[eval it 20] wr 0.7\n"})
+    monkeypatch.setattr(vast.subprocess, "run", fake)
+    seen = vast.relay_alerts("h", 22, "runs/t", log, 0, "PROGRESS", "PROGRESS ")
+    assert seen == 2
+    assert log.read_text().splitlines() == [
+        "PROGRESS [eval it 10] wr 0.6",
+        "PROGRESS [eval it 20] wr 0.7",
+    ]
+    # missing file is normal (other job types): no error, seen unchanged
+    fake.files.pop("PROGRESS")
+    seen2 = vast.relay_alerts("h", 22, "runs/t", log, seen, "PROGRESS", "PROGRESS ")
+    assert seen2 == seen
+    assert log.read_text().splitlines() == [
+        "PROGRESS [eval it 10] wr 0.6",
+        "PROGRESS [eval it 20] wr 0.7",
+    ]

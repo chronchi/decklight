@@ -24,6 +24,7 @@ import contextlib
 import json
 import os
 import random
+import sys
 import time
 from pathlib import Path
 
@@ -33,9 +34,9 @@ import torch
 from ygo_zero.decks import load_ydk
 from ygo_zero.engine.cpp_env import VecEnv
 from ygo_zero.engine.duel import Engine
-from ygo_zero.eval.bc_policy import BCPolicy, _run_args
-from ygo_zero.eval.match import play_match, ring_pairs, wilson
+from ygo_zero.eval.bc_policy import _run_args
 from ygo_zero.model.policy import PolicyNet
+from ygo_zero.rl.evaluate import AsyncEvaluator, format_eval_line, run_eval
 from ygo_zero.rl.ppo import SlotStore, gae, gather, masked_log_softmax, ppo_loss, to_torch
 from ygo_zero.rl.rollout import Collector
 
@@ -96,7 +97,13 @@ def main() -> None:
     ap.add_argument("--emb", type=Path, default=ROOT / "data/cards/emb/qwen3-0.6b-d512.npz")
     ap.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     ap.add_argument("--envs", type=int, default=512)  # open trajectories must fit --store (≈ envs × 550)
-    ap.add_argument("--threads", type=int, default=_effective_cores())
+    _eff = _effective_cores()
+    _eval_default = max(1, _eff // 2)
+    ap.add_argument("--threads", type=int, default=max(2, _eff - _eval_default))
+    ap.add_argument("--eval-mode", choices=("async", "sync"), default="async",
+                    help="async: eval_ckpt.py subprocess while training continues; sync: blocking in-process")
+    ap.add_argument("--eval-threads", type=int, default=_eval_default,
+                    help="CPUs for the eval subprocess (async mode)")
     ap.add_argument("--recv-batch", type=int, default=None, help="async recv batch (default: envs // 4)")
     ap.add_argument("--precision", default=None, help="fp32|bf16 (default: bf16 on cuda, fp32 on cpu)")
     ap.add_argument("--max-upload-gb", type=float, default=6.0, help="device-upload-once budget per iteration")
@@ -115,7 +122,7 @@ def main() -> None:
     ap.add_argument("--kl-coef", type=float, default=0.1)
     ap.add_argument("--value-warmup", type=int, default=2, help="first iterations train the value head only")
     ap.add_argument("--eval-every", type=int, default=10)
-    ap.add_argument("--eval-seeds", type=int, default=2, help="vs BC: seeds per ordered deck pair")
+    ap.add_argument("--eval-seeds", type=int, default=6, help="vs BC: seeds per ordered deck pair")
     ap.add_argument("--ga-seeds", type=int, default=1, help="vs ygo-agent: seeds per deck pair")
     ap.add_argument("--gauntlet-decks", type=Path, default=ROOT / "decks/gauntlet",
                     help="ygo-agent's own lists (in its 864-card vocabulary); also in the training pool")
@@ -177,43 +184,49 @@ def main() -> None:
     log.flush()
 
     engine = Engine()
-    ga = None
-    if not args.no_ygoagent:
-        from ygo_zero.eval.ygoagent import YgoAgentPolicy
-
-        ga = YgoAgentPolicy(seed=3)
-    base_pol = BCPolicy(args.init, args.emb, device=args.device)
 
     def evaluate(it: int) -> dict:
-        t = time.time()
+        """Synchronous eval: save iter-NNNN.pt, run in-process, print + log the record."""
         ck = args.out / f"iter-{it:04d}.pt"
         torch.save(policy_state(model), ck)
-        pol = BCPolicy(ck, args.emb, device=args.device)
-        res: dict = {"iter": it, "eval": {}}
-        pairs = [(i, j) for i in range(len(ev_decks)) for j in range(len(ev_decks)) if i != j]
-        games = play_match(engine, ev_decks, pol, base_pol, pairs, range(args.eval_seeds), num_envs=128,
-                           num_threads=args.threads)  # fmt: skip
-        for name, gs in (("vs_bc", games), ("vs_bc_holdout", [g for g in games if ev_names[g.deck_a] in hold])):
-            w = sum(g.winner_is_a for g in gs)
-            lo, hi = wilson(w, len(gs))
-            res["eval"][name] = {"n": len(gs), "wr": round(w / len(gs), 3), "ci": [round(lo, 3), round(hi, 3)],
-                                 "cut": sum(g.truncated for g in gs)}  # fmt: skip
-        if ga is not None:
-            ga._states.clear()  # LSTM states are keyed by schedule index, which restarts at 0 every match
-            gp = ring_pairs(len(g_decks), args.ga_opps)
-            games = play_match(engine, g_decks, pol, ga, gp, range(args.ga_seeds), num_envs=64, num_threads=args.threads)
-            w = sum(g.winner_is_a for g in games)
-            lo, hi = wilson(w, len(games))
-            res["eval"]["vs_ygoagent"] = {"n": len(games), "wr": round(w / len(games), 3),
-                                          "ci": [round(lo, 3), round(hi, 3)], "cut": sum(g.truncated for g in games)}  # fmt: skip
-        res["eval_seconds"] = round(time.time() - t)
-        print(f"[eval it {it}] " + "  ".join(f"{k} {v['wr']:.3f} [{v['ci'][0]:.3f},{v['ci'][1]:.3f}] n={v['n']} cut={v['cut']}"
-                                             for k, v in res["eval"].items()) + f"  ({res['eval_seconds']} s)", flush=True)  # fmt: skip
+        res = run_eval(ck, args.init, args.emb, ev_names, hold, args.gauntlet_decks, args.eval_seeds,
+                       args.ga_seeds, args.ga_opps, args.no_ygoagent, args.device, args.threads, it=it)  # fmt: skip
+        print(format_eval_line(res), flush=True)
         log.write(json.dumps(res) + "\n")
         log.flush()
         return res
 
+    asev: AsyncEvaluator | None = None
+    recorded: set[int] = set()
+    eval_started: set[int] = set()
+
+    def relay(recs: list[dict]) -> None:
+        for r in recs:
+            print(format_eval_line(r), flush=True)
+            log.write(json.dumps(r) + "\n")
+            recorded.add(r.get("iter"))
+        if recs:
+            log.flush()
+
+    if args.eval_mode == "async":
+        evals_path = args.out / "evals.jsonl"
+
+        def _eval_cmd(it: int, ckpt: Path) -> list[str]:
+            cmd = [sys.executable, str(ROOT / "scripts" / "eval_ckpt.py"), "--ckpt", str(ckpt),
+                   "--init", str(args.init), "--iter", str(it), "--emb", str(args.emb),
+                   "--eval-names", ",".join(ev_names), "--gauntlet-decks", str(args.gauntlet_decks),
+                   "--eval-seeds", str(args.eval_seeds), "--ga-seeds", str(args.ga_seeds),
+                   "--ga-opps", str(args.ga_opps), "--device", str(args.device),
+                   "--threads", str(args.eval_threads), "--out", str(evals_path)]  # fmt: skip
+            if args.no_ygoagent:
+                cmd.append("--no-ygoagent")
+            return cmd
+
+        asev = AsyncEvaluator(_eval_cmd, args.out)
+
     evaluate(0)
+    recorded.add(0)
+    eval_started.add(0)
 
     # rollout state: async collector owns the envs + trajectory bookkeeping
     N = args.envs
@@ -341,10 +354,32 @@ def main() -> None:
         log.write(json.dumps(rec) + "\n")
         log.flush()
         out_of_time = (time.time() - t_train) / 3600 >= args.hours or (args.iters and it >= args.iters)
+        if args.eval_mode == "async":
+            assert asev is not None
+            relay(asev.poll())
         if it % args.eval_every == 0 or out_of_time:
             torch.save({"model": model.state_dict(), "opt": opt.state_dict(), "iter": it}, args.out / "last.pt")
-            evaluate(it)
+            if args.eval_mode == "sync":
+                evaluate(it)
+                recorded.add(it)
+                eval_started.add(it)
+            else:
+                assert asev is not None
+                ck = args.out / f"iter-{it:04d}.pt"
+                torch.save(policy_state(model), ck)
+                if asev.maybe_start(it, ck):
+                    eval_started.add(it)
+                else:
+                    print(f"[eval it {it}] skipped (previous eval running)", flush=True)
         if out_of_time:
+            if args.eval_mode == "async":
+                assert asev is not None
+                relay(asev.poll())
+                relay(asev.wait())
+                if it not in recorded and it not in eval_started:
+                    evaluate(it)  # final eval was skipped: run it blocking so it is never missing
+                    recorded.add(it)
+                    eval_started.add(it)
             break
     print(f"done: {it} iterations, {tot['games']} games, {tot['decisions']} decisions, "
           f"{(time.time() - t_start) / 3600:.2f} h", flush=True)  # fmt: skip

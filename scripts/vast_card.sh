@@ -31,6 +31,10 @@ for d in "$@"; do
 done
 for p in "${PIDS[@]}"; do wait "$p" || alert "playtest pid $p exit $?"; done
 grep -h "^ALERT\|Traceback" "$OUT"/playtest-*.txt >> "$OUT/ALERT" 2>/dev/null || true
-for d in "$@"; do mkdir -p "$OUT/$(basename "$d")"; cp -r "$d/playtest" "$OUT/$(basename "$d")/" 2>/dev/null || alert "no report for $d"; done
+for d in "$@"; do
+  [ -f "$d/playtest/report.json" ] || { alert "no report for $d"; continue; }
+  dst="$OUT/$(basename "$d")"; [ "$(realpath "$d")" = "$(realpath -m "$dst")" ] && continue  # already inside OUT
+  mkdir -p "$dst"; cp -r "$d/playtest" "$dst/"
+done
 kill "$USAGE_PID" 2>/dev/null
 echo done > "$OUT/DONE"
