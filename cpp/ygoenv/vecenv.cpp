@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <stdexcept>
 #include <utility>
 
@@ -27,7 +28,8 @@ static std::vector<uint32_t> shuffled_main(std::vector<uint32_t> main, uint64_t 
 VecEnv::VecEnv(Engine& engine, std::vector<Deck> decks, int num_envs, int num_threads, uint64_t seed, bool auto_single)
     : num_envs(num_envs), obs(num_envs), player(num_envs, 0), winner(num_envs, -1), done(num_envs, 0), game(num_envs, -1),
       engine_(engine), decks_(std::move(decks)), auto_single_(auto_single), envs_(num_envs), rng_(num_envs),
-      current_(num_envs), idle_(num_envs, 0), errors_(num_envs) {
+      current_(num_envs), idle_(num_envs, 0), errors_(num_envs), slot_(num_envs, Slot::HELD),
+      pending_action_(num_envs, 0), pending_reset_(num_envs, 0) {
   if (decks_.empty() || num_envs <= 0) throw std::invalid_argument("need decks and num_envs > 0");
   for (int i = 0; i < num_envs; ++i) {
     uint64_t s = seed ^ (0xD1B54A32D192ED03ull * (i + 1));
@@ -42,6 +44,7 @@ VecEnv::~VecEnv() {
     stop_ = true;
   }
   cv_work_.notify_all();
+  cv_ready_.notify_all();
   for (auto& w : workers_) w.join();
 }
 
@@ -57,7 +60,10 @@ void VecEnv::set_schedule(std::vector<Episode> games) {
   unfinished_ = static_cast<int64_t>(schedule_.size());
 }
 
-int64_t VecEnv::remaining() const { return unfinished_; }
+int64_t VecEnv::remaining() const {
+  std::lock_guard lock(mu_);
+  return unfinished_;
+}
 
 void VecEnv::set_max_decisions(int n) { max_decisions_ = n; }
 
@@ -93,16 +99,21 @@ void VecEnv::start_episode(int i) {
   if (!envs_[i]->reset(obs[i])) throw std::runtime_error("duel ended before the first decision");
 }
 
-void VecEnv::work(int i) {
+void VecEnv::require_all_held() const {
+  for (int i = 0; i < num_envs; ++i)
+    if (slot_[i] != Slot::HELD) throw std::logic_error("VecEnv: async work outstanding (mixing sync and async)");
+}
+
+void VecEnv::work(int i, int32_t action, bool reset_flag) {
   try {
     done[i] = 0;
     winner[i] = -1;
-    if (resetting_) {
+    if (reset_flag) {
       idle_[i] = 0;
       start_episode(i);
     } else if (idle_[i]) {
       // scheduled games exhausted: ignore the action
-    } else if (bool over = !envs_[i]->step(actions_[i], obs[i]);
+    } else if (bool over = !envs_[i]->step(action, obs[i]);
                over || (max_decisions_ > 0 && envs_[i]->decisions >= max_decisions_)) {
       Env& env = *envs_[i];
       Episode& ep = current_[i];
@@ -127,16 +138,42 @@ void VecEnv::work(int i) {
 void VecEnv::worker() {
   uint64_t seen = 0;
   while (true) {
+    int id = -1;
+    int32_t act = 0;
+    bool rst = false, is_async = false, is_sync = false;
     {
       std::unique_lock lock(mu_);
-      cv_work_.wait(lock, [&] { return stop_ || generation_ != seen; });
+      cv_work_.wait(lock, [&] { return stop_ || generation_ != seen || !queue_.empty(); });
       if (stop_) return;
-      seen = generation_;
+      if (!queue_.empty()) {
+        id = queue_.front();
+        queue_.pop_front();
+        slot_[id] = Slot::RUNNING;
+        act = pending_action_[id];
+        rst = pending_reset_[id] != 0;
+        is_async = true;
+      } else if (generation_ != seen) {
+        seen = generation_;
+        is_sync = true;
+      }
     }
-    int i;
-    while ((i = next_.fetch_add(1)) < num_envs) work(i);
-    std::lock_guard lock(mu_);
-    if (--pending_ == 0) cv_done_.notify_one();
+    if (is_async) {
+      work(id, act, rst);
+      {
+        std::lock_guard lock(mu_);
+        slot_[id] = Slot::READY;
+        ready_.push_back(id);
+      }
+      cv_ready_.notify_all();
+    } else if (is_sync) {
+      int i;
+      bool rst = resetting_;
+      const int32_t* acts = actions_;
+      // NOTE: actions_ is null during reset(); do not touch it then.
+      while ((i = next_.fetch_add(1)) < num_envs) work(i, rst ? 0 : acts[i], rst);
+      std::lock_guard lock(mu_);
+      if (--pending_ == 0) cv_done_.notify_one();
+    }
   }
 }
 
@@ -157,14 +194,87 @@ void VecEnv::run_all() {
 }
 
 void VecEnv::reset() {
+  {
+    std::lock_guard lock(mu_);
+    require_all_held();
+  }
   resetting_ = true;
   run_all();
   resetting_ = false;
 }
 
 void VecEnv::step(const int32_t* actions) {
+  {
+    std::lock_guard lock(mu_);
+    require_all_held();
+  }
   actions_ = actions;
   run_all();
+}
+
+void VecEnv::async_reset() {
+  std::unique_lock lock(mu_);
+  require_all_held();
+  for (int i = 0; i < num_envs; ++i) {
+    slot_[i] = Slot::QUEUED;
+    pending_reset_[i] = 1;
+    queue_.push_back(i);
+  }
+  lock.unlock();
+  cv_work_.notify_all();
+}
+
+void VecEnv::send(const int32_t* ids, const int32_t* actions, int n) {
+  std::unique_lock lock(mu_);
+  for (int k = 0; k < n; ++k) {
+    int id = ids[k];
+    if (id < 0 || id >= num_envs) throw std::invalid_argument("VecEnv::send: id out of range");
+    if (slot_[id] != Slot::HELD) throw std::invalid_argument("VecEnv::send: id not HELD");
+    for (int j = 0; j < k; ++j)
+      if (ids[j] == id) throw std::invalid_argument("VecEnv::send: duplicate id");
+  }
+  for (int k = 0; k < n; ++k) {
+    int id = ids[k];
+    slot_[id] = Slot::QUEUED;
+    pending_action_[id] = actions[k];
+    pending_reset_[id] = 0;
+    queue_.push_back(id);
+  }
+  lock.unlock();
+  // one wake per queued env: notify_all would wake every pool thread for each send
+  if (n >= static_cast<int>(workers_.size())) cv_work_.notify_all();
+  else
+    for (int k = 0; k < n; ++k) cv_work_.notify_one();
+}
+
+std::vector<int32_t> VecEnv::recv(int min_ready, int max_ready) {
+  std::unique_lock lock(mu_);
+  int64_t outstanding = 0;
+  for (auto s : slot_)
+    if (s != Slot::HELD) ++outstanding;
+  if (outstanding == 0 || max_ready <= 0) return {};
+  int64_t target = std::min<int64_t>(min_ready, outstanding);
+  if (target < 0) target = 0;
+  cv_ready_.wait(lock, [&] { return stop_ || static_cast<int64_t>(ready_.size()) >= target; });
+  if (stop_ && ready_.empty()) return {};
+  size_t take = std::min<size_t>(static_cast<size_t>(max_ready), ready_.size());
+  std::vector<int32_t> out;
+  out.reserve(take);
+  for (size_t k = 0; k < take; ++k) {
+    int id = ready_.front();
+    ready_.pop_front();
+    slot_[id] = Slot::HELD;
+    out.push_back(id);
+  }
+  std::exception_ptr first;
+  for (int id : out)
+    if (errors_[id]) {
+      if (!first) first = errors_[id];
+      errors_[id] = nullptr;
+    }
+  lock.unlock();
+  if (first) std::rethrow_exception(first);
+  return out;
 }
 
 std::vector<Episode> VecEnv::pop_finished() {

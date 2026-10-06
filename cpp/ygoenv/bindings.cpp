@@ -141,6 +141,26 @@ PYBIND11_MODULE(_ygoenv, m) {
            py::keep_alive<1, 2>(), py::arg("engine"), py::arg("decks"), py::arg("num_envs"), py::arg("num_threads"),
            py::arg("seed"), py::arg("auto_single") = true)
       .def("reset", &VecEnv::reset, py::call_guard<py::gil_scoped_release>())
+      .def("async_reset", &VecEnv::async_reset, py::call_guard<py::gil_scoped_release>())
+      .def("send",
+           [](VecEnv& v, py::array_t<int32_t, py::array::c_style | py::array::forcecast> ids,
+              py::array_t<int32_t, py::array::c_style | py::array::forcecast> actions) {
+             if (ids.size() != actions.size()) throw std::invalid_argument("send: ids and actions differ in length");
+             py::gil_scoped_release nogil;
+             v.send(ids.data(), actions.data(), static_cast<int>(ids.size()));
+           })
+      .def("recv",
+           [](VecEnv& v, int min_ready, int max_ready) {
+             std::vector<int32_t> out;
+             {
+               py::gil_scoped_release nogil;
+               out = v.recv(min_ready, max_ready);
+             }
+             py::array_t<int32_t> r(static_cast<py::ssize_t>(out.size()));
+             if (!out.empty()) std::memcpy(r.mutable_data(), out.data(), out.size() * sizeof(int32_t));
+             return r;
+           },
+           py::arg("min_ready"), py::arg("max_ready"))
       .def("step",
            [](VecEnv& v, py::array_t<int32_t, py::array::c_style | py::array::forcecast> actions) {
              if (actions.size() != v.num_envs) throw std::invalid_argument("actions must have num_envs entries");

@@ -88,6 +88,27 @@ class VecEnv:
         self._v.step(actions)
         return self.buf
 
+    def async_reset(self) -> dict:
+        """Queue an episode start for every env and return at once; collect starts via `recv`."""
+        self._v.async_reset()
+        return self.buf
+
+    def send(self, ids, actions) -> None:
+        """Queue env `ids[k]` to step with `actions[k]` (no wait)."""
+        import numpy as np
+
+        self._v.send(np.asarray(ids, dtype=np.int32), np.asarray(actions, dtype=np.int32))
+
+    def recv(self, min_ready: int = 1, max_ready=None):
+        """Block until at least `min_ready` envs are ready, return up to `max_ready` ready env ids
+        (completion order). Rows `buf[k][ids]` are valid until those ids are sent again; copy what you keep."""
+        import numpy as np
+
+        if max_ready is None:
+            max_ready = self.num_envs
+        out = self._v.recv(int(min_ready), int(max_ready))
+        return np.asarray(out, dtype=np.int32)
+
     def set_schedule(self, games: Sequence[tuple[int, int, int]]) -> None:
         """Evaluation mode: play exactly these (deck0 index, deck1 index, seed) games, then idle (player -1).
         Call before `reset`. Finished episodes carry `.index` into this list."""

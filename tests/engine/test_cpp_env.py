@@ -1,6 +1,7 @@
 """Contract: the C++ env produces exactly the Python reference env's observations, step for step."""
 
 import random
+import zlib
 
 import numpy as np
 import pytest
@@ -84,3 +85,72 @@ def test_vecenv_max_decisions_truncates(engine, decks):
     for ep in cut[:3]:  # a cut game is a prefix of a real one: replays without ending
         env = PyEnv.replay(engine, vec.episode_config(ep), ep.choices)
         assert not env.done
+
+
+def _policy_action(buf, i):
+    count = int(buf["action_mask"][i].sum())
+    assert count > 0
+    return zlib.crc32(buf["actions"][i].tobytes() + buf["cards"][i].tobytes()) % count
+
+
+def test_vecenv_async_matches_sync(engine, decks):
+    deck_list = [decks[k] for k in sorted(decks)]
+    n = len(deck_list)
+    games = [(k % n, (2 * k + 1) % n, 1000 + k) for k in range(12)]
+
+    def make():
+        vec = cpp_env.VecEnv(engine, deck_list, num_envs=4, num_threads=3, seed=99)
+        vec.set_schedule(games)
+        vec.set_max_decisions(300)
+        return vec
+
+    sync_vec = make()
+    buf = sync_vec.reset()
+    sync_eps = []
+    while sync_vec.remaining > 0:
+        counts = buf["action_mask"].sum(1)
+        actions = np.zeros(4, dtype=np.int32)
+        for i in range(4):
+            if int(buf["player"][i]) != -1:
+                actions[i] = _policy_action(buf, i)
+        sync_vec.step(actions)
+        sync_eps += sync_vec.pop_finished()
+    sync_map = {e.index: (e.winner, e.turns, tuple(e.choices)) for e in sync_eps}
+    assert len(sync_map) == 12
+
+    async_vec = make()
+    buf = async_vec.async_reset()
+    async_eps = []
+    while True:
+        ids = async_vec.recv(1, 4)
+        if len(ids) == 0:
+            break
+        send_ids, send_acts = [], []
+        for i in ids:
+            if int(buf["player"][int(i)]) != -1:
+                send_ids.append(int(i))
+                send_acts.append(_policy_action(buf, int(i)))
+        if send_ids:
+            async_vec.send(send_ids, send_acts)
+        async_eps += async_vec.pop_finished()
+    async_eps += async_vec.pop_finished()
+    async_map = {e.index: (e.winner, e.turns, tuple(e.choices)) for e in async_eps}
+    assert len(async_map) == 12
+    assert async_map == sync_map
+
+
+def test_vecenv_async_misuse(engine, decks):
+    deck_list = [decks[k] for k in sorted(decks)]
+    vec = cpp_env.VecEnv(engine, deck_list, num_envs=2, num_threads=1, seed=5)
+    assert len(vec.recv(1, 2)) == 0  # nothing outstanding: empty at once
+    vec.async_reset()
+    ids = vec.recv(2, 2)
+    assert len(ids) == 2
+    vec.send([int(ids[0])], [0])
+    with pytest.raises(ValueError):  # id not HELD (already queued)
+        vec.send([int(ids[0])], [0])
+    with pytest.raises(RuntimeError):  # sync step while async work outstanding
+        vec.step(np.zeros(2, dtype=np.int32))
+    got = vec.recv(1, 2)
+    assert len(got) == 1
+    assert len(vec.recv(1, 2)) == 0

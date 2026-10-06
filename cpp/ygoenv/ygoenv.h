@@ -5,6 +5,7 @@
 #include <array>
 #include <atomic>
 #include <condition_variable>
+#include <deque>
 #include <exception>
 #include <mutex>
 #include <thread>
@@ -306,6 +307,10 @@ class VecEnv {
   ~VecEnv();
   void reset();
   void step(const int32_t* actions);  // actions[num_envs]
+  // Async mode (envpool send/recv): envs step independently; a slow env never blocks the others.
+  void async_reset();  // queue an episode start for every env (like reset(), but returns at once)
+  void send(const int32_t* ids, const int32_t* actions, int n);  // queue env ids[k] with actions[k]
+  std::vector<int32_t> recv(int min_ready, int max_ready);
   std::vector<Episode> pop_finished();
   // Scheduled mode (evaluation): play exactly these (deck0, deck1, seed) games, in order, then go idle.
   // Idle envs have player = -1 and an empty action mask, and ignore their action. Call before reset().
@@ -341,16 +346,24 @@ class VecEnv {
 
   // pool
   std::vector<std::thread> workers_;
-  std::mutex mu_;
-  std::condition_variable cv_work_, cv_done_;
+  mutable std::mutex mu_;
+  std::condition_variable cv_work_, cv_done_, cv_ready_;
   uint64_t generation_ = 0;
   int pending_ = 0;
   std::atomic<int> next_{0};
   bool stop_ = false;
+  // async mode: per-env HELD (caller owns obs[i]) / QUEUED / RUNNING / READY, FIFO queues
+  enum class Slot : uint8_t { HELD, QUEUED, RUNNING, READY };
+  std::vector<Slot> slot_;
+  std::deque<int> queue_;  // QUEUED ids waiting for a worker
+  std::deque<int> ready_;  // READY ids in completion order, not yet returned by recv
+  std::vector<int32_t> pending_action_;  // per-env action copy for queued work
+  std::vector<char> pending_reset_;      // per-env reset flag for queued work
   void run_all();
   void worker();
-  void work(int i);
+  void work(int i, int32_t action, bool reset_flag);
   void start_episode(int i);
+  void require_all_held() const;
 };
 
 }  // namespace ygo
