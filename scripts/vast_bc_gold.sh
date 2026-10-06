@@ -105,7 +105,9 @@ want ft-all && train ft-all --init "$BASE" --epochs "$EP_MIX" --lr 2e-4 --select
 # value@h3). ft-t13 is the control for both. Unused sw kinds must be 0 (kinds missing from --kind-frac keep all).
 TFRAC=${TFRAC:-0.5}
 R1=(--init "$BASE" --epochs "$EP_MIX" --lr 2e-4 --select-on last --kind-frac line_expanded=0.2 game_plan=1 game_interrupt=1
-    gold=20 gold_pass=10 teacher="$TFRAC" teacher_pass="$TFRAC" dagger=1 dagger_pass=1 window=1 window_own=0 search=0)
+    gold=20 gold_pass=10 teacher="$TFRAC" teacher_pass="$TFRAC" dagger=1 dagger_pass=1 window=1 window_own=0 search=1)
+# search=1 / window_own=0 from mix-20261005-2016 (NOTEBOOK 23:40): without turn-1 search ft-dw lost combos (2.04 -> 1.54);
+# ft-all (+ heuristic own-turn labels) lost on new-card decks (75.8% -> 66.7% vs greedy)
 want ft-t13 && train ft-t13 "${R1[@]}" sw-v=0 sw-v_own=0 sw-d3=0 sw-d3_own=0
 want ft-swv && train ft-swv "${R1[@]}" sw-v=2 sw-v_own=1 sw-d3=0 sw-d3_own=0 --require-kinds sw-v sw-v_own
 want ft-swd && train ft-swd "${R1[@]}" sw-v=0 sw-v_own=0 sw-d3=2 sw-d3_own=1 --require-kinds sw-d3 sw-d3_own
