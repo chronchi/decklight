@@ -71,7 +71,7 @@ train() {  # <variant> <args...>
 VARIANTS=" ${VARIANTS:-zero ft-gold ft-mix mix lines-gold mix-l} "
 want() { [[ "$VARIANTS" == *" $1 "* ]]; }
 MIXK=(--kind-frac line_expanded=0.2 game_plan=2 game_interrupt=2 gold=20 gold_pass=10)
-train zero --init "$BASE" --epochs 0
+want zero && train zero --init "$BASE" --epochs 0  # the base's own metrics (skip in parallel per-variant jobs)
 want ft-gold && train ft-gold --init "$BASE" --epochs "$EP_FT" --lr 1e-4 --batch 256 --kinds gold gold_pass
 want ft-mix && train ft-mix --init "$BASE" --epochs "$EP_MIX" --lr 2e-4 \
   --kind-frac line_expanded=0.2 game_plan=1 game_interrupt=1 gold=20 gold_pass=10
@@ -99,6 +99,16 @@ want ft-dw && train ft-dw --init "$BASE" --epochs "$EP_MIX" --lr 2e-4 --select-o
 # ft-all: every teacher, own-turn window targets and turn-1 search at a reduced share
 want ft-all && train ft-all --init "$BASE" --epochs "$EP_MIX" --lr 2e-4 --select-on last --kind-frac line_expanded=0.2 game_plan=1 \
   game_interrupt=1 gold=20 gold_pass=10 teacher=1 teacher_pass=1 dagger=1 dagger_pass=1 window=1 window_own=0.5 search=1
+# ADR 0007 round 1 (from BASE = the mix winner): every variant adds the scaled ygo-agent teacher games (subsampled to
+# TFRAC per epoch); ft-swv / ft-swd add self-play window search labels (data/demos/sw-*, scripts/relabel_window.py)
+# picked by the learned value at the end of the turn (value@h1) or by "won within 3 turns, then value" (done@h3,
+# value@h3). ft-t13 is the control for both. Unused sw kinds must be 0 (kinds missing from --kind-frac keep all).
+TFRAC=${TFRAC:-0.5}
+R1=(--init "$BASE" --epochs "$EP_MIX" --lr 2e-4 --select-on last --kind-frac line_expanded=0.2 game_plan=1 game_interrupt=1
+    gold=20 gold_pass=10 teacher="$TFRAC" teacher_pass="$TFRAC" dagger=1 dagger_pass=1 window=1 window_own=0 search=0)
+want ft-t13 && train ft-t13 "${R1[@]}" sw-v=0 sw-v_own=0 sw-d3=0 sw-d3_own=0
+want ft-swv && train ft-swv "${R1[@]}" sw-v=2 sw-v_own=1 sw-d3=0 sw-d3_own=0 --require-kinds sw-v sw-v_own
+want ft-swd && train ft-swd "${R1[@]}" sw-v=0 sw-v_own=0 sw-d3=2 sw-d3_own=1 --require-kinds sw-d3 sw-d3_own
 for V in mix-h32 mix-h128 mix-h256 mix-h512 mix-h32k mix-h128k mix-h256k mix-h512k mix-k; do
   want "$V" || continue
   H=${V#mix-h}; H=${H%k}; [ "$V" = mix-k ] && H=0
@@ -115,7 +125,7 @@ from pathlib import Path
 out = Path(sys.argv[1])
 best_v, best_s = "zero", -1.0
 best_hv, best_h = "zero", -1.0  # also playtest the best on unseen-deck gold (bcg-20261004-2223: mix won there)
-for v in ("zero", "ft-gold", "ft-mix", "ft-teach", "ft-teach-h", "ft-search", "ft-dw", "ft-all", "mix", "lines-gold", "mix-l", "mix-h32", "mix-h128", "mix-h256", "mix-h512",
+for v in ("zero", "ft-gold", "ft-mix", "ft-teach", "ft-teach-h", "ft-search", "ft-dw", "ft-all", "ft-t13", "ft-swv", "ft-swd", "mix", "lines-gold", "mix-l", "mix-h32", "mix-h128", "mix-h256", "mix-h512",
           "mix-h32k", "mix-h128k", "mix-h256k", "mix-h512k", "mix-k"):
     m = out / v / "metrics.jsonl"
     if not m.exists():

@@ -249,6 +249,8 @@ def main() -> None:
     ap.add_argument("--card-dropout", type=float, default=0.0)
     ap.add_argument("--holdout", nargs="*", default=["kewl-tune"], help="decks never trained on")
     ap.add_argument("--kinds", nargs="*", default=None, help="train only on these sample kinds (default: all)")
+    ap.add_argument("--require-kinds", nargs="*", default=None,
+                    help="exit 4 with an ALERT when any of these kinds has 0 train samples (the variant's new data)")
     ap.add_argument("--kind-frac", nargs="*", default=None, metavar="KIND=FRAC",
                     help="per-epoch share of each kind's train samples (<1 subsample, >1 repeat)")
     ap.add_argument("--merge-last", type=int, default=0, help="also evaluate the average of the last K epochs")
@@ -304,6 +306,14 @@ def main() -> None:
     kind_frac = parse_kind_frac(args.kind_frac)
     n_epoch = len(epoch_train_idx(data, idx["train"], kind_frac, np.random.default_rng(0)))
     print(f"train samples per epoch {n_epoch} (kind_frac {kind_frac or 'none'})", flush=True)
+    if args.require_kinds and "kind" in data:
+        # fail loud: a kind this variant exists for with 0 train samples means its data never reached the shards;
+        # the variant would silently train as another one
+        have = set(np.unique(data["kind"][idx["train"]]).tolist())
+        empty = [k for k in args.require_kinds if k not in have]
+        if empty:
+            print(f"ALERT {args.out.name}: --require-kinds with 0 train samples: {empty}", flush=True)
+            raise SystemExit(4)
     steps = args.epochs * math.ceil(n_epoch / args.batch)
     sched = torch.optim.lr_scheduler.OneCycleLR(
         opt, max_lr=args.lr, total_steps=max(steps, 1), pct_start=0.05

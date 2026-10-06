@@ -76,9 +76,14 @@ def sample_kind(source: str | Path, label: str) -> str:
     - files under `dagger/` -> dagger_pass if label == "pass" else dagger
     - files under `search/` -> search
     - files under `window/` -> window_own if label == "own" else window
+    - files under `sw-<name>/` (relabelled self-play window search, ADR 0007) -> sw-<name>_own if label == "own"
+      else sw-<name>, so each labelling is its own kind in --kind-frac
     - everything else -> line
     """
     parts = Path(source).parts
+    sw = next((p for p in parts if p.startswith("sw-")), None)
+    if sw is not None:
+        return f"{sw}_own" if label == "own" else sw
     if "gold" in parts:
         return "gold_pass" if label == "pass" else "gold"
     if "teacher" in parts:
@@ -198,7 +203,7 @@ def iter_samples(engine: Engine, path: Path) -> Iterator[tuple[dict, int, float,
         judges = load_judgements(f)
         weights = GOLD_LABEL_WEIGHT if ("gold" in f.parts or "teacher" in f.parts or "dagger" in f.parts) else LABEL_WEIGHT
         weights = SEARCH_LABEL_WEIGHT if "search" in f.parts else weights
-        weights = WINDOW_LABEL_WEIGHT if "window" in f.parts else weights
+        weights = WINDOW_LABEL_WEIGHT if ("window" in f.parts or any(q.startswith("sw-") for q in f.parts)) else weights
         for rec in load_records(f):
             if starved_opening(rec):
                 continue

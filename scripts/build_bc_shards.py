@@ -19,6 +19,8 @@ SOURCES = {  # tag -> globs of record files (verified lines and their hand-varia
     "teacher": ["data/demos/teacher/*.jsonl"],  # ygo-agent self-play (scripts/gen_teacher.py; kinds teacher / teacher_pass)
     "dagger": ["data/demos/dagger/*.jsonl"],  # DAgger on our policy's states (scripts/gen_dagger.py; kinds dagger / dagger_pass)
     "window": ["data/demos/window/*.jsonl"],  # mid-game search teacher (scripts/gen_window.py; kinds window / window_own)
+    # self-play window search, one dir per labelling (scripts/relabel_window.py; kinds sw-<name> / sw-<name>_own)
+    "sw": ["data/demos/sw-*/*.jsonl"],
 }
 
 ap = argparse.ArgumentParser()
