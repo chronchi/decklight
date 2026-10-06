@@ -16,6 +16,33 @@ import torch
 from torch import nn
 
 N_KINDS = 32
+TRIM_TO = 8  # trimmed lengths round up to a multiple of this (fewer distinct shapes for kernels / compile)
+
+
+def _used(mask: torch.Tensor) -> int:
+    """Length of the prefix of axis 1 that holds every set entry of the batch (rounded up to TRIM_TO, ≥ 1)."""
+    any_ = mask.any(0)
+    n = int(any_.nonzero().max().item()) + 1 if bool(any_.any()) else 1
+    return min(mask.shape[1], -(-n // TRIM_TO) * TRIM_TO)
+
+
+def trim_obs(obs: dict[str, torch.Tensor]) -> tuple[dict[str, torch.Tensor], int]:
+    """Drop the all-padding tail of the card, chain, history and option axes for this batch (NOTEBOOK 2026-10-06:
+    a decision uses ~76 of 160 card rows, 0.3 of 16 chain links and 4.7 of 64 options). Masked positions never
+    reach a real output (attention key masks, option mask), so the logits are unchanged; returns the trimmed obs and
+    the full option count to pad the logits back to."""
+    o = dict(obs)
+    n_opt = obs["action_mask"].shape[1]
+    lc, lch, lh, la = (_used(obs[k]) for k in ("card_mask", "chain_mask", "history_mask", "action_mask"))
+    for k in ("cards", "card_mask", "card_known", "known_code"):
+        if k in o:
+            o[k] = o[k][:, :lc]
+    o["chain"], o["chain_mask"] = o["chain"][:, :lch], o["chain_mask"][:, :lch]
+    o["history"], o["history_mask"] = o["history"][:, :lh], o["history_mask"][:, :lh]
+    o["actions"], o["action_mask"] = o["actions"][:, :la], o["action_mask"][:, :la]
+    return o, n_opt
+
+
 N_MSGS = 64
 MAX_ARG = 64
 
@@ -87,8 +114,16 @@ class ActionEmbed(nn.Module):
 
 class PolicyNet(nn.Module):
     def __init__(
-        self, emb: dict[str, np.ndarray], d: int = 256, layers: int = 4, heads: int = 4, dropout: float = 0.1,
-        card_dropout: float = 0.0, hist: int = 0, known: bool = False, value: bool = False,
+        self,
+        emb: dict[str, np.ndarray],
+        d: int = 256,
+        layers: int = 4,
+        heads: int = 4,
+        dropout: float = 0.1,
+        card_dropout: float = 0.0,
+        hist: int = 0,
+        known: bool = False,
+        value: bool = False,
     ):
         """`hist`: long-memory window (obs v2, ADR 0005). 0 = v1 exactly (same parameters, old state dicts
         load with strict=True); > 0 adds a learned recency-position embedding and widens the turns-ago
@@ -98,11 +133,16 @@ class PolicyNet(nn.Module):
         (RL); `forward` is unchanged, `forward_value` returns (logits, value in [-1, 1])."""
         super().__init__()
         self.hist = hist
+        self.trim = (
+            True  # drop batch padding before the encoder (trim_obs); False = the full fixed-size inputs
+        )
         self.known = known
         self.text = CardText(emb["codes"], emb["card"], emb["effects"], emb["n_effects"], d)
         self.text.p_unknown = card_dropout
         if known:
-            self.known_emb = nn.Embedding(3, d)  # card_known flag (0 unknown/hidden, 1 remembered, 2 revealed)
+            self.known_emb = nn.Embedding(
+                3, d
+            )  # card_known flag (0 unknown/hidden, 1 remembered, 2 revealed)
         self.loc = nn.Embedding(16, d)
         self.seq = nn.Embedding(33, d)
         self.ctrl = nn.Embedding(2, d)
@@ -135,16 +175,24 @@ class PolicyNet(nn.Module):
         self.act_norm = nn.LayerNorm(d)
         self.head = nn.Sequential(nn.Linear(3 * d, d), nn.GELU(), nn.Linear(d, 1))
         if value:
-            self.value_head = nn.Sequential(nn.LayerNorm(d), nn.Linear(d, d), nn.GELU(), nn.Linear(d, 1), nn.Tanh())
+            self.value_head = nn.Sequential(
+                nn.LayerNorm(d), nn.Linear(d, d), nn.GELU(), nn.Linear(d, 1), nn.Tanh()
+            )
 
-    def encode_cards(self, cards: torch.Tensor, card_known: torch.Tensor | None = None,
-                       known_code: torch.Tensor | None = None) -> torch.Tensor:
+    def encode_cards(
+        self,
+        cards: torch.Tensor,
+        card_known: torch.Tensor | None = None,
+        known_code: torch.Tensor | None = None,
+    ) -> torch.Tensor:
         c = cards.long()
         code = c[..., 0]
         extra = 0.0
         if self.known:
             if card_known is None or known_code is None:
-                raise KeyError("this PolicyNet was built with known=True: the obs needs card_known/known_code")
+                raise KeyError(
+                    "this PolicyNet was built with known=True: the obs needs card_known/known_code"
+                )
             k = card_known.long().clamp(0, 2)
             code = torch.where(k == 1, known_code.long(), code)  # remembered identity, not "hidden"
             extra = self.known_emb(k)
@@ -189,9 +237,14 @@ class PolicyNet(nn.Module):
         return logits, self.value_head(enc[:, 0]).squeeze(-1)
 
     def _run(self, obs: dict[str, torch.Tensor]) -> tuple[torch.Tensor, torch.Tensor]:
+        n_opt = 0
+        if self.trim:
+            obs, n_opt = trim_obs(obs)
         cards, glob = obs["cards"], obs["global"].long()
         B = cards.shape[0]
-        card_tok = self.encode_cards(cards, obs.get("card_known"), obs.get("known_code")) + self.type_emb.weight[1]
+        card_tok = (
+            self.encode_cards(cards, obs.get("card_known"), obs.get("known_code")) + self.type_emb.weight[1]
+        )
         num = glob[:, :22].float()
         num = torch.cat([num[:, :2] / 8000.0, num[:, 2:20] / 40.0, num[:, 20:22] / 64.0], -1)
         g = (
@@ -228,12 +281,16 @@ class PolicyNet(nn.Module):
         act = self.action(a)
         # the option's own card, as encoded in context (row index into the card tokens; -1 = none)
         row = a[..., 1]
+        n_cards = cards.shape[1]
         card_ctx = torch.gather(
-            enc[:, 1:161], 1, row.clamp(min=0).unsqueeze(-1).expand(-1, -1, enc.shape[-1])
+            enc[:, 1 : 1 + n_cards], 1, row.clamp(0, n_cards - 1).unsqueeze(-1).expand(-1, -1, enc.shape[-1])
         )
         card_ctx = card_ctx * (row >= 0).unsqueeze(-1)
         q = self.act_norm(act + card_ctx)
         att, _ = self.cross(q, enc, enc, key_padding_mask=~keep)
         glob_ctx = enc[:, :1].expand(-1, a.shape[1], -1)
         logits = self.head(torch.cat([q + att, card_ctx, glob_ctx], -1)).squeeze(-1)
-        return logits.masked_fill(~obs["action_mask"], float("-inf")), enc
+        logits = logits.masked_fill(~obs["action_mask"], float("-inf"))
+        if n_opt > logits.shape[1]:
+            logits = torch.nn.functional.pad(logits, (0, n_opt - logits.shape[1]), value=float("-inf"))
+        return logits, enc
