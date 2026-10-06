@@ -3,7 +3,7 @@ import pytest
 
 pytest.importorskip("ygo_zero.engine.cpp_env")
 
-from ygo_zero.eval.match import play_match, wilson
+from ygo_zero.eval.match import game_state, play_match, wilson
 from ygo_zero.eval.policies import GreedyPolicy, RandomPolicy
 
 
@@ -96,3 +96,48 @@ def test_play_match_async_no_idle_send(engine, decks):
     expected = sorted((da, db, s, first) for da, db in pairs for s in seeds for first in (True, False))
     got = sorted((g.deck_a, g.deck_b, g.seed, g.a_first) for g in games)
     assert got == expected  # every scheduled game exactly once
+
+
+def test_saved_games_replay_and_render(engine, decks, tmp_path):
+    import json
+    import sys
+    from pathlib import Path
+
+    from ygo_zero.engine.cpp_env import CppEnv
+    from ygo_zero.engine.duel import DuelConfig
+
+    names = sorted(decks)[:2]
+    deck_list = [decks[n] for n in names]
+    deck_paths = [f"tests/fixtures/decks/{n}.ydk" for n in names]
+    games = play_match(engine, deck_list, _FirstLegal(), _LastLegal(),
+                       pairs=[(0, 1)], seeds=[0], num_envs=2, num_threads=1,
+                       max_decisions=400)  # fmt: skip
+    assert len(games) == 2 and all(g.choices for g in games)
+    for k, g in enumerate(games[:2]):
+        st = game_state(deck_paths, g, engine, match="test", opponent="other")
+        assert st["decks"] == [deck_paths[g.deck_a if g.a_first else g.deck_b],
+                               deck_paths[g.deck_b if g.a_first else g.deck_a]]
+        assert st["labels"] == ["gold"] * len(st["choices"])
+        assert len(st["actors"]) == len(st["choices"]) == len(st["turns"])
+        s0 = g.deck_a if g.a_first else g.deck_b
+        s1 = g.deck_b if g.a_first else g.deck_a
+        env = CppEnv.replay(engine, DuelConfig(deck_list[s0], deck_list[s1], seed=g.seed), st["choices"])
+        if g.truncated:
+            assert env.winner is None  # a cut game replays as an unfinished prefix
+        elif g.winner_is_a == 1.0:
+            assert env.winner == (0 if g.a_first else 1)
+        elif g.winner_is_a == 0.0:
+            assert env.winner == (1 if g.a_first else 0)
+        else:
+            assert env.winner == 2
+        d = tmp_path / "games" / "test" / str(k)
+        d.mkdir(parents=True)
+        (d / "state.json").write_text(json.dumps(st))
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
+    from render_games import main as render_main
+
+    render_main([str(tmp_path), "--decisions"])
+    txts = sorted(tmp_path.rglob("game.txt"))
+    assert len(txts) == 2 and all(p.stat().st_size > 0 for p in txts)
+    idx = tmp_path / "INDEX.txt"
+    assert idx.exists() and idx.stat().st_size > 0

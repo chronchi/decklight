@@ -7,7 +7,8 @@ seed), so seat and deck advantages cancel. Player 0 always moves first in the co
 import math
 from collections import defaultdict
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from pathlib import Path
 
 import numpy as np
 
@@ -25,6 +26,7 @@ class Game:
     winner_is_a: float  # 1 win, 0 loss, 0.5 draw (or cut at max_decisions)
     turns: int
     truncated: bool = False
+    choices: tuple = field(default=(), compare=False)  # response indices, replayable via CppEnv
 
 
 def wilson(wins: float, n: int, z: float = 1.96) -> tuple[float, float]:
@@ -95,7 +97,8 @@ def play_match(
                 da, db, s, a_first = meta[ep.index]
                 seat = 0 if a_first else 1
                 win = 0.5 if ep.winner not in (0, 1) else float(ep.winner == seat)
-                games.append(Game(da, db, s, a_first, win, ep.turns, ep.winner == VecEnv.TRUNCATED))
+                games.append(Game(da, db, s, a_first, win, ep.turns, ep.winner == VecEnv.TRUNCATED,
+                                  tuple(int(c) for c in ep.choices)))
     else:
         buf = vec.async_reset()
         n = vec.num_envs
@@ -106,7 +109,8 @@ def play_match(
                 da, db, s, a_first = meta[ep.index]
                 seat = 0 if a_first else 1
                 win = 0.5 if ep.winner not in (0, 1) else float(ep.winner == seat)
-                games.append(Game(da, db, s, a_first, win, ep.turns, ep.winner == VecEnv.TRUNCATED))
+                games.append(Game(da, db, s, a_first, win, ep.turns, ep.winner == VecEnv.TRUNCATED,
+                                  tuple(int(c) for c in ep.choices)))
             if len(ids) == 0:  # nothing in flight: every env received and idle
                 if vec.remaining != 0:
                     raise RuntimeError(
@@ -133,9 +137,79 @@ def play_match(
             da, db, s, a_first = meta[ep.index]
             seat = 0 if a_first else 1
             win = 0.5 if ep.winner not in (0, 1) else float(ep.winner == seat)
-            games.append(Game(da, db, s, a_first, win, ep.turns, ep.winner == VecEnv.TRUNCATED))
+            games.append(Game(da, db, s, a_first, win, ep.turns, ep.winner == VecEnv.TRUNCATED,
+                              tuple(int(c) for c in ep.choices)))
     games.sort(key=lambda g: (g.deck_a, g.deck_b, g.seed, g.a_first))
     return games
+
+
+ROOT = Path(__file__).resolve().parents[3]
+
+
+def game_state(
+    deck_paths: Sequence[str | Path],
+    game: Game,
+    engine: Engine,
+    *,
+    match: str = "",
+    opponent: str = "",
+) -> dict:
+    """A finished `Game` as a hand_play state dict (replay: decks + seed + choice list).
+
+    `deck_paths` is the deck list `play_match` ran on, as `.ydk` paths relative to the repo
+    root (seat order is resolved here: seat 0 first). `actors`/`turns` are recomputed by
+    replaying the choices through `CppEnv` (engine only, no model). Every decision is
+    labelled "gold".
+    """
+    from ygo_zero.decks import load_ydk
+    from ygo_zero.engine.cpp_env import CppEnv
+    from ygo_zero.engine.duel import DuelConfig
+
+    seat0_idx = game.deck_a if game.a_first else game.deck_b
+    seat1_idx = game.deck_b if game.a_first else game.deck_a
+    paths = [str(p).replace("\\", "/") for p in (deck_paths[seat0_idx], deck_paths[seat1_idx])]
+
+    def _load(p: str):
+        q = Path(p)
+        if not q.is_absolute():
+            q = ROOT / p
+        return load_ydk(q)
+
+    cfg = DuelConfig(_load(paths[0]), _load(paths[1]), seed=game.seed)
+    env = CppEnv(engine, cfg)
+    obs = env.reset()
+    actors, turns = [], []
+    for c in game.choices:
+        actors.append(int(env.player))
+        turns.append(int(obs["global"][2]))
+        obs = env.step(int(c))
+        if obs is None:
+            break
+    policy_seat = 0 if game.a_first else 1
+    if game.truncated or game.winner_is_a == 0.5:
+        winner = None
+    elif game.winner_is_a == 1.0:
+        winner = policy_seat
+    else:
+        winner = 1 - policy_seat
+    return {
+        "decks": paths,
+        "seed": game.seed,
+        "choices": [int(c) for c in game.choices],
+        "labels": ["gold"] * len(game.choices),
+        "actors": actors,
+        "turns": turns,
+        "notes": [],
+        "meta": {
+            "match": match,
+            "policy_seat": policy_seat,
+            "opponent": opponent,
+            "winner": winner,
+            "policy_won": bool(game.winner_is_a == 1.0),
+            "turns": game.turns,
+            "truncated": bool(game.truncated),
+        },
+    }
 
 
 def report(games: Sequence[Game], deck_names: Sequence[str], a_name: str, b_name: str) -> str:

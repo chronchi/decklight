@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Report card for existing checkpoints, no training: playtest each CKPT dir (ckpt/best.pt + ckpt/metrics.jsonl; the report lands in <dir>/playtest) head-to-head vs
 # BASE plus the fixed opponents (PT_ARGS), all in parallel on one box with the cores split between them.
-# Env: BASE (vs checkpoint), CKPTS ("dir1 dir2 ..."), PT_ARGS, PT_CAP (default 60m).
+# Env: BASE (vs checkpoint), CKPTS ("dir1 dir2 ..."), PT_ARGS, PT_CAP (default 60m), RENDER (1: render saved games).
 # Usage: bash scripts/vast_card.sh <name>. Results: runs/<name>/playtest-<dir>.txt, <dir>/playtest/report.json, ALERT
 set -uo pipefail
 export PATH="$HOME/.local/bin:$PATH"
@@ -36,5 +36,16 @@ for d in "$@"; do
   dst="$OUT/$(basename "$d")"; [ "$(realpath "$d")" = "$(realpath -m "$dst")" ] && continue  # already inside OUT
   mkdir -p "$dst"; cp -r "$d/playtest" "$dst/"
 done
+# RENDER=1: turn every saved game (playtest --save-games) into a readable log, on the box (engine only)
+if [ "${RENDER:-0}" = "1" ]; then
+  for d in "$@"; do
+    [ -d "$d/playtest/games" ] || { alert "RENDER: no saved games in $d"; continue; }
+    uv run --no-sync python scripts/render_games.py "$d/playtest/games" --decisions > "$OUT/render-$(basename "$d").txt" 2>&1 \
+      || alert "render failed for $d"
+    n=$(find "$d/playtest/games" -name game.txt | wc -l); echo "rendered $n games for $d" >> "$OUT/card.txt"
+    [ "$n" -gt 0 ] || alert "RENDER: 0 games rendered for $d"
+    dst="$OUT/$(basename "$d")"; [ "$(realpath "$d")" = "$(realpath -m "$dst")" ] || { mkdir -p "$dst"; cp -r "$d/playtest" "$dst/"; }
+  done
+fi
 kill "$USAGE_PID" 2>/dev/null
 echo done > "$OUT/DONE"

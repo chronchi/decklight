@@ -39,7 +39,7 @@ from ygo_zero.engine.actions import Kind
 from ygo_zero.engine.cpp_env import CppEnv
 from ygo_zero.engine.duel import DuelConfig, Engine
 from ygo_zero.eval.bc_policy import BCPolicy
-from ygo_zero.eval.match import play_match, ring_pairs, wilson
+from ygo_zero.eval.match import game_state, play_match, ring_pairs, wilson
 from ygo_zero.eval.policies import GreedyPolicy, RandomPolicy
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -261,6 +261,8 @@ def main() -> None:
     ap.add_argument("--newcards", type=Path, default=None,
                     help="new-card test (ADR 0007): matches on these unseen-archetype decks (decks/newcards) vs greedy and --vs-ckpt")
     ap.add_argument("--selfplay", type=int, default=0, help="full policy-vs-policy games saved for review")
+    ap.add_argument("--save-games", type=int, default=0,
+                    help="per match, save up to K games as replays under <out_dir>/games/<match>/<k>/state.json")
     ap.add_argument("--selfplay-decks", nargs="*", default=None, help="deck pool for --selfplay (default: the sample)")
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--device", default="cpu")
@@ -290,7 +292,7 @@ def main() -> None:
         print(f"[{section}: {time.time() - t:.0f} s]", flush=True)
         (out_dir / "report.json").write_text(json.dumps(report, indent=1))
 
-    def match(name: str, opp, decks: list, n_seeds: int, k: int = 0) -> None:
+    def match(name: str, opp, decks: list, deck_files: list[str], n_seeds: int, k: int = 0) -> None:
         pairs = ring_pairs(len(decks), k or len(decks))
         games = play_match(engine, decks, pol, opp, pairs, range(n_seeds), num_envs=64, num_threads=args.threads)
         w = sum(g.winner_is_a for g in games)
@@ -307,25 +309,73 @@ def main() -> None:
         }  # fmt: skip
         print(f"vs {name:8s}: {w:.0f}/{len(games)} = {w / len(games):.1%}  [{lo:.1%}, {hi:.1%}]  "
               f"mean turns {report['matches'][name]['mean_turns']}, cut {report['matches'][name]['cut']}", flush=True)
+        if args.save_games > 0 and games:
+            opp_name = getattr(opp, "name", type(opp).__name__)
+            losses = [g for g in games if g.winner_is_a == 0.0]
+            wins = [g for g in games if g.winner_is_a == 1.0]
+            draws = [g for g in games if g.winner_is_a == 0.5]
+            ordered, i, j = [], 0, 0
+            while len(ordered) < args.save_games and (i < len(losses) or j < len(wins)):
+                if i < len(losses) and len(ordered) < args.save_games:
+                    ordered.append(losses[i])
+                    i += 1
+                if j < len(wins) and len(ordered) < args.save_games:
+                    ordered.append(wins[j])
+                    j += 1
+            for g in losses[i:] + wins[j:] + draws:  # one-sided matches still save K games
+                if len(ordered) >= args.save_games:
+                    break
+                ordered.append(g)
+            for kk, g in enumerate(ordered[: args.save_games]):
+                st = game_state(deck_files, g, engine, match=name, opponent=opp_name)
+                d = out_dir / "games" / name / str(kk)
+                d.mkdir(parents=True, exist_ok=True)
+                (d / "state.json").write_text(json.dumps(st))
+                env2 = CppEnv(
+                    engine,
+                    DuelConfig(load_ydk(ROOT / st["decks"][0]), load_ydk(ROOT / st["decks"][1]),
+                               seed=st["seed"]),
+                )
+                obs2 = env2.reset()
+                for c in st["choices"]:
+                    obs2 = env2.step(int(c))
+                    if obs2 is None:
+                        break
+                if g.truncated:
+                    ok = obs2 is not None
+                elif g.winner_is_a == 1.0:
+                    ok = env2.winner == (0 if g.a_first else 1)
+                elif g.winner_is_a == 0.0:
+                    ok = env2.winner == (1 if g.a_first else 0)
+                else:
+                    ok = env2.winner == 2
+                if not ok:
+                    print(f"ALERT playtest: replay mismatch {name} {kk}", flush=True)
+                    raise SystemExit(4)
 
     # matches first (cheap, batched over VecEnv), then self-play games, then the slower combo test
     t = time.time()
     report["matches"] = {}
     decks = [load_ydk(ROOT / "decks" / "pool" / f"{d}.ydk") for d in sample]
+    deck_files = [f"decks/pool/{d}.ydk" for d in sample]
     if args.vs_ckpt:
-        match("base", BCPolicy(args.vs_ckpt, args.emb, device=args.device), decks, args.seeds)
-    match("greedy", GreedyPolicy(2), decks, args.seeds)
-    match("random", RandomPolicy(1), decks, args.seeds)
+        match("base", BCPolicy(args.vs_ckpt, args.emb, device=args.device), decks, deck_files, args.seeds)
+    match("greedy", GreedyPolicy(2), decks, deck_files, args.seeds)
+    match("random", RandomPolicy(1), decks, deck_files, args.seeds)
     if args.ygoagent:
         from ygo_zero.eval.ygoagent import YgoAgentPolicy
 
-        gdecks = [load_ydk(f) for f in sorted(args.gauntlet_decks.glob("*.ydk"))]
-        match("ygoagent", YgoAgentPolicy(seed=3), gdecks, 1, args.ga_opps)  # 31 lists x 4 opponents x 2 seats
+        gfiles = sorted(args.gauntlet_decks.glob("*.ydk"))
+        gdecks = [load_ydk(f) for f in gfiles]
+        match("ygoagent", YgoAgentPolicy(seed=3), gdecks,
+              [f.resolve().relative_to(ROOT.resolve()).as_posix() for f in gfiles], 1, args.ga_opps)  # 31 lists x 4 opponents x 2 seats
     if args.newcards:  # every deck plays every other new-card deck, both seats: generalization to unseen cards
-        ndecks = [load_ydk(f) for f in sorted(args.newcards.glob("*.ydk"))]
+        nfiles = sorted(args.newcards.glob("*.ydk"))
+        ndecks = [load_ydk(f) for f in nfiles]
+        nrel = [f.resolve().relative_to(ROOT.resolve()).as_posix() for f in nfiles]
         if args.vs_ckpt:
-            match("new_base", BCPolicy(args.vs_ckpt, args.emb, device=args.device), ndecks, args.seeds)
-        match("new_greedy", GreedyPolicy(2), ndecks, args.seeds)
+            match("new_base", BCPolicy(args.vs_ckpt, args.emb, device=args.device), ndecks, nrel, args.seeds)
+        match("new_greedy", GreedyPolicy(2), ndecks, nrel, args.seeds)
     flush("matches", t)
 
     if args.selfplay:
