@@ -211,6 +211,8 @@ def iter_samples(engine: Engine, path: Path) -> Iterator[tuple[dict, int, float,
                     env = CppEnv(engine, record_config(rec, seed), rec.get("auto_single", True))
                     obs = env.reset()
                     targets = rec.get("targets")  # DAgger records: the labeler's move at student decisions
+                    target_sets = rec.get("target_sets")
+                    target_conf = rec.get("target_conf")
                     for k, (choice, label) in enumerate(zip(rec["choices"], rec["labels"], strict=True)):
                         if obs is None:
                             raise ValueError(f"{rec['line_id']} seed {seed}: duel ended at choice {k}")
@@ -235,6 +237,14 @@ def iter_samples(engine: Engine, path: Path) -> Iterator[tuple[dict, int, float,
                                 score = judge_turn_score(judge, turn)
                             if score is not None:
                                 weight *= JUDGE_WEIGHT[score]
+                        alt: list[int] | None = None
+                        if target_sets is not None and k < len(target_sets) and target_sets[k] is not None:
+                            mask = obs.get("action_mask")
+                            alt = [int(a) for a in target_sets[k]
+                                   if 0 <= int(a) < len(mask) and bool(mask[int(a)])] if mask is not None else \
+                                [int(a) for a in target_sets[k]]
+                            if target_conf is not None and k < len(target_conf) and target_conf[k] is not None:
+                                weight *= float(target_conf[k])
                         if weight:
                             # game records (ADR 0004) carry both decks and who acted; lines are named <deck>/<id>
                             deck = (
@@ -254,6 +264,8 @@ def iter_samples(engine: Engine, path: Path) -> Iterator[tuple[dict, int, float,
                                 "me": env.player,  # acting seat, absolute
                                 "turn": int(obs["global"][2]),
                             }
+                            if alt is not None:
+                                meta["alt"] = alt
                             out.append(({key: v.copy() for key, v in obs.items()}, action, weight, meta))
                         obs = env.step(choice)
                     if "actors" not in rec:  # a combo line: teach the stop (records end at the last combo step)

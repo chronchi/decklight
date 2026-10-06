@@ -61,15 +61,49 @@ class WindowResult:
     kinds: dict[int, str] = field(default_factory=dict)  # decision index -> "window" | "own"
     log: list[dict] = field(default_factory=list)
     replay_ok: bool = True
+    sets: dict[int, list[int]] = field(default_factory=dict)  # decision index -> target set (option indices)
+    conf: dict[int, float] = field(default_factory=dict)  # decision index -> confidence
+
+
+def cards_score(obs, actor: int, me: int) -> float:
+    """Raw card advantage for `me`: (hand + field) mine − theirs, from an obs seen by `actor`."""
+    g = obs["global"]
+    if actor == me:
+        mine = int(g[7]) + int(g[8]) + int(g[9])
+        theirs = int(g[14]) + int(g[15]) + int(g[16])
+    else:
+        mine = int(g[14]) + int(g[15]) + int(g[16])
+        theirs = int(g[7]) + int(g[8]) + int(g[9])
+    return float(mine - theirs)
+
+
+BOARD_WIN = 50.0
+VALUE_WIN = 1.0
 
 
 class WindowSearch:
     def __init__(self, engine: Engine, logits: LogitsFn, k: int = 4, horizon: int = 1, own_frac: float = 0.0,
-                 max_rollout: int = 300, batch: int = 512, seed: int = 0, value: ValueFn | None = None) -> None:  # fmt: skip
+                 max_rollout: int = 300, batch: int = 512, seed: int = 0, value: ValueFn | None = None,
+                 horizons: tuple[int, ...] | list[int] | None = None, samples: int = 1,
+                 rollout_temp: float = 1.0, select: str | None = None, tie_eps: float = 0.0) -> None:  # fmt: skip
         self.engine, self.logits, self.k, self.horizon = engine, logits, k, horizon
         self.value, self.win = value, (1.0 if value is not None else WIN)
         self.own_frac, self.max_rollout, self.batch = own_frac, max_rollout, batch
         self.seed = seed
+        self.horizons = tuple(horizons) if horizons is not None else None
+        self.samples = samples
+        self.rollout_temp = rollout_temp
+        self.select = select
+        self.tie_eps = tie_eps
+
+    def _hs(self) -> tuple[int, ...]:
+        return self.horizons if self.horizons is not None else (self.horizon,)
+
+    def _select_key(self) -> str:
+        if self.select is not None:
+            return self.select
+        h0 = self._hs()[0]
+        return f"value@h{h0}" if self.value is not None else f"board@h{h0}"
 
     def _forward(self, obs_list: list[dict]) -> np.ndarray:
         out = [self.logits(_batch(obs_list[i : i + self.batch])) for i in range(0, len(obs_list), self.batch)]
@@ -85,37 +119,94 @@ class WindowSearch:
         acts = [i for i in order if int(kinds[i]) == Kind.ACTIVATE]
         return (passes[:1] + acts)[: max(self.k, 2)]
 
-    def rollouts_gen(self, config: DuelConfig, auto_single: bool, prefixes: list[list[int]], me: int, end_turn: int):
-        """Play each prefix out (policy argmax, both players) until the turn number exceeds end_turn or the duel
-        ends; returns the position score for `me` of each branch."""
+    def rollouts_gen(self, config: DuelConfig, auto_single: bool, prefixes, me: int, end_turn: int = 0,
+                       game_seed: int = 0, decision_k: int = 0, turn_start: int | None = None):
+        """Play each branch out with the policy until the largest horizon ends (or the duel ends / max_rollout).
+
+        `prefixes` is either the legacy list of choice prefixes (one branch per prefix, argmax rollouts,
+        scored to `end_turn`) or a list of (prefix, cand_idx, cand_action, sample) tuples for the multi-score
+        path. Returns `{score_key: [per-candidate averaged score]}` with keys `<name>@h<h>` for board / done /
+        cards on every horizon plus value when `value` is set. Sample 0 of each candidate is argmax (as before);
+        samples 1..S-1 sample from softmax(logits / rollout_temp) with a Random seeded from
+        (seed, game_seed, k, candidate, sample). When the turn number first exceeds `turn_start + h - 1` the
+        branch's scores for h are snapshotted; a branch that ended earlier keeps its terminal scores.
+        """
+        hs = self._hs()
+        # Legacy call: list of prefixes -> one argmax branch each, single horizon ending at end_turn.
+        if prefixes and isinstance(prefixes[0], list):
+            turn_start_eff = end_turn - self.horizon + 1
+            branches = [(list(p), j, -1, 0) for j, p in enumerate(prefixes)]
+            single_legacy = True
+        else:
+            branches = [(list(p), int(j), int(a), int(s)) for p, j, a, s in prefixes]
+            single_legacy = False
+            turn_start_eff = turn_start if turn_start is not None else end_turn
+        turn_start = turn_start_eff
+        n_cands = max((j for _, j, _, _ in branches), default=-1) + 1
+        B = len(branches)
         envs, obs = [], []
-        for p in prefixes:
+        for p, _, _, _ in branches:
             e = CppEnv(self.engine, config, auto_single)
             o = e.reset()
             for c in p:
                 o = e.step(c)
             envs.append(e)
             obs.append(o)
-        score = [0.0] * len(envs)
-        n = [0] * len(envs)
-        live = [True] * len(envs)
-        pending: list[tuple[int, dict, int]] = []  # branch ends scored by the learned value in one call
+        H = len(hs)
+        snap_board: list[list[float | None]] = [[None] * H for _ in range(B)]
+        snap_cards: list[list[float | None]] = [[None] * H for _ in range(B)]
+        snap_done: list[list[float | None]] = [[None] * H for _ in range(B)]
+        snap_actor: list[list[int]] = [[0] * H for _ in range(B)]
+        snap_vobs: list[list[dict | None]] = [[None] * H for _ in range(B)]
+        snap_vterm: list[list[float | None]] = [[None] * H for _ in range(B)]
+        n = [0] * B
+        live = [True] * B
+        rngs = [random.Random(f"{self.seed}:{game_seed}:{decision_k}:{a}:{s}") for _, _, a, s in branches]
+
+        def _snapshot(i: int, h_idx: int, terminal: bool) -> None:
+            if terminal:
+                w = int(envs[i].winner)
+                b = BOARD_WIN if w == me else -BOARD_WIN if w in (0, 1) else 0.0
+                d = 1.0 if w == me else -1.0 if w in (0, 1) else 0.0
+                snap_board[i][h_idx] = b
+                snap_cards[i][h_idx] = 0.0
+                snap_done[i][h_idx] = d
+                snap_actor[i][h_idx] = me
+                if self.value is not None:
+                    snap_vterm[i][h_idx] = VALUE_WIN if w == me else -VALUE_WIN if w in (0, 1) else 0.0
+            else:
+                assert obs[i] is not None
+                actor = int(envs[i].player)
+                snap_board[i][h_idx] = position_score(obs[i], actor, me)
+                snap_cards[i][h_idx] = cards_score(obs[i], actor, me)
+                snap_done[i][h_idx] = 0.0
+                snap_actor[i][h_idx] = actor
+                if self.value is not None:
+                    snap_vobs[i][h_idx] = obs[i]
+
         while any(live):
             act = []
             for i, e in enumerate(envs):
                 if not live[i]:
                     continue
                 if obs[i] is None:
+                    for h_idx in range(H):
+                        if snap_board[i][h_idx] is None:
+                            _snapshot(i, h_idx, True)
                     live[i] = False
-                    w = int(e.winner)
-                    score[i] = self.win if w == me else -self.win if w in (0, 1) else 0.0
                     continue
-                if int(obs[i]["global"][2]) > end_turn or n[i] >= self.max_rollout:
+                turn = int(obs[i]["global"][2])
+                for h_idx, h in enumerate(hs):
+                    if snap_board[i][h_idx] is None and turn > turn_start + h - 1:
+                        _snapshot(i, h_idx, False)
+                if all(v is not None for v in snap_board[i]):
                     live[i] = False
-                    if self.value is None:
-                        score[i] = position_score(obs[i], int(e.player), me)
-                    else:
-                        pending.append((i, obs[i], int(e.player)))
+                    continue
+                if n[i] >= self.max_rollout:
+                    for h_idx in range(H):
+                        if snap_board[i][h_idx] is None:
+                            _snapshot(i, h_idx, False)
+                    live[i] = False
                     continue
                 act.append(i)
             if not act:
@@ -123,12 +214,79 @@ class WindowSearch:
             lg = yield [obs[i] for i in act]
             for i, row in zip(act, lg, strict=True):
                 n[i] += 1
-                obs[i] = envs[i].step(int(np.argmax(_masked(row, obs[i]))))
-        if pending:
-            v = self.value(_batch([o for _, o, _ in pending]))
-            for (i, _, actor), x in zip(pending, v, strict=True):
-                score[i] = float(x) if actor == me else -float(x)
-        return score
+                z = _masked(row, obs[i])
+                s = branches[i][3]
+                if s == 0:
+                    a = int(np.argmax(z))
+                else:
+                    finite = np.isfinite(z)
+                    vals = z[finite] / self.rollout_temp
+                    vals = vals - np.max(vals)
+                    exp = np.exp(vals)
+                    probs = exp / exp.sum()
+                    r = rngs[i].random()
+                    cum = 0.0
+                    legal = np.flatnonzero(finite)
+                    a = int(legal[-1])
+                    for li, p in zip(legal, probs, strict=True):
+                        cum += float(p)
+                        if r < cum:
+                            a = int(li)
+                            break
+                obs[i] = envs[i].step(a)
+        # Any branch still live (should not happen) gets its current position for remaining horizons.
+        for i in range(B):
+            if live[i] and obs[i] is not None:
+                for h_idx in range(H):
+                    if snap_board[i][h_idx] is None:
+                        _snapshot(i, h_idx, False)
+            elif live[i]:
+                for h_idx in range(H):
+                    if snap_board[i][h_idx] is None:
+                        _snapshot(i, h_idx, True)
+        # Batched learned-value scoring for non-terminal snapshots.
+        snap_value: list[list[float | None]] = [[None] * H for _ in range(B)]
+        if self.value is not None:
+            for i in range(B):
+                for h_idx in range(H):
+                    if snap_vterm[i][h_idx] is not None:
+                        snap_value[i][h_idx] = snap_vterm[i][h_idx]
+            need = [(i, h_idx) for i in range(B) for h_idx in range(H)
+                    if snap_board[i][h_idx] is not None and snap_value[i][h_idx] is None]
+            if need:
+                v = self.value(_batch([snap_vobs[i][h_idx] for i, h_idx in need]))  # type: ignore[index]
+                for (i, h_idx), x in zip(need, v, strict=True):
+                    snap_value[i][h_idx] = float(x) if snap_actor[i][h_idx] == me else -float(x)
+        # Average over samples per candidate.
+        keys: list[str] = []
+        for h in hs:
+            keys.append(f"board@h{h}")
+            if self.value is not None:
+                keys.append(f"value@h{h}")
+            keys.append(f"done@h{h}")
+            keys.append(f"cards@h{h}")
+        out: dict[str, list[float]] = {kk: [0.0] * n_cands for kk in keys}
+        counts = [0] * n_cands
+        for i, (_, j, _, _) in enumerate(branches):
+            counts[j] += 1
+            for h_idx, h in enumerate(hs):
+                assert snap_board[i][h_idx] is not None and snap_cards[i][h_idx] is not None
+                assert snap_done[i][h_idx] is not None
+                out[f"board@h{h}"][j] += float(snap_board[i][h_idx])  # type: ignore[arg-type]
+                out[f"done@h{h}"][j] += float(snap_done[i][h_idx])  # type: ignore[arg-type]
+                out[f"cards@h{h}"][j] += float(snap_cards[i][h_idx])  # type: ignore[arg-type]
+                if self.value is not None:
+                    assert snap_value[i][h_idx] is not None
+                    out[f"value@h{h}"][j] += float(snap_value[i][h_idx])  # type: ignore[arg-type]
+        for kk in keys:
+            for j in range(n_cands):
+                if counts[j]:
+                    out[kk][j] /= counts[j]
+        if single_legacy:
+            # Legacy shape: plain score list for the single horizon (today's behaviour).
+            sel = self._select_key()
+            return [out[sel][j] for j in range(n_cands)]
+        return out
 
     def game_gen(self, rec: dict, config: DuelConfig, game_seed: int = 0):
         """Replay a recorded game and search its selected decisions. Returns a WindowResult."""
@@ -153,13 +311,37 @@ class WindowSearch:
                 z = _masked((yield [obs])[0], obs)
                 cands = self._candidates(z, obs, kind == "window")
                 if len(cands) >= 2:
-                    end = turn + self.horizon - 1
-                    scores = yield from self.rollouts_gen(config, auto_single, [choices[:k] + [x] for x in cands], me, end)
-                    best = max(range(len(cands)), key=lambda j: (scores[j], -j))
+                    sel = self._select_key()
+                    branches = [(choices[:k] + [x], j, x, s) for j, x in enumerate(cands)
+                                for s in range(self.samples)]
+                    scores_all = yield from self.rollouts_gen(
+                        config, auto_single, branches, me, turn_start=turn,
+                        game_seed=game_seed, decision_k=k)
+                    assert isinstance(scores_all, dict)
+                    sel_scores = scores_all[sel]
+                    best = max(range(len(cands)), key=lambda j: (sel_scores[j], -j))
+                    best_score = sel_scores[best]
+                    # tie_eps 0: the single best (exact ties keep the candidate order, so firing must earn its card)
+                    in_set = ([best] if self.tie_eps <= 0 else
+                              [j for j in range(len(cands)) if sel_scores[j] >= best_score - self.tie_eps])
+                    tset = [cands[j] for j in in_set]
+                    in_set_s = set(in_set)
+                    # confidence: share of the scores that separate the candidates whose top candidates (ties
+                    # included) touch the target set; a flat score (e.g. done@h1 = 0 everywhere) does not vote
+                    conf_keys = [kk for kk in scores_all if not kk.startswith("cards@")
+                                 and max(scores_all[kk]) > min(scores_all[kk])]
+                    agree = sum(1 for kk in conf_keys
+                                if in_set_s & {j for j, x in enumerate(scores_all[kk]) if x == max(scores_all[kk])})
+                    conf = agree / len(conf_keys) if conf_keys else 1.0
                     res.targets[k] = cands[best]
                     res.kinds[k] = kind
+                    res.sets[k] = tset
+                    res.conf[k] = conf
                     res.log.append({"k": k, "kind": kind, "turn": turn, "cands": cands,
-                                    "scores": [round(s, 2) for s in scores], "chosen": cands[best],
+                                    "scores": [round(s, 2) for s in sel_scores],
+                                    "scores_all": {kk: [round(s, 2) for s in col] for kk, col in scores_all.items()},
+                                    "set": tset, "conf": round(conf, 4),
+                                    "chosen": cands[best],
                                     "played": int(c),
                                     "fired": int(obs["actions"][cands[best], 0]) == Kind.ACTIVATE})  # fmt: skip
             obs = env.step(int(c))

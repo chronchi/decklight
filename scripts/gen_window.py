@@ -63,6 +63,12 @@ def main() -> None:
     ap.add_argument("--value", type=Path, default=None, help="learned value checkpoint (ADR 0007 v2) to score branch ends")
     ap.add_argument("--k", type=int, default=4)
     ap.add_argument("--horizon", type=int, default=1, help="turns played out (1 = to the end of the current turn)")
+    ap.add_argument("--horizons", type=int, nargs="+", default=None,
+                    help="score horizons (default: --horizon alone)")
+    ap.add_argument("--samples", type=int, default=1, help="rollouts per candidate (sample 0 is argmax)")
+    ap.add_argument("--rollout-temp", type=float, default=1.0)
+    ap.add_argument("--select", type=str, default=None, help="score key selecting the target (default: board/value@h<H0>)")
+    ap.add_argument("--tie-eps", type=float, default=0.0, help="candidates within eps of best form the target set")
     ap.add_argument("--own-frac", type=float, default=0.1, help="share of own-turn decisions (turn >= 2) searched")
     ap.add_argument("--width", type=int, default=32)
     ap.add_argument("--batch", type=int, default=512)
@@ -88,12 +94,19 @@ def main() -> None:
 
         value = ValueNet(args.value, args.emb, device=args.device, batch=args.batch).values
     ws = WindowSearch(Engine(), logits, k=args.k, horizon=args.horizon, own_frac=args.own_frac, batch=args.batch,
-                      seed=args.seed, value=value)  # fmt: skip
+                      seed=args.seed, value=value,
+                      horizons=tuple(args.horizons) if args.horizons else None,
+                      samples=args.samples, rollout_temp=args.rollout_temp,
+                      select=args.select, tie_eps=args.tie_eps)  # fmt: skip
     games = load_games(args.records, args.games, args.seed, args.proc, args.nproc)
     args.out.mkdir(parents=True, exist_ok=True)
+    eff_hs = tuple(args.horizons) if args.horizons else (args.horizon,)
     jobs = ((i, ws.game_gen(rec, record_config(rec), i)) for i, (_, rec) in enumerate(games))
     t0 = time.time()
     tot = {"games": 0, "window": 0, "own": 0, "fired": 0, "agree_window": 0, "agree_own": 0, "bad_replay": 0}
+    agree: dict[str, int] = {}
+    agree_n = 0
+    conf_sum, set_sum, conf_n = 0.0, 0, 0
     for i, res in ws.run_many(jobs, args.width):
         src, rec = games[i]
         tot["games"] += 1
@@ -103,17 +116,32 @@ def main() -> None:
         n = len(rec["choices"])
         targets: list[int | None] = [None] * n
         labels = ["skip"] * n
+        target_sets: list[list[int] | None] = [None] * n
+        target_conf: list[float | None] = [None] * n
         for k, t in res.targets.items():
             targets[k], labels[k] = t, res.kinds[k]
+            target_sets[k] = res.sets.get(k)
+            target_conf[k] = res.conf.get(k)
         for e in res.log:
             tot[e["kind"]] += 1
             tot["fired"] += e["kind"] == "window" and e["fired"]
             tot[f"agree_{e['kind']}"] += e["chosen"] == e["played"]
+            agree_n += 1
+            conf_sum += float(e.get("conf", 1.0))
+            set_sum += len(e.get("set", [e["chosen"]]))
+            conf_n += 1
+            cands, chosen = e["cands"], e["chosen"]
+            for kk, col in (e.get("scores_all") or {}).items():
+                amax = max(range(len(cands)), key=lambda j: (col[j], -j))
+                agree[kk] = agree.get(kk, 0) + (cands[amax] == chosen)
         gid = rec.get("game_id") or rec.get("line_id", f"g{i}")
+        hs_str = ",".join(str(h) for h in eff_hs)
         out = {k: rec[k] for k in KEEP if k in rec} | {
             "game_id": f"w-{gid}", "line_id": f"{rec.get('line_id', gid)}/w", "source_game": gid,
             "targets": targets, "labels": labels, "notes": [], "search": res.log,
-            "source": f"window search k={args.k} h={args.horizon} over {args.policy}"
+            "target_sets": target_sets, "target_conf": target_conf,
+            "source": f"window search k={args.k} h={args.horizon} hs=[{hs_str}] samples={args.samples} "
+                      f"temp={args.rollout_temp} select={args.select} tie_eps={args.tie_eps} over {args.policy}"
                       + (f", value {args.value}" if args.value else ""),
         }  # fmt: skip
         with (args.out / src).open("a") as f:
@@ -121,8 +149,13 @@ def main() -> None:
         if tot["games"] % 20 == 0:
             print(f"{tot} {time.time() - t0:.0f} s", flush=True)
     w = max(tot["window"], 1)
+    per_key = {kk: f"{v / max(agree_n, 1):.3f}" for kk, v in sorted(agree.items())}
+    mean_conf = conf_sum / max(conf_n, 1)
+    mean_set = set_sum / max(conf_n, 1)
     print(f"done: {tot}; fire rate {tot['fired'] / w:.3f}, agreement with the played move at windows "
-          f"{tot['agree_window'] / w:.3f}, own {tot['agree_own'] / max(tot['own'], 1):.3f}; wall {time.time() - t0:.0f} s",
+          f"{tot['agree_window'] / w:.3f}, own {tot['agree_own'] / max(tot['own'], 1):.3f}; "
+          f"per-key agreement with target {per_key}, mean conf {mean_conf:.3f}, mean set {mean_set:.2f}; "
+          f"wall {time.time() - t0:.0f} s",
           flush=True)  # fmt: skip
 
 

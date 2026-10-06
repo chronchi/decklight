@@ -160,6 +160,14 @@ def _shard_one(job: tuple[str, str, str]) -> tuple[str, int]:
             for k in KNOWN_KEYS:
                 known_cols[k].append(obs[k])
         equiv.append(equivalent_mask(obs["actions"], a, obs.get("action_mask")))
+        alt = meta.get("alt")
+        if alt:
+            mask = obs.get("action_mask")
+            eq = equiv[-1]
+            for b in alt:
+                b = int(b)
+                if 0 <= b < len(eq) and (mask is None or bool(mask[b])):
+                    eq[b] = True
         action.append(a)
         weight.append(w)
         line.append(base_line(meta["line_id"]))

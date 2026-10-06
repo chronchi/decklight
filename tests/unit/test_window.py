@@ -119,11 +119,15 @@ def test_window_samples_are_targets_with_window_kinds(engine, tmp_path):
         sys.argv = old
     recs = [json.loads(x) for f in out.glob("*.jsonl") for x in f.read_text().splitlines() if x.strip()]
     want = {(r["line_id"], k): t for r in recs for k, t in enumerate(r["targets"]) if t is not None}
+    conf = {(r["line_id"], k): c for r in recs for k, c in enumerate(r.get("target_conf") or []) if c is not None}
     samples = list(iter_samples(engine, out))
     assert len(samples) == len(want) > 0
     for _, a, w, m in samples:
-        assert m["kind"] in ("window", "window_own") and w == 1.0
+        assert m["kind"] in ("window", "window_own")
         assert a == want[(m["line_id"], m["k"])]
+        # weight is the confidence (base 1.0 x target_conf); records without conf keep 1.0
+        c = conf.get((m["line_id"], m["k"]))
+        assert w == (c if c is not None else 1.0)
 
 
 def test_value_scoring_constant_value_keeps_pass(engine, tmp_path):
@@ -151,3 +155,116 @@ def test_value_scoring_constant_value_keeps_pass(engine, tmp_path):
             if e["kind"] == "window" and max(e["scores"]) == 0.0:
                 assert not e["fired"]
     assert n > 0 and calls
+
+
+def _run_search(engine, recs, tmp_path, **kw):
+    from ygo_zero.demos.dataset import record_config
+    from ygo_zero.engine.duel import Engine
+    from ygo_zero.search.window import WindowSearch
+
+    kw.setdefault("own_frac", 0.2)
+    ws = WindowSearch(Engine(), gen_search.greedy_logits, **kw)
+    jobs = ((i, ws.game_gen(r, record_config(r), i)) for i, r in enumerate(recs))
+    return {i: res for i, res in ws.run_many(jobs, 4)}, ws
+
+
+def test_defaults_match_explicit_equivalent(engine, tmp_path):
+    import json as _json
+
+    src = _random_games(engine, tmp_path, n=2)
+    recs = [_json.loads(x) for x in src.read_text().splitlines()]
+    dflt, _ = _run_search(engine, recs, tmp_path)
+    xplt, _ = _run_search(engine, recs, tmp_path, horizons=(1,), samples=1, select="board@h1")
+    assert set(dflt) == set(xplt)
+    for i in dflt:
+        assert dflt[i].targets == xplt[i].targets
+        assert dflt[i].sets == xplt[i].sets
+        assert dflt[i].conf == xplt[i].conf
+        assert len(dflt[i].log) == len(xplt[i].log)
+        for a, b in zip(dflt[i].log, xplt[i].log):
+            assert a["cands"] == b["cands"] and a["scores"] == b["scores"]
+            assert a["scores_all"] == b["scores_all"] and a["set"] == b["set"]
+            assert a["conf"] == b["conf"]
+    n_log = sum(len(res.log) for res in dflt.values())
+    assert n_log > 0
+    for res in dflt.values():
+        for e in res.log:
+            # tie_eps=0: the target alone (exact ties keep the candidate order: PASS first at a window)
+            assert e["set"] == [e["chosen"]]
+            assert 0.0 <= e["conf"] <= 1.0
+
+
+def test_multi_horizon_scores(engine, tmp_path):
+    import json as _json
+
+    src = _random_games(engine, tmp_path, n=2)
+    recs = [_json.loads(x) for x in src.read_text().splitlines()]
+    out, _ = _run_search(engine, recs, tmp_path, horizons=(1, 3))
+    n = 0
+    for res in out.values():
+        for e in res.log:
+            n += 1
+            sa = e["scores_all"]
+            for kk in ("board@h1", "board@h3", "done@h1", "done@h3"):
+                assert kk in sa
+                assert len(sa[kk]) == len(e["cands"])
+            assert any(k.startswith("cards@h") for k in sa)
+            for v in sa["done@h1"] + sa["done@h3"]:
+                assert v in (-1.0, 0.0, 1.0)
+            for a, b in zip(sa["done@h1"], sa["done@h3"]):
+                if a in (-1.0, 1.0):  # duel ended by h1: terminal persists
+                    assert b == a
+    assert n > 0
+
+
+def test_samples_reproducible(engine, tmp_path):
+    import json as _json
+
+    src = _random_games(engine, tmp_path, n=1)
+    recs = [_json.loads(x) for x in src.read_text().splitlines()]
+    r1, _ = _run_search(engine, recs, tmp_path, horizons=(1,), samples=3)
+    r2, _ = _run_search(engine, recs, tmp_path, horizons=(1,), samples=3)
+    for i in r1:
+        assert [e["scores_all"] for e in r1[i].log] == [e["scores_all"] for e in r2[i].log]
+        assert [e["chosen"] for e in r1[i].log] == [e["chosen"] for e in r2[i].log]
+    assert sum(len(r.log) for r in r1.values()) > 0
+
+
+def test_tie_eps_large_gives_full_set_conf_one(engine, tmp_path):
+    import json as _json
+
+    src = _random_games(engine, tmp_path, n=1)
+    recs = [_json.loads(x) for x in src.read_text().splitlines()]
+    out, _ = _run_search(engine, recs, tmp_path, horizons=(1,), tie_eps=1e9)
+    n = 0
+    for res in out.values():
+        for e in res.log:
+            n += 1
+            assert sorted(e["set"]) == sorted(e["cands"])
+            assert e["conf"] == 1.0
+        for k, s in res.sets.items():
+            assert sorted(s) == sorted(res.log[[e["k"] for e in res.log].index(k)]["cands"])
+            assert res.conf[k] == 1.0
+    assert n > 0
+
+
+def test_value_multi_horizon_keys(engine, tmp_path):
+    import json as _json
+
+    import numpy as np
+
+    src = _random_games(engine, tmp_path, n=1)
+
+    def stub_value(obs):
+        n = len(obs["global"])
+        return np.linspace(-0.5, 0.5, n).astype(np.float32)
+
+    recs = [_json.loads(x) for x in src.read_text().splitlines()]
+    out, _ = _run_search(engine, recs, tmp_path, horizons=(1, 3), value=stub_value, select="value@h1")
+    n = 0
+    for res in out.values():
+        for e in res.log:
+            n += 1
+            assert "value@h1" in e["scores_all"] and "value@h3" in e["scores_all"]
+            assert all(-1.0 <= s <= 1.0 for s in e["scores"])
+    assert n > 0
