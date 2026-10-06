@@ -294,6 +294,9 @@ def main() -> None:
             "win_rate_first": round(sum(g.winner_is_a for g in first) / max(len(first), 1), 3),
             "mean_turns": round(statistics.mean(g.turns for g in games), 1),
             "cut": sum(g.truncated for g in games),
+            # per game (deck A, deck B, seed, A first, result, turns, cut): where the losses come from
+            "per_game": [[decks[g.deck_a].name, decks[g.deck_b].name, g.seed, g.a_first, g.winner_is_a, g.turns,
+                          g.truncated] for g in games],
         }  # fmt: skip
         print(f"vs {name:8s}: {w:.0f}/{len(games)} = {w / len(games):.1%}  [{lo:.1%}, {hi:.1%}]  "
               f"mean turns {report['matches'][name]['mean_turns']}, cut {report['matches'][name]['cut']}", flush=True)
