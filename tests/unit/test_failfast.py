@@ -1,8 +1,10 @@
 """Fail-fast invariants (AGENTS.md "Fail fast and loud"): checkpoint selection, identical-weights guard, ALERT relay."""
 
 import importlib.util
+import os
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import torch
@@ -54,6 +56,31 @@ def test_relay_alerts_appends_only_new_lines(tmp_path, monkeypatch):
     seen = vast.relay_alerts("h", 1, "/r", log, seen)
     lines = log.read_text().splitlines()
     assert seen == 2 and lines == ["ALERT train-ft-dw: best.pt is the --init weights", "ALERT playtest-ft-dw skipped"]
+
+
+def test_selfwin_crashwatch_alerts_once(tmp_path):
+    (tmp_path / "window-3.txt").write_text(
+        "Traceback (most recent call last):\n...\ntorch.OutOfMemoryError: CUDA out of memory\n"
+    )
+    (tmp_path / "window-1.txt").write_text("all good\n")
+    env = dict(os.environ, CRASHWATCH_S="1")
+    proc = subprocess.Popen(
+        ["bash", str(ROOT / "scripts/vast_selfwin.sh"), "--crashwatch-only", str(tmp_path)],
+        env=env,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    try:
+        time.sleep(3.5)
+    finally:
+        proc.terminate()
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait(timeout=5)
+    lines = (tmp_path / "ALERT").read_text().splitlines()
+    assert len(lines) == 1 and "window-3.txt" in lines[0] and "OutOfMemoryError" in lines[0]
 
 
 def test_stall_check_alerts_once_and_clears(tmp_path, monkeypatch):

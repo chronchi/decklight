@@ -11,6 +11,22 @@
 # Usage: bash scripts/vast_selfwin.sh <name>. Results: runs/<name>/{selfplay,teacher,window}/p<k>/, selfwin.txt, ALERT
 set -uo pipefail
 export PATH="$HOME/.local/bin:$PATH"
+crashwatch() {
+  declare -A seen=()
+  while true; do
+    for f in "$OUT"/selfplay-*.txt "$OUT"/teacher-*.txt "$OUT"/window-*.txt; do
+      [ -e "$f" ] || continue
+      base=$(basename "$f")
+      [ -n "${seen[$base]:-}" ] && continue
+      grep -q "^Traceback" "$f" 2>/dev/null || continue
+      last=$(grep -v '^[[:space:]]*$' "$f" | tail -n 1 | cut -c1-200)
+      echo "ALERT worker crashed: $base: $last" >> "$OUT/ALERT"
+      seen[$base]=1
+    done
+    sleep "${CRASHWATCH_S:-60}"
+  done
+}
+if [ "${1:-}" = "--crashwatch-only" ]; then OUT="${2:?usage: $0 --crashwatch-only <outdir>}"; crashwatch; exit 0; fi
 NAME="$1"; OUT="runs/$NAME"; mkdir -p "$OUT"
 : "${BASE:?set BASE to the policy best.pt}"
 VALUE="${VALUE:-data/cache/value_v2/best.pt}"
@@ -28,6 +44,8 @@ uv run --no-sync python -c "import torch; assert torch.cuda.is_available()" || {
 for f in "$BASE" "$VALUE"; do [ -f "$f" ] || { alert "missing $f"; exit 3; }; done
 ( while true; do echo "$(date +%T) $(nvidia-smi --query-gpu=utilization.gpu,memory.used --format=csv,noheader,nounits 2>/dev/null | tr -d ' ') $(cut -d' ' -f1 /proc/loadavg)"; sleep 30; done ) > "$OUT/usage.txt" 2>&1 &
 USAGE_PID=$!
+crashwatch &
+WATCH_PID=$!
 echo "selfplay $SPG/$SPP procs, teacher $TG/$TP procs, window $WG/$WP procs samples $S; base $BASE value $VALUE; cores $(nproc)" > "$OUT/selfwin.txt"
 T0=$SECONDS
 tick() { echo "$1 $((SECONDS - T0)) s" >> "$OUT/selfwin.txt"; }
@@ -54,7 +72,6 @@ wait "${SP_PIDS[@]}"
 tick selfplay
 n_sp=$(cat "$OUT"/selfplay/p*/*.jsonl 2>/dev/null | wc -l)
 echo "selfplay records $n_sp" >> "$OUT/selfwin.txt"
-grep -h "Traceback" "$OUT"/selfplay-*.txt | head -3 | sed 's/^/ALERT selfplay: /' >> "$OUT/ALERT"
 # fail loud: under half the games written means the generator is broken; the window stage would label nothing useful
 [ "$n_sp" -ge $(( SPG / 2 )) ] || { alert "selfplay wrote $n_sp of $SPG games"; }
 
@@ -74,7 +91,6 @@ if [ "$n_sp" -gt 0 ]; then
   grep -h "^done\|Traceback" "$OUT"/window-*.txt >> "$OUT/selfwin.txt"
   n_w=$(cat "$OUT"/window/p*/*.jsonl 2>/dev/null | wc -l)
   echo "window records $n_w" >> "$OUT/selfwin.txt"
-  grep -h "Traceback" "$OUT"/window-*.txt | head -3 | sed 's/^/ALERT window: /' >> "$OUT/ALERT"
   n_done=$(grep -l "^done" "$OUT"/window-*.txt | wc -l)
   [ "$n_done" -eq "$WP" ] || alert "window: $n_done of $WP procs finished (cap or crash)"
   [ "$n_w" -ge $(( WG / 2 )) ] || alert "window wrote $n_w of $WG games"
@@ -83,8 +99,8 @@ fi
 tick teacher
 n_t=$(cat "$OUT"/teacher/p*/*.jsonl 2>/dev/null | wc -l)
 echo "teacher records $n_t" >> "$OUT/selfwin.txt"
-grep -h "Traceback" "$OUT"/teacher-*.txt | head -3 | sed 's/^/ALERT teacher: /' >> "$OUT/ALERT"
 [ "$TG" -eq 0 ] || [ "$n_t" -ge $(( TG / 2 )) ] || alert "teacher wrote $n_t of $TG games"
 du -sh "$OUT"/selfplay "$OUT"/window "$OUT"/teacher >> "$OUT/selfwin.txt" 2>&1
 kill "$USAGE_PID" 2>/dev/null
+kill "$WATCH_PID" 2>/dev/null
 echo done > "$OUT/DONE"
