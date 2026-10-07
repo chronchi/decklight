@@ -2,11 +2,16 @@
 
     python scripts/select_turn1_lines.py --lines <dir or lines.jsonl>... --out data/demos/selfimit/<tag> \
         [--by v|field] [--min-dv 0.1] [--min-dfield 0] [--top 1]
+    python scripts/select_turn1_lines.py --lines <scored.jsonl>... --out data/demos/selfimit/<tag> \
+        --by rollout [--min-dr 0.0]
 
 Reads turn-1 line rows (scripts/turn1_lines.py: one greedy + K sampled lines per (deck, hand) with
 field and privileged-critic v_p0). Per (deck, source, hand) the best sampled line that beats the greedy
 line becomes a BC training record in the turn-1 search teacher format (scripts/gen_search.py), so the
 existing pipeline (build_bc_shards -> bc_data -> demos.dataset.iter_samples) trains on it unchanged.
+With --by rollout the rows come from scripts/score_lines.py and the winner is the best rollout
+score (played out through the opponent's turn 2, so held hand traps count); rows without a
+rollout score are ignored.
 
 Only `train_ok` rows are used (holdout/gauntlet never become training data). Actors/labels/turns are
 recovered by replaying the winning choice list in a CppEnv; a line whose replay fails or reaches a
@@ -88,10 +93,20 @@ def read_rows(specs: list[str]) -> list[dict]:
 
 
 def rank_key(by: str, row: dict) -> tuple:
+    if by == "rollout":
+        return (-row["rollout"], row["sample"])
     return (-row["v_p0"], -row["field"]) if by == "v" else (-row["field"], -row["v_p0"])
 
 
-def qualifies(by: str, best: dict, greedy: dict, min_dv: float, min_dfield: float) -> bool:
+def _has_rollout(row: dict) -> bool:
+    v = row.get("rollout")
+    return isinstance(v, (int, float)) and v == v  # not None, not NaN
+
+
+def qualifies(by: str, best: dict, greedy: dict, min_dv: float, min_dfield: float,
+              min_dr: float = 0.0) -> bool:
+    if by == "rollout":
+        return bool(best["rollout"] > greedy["rollout"] + min_dr)
     dv = best["v_p0"] - greedy["v_p0"]
     df = best["field"] - greedy["field"]
     if by == "field":
@@ -99,20 +114,24 @@ def qualifies(by: str, best: dict, greedy: dict, min_dv: float, min_dfield: floa
     return bool(dv >= min_dv and df >= min_dfield)
 
 
-def select_group(rows: list[dict], by: str, min_dv: float, min_dfield: float, top: int) -> list[dict]:
+def select_group(rows: list[dict], by: str, min_dv: float, min_dfield: float, top: int,
+                 min_dr: float = 0.0) -> list[dict]:
     """Best qualifying samples of one (deck, source, hand) group, rank order, distinct choices."""
-    greedy = [r for r in rows if r["kind"] == "greedy" and not r["stuck"]]
-    samples = sorted(
-        (r for r in rows if r["kind"] == "sample" and not r["stuck"]),
-        key=lambda r: (rank_key(by, r), r["sample"]),
-    )
+    if by == "rollout":
+        greedy = [r for r in rows if r["kind"] == "greedy" and not r["stuck"] and _has_rollout(r)]
+        cands = [r for r in rows if r["kind"] == "sample" and not r["stuck"] and _has_rollout(r)]
+    else:
+        greedy = [r for r in rows if r["kind"] == "greedy" and not r["stuck"]]
+        cands = [r for r in rows if r["kind"] == "sample" and not r["stuck"]]
+    samples = sorted(cands, key=lambda r: (rank_key(by, r), r["sample"]) if by != "rollout"
+                     else rank_key(by, r))
     if not greedy or not samples:
         return []
     g = greedy[0]
     kept, seen = [], set()
     for s in samples:
         key = tuple(s["choices"])
-        if key in seen or not qualifies(by, s, g, min_dv, min_dfield):
+        if key in seen or not qualifies(by, s, g, min_dv, min_dfield, min_dr):
             continue
         seen.add(key)
         kept.append((s, g))
@@ -124,7 +143,7 @@ def select_group(rows: list[dict], by: str, min_dv: float, min_dfield: float, to
 def make_record(deck: str, best: dict, greedy: dict, by: str,
                 actors: list[int], turns: list[int]) -> dict:
     game_id = f"si-{deck}-{best['source']}-h{best['hand']}-s{best['sample']}"
-    return {
+    rec = {
         "game_id": game_id,
         "line_id": f"{deck}/{game_id}",
         # lines.jsonl rows carry card lists, not the opponent deck's name; the opp label is
@@ -142,15 +161,21 @@ def make_record(deck: str, best: dict, greedy: dict, by: str,
         "end_v": float(best["v_p0"]),
         "source": f"turn1 self-imitation {by}",
     }
+    if by == "rollout":  # the selection metric, for analysis (never trained)
+        rec["rollout"] = float(best["rollout"])
+        rec["greedy_rollout"] = float(greedy["rollout"])
+    return rec
 
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--lines", nargs="+", required=True, help="lines.jsonl files or dirs containing one")
     ap.add_argument("--out", type=Path, required=True)
-    ap.add_argument("--by", default="v", choices=["v", "field"])
+    ap.add_argument("--by", default="v", choices=["v", "field", "rollout"])
     ap.add_argument("--min-dv", type=float, default=0.1)
     ap.add_argument("--min-dfield", type=float, default=0)
+    ap.add_argument("--min-dr", type=float, default=0.0,
+                    help="--by rollout: keep the best sample only if rollout(best) > rollout(greedy) + this")
     ap.add_argument("--top", type=int, default=1)
     args = ap.parse_args(argv)
 
@@ -176,7 +201,8 @@ def main(argv: list[str] | None = None) -> int:
     dropped, attempted = 0, 0
     for key in sorted(groups):
         deck = key[0]
-        for best, greedy in select_group(groups[key], args.by, args.min_dv, args.min_dfield, args.top):
+        for best, greedy in select_group(groups[key], args.by, args.min_dv, args.min_dfield,
+                                         args.top, args.min_dr):
             attempted += 1
             try:
                 actors, turns, fld = replay_line(
@@ -211,7 +237,8 @@ def main(argv: list[str] | None = None) -> int:
             for rec in per_deck[deck]:
                 f.write(json.dumps(rec) + "\n")
     summary = {
-        "by": args.by, "min_dv": args.min_dv, "min_dfield": args.min_dfield, "top": args.top,
+        "by": args.by, "min_dv": args.min_dv, "min_dfield": args.min_dfield, "min_dr": args.min_dr,
+        "top": args.top,
         "rows_read": n_read, "train_ok_rows": len(ok), "skipped_train_ok_false": n_notrain,
         "groups": len(groups), "attempted": attempted, "dropped_replay": dropped,
         "kept_total": n_kept,
