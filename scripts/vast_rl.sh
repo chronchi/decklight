@@ -60,14 +60,15 @@ if [ "$TRAIN_RC" -ne 0 ]; then
 fi
 # keep the eval checkpoints small: last.pt (with optimizer) only for a resume; drop it to save the pull
 rm -f "$OUT/rl/last.pt"
-# card stage (same box): pick top CARD_K iters by eval.vs_bc.wr (excluding iter 0) and report-card them
+# card stage (same box): pick top CARD_K iters by the mean eval wr of CARD_BY ("+"-joined eval keys, default vs_bc;
+# rl3long showed vs_bc alone picks base-overfit checkpoints) (excluding iter 0) and report-card them
 if [ "$TRAIN_RC" -eq 0 ] && [ "${CARD:-1}" != "0" ]; then
   if [ ! -f "$OUT/rl/metrics.jsonl" ]; then
     alert "no $OUT/rl/metrics.jsonl: skipping card stage"
   else
-    CHOSEN=$(python3 - "$OUT/rl/metrics.jsonl" "${CARD_K:-2}" <<'EOF'
+    CHOSEN=$(python3 - "$OUT/rl/metrics.jsonl" "${CARD_K:-2}" "${CARD_BY:-vs_bc}" <<'EOF'
 import json, sys
-path, k = sys.argv[1], int(sys.argv[2])
+path, k, by = sys.argv[1], int(sys.argv[2]), sys.argv[3].split("+")
 recs = []
 with open(path) as f:
     for line in f:
@@ -81,7 +82,7 @@ with open(path) as f:
         if it == 0:
             continue
         try:
-            wr = float(r["eval"]["vs_bc"]["wr"])
+            wr = sum(float(r["eval"][key]["wr"]) for key in by) / len(by)
         except (KeyError, TypeError, ValueError):
             continue
         recs.append((wr, it))
