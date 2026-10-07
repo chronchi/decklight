@@ -185,7 +185,12 @@ void Board::fill(Obs& obs, const Duel& duel, int msg_type, const std::vector<Car
     o[5] = pos;
     o[6] = is_public(c);
     obs.card_mask[i] = 1;
-    if (!rows[i].visible) continue;
+    if (!rows[i].visible) {
+      // Privileged critic (RL v2 part B): the true code of every hidden row. The policy must
+      // never read this; it only reaches the critic via critic_obs (card_known'/known_code').
+      obs.priv_code[i] = i32(c.code);
+      continue;
+    }
     o[0] = i32(c.code);
     o[4] = static_cast<int32_t>((loc != LOCATION_OVERLAY ? c.owner : c.controller) ^ me);
     uint64_t race = (c.race & 0xFFFFFFFFu) | (((c.race >> 62) & 1) << 31);

@@ -40,7 +40,9 @@ from ygo_zero.eval.bc_policy import _run_args
 from ygo_zero.model.policy import PolicyNet
 from ygo_zero.rl.evaluate import AsyncEvaluator, format_eval_line, run_eval
 from ygo_zero.rl.league import League
-from ygo_zero.rl.ppo import SlotStore, gae, gather, masked_log_softmax, ppo_loss, to_torch
+from ygo_zero.rl.critic import critic_obs
+from ygo_zero.rl.ppo import SlotStore, explained_variance, gae, gather, masked_log_softmax, ppo_loss, \
+    ppo_loss_priv, to_torch
 from ygo_zero.rl.rollout import Collector
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -77,6 +79,26 @@ def load_net(ckpt: Path, emb: dict, a: dict, value: bool) -> PolicyNet:
     missing, unexpected = net.load_state_dict({k: v.float() if v.is_floating_point() else v for k, v in state.items()},
                                               strict=False)  # fmt: skip
     assert not unexpected and all(k.startswith("value_head.") for k in missing), (missing, unexpected)
+    return net
+
+
+def load_critic(ckpt: Path, emb: dict, a: dict) -> PolicyNet:
+    """Privileged critic: PolicyNet(known=True, value=True), init from `--critic-init`.
+
+    Non-strict load: the checkpoint may lack the known inputs (a BC checkpoint trained
+    without --known) and/or the value head (any BC checkpoint); only those may be missing.
+    """
+    net = PolicyNet(emb, d=a.get("d", 256), layers=a.get("layers", 4), heads=a.get("heads", 4), dropout=0.0,
+                    hist=int(a.get("hist", 0) or 0), known=True, value=True)  # fmt: skip
+    state = torch.load(ckpt, map_location="cpu")
+    state = state.get("model", state)
+    missing, unexpected = net.load_state_dict({k: v.float() if v.is_floating_point() else v for k, v in state.items()},
+                                              strict=False)  # fmt: skip
+    assert not unexpected and all(k.startswith("value_head.") or k.startswith("known_emb.")
+                                  for k in missing), (missing, unexpected)
+    if any(k.startswith("known_emb.") for k in missing):
+        # Zero, not N(0,1): the critic then starts as exactly the init net, except hidden rows now carry their code.
+        torch.nn.init.zeros_(net.known_emb.weight)
     return net
 
 
@@ -169,6 +191,12 @@ def league_fail_checks(it: int, st: dict, league: League, snap_every: int, leagu
         fail(f"iteration {it}: snapshots enabled (--snap-every {snap_every}) but none added")
 
 
+def priv_fail_checks(it: int, st: dict, priv_critic: bool, fail) -> None:
+    if priv_critic and st.get("priv_rows", 0) > 0 and st.get("priv_nonzero", 0) == 0:
+        fail(f"iteration {it}: priv_code all zero over {st['priv_rows']} learner rows "
+             f"(the privileged feature is not reaching the critic)")
+
+
 def gae_batch(store: SlotStore, finished: list, lam: float):
     """GAE per finished seat trajectory. Returns (slots, adv, ret, adv_n)."""
     slots = np.concatenate([np.array(s, np.int64) for s, _ in finished])
@@ -185,14 +213,30 @@ def gae_batch(store: SlotStore, finished: list, lam: float):
 def ppo_update(model: PolicyNet, upd_model, opt, vopt, store: SlotStore, slots: np.ndarray,
                adv_n: np.ndarray, ret: np.ndarray, rng: np.random.Generator, dev: torch.device,
                *, clip: float, vf_coef: float, kl_coef: float, ent_coef: float, epochs: int,
-               minibatch: int, warm: bool, precision: str, max_upload_gb: float, compile: bool) -> dict:
-    """Upload-once + PPO epochs over one batch. Returns per-iteration mean stats (raises on non-finite)."""
+               minibatch: int, warm: bool, precision: str, max_upload_gb: float, compile: bool,
+               critic: PolicyNet | None = None, copt=None, priv_critic: bool = False) -> dict:
+    """Upload-once + PPO epochs over one batch. Returns per-iteration mean stats (raises on non-finite).
+
+    With `priv_critic`, the value loss trains `critic` (via `copt`) on the privileged
+    obs built from the stored `priv_code`, while the policy loss (pg + KL - entropy)
+    trains the policy; stats gain `critic_ev` / `policy_ev`. `--value-warmup` then
+    trains the critic alone.
+    """
     if dev.type == "cuda":
         torch.cuda.empty_cache()
+    if priv_critic and (critic is None or copt is None or "priv_code" not in store.obs):
+        raise ValueError("--priv-critic 1 needs a critic, its optimizer and priv_code in the slot store")
+    cobs_np = None
+    if priv_critic:
+        assert critic is not None
+        policy_keys = [k for k in store.obs if k != "priv_code"]
+        cobs_np = critic_obs({k: np.ascontiguousarray(store.obs[k][slots]) for k in policy_keys},
+                             np.ascontiguousarray(store.obs["priv_code"][slots]))
     per_slot = (sum(int(np.prod(v.shape[1:], dtype=np.int64)) * np.dtype(v.dtype).itemsize
                     for v in store.obs.values()) + 8 + 4 + 4 + 64 * 2 + 4 + 4)
     upload_once = per_slot * len(slots) <= max_upload_gb * 1e9
     obs_dev = act_dev = olp_dev = ref_dev = adv_dev = ret_dev = perm_dev = None
+    cobs_dev = None
     if upload_once:
         obs_dev = {k: torch.from_numpy(np.ascontiguousarray(store.obs[k][slots])).to(dev)
                    for k in store.obs}
@@ -202,8 +246,14 @@ def ppo_update(model: PolicyNet, upd_model, opt, vopt, store: SlotStore, slots: 
         adv_dev = torch.from_numpy(np.ascontiguousarray(adv_n)).to(dev)
         ret_dev = torch.from_numpy(np.ascontiguousarray(ret)).to(dev)
         perm_dev = torch.from_numpy(rng.permutation(len(slots))).to(dev)
+        if priv_critic:
+            assert cobs_np is not None
+            cobs_dev = to_torch(cobs_np, dev)
     t_up = time.time()
     model.train()
+    if priv_critic:
+        assert critic is not None
+        critic.train()
     if compile:
         upd_model.train()
     agg_sum: dict[str, torch.Tensor] = {}
@@ -221,6 +271,7 @@ def ppo_update(model: PolicyNet, upd_model, opt, vopt, store: SlotStore, slots: 
                 rl = ref_dev[idx] if kl_coef > 0 else None
                 a_t = adv_dev[idx]
                 r_t = ret_dev[idx]
+                cobs_t = {key: v[idx] for key, v in cobs_dev.items()} if priv_critic else None
             else:
                 mb = perm[k : k + minibatch]
                 sl = slots[mb]
@@ -230,17 +281,48 @@ def ppo_update(model: PolicyNet, upd_model, opt, vopt, store: SlotStore, slots: 
                 rl = torch.from_numpy(store.ref_lp[sl]).to(dev) if kl_coef > 0 else None
                 a_t = torch.from_numpy(adv_n[mb]).to(dev)
                 r_t = torch.from_numpy(ret[mb]).to(dev)
+                cobs_t = to_torch({key: v[mb] for key, v in cobs_np.items()}, dev) \
+                    if priv_critic else None
             if warm:
+                if priv_critic:
+                    assert critic is not None and copt is not None
+                    with _autocast(dev, precision):
+                        with torch.no_grad():  # critic value head only: no graph through the trunk
+                            _, cenc = critic._run(cobs_t)
+                        cv = critic.value_head(cenc[:, 0]).squeeze(-1)
+                        loss = torch.nn.functional.mse_loss(cv.float(), r_t)
+                    finite_epoch = finite_epoch & torch.isfinite(loss).detach()
+                    copt.zero_grad(set_to_none=True)
+                    loss.backward()
+                    copt.step()
+                    s = {"vf": loss.detach(), "critic_ev": explained_variance(cv, r_t)}
+                else:
+                    with _autocast(dev, precision):
+                        with torch.no_grad():  # value head only: no graph through the trunk
+                            _, enc = upd_model._run(obs)
+                        v = upd_model.value_head(enc[:, 0]).squeeze(-1)
+                        loss = torch.nn.functional.mse_loss(v.float(), r_t)
+                    finite_epoch = finite_epoch & torch.isfinite(loss).detach()
+                    vopt.zero_grad(set_to_none=True)
+                    loss.backward()
+                    vopt.step()
+                    s = {"vf": loss.detach()}
+            elif priv_critic:
+                assert critic is not None and copt is not None
                 with _autocast(dev, precision):
-                    with torch.no_grad():  # value head only: no graph through the trunk
-                        _, enc = upd_model._run(obs)
-                    v = upd_model.value_head(enc[:, 0]).squeeze(-1)
-                    loss = torch.nn.functional.mse_loss(v.float(), r_t)
-                finite_epoch = finite_epoch & torch.isfinite(loss).detach()
-                vopt.zero_grad(set_to_none=True)
-                loss.backward()
-                vopt.step()
-                s = {"vf": loss.detach()}
+                    loss_pol, loss_crit, s = ppo_loss_priv(upd_model, critic, rl, obs, cobs_t, act,
+                                                           olp, a_t, r_t, clip, vf_coef, kl_coef,
+                                                           ent_coef)  # fmt: skip
+                finite_epoch = finite_epoch & torch.isfinite(loss_pol).detach() \
+                    & torch.isfinite(loss_crit).detach()
+                opt.zero_grad(set_to_none=True)
+                loss_pol.backward()
+                torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+                opt.step()
+                copt.zero_grad(set_to_none=True)
+                loss_crit.backward()
+                torch.nn.utils.clip_grad_norm_(critic.parameters(), 1.0)
+                copt.step()
             else:
                 with _autocast(dev, precision):
                     loss, s = ppo_loss(upd_model, rl, obs, act, olp, a_t, r_t, clip, vf_coef,
@@ -265,6 +347,9 @@ def ppo_update(model: PolicyNet, upd_model, opt, vopt, store: SlotStore, slots: 
     agg_mean = {k: float((v / agg_n).item()) for k, v in agg_sum.items()} if agg_n else {}
     t_update = time.time() - t_up
     model.eval()
+    if priv_critic:
+        assert critic is not None
+        critic.eval()
     return agg_mean, t_update
 
 
@@ -307,6 +392,10 @@ def main() -> None:
     ap.add_argument("--ent-coef", type=float, default=0.003)
     ap.add_argument("--kl-coef", type=float, default=0.1)
     ap.add_argument("--value-warmup", type=int, default=2, help="first iterations train the value head only")
+    ap.add_argument("--priv-critic", type=int, choices=(0, 1), default=0,
+                    help="1: separate privileged critic (sees hidden cards); the policy stays honest")
+    ap.add_argument("--critic-init", type=Path, default=None,
+                    help="critic init checkpoint (default: --init)")
     ap.add_argument("--eval-every", type=int, default=10)
     ap.add_argument("--eval-seeds", type=int, default=6, help="vs BC: seeds per ordered deck pair")
     ap.add_argument("--ga-seeds", type=int, default=1, help="vs ygo-agent: seeds per deck pair")
@@ -372,6 +461,10 @@ def main() -> None:
     opt = torch.optim.AdamW([{"params": trunk}, {"params": vparams, "lr": 1e-4}], lr=args.lr,
                             weight_decay=0.0, **_fused)
     vopt = torch.optim.AdamW(model.value_head.parameters(), lr=3e-4, **_fused)
+    critic, copt = None, None
+    if args.priv_critic:
+        critic = load_critic(args.critic_init or args.init, emb, a).to(dev).eval()
+        copt = torch.optim.AdamW(critic.parameters(), lr=3e-4, **_fused)
     # Update forward only: rollout Collector keeps the eager `model`; the compiled
     # module shares parameters with it, so optimizer steps and saved state_dicts are unchanged.
     upd_model = torch.compile(model, dynamic=True) if args.compile else model
@@ -384,10 +477,26 @@ def main() -> None:
 
     engine = Engine()
 
+    def save_critic_pt() -> None:
+        """priv-critic only: fp16 critic weights next to the iter checkpoints (for search later)."""
+        if args.priv_critic:
+            assert critic is not None
+            torch.save({k: v.half() if v.is_floating_point() else v for k, v in critic.state_dict().items()},
+                       args.out / "critic.pt")
+
+    def save_last(it: int) -> None:
+        ckpt = {"model": model.state_dict(), "opt": opt.state_dict(), "iter": it}
+        if args.priv_critic:
+            assert critic is not None and copt is not None
+            ckpt["critic"] = critic.state_dict()
+            ckpt["copt"] = copt.state_dict()
+        torch.save(ckpt, args.out / "last.pt")
+
     def evaluate(it: int) -> dict:
         """Synchronous eval: save iter-NNNN.pt, run in-process, print + log the record."""
         ck = args.out / f"iter-{it:04d}.pt"
         torch.save(policy_state(model), ck)
+        save_critic_pt()
         res = run_eval(ck, args.init, args.emb, ev_names, hold, args.gauntlet_decks, args.eval_seeds,
                        args.ga_seeds, args.ga_opps, args.no_ygoagent, args.device, args.threads, it=it)  # fmt: skip
         print(format_eval_line(res), flush=True)
@@ -431,8 +540,8 @@ def main() -> None:
     N = args.envs
     vec = VecEnv(engine, train_decks, N, args.threads, seed=args.seed)
     vec.set_max_decisions(args.max_decisions)
-    store = SlotStore(args.store, gather(vec.buf, np.arange(1), hist, known))
-    actor = None
+    store = SlotStore(args.store, gather(vec.buf, np.arange(1), hist, known, priv=bool(args.priv_critic)))
+    actor = critic_actor = None
     col_rng = rng
     if args.overlap:
         # The collector runs in a background thread while the main thread updates `model`,
@@ -440,6 +549,9 @@ def main() -> None:
         # It also gets its own RNG: np Generators are not thread-safe and the main thread
         # keeps using `rng` for minibatch permutations during the update.
         actor = copy.deepcopy(model).eval()
+        if args.priv_critic:
+            assert critic is not None
+            critic_actor = copy.deepcopy(critic).eval()
         col_rng = np.random.default_rng(args.seed + 0x1234)
     league = None
     ygo_pol = None
@@ -456,7 +568,9 @@ def main() -> None:
             ygo_pol = YgoAgentPolicy(seed=args.seed + 0x5EED, sample=True)
     col = Collector(vec, actor if actor is not None else model, ref, store, hist, known, dev,
                     args.p_bc, args.trunc_reward, args.recv_batch, col_rng, args.precision,
-                    league, ygo_pol)
+                    league, ygo_pol,
+                    critic=(critic_actor if critic_actor is not None else critic),
+                    priv_critic=bool(args.priv_critic))
     it, t_train = 0, time.time()
     tot = {"games": 0, "trunc": 0, "decisions": 0}
     if args.overlap:
@@ -472,6 +586,7 @@ def main() -> None:
             t_roll = pending_roll
             if league is not None:
                 league_fail_checks(it, st, league, args.snap_every, args.league_size, fail)
+            priv_fail_checks(it, st, bool(args.priv_critic), fail)
             # Start the next batch in the background (actor weights: one update behind
             # after the first sync); the last --iters iteration has no next batch.
             task = None
@@ -487,7 +602,8 @@ def main() -> None:
                     clip=args.clip, vf_coef=args.vf_coef, kl_coef=args.kl_coef,
                     ent_coef=args.ent_coef, epochs=args.epochs, minibatch=args.minibatch,
                     warm=warm, precision=args.precision, max_upload_gb=args.max_upload_gb,
-                    compile=args.compile)
+                    compile=args.compile, critic=critic, copt=copt,
+                    priv_critic=bool(args.priv_critic))
             except RuntimeError:
                 fail(f"iteration {it}: non-finite loss")
             wait_s = 0.0
@@ -512,6 +628,9 @@ def main() -> None:
                 store.release(s)
             assert actor is not None
             sync_actor(actor, model)
+            if critic_actor is not None:
+                assert critic is not None
+                sync_actor(critic_actor, critic)
             if league is not None:
                 league_snapshot(model, league, it, args.snap_every, args.league_size)
 
@@ -545,7 +664,7 @@ def main() -> None:
                 assert asev is not None
                 relay(asev.poll())
             if it % args.eval_every == 0 or out_of_time:
-                torch.save({"model": model.state_dict(), "opt": opt.state_dict(), "iter": it}, args.out / "last.pt")
+                save_last(it)
                 if args.eval_mode == "sync":
                     evaluate(it)
                     recorded.add(it)
@@ -554,6 +673,7 @@ def main() -> None:
                     assert asev is not None
                     ck = args.out / f"iter-{it:04d}.pt"
                     torch.save(policy_state(model), ck)
+                    save_critic_pt()
                     if asev.maybe_start(it, ck):
                         eval_started.add(it)
                     else:
@@ -581,101 +701,23 @@ def main() -> None:
             fail(f"iteration {it}: collected 0 samples")
         if league is not None:
             league_fail_checks(it, st, league, args.snap_every, args.league_size, fail)
+        priv_fail_checks(it, st, bool(args.priv_critic), fail)
 
         # GAE per finished seat trajectory, then PPO epochs
-        slots = np.concatenate([np.array(s, np.int64) for s, _ in finished])
+        slots, adv, ret, adv_n = gae_batch(store, finished, args.lam)
         if len(slots) == 0:
             fail(f"iteration {it}: collected 0 samples")
-        advs, rets = [], []
-        for s, rew in finished:
-            ad, rt = gae(store.value[np.array(s)], rew, args.lam)
-            advs.append(ad)
-            rets.append(rt)
-        adv, ret = np.concatenate(advs), np.concatenate(rets)
-        adv_n = (adv - adv.mean()) / (adv.std() + 1e-8)
         warm = it <= args.value_warmup
-        if dev.type == "cuda":
-            torch.cuda.empty_cache()
-        # upload the iteration's samples to the device ONCE, index minibatches there
-        per_slot = (sum(int(np.prod(v.shape[1:], dtype=np.int64)) * np.dtype(v.dtype).itemsize
-                        for v in store.obs.values()) + 8 + 4 + 4 + 64 * 2 + 4 + 4)
-        upload_once = per_slot * len(slots) <= args.max_upload_gb * 1e9
-        obs_dev = act_dev = olp_dev = ref_dev = adv_dev = ret_dev = perm_dev = None
-        if upload_once:
-            obs_dev = {k: torch.from_numpy(np.ascontiguousarray(store.obs[k][slots])).to(dev)
-                       for k in store.obs}
-            act_dev = torch.from_numpy(np.ascontiguousarray(store.action[slots])).to(dev)
-            olp_dev = torch.from_numpy(np.ascontiguousarray(store.logp[slots])).to(dev)
-            ref_dev = torch.from_numpy(np.ascontiguousarray(store.ref_lp[slots])).to(dev)
-            adv_dev = torch.from_numpy(np.ascontiguousarray(adv_n)).to(dev)
-            ret_dev = torch.from_numpy(np.ascontiguousarray(ret)).to(dev)
-            perm_dev = torch.from_numpy(rng.permutation(len(slots))).to(dev)
-        t_up = time.time()
-        model.train()
-        if args.compile:
-            upd_model.train()
-        # On-device accumulation: ppo_loss returns detached 0-d tensors (no per-minibatch
-        # host sync); sums stay on-device and convert once per iteration below.
-        agg_sum: dict[str, torch.Tensor] = {}
-        agg_n = 0
-        bad_loss = False
-        for _ in range(args.epochs):
-            finite_epoch = torch.ones((), dtype=torch.bool, device=dev)
-            perm = rng.permutation(len(slots))
-            mb_dev = torch.from_numpy(perm).to(dev) if upload_once else None
-            for k in range(0, len(perm), args.minibatch):
-                if upload_once:
-                    idx = mb_dev[k : k + args.minibatch]
-                    obs = {key: v[idx] for key, v in obs_dev.items()}
-                    act, olp = act_dev[idx], olp_dev[idx]
-                    rl = ref_dev[idx] if args.kl_coef > 0 else None
-                    a_t = adv_dev[idx]
-                    r_t = ret_dev[idx]
-                else:
-                    mb = perm[k : k + args.minibatch]
-                    sl = slots[mb]
-                    obs = to_torch({key: v[sl] for key, v in store.obs.items()}, dev)
-                    act = torch.from_numpy(store.action[sl]).to(dev)
-                    olp = torch.from_numpy(store.logp[sl]).to(dev)
-                    rl = torch.from_numpy(store.ref_lp[sl]).to(dev) if args.kl_coef > 0 else None
-                    a_t = torch.from_numpy(adv_n[mb]).to(dev)
-                    r_t = torch.from_numpy(ret[mb]).to(dev)
-                if warm:
-                    with _autocast(dev, args.precision):
-                        with torch.no_grad():  # value head only: no graph through the trunk
-                            _, enc = upd_model._run(obs)
-                        v = upd_model.value_head(enc[:, 0]).squeeze(-1)
-                        loss = torch.nn.functional.mse_loss(v.float(), r_t)
-                    finite_epoch = finite_epoch & torch.isfinite(loss).detach()
-                    vopt.zero_grad(set_to_none=True)
-                    loss.backward()
-                    vopt.step()
-                    s = {"vf": loss.detach()}
-                else:
-                    with _autocast(dev, args.precision):
-                        loss, s = ppo_loss(upd_model, rl, obs, act, olp, a_t, r_t, args.clip, args.vf_coef,
-                                           args.kl_coef, args.ent_coef)  # fmt: skip
-                    finite_epoch = finite_epoch & torch.isfinite(loss).detach()
-                    opt.zero_grad(set_to_none=True)
-                    loss.backward()
-                    torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
-                    opt.step()
-                for key, val in s.items():
-                    t = val.detach()
-                    if key in agg_sum:
-                        agg_sum[key] = agg_sum[key] + t
-                    else:
-                        agg_sum[key] = t.clone()
-                agg_n += 1
-            if not bool(finite_epoch.item()):  # single host sync per epoch
-                bad_loss = True
-                break
-        if bad_loss:
+        try:
+            agg_mean, t_update = ppo_update(
+                model, upd_model, opt, vopt, store, slots, adv_n, ret, rng, dev,
+                clip=args.clip, vf_coef=args.vf_coef, kl_coef=args.kl_coef,
+                ent_coef=args.ent_coef, epochs=args.epochs, minibatch=args.minibatch,
+                warm=warm, precision=args.precision, max_upload_gb=args.max_upload_gb,
+                compile=args.compile, critic=critic, copt=copt,
+                priv_critic=bool(args.priv_critic))
+        except RuntimeError:
             fail(f"iteration {it}: non-finite loss")
-        # One host sync per key per iteration (same values as the old per-minibatch .item() means).
-        agg_mean = {k: float((v / agg_n).item()) for k, v in agg_sum.items()} if agg_n else {}
-        t_update = time.time() - t_up
-        model.eval()
         for s, _ in finished:
             store.release(s)
         if league is not None:
@@ -710,7 +752,7 @@ def main() -> None:
             assert asev is not None
             relay(asev.poll())
         if it % args.eval_every == 0 or out_of_time:
-            torch.save({"model": model.state_dict(), "opt": opt.state_dict(), "iter": it}, args.out / "last.pt")
+            save_last(it)
             if args.eval_mode == "sync":
                 evaluate(it)
                 recorded.add(it)
@@ -719,6 +761,7 @@ def main() -> None:
                 assert asev is not None
                 ck = args.out / f"iter-{it:04d}.pt"
                 torch.save(policy_state(model), ck)
+                save_critic_pt()
                 if asev.maybe_start(it, ck):
                     eval_started.add(it)
                 else:

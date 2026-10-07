@@ -205,6 +205,8 @@ struct Obs {
   std::array<uint8_t, MAX_CARDS> card_mask{};
   std::array<uint8_t, MAX_CARDS> card_known{};  // obs v2: 1 = remembered opp hidden card, 2 = own known to opp
   std::array<int32_t, MAX_CARDS> known_code{};  // obs v2: remembered passcode for card_known == 1 rows
+  std::array<int32_t, MAX_CARDS> priv_code{};  // privileged critic (RL v2 part B): true code of every
+                                               // row hidden from the viewer (!visible, code column 0), else 0
   std::array<int32_t, GLOBAL_COLS> global{};
   std::array<int32_t, MAX_CHAIN * CHAIN_COLS> chain{};
   std::array<uint8_t, MAX_CHAIN> chain_mask{};

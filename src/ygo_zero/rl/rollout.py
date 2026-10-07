@@ -25,6 +25,7 @@ import numpy as np
 import torch
 
 from ygo_zero.rl.league import BASE, SELF, YGO, League
+from ygo_zero.rl.critic import critic_obs
 from ygo_zero.rl.ppo import gather, masked_log_softmax, to_torch
 
 TRUNCATED = 3  # VecEnv.TRUNCATED: game cut by set_max_decisions
@@ -47,7 +48,8 @@ class Collector:
 
     def __init__(self, vec, model, ref, store, hist: int, known: bool, device: torch.device,
                  p_bc: float, trunc_reward: float, recv_batch: int, rng: np.random.Generator,
-                 precision: str = "fp32", league: League | None = None, ygo=None) -> None:
+                 precision: str = "fp32", league: League | None = None, ygo=None,
+                 critic=None, priv_critic: bool = False) -> None:
         self.vec = vec
         self.model = model
         self.ref = ref
@@ -62,6 +64,12 @@ class Collector:
         self.precision = precision
         self.league = league
         self.ygo = ygo
+        # Privileged critic (RL v2 part B): values come from `critic` on the privileged
+        # obs; the policy forward then needs logits only. None keeps today's behaviour.
+        if priv_critic and critic is None:
+            raise ValueError("--priv-critic 1 needs a critic net")
+        self.critic = critic
+        self.priv_critic = bool(priv_critic)
         n = vec.num_envs
         self.buf = vec.buf
         self.traj: list[list[list[int]]] = [[[], []] for _ in range(n)]
@@ -116,6 +124,7 @@ class Collector:
         lg_games: dict[str, int] = {}
         lg_wins: dict[str, float] = {}
         opp_games = opp_learner_samples = 0
+        priv_rows = priv_nonzero = 0
         n = self.vec.num_envs
         buf = self.buf
         while n_fin < n_samples:
@@ -191,7 +200,7 @@ class Collector:
             b_ids = ids[~is_learner]
             t1 = time.perf_counter()
             with torch.inference_mode(), self._autocast():
-                ob_all = gather(buf, ids, self.hist, self.known)
+                ob_all = gather(buf, ids, self.hist, self.known, priv=self.priv_critic)
                 tob_all = to_torch(ob_all, self.device)
                 ref_logits = self.ref(tob_all)
                 ref_lp_all = masked_log_softmax(ref_logits)
@@ -231,13 +240,21 @@ class Collector:
                             actions[pos[int(i)]] = int(a)
                 if len(l_ids):
                     l_idx = torch.from_numpy(np.array([pos[int(i)] for i in l_ids], np.int64)).to(self.device)
-                    tob_l = {k: v[l_idx] for k, v in tob_all.items()}
-                    logits, v = self.model.forward_value(tob_l)
+                    tob_l = {k: v[l_idx] for k, v in tob_all.items() if k != "priv_code"}
+                    ob_l = {k: v[np.array([pos[int(i)] for i in l_ids])] for k, v in ob_all.items()}
+                    if self.critic is None:
+                        logits, v = self.model.forward_value(tob_l)
+                    else:
+                        logits = self.model(tob_l)
+                        cobs_l = to_torch(critic_obs(ob_l, ob_l["priv_code"]), self.device)
+                        _, v = self.critic.forward_value(cobs_l)
                     lp = masked_log_softmax(logits)
                     act_l, lp_l = _sample_from_lp(lp, torch.isfinite(logits))
-                    ob_l = {k: v[np.array([pos[int(i)] for i in l_ids])] for k, v in ob_all.items()}
                     slots = self.store.put(ob_l, act_l, lp_l, v.float().cpu().numpy(),
                                            ref_lp_cpu[[pos[int(i)] for i in l_ids]])
+                    if self.priv_critic:
+                        priv_rows += len(l_ids)
+                        priv_nonzero += int((ob_l["priv_code"] > 0).sum())
                     for i, s in zip(l_ids, slots):
                         self.traj[int(i)][int(player[int(i)])].append(int(s))
                     for i, a in zip(l_ids, act_l):
@@ -247,6 +264,9 @@ class Collector:
             decisions += len(ids)
         stats = {"games": games, "trunc": trunc, "bc_games": bc_games, "bc_wins": bc_wins,
                  "decisions": decisions, "lengths": lengths, "t_env": t_env, "t_fwd": t_fwd}  # fmt: skip
+        if self.priv_critic:
+            stats["priv_rows"] = priv_rows
+            stats["priv_nonzero"] = priv_nonzero
         if lg:
             assert self.league is not None
             probs = self.league.sampling_probs()

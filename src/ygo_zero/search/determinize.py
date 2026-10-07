@@ -27,12 +27,18 @@ _SZONE = C.LOCATION_SZONE
 
 
 def obs_equal(a: dict | None, b: dict | None) -> bool:
-    """Exact equality of two observations (every array, exactly)."""
+    """Exact equality of two observations (every array, exactly).
+
+    `priv_code` is skipped: it is a privileged-critic channel (the true hidden codes),
+    not part of the agent's observation, so worlds differing only in hidden cards compare
+    equal here (RL v2 part B)."""
     if a is None or b is None:
         return a is None and b is None
     if set(a.keys()) != set(b.keys()):
         return False
     for k in a:
+        if k == "priv_code":
+            continue
         va, vb = a[k], b[k]
         if isinstance(va, np.ndarray) or isinstance(vb, np.ndarray):
             if not isinstance(va, np.ndarray) or not isinstance(vb, np.ndarray):
@@ -98,12 +104,15 @@ def prefix_keys_for(engine, config, prefix: list[int], auto_single: bool = True,
 
 def root_obs_equal(a: dict | None, b: dict | None) -> bool:
     """`me`'s root-obs comparison for semantic replay: `actions` matches on the meaning
-    columns only (`_CMP_COLS`), the mask and every other array match exactly."""
+    columns only (`_CMP_COLS`), the mask and every other array match exactly. `priv_code`
+    is skipped (privileged-critic channel, not observed: RL v2 part B)."""
     if a is None or b is None:
         return a is None and b is None
     if set(a.keys()) != set(b.keys()):
         return False
     for k in a:
+        if k == "priv_code":
+            continue
         va, vb = a[k], b[k]
         if k == "actions":
             if not isinstance(va, np.ndarray) or not isinstance(vb, np.ndarray):

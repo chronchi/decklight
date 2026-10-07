@@ -32,6 +32,7 @@ py::object to_dict(const Obs& o) {
   d["hist_long_mask"] = arr(o.hist_long_mask, {HISTORY_MAX}).attr("astype")("bool");
   d["card_known"] = arr(o.card_known, {MAX_CARDS});
   d["known_code"] = arr(o.known_code, {MAX_CARDS});
+  d["priv_code"] = arr(o.priv_code, {MAX_CARDS});
   return d;
 }
 
@@ -210,6 +211,7 @@ PYBIND11_MODULE(_ygoenv, m) {
         d["hist_long_mask"] = view(self, o, o[0].hist_long_mask.data(), {HISTORY_MAX}, "bool");
         d["card_known"] = view(self, o, o[0].card_known.data(), {MAX_CARDS}, "uint8");
         d["known_code"] = view(self, o, o[0].known_code.data(), {MAX_CARDS}, "int32");
+        d["priv_code"] = view(self, o, o[0].priv_code.data(), {MAX_CARDS}, "int32");
         d["player"] = py::array(py::dtype("int32"), {v.num_envs}, {4}, v.player.data(), self);
         d["winner"] = py::array(py::dtype("int32"), {v.num_envs}, {4}, v.winner.data(), self);
         d["done"] = py::array(py::dtype("bool"), {v.num_envs}, {1}, v.done.data(), self);

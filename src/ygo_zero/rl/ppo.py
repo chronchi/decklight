@@ -24,8 +24,13 @@ def model_keys(hist: int, known: bool) -> tuple[str, ...]:
     return keys + (tuple(KNOWN_KEYS) if known else ())
 
 
-def gather(buf: dict[str, np.ndarray], rows: np.ndarray, hist: int, known: bool) -> dict[str, np.ndarray]:
-    """Rows of the buffer as the model's input dict (copies; hist_long already cut to `hist`)."""
+def gather(buf: dict[str, np.ndarray], rows: np.ndarray, hist: int, known: bool,
+           priv: bool = False) -> dict[str, np.ndarray]:
+    """Rows of the buffer as the model's input dict (copies; hist_long already cut to `hist`).
+
+    `priv=True` also returns `priv_code` (the true codes of hidden rows, for the
+    privileged critic); the default False keeps the policy path bit-identical.
+    """
     out = {}
     for k in model_keys(hist, known):
         if k == "hist_long":
@@ -34,6 +39,8 @@ def gather(buf: dict[str, np.ndarray], rows: np.ndarray, hist: int, known: bool)
             out["history_mask"] = buf[k][rows, :hist]
         else:
             out[k] = buf[k][rows]
+    if priv:
+        out["priv_code"] = buf["priv_code"][rows]
     return out
 
 
@@ -96,6 +103,47 @@ def masked_log_softmax(logits: torch.Tensor) -> torch.Tensor:
     """log-softmax over legal options (illegal logits are -inf); illegal entries come out as 0, not nan."""
     lp = F.log_softmax(logits.float(), -1)
     return torch.where(torch.isfinite(logits), lp, torch.zeros_like(lp))
+
+
+def explained_variance(value: torch.Tensor, ret: torch.Tensor) -> torch.Tensor:
+    """1 - Var(ret - value) / Var(ret): 1 = perfect, 0 = mean predictor (detached 0-d)."""
+    var_ret = ret.float().var(unbiased=False)
+    ev = 1.0 - (ret.float() - value.float()).var(unbiased=False) / (var_ret + 1e-8)
+    return ev.detach()
+
+
+def ppo_loss_priv(policy, critic, ref_lp, obs, cobs, action, old_logp, adv, ret, clip: float,
+                   vf_coef: float, kl_coef: float, ent_coef: float,
+                   ) -> tuple[torch.Tensor, torch.Tensor, dict]:  # fmt: skip
+    """PPO with a privileged critic: the policy loss (pg + KL - entropy) trains the
+    policy from its own obs, the value loss trains the critic from the privileged
+    obs. Returns (policy_loss, critic_loss, stats); stats match `ppo_loss` plus
+    `critic_ev` / `policy_ev` (explained variance of each value function on returns)."""
+    logits, pval = policy.forward_value(obs)
+    _, cval = critic.forward_value(cobs)
+    lp_all = masked_log_softmax(logits)
+    legal = torch.isfinite(logits)
+    p = lp_all.exp() * legal
+    logp = lp_all.gather(1, action[:, None]).squeeze(1)
+    ratio = torch.exp(logp - old_logp)
+    pg = -torch.min(ratio * adv, ratio.clamp(1 - clip, 1 + clip) * adv).mean()
+    vf = F.mse_loss(cval.float(), ret)
+    ent = -(p * lp_all).sum(1).mean()
+    loss_pol = pg - ent_coef * ent
+    loss_crit = vf_coef * vf
+    kl = torch.zeros((), device=logits.device)
+    if ref_lp is not None and kl_coef > 0:
+        ref_lp = ref_lp.to(dtype=torch.float32) if torch.is_tensor(ref_lp) else torch.as_tensor(ref_lp)
+        ref_lp = ref_lp.to(device=logits.device, dtype=torch.float32)
+        kl = (p.float() * (lp_all - ref_lp)).sum(1).mean()  # KL(pi || pi_BC), exact over the legal options
+        loss_pol = loss_pol + kl_coef * kl
+    stats = {
+        "pg": pg.detach(), "vf": vf.detach(), "ent": ent.detach(), "kl_bc": kl.detach(),
+        "clipfrac": ((ratio - 1).abs() > clip).float().mean().detach(),
+        "approx_kl": ((ratio - 1) - torch.log(ratio)).mean().detach(),
+        "critic_ev": explained_variance(cval, ret), "policy_ev": explained_variance(pval, ret),
+    }  # fmt: skip
+    return loss_pol, loss_crit, stats
 
 
 def ppo_loss(model, ref_lp, obs, action, old_logp, adv, ret, clip: float, vf_coef: float, kl_coef: float,
