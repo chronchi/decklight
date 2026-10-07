@@ -41,6 +41,8 @@ def init_from_env(device_type: str) -> tuple[int, int]:
     if world <= 1:
         return 0, 1
     backend = "nccl" if device_type == "cuda" else "gloo"
+    if device_type == "cuda":  # a bare "cuda" (NCCL, empty_cache, ...) must mean this rank's GPU, not GPU 0
+        torch.cuda.set_device(int(os.environ.get("LOCAL_RANK", "0")))
     dist.init_process_group(backend=backend)
     return dist.get_rank(), dist.get_world_size()
 
@@ -55,11 +57,19 @@ def barrier() -> None:
         dist.barrier()
 
 
+def _coll_device() -> torch.device:
+    """Where small collective tensors live: NCCL only takes CUDA tensors (ddpsmoke 2026-10-07: a CPU tensor in
+    bcast_flag → "No backend type associated with device type cpu"); gloo takes CPU."""
+    if dist.get_backend() == "nccl":
+        return torch.device("cuda", torch.cuda.current_device())
+    return torch.device("cpu")
+
+
 def bcast_flag(flag: bool) -> bool:
     """Broadcast a boolean from rank 0 to all ranks (no-op single-process)."""
     if not is_dist():
         return flag
-    t = torch.tensor([1 if flag else 0], dtype=torch.long)
+    t = torch.tensor([1 if flag else 0], dtype=torch.long, device=_coll_device())
     dist.broadcast(t, src=0)
     return bool(t.item())
 
@@ -191,10 +201,7 @@ def sync_league_ema(league) -> None:
     # identical by construction, so the local key set suffices (base + snapshots).
     with league._lock:
         keys = sorted(set(league.ema) | {n for n in league.snaps} | {"base"})
-    vals = torch.tensor([float(league.ema.get(k, 0.5)) for k in keys], dtype=torch.float64,
-                        device=torch.device("cpu"))
-    if torch.cuda.is_available() and dist.get_backend() == "nccl":
-        vals = vals.to(torch.device("cuda"))
+    vals = torch.tensor([float(league.ema.get(k, 0.5)) for k in keys], dtype=torch.float64, device=_coll_device())
     dist.all_reduce(vals, op=dist.ReduceOp.SUM)
     vals = vals / dist.get_world_size()
     with league._lock:
