@@ -268,3 +268,66 @@ def test_value_multi_horizon_keys(engine, tmp_path):
             assert "value@h1" in e["scores_all"] and "value@h3" in e["scores_all"]
             assert all(-1.0 <= s <= 1.0 for s in e["scores"])
     assert n > 0
+
+
+def test_game_gen_honest_false_is_bit_identical(engine, tmp_path):
+    import json as _json
+
+    from ygo_zero.demos.dataset import record_config
+    from ygo_zero.engine.duel import Engine
+    from ygo_zero.search.window import WindowSearch
+
+    src = _random_games(engine, tmp_path, n=1)
+    recs = [_json.loads(x) for x in src.read_text().splitlines()]
+    rec, cfg = recs[0], record_config(recs[0])
+    ws = WindowSearch(Engine(), gen_search.greedy_logits, own_frac=0.2, seed=0)
+    dflt = dict(ws.run_many([(0, ws.game_gen(rec, cfg, 0))], 4))[0]
+    ws2 = WindowSearch(Engine(), gen_search.greedy_logits, own_frac=0.2, seed=0)
+    expl = dict(ws2.run_many([(0, ws2.game_gen(rec, cfg, 0, honest=False))], 4))[0]
+    assert expl.targets == dflt.targets
+    assert expl.kinds == dflt.kinds and expl.sets == dflt.sets and expl.conf == dflt.conf
+    assert len(expl.log) == len(dflt.log)
+    for a, b in zip(expl.log, dflt.log):
+        assert a == b
+    assert expl.det_proposals == 0 and expl.det_skipped == 0
+    assert sum(len(r.log) for r in (dflt,)) > 0
+
+
+def test_game_gen_honest_skip_never_uses_true_config(engine, tmp_path):
+    import json as _json
+
+    from ygo_zero.demos.dataset import record_config
+    from ygo_zero.engine.duel import Engine
+    from ygo_zero.search.window import WindowSearch
+
+    src = _random_games(engine, tmp_path, n=2)
+    recs = [_json.loads(x) for x in src.read_text().splitlines()]
+    for r in recs:  # short prefixes: early turn>=2 own-turn decisions still search, determinizer replays stay cheap
+        r["choices"] = r["choices"][:100]
+    ws = WindowSearch(Engine(), gen_search.greedy_logits, own_frac=1.0, seed=0, samples=1)
+    orig = ws.rollouts_gen
+    seen: list = []
+    cfgs: list = []
+
+    def spy(config, auto_single, branches, me, **kw):
+        w = kw.get("worlds")
+        if w is not None:
+            seen.append(list(w))
+            cfgs.append(config)
+        return (yield from orig(config, auto_single, branches, me, **kw))
+
+    ws.rollouts_gen = spy  # type: ignore[method-assign]
+    cfgs_rec = [record_config(r) for r in recs]
+    jobs = ((i, ws.game_gen(r, cfgs_rec[i], i, honest=True, det_tries=8, det_fallback="skip"))
+            for i, r in enumerate(recs))
+    out = dict(ws.run_many(jobs, 4))
+    assert all(r.replay_ok for r in out.values())
+    assert sum(r.det_proposals for r in out.values()) > 0
+    assert sum(r.det_accepted + r.det_fallbacks for r in out.values()) > 0
+    assert seen, "honest search ran no rollout with worlds"
+    for worlds, cfg in zip(seen, cfgs, strict=True):
+        assert worlds, "skip mode must pass only accepted worlds"
+        for w in worlds:
+            assert isinstance(w, tuple), f"skip mode must not use the true config, got {type(w)}"
+            wcfg, _wprefix = w
+            assert wcfg is not cfg, "rollout used the true config (None-substitute) in skip mode"

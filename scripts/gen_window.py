@@ -72,6 +72,10 @@ def main() -> None:
     ap.add_argument("--conf-skip", type=float, default=1.01,
                     help="skip decisions whose policy top probability is >= this (S0 used 0.9; 1.01 = search all)")
     ap.add_argument("--own-frac", type=float, default=0.1, help="share of own-turn decisions (turn >= 2) searched")
+    ap.add_argument("--honest", type=int, default=0, choices=(0, 1), help="search determinized worlds (honest search)")
+    ap.add_argument("--det-tries", type=int, default=32, help="rejection-sampling proposals per honest world")
+    ap.add_argument("--det-fallback", default="skip", choices=("true", "skip"),
+                    help="failed world: fall back to the true config, or skip the decision")
     ap.add_argument("--width", type=int, default=32)
     ap.add_argument("--batch", type=int, default=512)
     ap.add_argument("--seed", type=int, default=0)
@@ -103,15 +107,23 @@ def main() -> None:
     games = load_games(args.records, args.games, args.seed, args.proc, args.nproc)
     args.out.mkdir(parents=True, exist_ok=True)
     eff_hs = tuple(args.horizons) if args.horizons else (args.horizon,)
-    jobs = ((i, ws.game_gen(rec, record_config(rec), i)) for i, (_, rec) in enumerate(games))
+    jobs = ((i, ws.game_gen(rec, record_config(rec), i, honest=bool(args.honest),
+                            det_tries=args.det_tries, det_fallback=args.det_fallback))
+            for i, (_, rec) in enumerate(games))
     t0 = time.time()
-    tot = {"games": 0, "window": 0, "own": 0, "fired": 0, "agree_window": 0, "agree_own": 0, "bad_replay": 0}
+    tot = {"games": 0, "window": 0, "own": 0, "fired": 0, "agree_window": 0, "agree_own": 0, "bad_replay": 0,
+           "det_proposals": 0, "det_accepted": 0, "det_fallbacks": 0, "det_skipped": 0, "det_s": 0.0}
     agree: dict[str, int] = {}
     agree_n = 0
     conf_sum, set_sum, conf_n = 0.0, 0, 0
     for i, res in ws.run_many(jobs, args.width):
         src, rec = games[i]
         tot["games"] += 1
+        tot["det_proposals"] += res.det_proposals
+        tot["det_accepted"] += res.det_accepted
+        tot["det_fallbacks"] += res.det_fallbacks
+        tot["det_skipped"] += res.det_skipped
+        tot["det_s"] += res.det_s
         if not res.replay_ok:
             tot["bad_replay"] += 1
             continue
@@ -144,7 +156,8 @@ def main() -> None:
             "target_sets": target_sets, "target_conf": target_conf,
             "source": f"window search k={args.k} h={args.horizon} hs=[{hs_str}] samples={args.samples} "
                       f"temp={args.rollout_temp} select={args.select} tie_eps={args.tie_eps} over {args.policy}"
-                      + (f", value {args.value}" if args.value else ""),
+                      + (f", value {args.value}" if args.value else "")
+                      + f" honest={int(args.honest)} det_fallback={args.det_fallback}",
         }  # fmt: skip
         with (args.out / src).open("a") as f:
             f.write(json.dumps(out) + "\n")
@@ -154,12 +167,29 @@ def main() -> None:
     per_key = {kk: f"{v / max(agree_n, 1):.3f}" for kk, v in sorted(agree.items())}
     mean_conf = conf_sum / max(conf_n, 1)
     mean_set = set_sum / max(conf_n, 1)
+    det_extra = ""
+    skip_rate = 0.0
+    if args.honest:
+        props, acc, fb, sk = tot["det_proposals"], tot["det_accepted"], tot["det_fallbacks"], tot["det_skipped"]
+        worlds = acc + fb
+        accept_rate = acc / props if props else 0.0
+        fb_rate = fb / worlds if worlds else 0.0
+        eligible = conf_n + sk
+        skip_rate = sk / eligible if eligible else 0.0
+        det_extra = (f"honest worlds: accept {accept_rate:.3f} ({acc}/{props}), "
+                     f"fallback {fb_rate:.3f} ({fb}/{worlds}), "
+                     f"skipped {skip_rate:.3f} ({sk}/{eligible}); ")
     print(f"done: {tot}; fire rate {tot['fired'] / w:.3f}, agreement with the played move at windows "
           f"{tot['agree_window'] / w:.3f}, own {tot['agree_own'] / max(tot['own'], 1):.3f}; "
           f"per-key agreement with target {per_key}, mean conf {mean_conf:.3f}, mean set {mean_set:.2f}; "
+          f"{det_extra}"
           f"capped rollouts {ws.capped} (scored as losses); "
           f"wall {time.time() - t0:.0f} s",
           flush=True)  # fmt: skip
+    if args.honest and skip_rate > 0.5:
+        print(f"ALERT gen_window: honest skip rate {skip_rate:.3f} > 50% "
+              f"({tot['det_skipped']}/{conf_n + tot['det_skipped']})", flush=True)
+        raise SystemExit(2)
 
 
 if __name__ == "__main__":

@@ -31,6 +31,7 @@ from ygo_zero.engine.actions import Kind
 from ygo_zero.engine.cpp_env import CppEnv
 from ygo_zero.engine.duel import DuelConfig, Engine
 from ygo_zero.eval.loopguard import LoopGuard
+from ygo_zero.search.determinize import Determinizer, SeenTracker, key_rank_of_choice
 from ygo_zero.search.turn1 import _batch, _masked, drive_many
 
 LogitsFn = Callable[[dict[str, np.ndarray]], np.ndarray]
@@ -64,6 +65,11 @@ class WindowResult:
     replay_ok: bool = True
     sets: dict[int, list[int]] = field(default_factory=dict)  # decision index -> target set (option indices)
     conf: dict[int, float] = field(default_factory=dict)  # decision index -> confidence
+    det_proposals: int = 0  # honest worlds proposed (rejection-sampling tries)
+    det_accepted: int = 0  # ... accepted (root obs identical to the truth)
+    det_fallbacks: int = 0  # ... rejected after `tries` (fell back to the true config)
+    det_skipped: int = 0  # ... skipped searches (det_fallback="skip", no world accepted)
+    det_s: float = 0.0  # wall seconds spent drawing honest worlds
 
 
 def cards_score(obs, actor: int, me: int) -> float:
@@ -313,14 +319,29 @@ class WindowSearch:
             return [out[sel][j] for j in range(n_cands)]
         return out
 
-    def game_gen(self, rec: dict, config: DuelConfig, game_seed: int = 0):
-        """Replay a recorded game and search its selected decisions. Returns a WindowResult."""
+    def game_gen(self, rec: dict, config: DuelConfig, game_seed: int = 0,
+                 honest: bool = False, det_tries: int = 8, det_fallback: str = "true"):
+        """Replay a recorded game and search its selected decisions. Returns a WindowResult.
+
+        With `honest`, searched decisions roll out from determinized worlds (as in
+        search/play.py `search_game_gen`): one SeenTracker per seat plus the replayed
+        `choice_keys` feed a per-decision Determinizer whose worlds go to `rollouts_gen`.
+        With `det_fallback="skip"` a decision with no accepted world is not searched.
+        `honest=False` is today's behaviour (bit-identical).
+        """
+        if det_fallback not in ("true", "skip"):
+            raise ValueError(f"det_fallback must be 'true' or 'skip', got {det_fallback!r}")
         rng = random.Random(self.seed * 1_000_003 + game_seed)
         auto_single = rec.get("auto_single", True)
         env = CppEnv(self.engine, config, auto_single)
         obs = env.reset()
         res = WindowResult()
         choices = rec["choices"]
+        trackers = {0: SeenTracker(0), 1: SeenTracker(1)} if honest else None
+        if trackers is not None:
+            trackers[0].update(env)
+            trackers[1].update(env)
+        choice_keys: list = []
         for k, c in enumerate(choices):
             if obs is None:
                 res.replay_ok = False
@@ -340,9 +361,37 @@ class WindowSearch:
                     sel = self._select_key()
                     branches = [(choices[:k] + [x], j, x, s) for j, x in enumerate(cands)
                                 for s in range(self.samples)]
+                    worlds = None
+                    if trackers is not None:
+                        det = Determinizer(
+                            self.engine, config, auto_single, me, choices[:k],
+                            trackers[me].seen, obs,
+                            random.Random(f"{self.seed}:{game_seed}:{k}:det"),
+                            prefix_keys=choice_keys[:k], tries=det_tries,
+                        )
+                        worlds = []
+                        for _ in range(self.samples):
+                            got = det.sample()
+                            if got is None:
+                                if det_fallback == "true":
+                                    worlds.append((config, list(choices[:k])))
+                            else:
+                                worlds.append(got)
+                        res.det_proposals += det.proposals
+                        res.det_accepted += det.accepted
+                        res.det_fallbacks += det.fallbacks
+                        res.det_s += det.seconds
+                        if det_fallback == "skip" and not worlds:
+                            res.det_skipped += 1
+                            worlds = None
+                            choice_keys.append(key_rank_of_choice(obs, int(c)))
+                            obs = env.step(int(c))
+                            trackers[0].update(env)
+                            trackers[1].update(env)
+                            continue
                     scores_all = yield from self.rollouts_gen(
                         config, auto_single, branches, me, turn_start=turn,
-                        game_seed=game_seed, decision_k=k)
+                        game_seed=game_seed, decision_k=k, worlds=worlds)
                     assert isinstance(scores_all, dict)
                     sel_scores = scores_all[sel]
                     best = max(range(len(cands)), key=lambda j: (sel_scores[j], -j))
@@ -370,7 +419,12 @@ class WindowSearch:
                                     "chosen": cands[best],
                                     "played": int(c),
                                     "fired": int(obs["actions"][cands[best], 0]) == Kind.ACTIVATE})  # fmt: skip
+            if trackers is not None:
+                choice_keys.append(key_rank_of_choice(obs, int(c)))
             obs = env.step(int(c))
+            if trackers is not None:
+                trackers[0].update(env)
+                trackers[1].update(env)
         return res
 
     def run_many(self, jobs, width: int = 32):

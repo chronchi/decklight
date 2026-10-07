@@ -75,6 +75,7 @@ class GameResult:
     det_proposals: int = 0  # honest worlds proposed (rejection-sampling tries)
     det_accepted: int = 0  # ... accepted (root obs identical to the truth)
     det_fallbacks: int = 0  # ... rejected after `tries` (fell back to the true config)
+    det_skipped: int = 0  # ... skipped searches (det_fallback="skip", no world accepted)
     det_s: float = 0.0  # wall seconds spent drawing honest worlds
     choice_keys: list = field(default_factory=list)  # (key, rank) of every choice (semantic replay)
 
@@ -93,12 +94,18 @@ def search_game_gen(
     auto_single: bool = True,
     honest: bool = False,
     det_tries: int = 8,
+    det_fallback: str = "true",
 ):
     """Play one live game; S (absolute seat `s_seat`) searches, R plays raw. Returns a GameResult.
 
     With `honest`, S's searched decisions roll out from determinized worlds (everything S has
     not seen re-sampled consistently with S's observation) instead of the true hidden state.
+    With `det_fallback="true"` (default) a world that can't be sampled after `det_tries`
+    proposals falls back to the true config; with `"skip"` only accepted worlds are used, and a
+    decision with no accepted world is not searched (the policy's move is played, `det_skipped`).
     """
+    if det_fallback not in ("true", "skip"):
+        raise ValueError(f"det_fallback must be 'true' or 'skip', got {det_fallback!r}")
     rng = random.Random(search.seed * 1_000_003 + game_seed)
     env = CppEnv(engine, config, auto_single)
     obs = env.reset()
@@ -140,6 +147,7 @@ def search_game_gen(
                         for s in range(search.samples)
                     ]
                     worlds = None
+                    skip_search = False
                     if tracker is not None:
                         det = Determinizer(
                             engine, config, auto_single, me, res.choices, tracker.seen,
@@ -150,30 +158,35 @@ def search_game_gen(
                         for _ in range(search.samples):
                             got = det.sample()
                             if got is None:
-                                worlds.append((config, list(res.choices)))
+                                if det_fallback == "true":
+                                    worlds.append((config, list(res.choices)))
                             else:
                                 worlds.append(got)
                         res.det_proposals += det.proposals
                         res.det_accepted += det.accepted
                         res.det_fallbacks += det.fallbacks
                         res.det_s += det.seconds
-                    scores_all = yield from search.rollouts_gen(
-                        config, auto_single, branches, me, turn_start=turn,
-                        game_seed=game_seed, decision_k=k, worlds=worlds,
-                    )  # fmt: skip
-                    res.search_s += time.perf_counter() - t0
-                    sel_scores = (
-                        scores_all[search._select_key()]
-                        if isinstance(scores_all, dict)
-                        else scores_all
-                    )
-                    best = max(range(len(cands)), key=lambda j: (sel_scores[j], -j))
-                    a = cands[best]
-                    res.n_searched += 1
-                    res.n_branches += len(branches)
-                    res.searched_idx.append(k)
-                    if a != a_pol:
-                        res.n_override += 1
+                        if det_fallback == "skip" and not worlds:
+                            res.det_skipped += 1
+                            skip_search = True
+                    if not skip_search:
+                        scores_all = yield from search.rollouts_gen(
+                            config, auto_single, branches, me, turn_start=turn,
+                            game_seed=game_seed, decision_k=k, worlds=worlds,
+                        )  # fmt: skip
+                        res.search_s += time.perf_counter() - t0
+                        sel_scores = (
+                            scores_all[search._select_key()]
+                            if isinstance(scores_all, dict)
+                            else scores_all
+                        )
+                        best = max(range(len(cands)), key=lambda j: (sel_scores[j], -j))
+                        a = cands[best]
+                        res.n_searched += 1
+                        res.n_branches += len(branches)
+                        res.searched_idx.append(k)
+                        if a != a_pol:
+                            res.n_override += 1
         guard.note(0, key, a)
         if tracker is not None:
             res.choice_keys.append(key_rank_of_choice(obs, a))

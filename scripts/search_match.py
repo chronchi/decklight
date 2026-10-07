@@ -89,6 +89,8 @@ def summarize(out: Path) -> dict:
     worlds_acc = sum(r.get("det_accepted", 0) for r in recs)
     worlds_fb = sum(r.get("det_fallbacks", 0) for r in recs)
     worlds = worlds_acc + worlds_fb
+    skipped = sum(r.get("det_skipped", 0) for r in recs)
+    skip_mode = any(r.get("det_fallback", "true") == "skip" for r in recs) or skipped > 0
     lo, hi = wilson(wins, n)
     by_deck: dict[str, list[float]] = {}
     for r in recs:
@@ -109,6 +111,8 @@ def summarize(out: Path) -> dict:
     if worlds:
         summ["det_accept_rate"] = round(worlds_acc / props, 3) if props else 0.0
         summ["det_fallback_rate"] = round(worlds_fb / worlds, 3)
+    if skipped or skip_mode:
+        summ["det_skipped"] = skipped
     (out / "summary.json").write_text(json.dumps(summ, indent=1))
     print(
         f"S win rate {summ['s_win_rate']} [{summ['ci'][0]}, {summ['ci'][1]}] n={n}; "
@@ -120,10 +124,18 @@ def summarize(out: Path) -> dict:
     if worlds:
         print(f"honest worlds: accept {summ['det_accept_rate']} ({worlds_acc}/{props}), "
               f"fallback {summ['det_fallback_rate']} ({worlds_fb}/{worlds})", flush=True)
+    if skipped or skip_mode:
+        attempted = searched + skipped
+        skip_rate = skipped / attempted if attempted else 0.0
+        print(f"honest skipped searches {skipped}/{attempted} ({skip_rate:.3f})", flush=True)
     for d in sorted(summ["per_deck"]):
         print(f"  {d}: {summ['per_deck'][d]} (n={summ['per_deck_n'][d]})", flush=True)
     # after writing the summary, so a high fallback rate is reported with its numbers (the match is part-oracle)
-    if worlds and worlds_fb / worlds > 0.2:
+    if skip_mode:
+        attempted = searched + skipped
+        if attempted and skipped / attempted > 0.5:
+            fail(f"honest skipped searches {skipped / attempted:.3f} > 50% ({skipped}/{attempted})")
+    elif worlds and worlds_fb / worlds > 0.2:
         fail(f"honest-world fallback rate {worlds_fb / worlds:.3f} > 20% ({worlds_fb}/{worlds})")
     return summ
 
@@ -145,6 +157,8 @@ def main() -> None:
     ap.add_argument("--own-frac", type=float, default=1.0, help="share of S own-turn decisions searched")
     ap.add_argument("--own-turn1", type=int, default=0, choices=(0, 1), help="also search S turn-1 plays")
     ap.add_argument("--det-tries", type=int, default=8, help="rejection-sampling proposals per honest world")
+    ap.add_argument("--det-fallback", default="true", choices=("true", "skip"),
+                    help="failed world: fall back to the true config, or skip the decision")
     ap.add_argument("--honest", type=int, default=0, choices=(0, 1), help="search determinized worlds (honest search)")
     ap.add_argument("--width", type=int, default=32, help="games searched concurrently")
     ap.add_argument("--batch", type=int, default=512, help="max obs per policy forward")
@@ -209,7 +223,7 @@ def main() -> None:
             yield idx, search_game_gen(
                 engine, cfg, ws, s_seat, argmax_select, game_seed=idx,
                 own_turn1=bool(args.own_turn1), conf_skip=args.conf_skip, own_frac=args.own_frac,
-                honest=bool(args.honest), det_tries=args.det_tries,
+                honest=bool(args.honest), det_tries=args.det_tries, det_fallback=args.det_fallback,
             )  # fmt: skip
 
     args.out.mkdir(parents=True, exist_ok=True)
@@ -229,7 +243,8 @@ def main() -> None:
                     "search_s": round(res.search_s, 3),
                     "n_branches": res.n_branches, "n_capped": res.n_capped,
                     "det_proposals": res.det_proposals, "det_accepted": res.det_accepted,
-                    "det_fallbacks": res.det_fallbacks, "det_s": round(res.det_s, 3),
+                    "det_fallbacks": res.det_fallbacks, "det_skipped": res.det_skipped,
+                    "det_fallback": args.det_fallback, "det_s": round(res.det_s, 3),
                 }) + "\n")  # fmt: skip
                 got += 1
                 tot_s += res.n_searched

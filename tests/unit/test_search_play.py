@@ -131,6 +131,21 @@ def test_conf_skip_gates_search(engine):
     assert set(res1.searched_idx) == want
 
 
+def test_honest_skip_skips_searches_and_ends(engine):
+    """honest + det_fallback=skip with det_tries=1: some game skips >= 1 search and still ends."""
+    forward = _tiny_forward()
+    skipped = 0
+    for seed in range(4):
+        res, _ = _play(engine, forward, conf_skip=1.01, own_frac=1.0,
+                       honest=True, det_tries=1, det_fallback="skip", game_seed=seed)
+        assert res.det_proposals > 0
+        assert not res.truncated and res.winner in (0, 1)
+        skipped += res.det_skipped
+        if skipped > 0:
+            break
+    assert skipped > 0, "det_tries=1 never failed to sample a world"
+
+
 def test_summarize_win_rate(tmp_path):
     """--summarize on two fake games-*.jsonl files reports the right S win rate."""
     search_match = _load("search_match")
