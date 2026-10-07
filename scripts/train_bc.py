@@ -79,7 +79,21 @@ def set_loss(logits: torch.Tensor, equiv: torch.Tensor) -> torch.Tensor:
     )
 
 
-def evaluate(model, data, idx, bs, device, amp, set_target=True, hist=0, hist_salient=True, known=False):
+def kl_to_init(logits: torch.Tensor, ref_logits: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
+    """Per-sample KL(pi_init || pi) over legal options only: sum_legal p_ref * (logp_ref - logp).
+
+    All inputs are [B, A]; mask is bool. Computed in float32; illegal entries are masked out of
+    the sum so 0 * -inf never produces NaN.
+    """
+    logp = torch.log_softmax(logits.float().masked_fill(~mask, float("-inf")), dim=-1)
+    logp_ref = torch.log_softmax(ref_logits.float().masked_fill(~mask, float("-inf")), dim=-1)
+    p_ref = logp_ref.exp()
+    diff = torch.where(mask, logp_ref - logp, torch.zeros((), device=logp.device, dtype=logp.dtype))
+    return torch.where(mask, p_ref * diff, torch.zeros((), device=logp.device, dtype=logp.dtype)).sum(-1)
+
+
+def evaluate(model, data, idx, bs, device, amp, set_target=True, hist=0, hist_salient=True, known=False,
+             ref=None):
     model.eval()
     tot = {
         "n": 0, "loss": 0.0, "acc": 0.0, "acc_exact": 0.0,
@@ -91,6 +105,7 @@ def evaluate(model, data, idx, bs, device, amp, set_target=True, hist=0, hist_sa
     has_kind = "kind" in data
     has_turn = "turn" in data
     with torch.no_grad():
+        kl_sum = 0.0
         for obs, act, w, eq, j in batches(data, idx, bs, device, False, None, hist, hist_salient, known):
             with torch.autocast(device.type, dtype=torch.bfloat16, enabled=amp):
                 logits = model(obs)
@@ -110,6 +125,10 @@ def evaluate(model, data, idx, bs, device, amp, set_target=True, hist=0, hist_sa
             tot["acc_exact"] += exact.sum().item()
             tot["n_stated"] += stated.sum().item()
             tot["acc_stated"] += hit[stated].sum().item()
+            if ref is not None:
+                with torch.autocast(device.type, dtype=torch.bfloat16, enabled=amp):
+                    ref_logits = ref(obs)
+                kl_sum += kl_to_init(logits, ref_logits, obs["action_mask"]).sum().item()
             for d, h in zip(data["deck"][j], hit.tolist(), strict=True):
                 per_deck.setdefault(str(d), [0, 0])
                 per_deck[str(d)][0] += 1
@@ -139,6 +158,8 @@ def evaluate(model, data, idx, bs, device, amp, set_target=True, hist=0, hist_sa
     }
     if has_turn:
         rec["per_turn"] = {k: round(per_turn[k][1] / per_turn[k][0], 4) for k in ("t1", "t2-3", "t4+") if k in per_turn}
+    if ref is not None:
+        rec["kl_init"] = kl_sum / n
     return rec
 
 
@@ -255,6 +276,8 @@ def main() -> None:
                     help="per-epoch share of each kind's train samples (<1 subsample, >1 repeat)")
     ap.add_argument("--merge-last", type=int, default=0, help="also evaluate the average of the last K epochs")
     ap.add_argument("--init", type=Path, default=None, help="start from this checkpoint (fine-tune)")
+    ap.add_argument("--kl-init", type=float, default=0.0,
+                    help="KL(pi_init || pi) anchor coef to the --init weights (0 = off)")
     ap.add_argument("--gold-games", type=int, default=None, help="train on the first N gold games only (by number)")
     ap.add_argument("--val-frac-kind", nargs="*", default=None, metavar="KIND=FRAC",
                     help="val share for these kinds' lines (default 0.1 for every kind)")
@@ -268,6 +291,9 @@ def main() -> None:
     args = ap.parse_args()
     if args.set_target and args.label_smoothing:
         ap.error("--set-target and --label-smoothing are mutually exclusive")
+    if args.kl_init and not args.init:
+        print("error: --kl-init requires --init", flush=True)
+        raise SystemExit(2)
     if args.threads:
         torch.set_num_threads(args.threads)
     torch.manual_seed(args.seed)
@@ -300,6 +326,11 @@ def main() -> None:
         state = torch.load(args.init, map_location="cpu")
         state = state.get("model", state)
         model.load_state_dict({k: v.float() if v.is_floating_point() else v for k, v in state.items()})
+    ref = None
+    if args.kl_init:
+        import copy
+
+        ref = copy.deepcopy(model).eval().requires_grad_(False)
     n_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     print(f"params {n_params / 1e6:.2f}M device {device} amp {amp}", flush=True)
     opt = torch.optim.AdamW([p for p in model.parameters() if p.requires_grad], lr=args.lr, weight_decay=args.wd)
@@ -330,7 +361,7 @@ def main() -> None:
         for split in ("val", "holdout"):
             if len(idx[split]):
                 rec[split] = evaluate(model, data, idx[split], args.batch * 2, device, amp, args.set_target,
-                                      args.hist, not args.hist_all, args.known)
+                                      args.hist, not args.hist_all, args.known, ref=ref)
         print(json.dumps(rec), flush=True)
         log.write(json.dumps(rec) + "\n")
         log.flush()
@@ -338,7 +369,7 @@ def main() -> None:
         best_epoch = -1
         torch.save({k: v.half() if v.is_floating_point() else v for k, v in model.state_dict().items()}, args.out / "best.pt")
     for ep in range(args.epochs):
-        run = {"loss": 0.0, "n": 0}
+        run = {"loss": 0.0, "n": 0, "kl": 0.0}
         ep_idx = epoch_train_idx(data, idx["train"], kind_frac, rng)
         for obs, act, w, eq, j in batches(data, ep_idx, args.batch, device, True, rng,
                                             args.hist, not args.hist_all, args.known):
@@ -351,6 +382,11 @@ def main() -> None:
                     logits.float(), act, reduction="none", label_smoothing=args.label_smoothing
                 )
             loss = (per * w).sum() / w.sum()
+            if ref is not None:
+                with torch.no_grad(), torch.autocast(device.type, dtype=torch.bfloat16, enabled=amp):
+                    ref_logits = ref(obs)
+                kl = kl_to_init(logits.float(), ref_logits.float(), obs["action_mask"])
+                loss = loss + args.kl_init * kl.mean()
             opt.zero_grad(set_to_none=True)
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
@@ -358,16 +394,25 @@ def main() -> None:
             sched.step()
             run["loss"] += loss.item() * len(j)
             run["n"] += len(j)
+            if ref is not None:
+                run["kl"] += kl.detach().sum().item()
+        if ref is not None:
+            train_kl = run["kl"] / max(run["n"], 1)
+            if not math.isfinite(train_kl):
+                print(f"ALERT {args.out.name}: KL is NaN", flush=True)
+                raise SystemExit(3)
         if args.merge_last > 1:
             recent = (recent + [{k: v.detach().to("cpu", copy=True) for k, v in model.state_dict().items()}])[-args.merge_last:]
         rec = {"epoch": ep, "time": round(time.time() - t0, 1), "n_train": len(ep_idx), "train_loss": run["loss"] / max(run["n"], 1)}
+        if ref is not None:
+            rec["train_kl"] = train_kl
         if ep == 0:
             rec["args"] = args_rec
         for split in ("val", "holdout"):
             if len(idx[split]):
                 rec[split] = evaluate(
                     model, data, idx[split], args.batch * 2, device, amp, args.set_target,
-                    args.hist, not args.hist_all, args.known,
+                    args.hist, not args.hist_all, args.known, ref=ref,
                 )
         print(json.dumps(rec), flush=True)
         log.write(json.dumps(rec) + "\n")
@@ -401,7 +446,7 @@ def main() -> None:
         for split in ("val", "holdout"):
             if len(idx[split]):
                 rec[split] = evaluate(model, data, idx[split], args.batch * 2, device, amp, args.set_target,
-                                      args.hist, not args.hist_all, args.known)
+                                      args.hist, not args.hist_all, args.known, ref=ref)
         print(json.dumps(rec), flush=True)
         log.write(json.dumps(rec) + "\n")
         log.flush()
