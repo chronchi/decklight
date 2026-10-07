@@ -34,7 +34,7 @@ from ygo_zero.demos.game import _opts  # noqa: E402
 from ygo_zero.engine.cpp_env import CppEnv  # noqa: E402
 from ygo_zero.engine.duel import Engine  # noqa: E402
 from ygo_zero.demos.dataset import record_config  # noqa: E402
-from ygo_zero.eval.turn1 import FIELD_LOCS, config_from_dict, my_field  # noqa: E402
+from ygo_zero.eval.turn1 import FIELD_LOCS, actor_field_of, config_from_dict, my_field  # noqa: E402
 
 
 def _turn(obs) -> int:
@@ -43,40 +43,39 @@ def _turn(obs) -> int:
 
 def _p0_field_of(obs, player: int) -> int:
     """Player 0's field cards from an obs viewed by `player` (run_turn1 end-field measure)."""
-    c, m = obs["cards"], obs["card_mask"]
-    ctrl = 0 if player == 0 else 1
-    return int(sum(1 for j in np.flatnonzero(m) if int(c[j, 1]) in FIELD_LOCS and int(c[j, 3]) == ctrl))
+    return actor_field_of(obs, player, 0)
+
+
+def group_key(r: dict) -> tuple:
+    """One selection group: (deck, source, start) (old rows lack `start`, so `hand` is used)."""
+    return (r["deck"], r["source"], r.get("start", r["hand"]),
+            int(r.get("actor", 0)), int(r.get("turn_start", 1)))
 
 
 def replay_line(engine: Engine, cfg_dict: dict, choices: list[int],
-                auto_single: bool) -> tuple[list[int], list[int], int]:
-    """Replay a choice list through turn 1 (stops at turn 2 / game over, like replay_turn1).
+                auto_single: bool, actor: int = 0, turn_start: int = 1) -> tuple[list[int], list[int], int]:
+    """Replay a choice list (stops when the turn after `turn_start` starts, like replay_turn).
 
-    Returns (actors, turns, field) with the end field measured exactly the way turn1_lines does.
+    Returns (actors, turns, field) with the end field measured from the actor's view (for
+    actor 0 / turn_start 1 this is exactly the old turn1_lines measure).
     Raises on an illegal choice: the line must replay exactly.
     """
     env = CppEnv(engine, record_config({"config": cfg_dict}), auto_single)  # the BC replay (iter_samples) uses record_config
     obs = env.reset()
     actors, turns, last = [], [], 0
     for c in choices:
-        if obs is None or _turn(obs) > 1:
+        if obs is None or _turn(obs) > int(turn_start):
             break
         actors.append(int(env.player))
         turns.append(_turn(obs))
-        if env.player == 0:
-            last = my_field(obs)
+        if env.player == int(actor):
+            last = actor_field_of(obs, env.player, int(actor))
         if not 0 <= int(c) < len(_opts(obs)):
             raise ValueError(f"choice {c} illegal with {len(_opts(obs))} options (player {env.player})")
         obs = env.step(int(c))
     fld = last
     if obs is not None:
-        if _turn(obs) > 1:
-            fld = _p0_field_of(obs, env.player)
-        elif env.player == 1:
-            c, m = obs["cards"], obs["card_mask"]
-            fld = int(sum(1 for j in np.flatnonzero(m) if int(c[j, 1]) in FIELD_LOCS and int(c[j, 3]) == 1))
-        else:
-            fld = my_field(obs)
+        fld = actor_field_of(obs, env.player, int(actor))
     return actors, turns, int(fld)
 
 
@@ -95,7 +94,7 @@ def read_rows(specs: list[str]) -> list[dict]:
 def rank_key(by: str, row: dict) -> tuple:
     if by == "rollout":
         return (-row["rollout"], row["sample"])
-    return (-row["v_p0"], -row["field"]) if by == "v" else (-row["field"], -row["v_p0"])
+    return (-_vend(row), -row.get("field", 0)) if by == "v" else (-row.get("field", 0), -_vend(row))
 
 
 def _has_rollout(row: dict) -> bool:
@@ -107,16 +106,16 @@ def qualifies(by: str, best: dict, greedy: dict, min_dv: float, min_dfield: floa
               min_dr: float = 0.0) -> bool:
     if by == "rollout":
         return bool(best["rollout"] > greedy["rollout"] + min_dr)
-    dv = best["v_p0"] - greedy["v_p0"]
-    df = best["field"] - greedy["field"]
+    dv = _vend(best) - _vend(greedy)
+    df = best.get("field", 0) - greedy.get("field", 0)
     if by == "field":
-        return bool(best["field"] > greedy["field"] and best["v_p0"] >= greedy["v_p0"])
+        return bool(best.get("field", 0) > greedy.get("field", 0) and _vend(best) >= _vend(greedy))
     return bool(dv >= min_dv and df >= min_dfield)
 
 
 def select_group(rows: list[dict], by: str, min_dv: float, min_dfield: float, top: int,
                  min_dr: float = 0.0) -> list[dict]:
-    """Best qualifying samples of one (deck, source, hand) group, rank order, distinct choices."""
+    """Best qualifying samples of one (deck, source, start) group, rank order, distinct choices."""
     if by == "rollout":
         greedy = [r for r in rows if r["kind"] == "greedy" and not r["stuck"] and _has_rollout(r)]
         cands = [r for r in rows if r["kind"] == "sample" and not r["stuck"] and _has_rollout(r)]
@@ -140,26 +139,41 @@ def select_group(rows: list[dict], by: str, min_dv: float, min_dfield: float, to
     return kept
 
 
+def _vend(row: dict) -> float:
+    v = row.get("v_p0", row.get("v_actor"))
+    return float(v) if isinstance(v, (int, float)) and v == v else 0.0
+
+
 def make_record(deck: str, best: dict, greedy: dict, by: str,
                 actors: list[int], turns: list[int]) -> dict:
-    game_id = f"si-{deck}-{best['source']}-h{best['hand']}-s{best['sample']}"
+    actor = int(best.get("actor", 0))
+    prefix_len = int(best.get("prefix_len", 0))
+    start = best.get("start", f"h{best['hand']}")
+    game_id = f"si-{deck}-{best['source']}-{start}-s{best['sample']}"
+    opp = best.get("opp", deck)
+    decks = [deck, opp] if actor == 0 else [opp, deck]
+    src_tag = "turn1" if best.get("source") in ("random", "verified", "turn1") else best.get("source")
+    labels = ["self" if (k >= prefix_len and a == actor) else "opp"
+              for k, a in enumerate(actors)]
     rec = {
         "game_id": game_id,
         "line_id": f"{deck}/{game_id}",
         # lines.jsonl rows carry card lists, not the opponent deck's name; the opp label is
-        # never trained (SELFIMIT_LABEL_WEIGHT), so only decks[0] matters.
-        "decks": [deck, best.get("opp", deck)],
+        # never trained (SELFIMIT_LABEL_WEIGHT), so only decks[actor] matters.
+        "decks": decks,
         "config": best["config"],
         "auto_single": bool(best.get("auto_single", True)),
         "choices": [int(c) for c in best["choices"]],
-        "labels": ["self" if a == 0 else "opp" for a in actors],
+        "labels": labels,
         "actors": [int(a) for a in actors],
         "turns": [int(t) for t in turns],
+        "actor": actor,
+        "prefix_len": prefix_len,
         "greedy_field": int(greedy["field"]),
-        "greedy_v": float(greedy["v_p0"]),
+        "greedy_v": _vend(greedy),
         "end_field": int(best["field"]),
-        "end_v": float(best["v_p0"]),
-        "source": f"turn1 self-imitation {by}",
+        "end_v": _vend(best),
+        "source": f"{src_tag} self-imitation {by}",
     }
     if by == "rollout":  # the selection metric, for analysis (never trained)
         rec["rollout"] = float(best["rollout"])
@@ -193,7 +207,7 @@ def main(argv: list[str] | None = None) -> int:
     for r in ok:
         if r.get("kind") == "expert":  # human/LLM lines already in the BC data
             continue
-        groups.setdefault((r["deck"], r["source"], r["hand"]), []).append(r)
+        groups.setdefault(group_key(r), []).append(r)
 
     engine = Engine()
     per_deck: dict[str, list[dict]] = {}
@@ -207,19 +221,20 @@ def main(argv: list[str] | None = None) -> int:
             try:
                 actors, turns, fld = replay_line(
                     engine, best["config"], [int(c) for c in best["choices"]],
-                    bool(best.get("auto_single", True)))
+                    bool(best.get("auto_single", True)), int(best.get("actor", 0)),
+                    int(best.get("turn_start", 1)))
             except Exception as e:  # noqa: BLE001 - one bad line must not kill selection
                 dropped += 1
-                print(f"select_turn1_lines: drop {deck}/{best['source']}/h{best['hand']}/s{best['sample']}: "
+                print(f"select_turn1_lines: drop {deck}/{best['source']}/{best.get('start', best['hand'])}/s{best['sample']}: "
                       f"replay failed: {e!r}"[:200], flush=True)
                 continue
             if fld != int(best["field"]):
                 dropped += 1
-                print(f"select_turn1_lines: drop {deck}/{best['source']}/h{best['hand']}/s{best['sample']}: "
+                print(f"select_turn1_lines: drop {deck}/{best['source']}/{best.get('start', best['hand'])}/s{best['sample']}: "
                       f"field mismatch replay={fld} stored={best['field']}", flush=True)
                 continue
             per_deck.setdefault(deck, []).append(make_record(deck, best, greedy, args.by, actors, turns))
-            dvs.append(float(best["v_p0"]) - float(greedy["v_p0"]))
+            dvs.append(_vend(best) - _vend(greedy))
             dfs.append(int(best["field"]) - int(greedy["field"]))
 
     n_kept = sum(len(v) for v in per_deck.values())
@@ -233,9 +248,13 @@ def main(argv: list[str] | None = None) -> int:
 
     args.out.mkdir(parents=True, exist_ok=True)
     for deck in sorted(per_deck):
-        with open(args.out / f"p0-{deck}.jsonl", "w") as f:
-            for rec in per_deck[deck]:
-                f.write(json.dumps(rec) + "\n")
+        by_actor: dict[int, list[dict]] = {}
+        for rec in per_deck[deck]:
+            by_actor.setdefault(int(rec.get("actor", 0)), []).append(rec)
+        for a, recs in sorted(by_actor.items()):
+            with open(args.out / f"p{a}-{deck}.jsonl", "w") as f:
+                for rec in recs:
+                    f.write(json.dumps(rec) + "\n")
     summary = {
         "by": args.by, "min_dv": args.min_dv, "min_dfield": args.min_dfield, "min_dr": args.min_dr,
         "top": args.top,

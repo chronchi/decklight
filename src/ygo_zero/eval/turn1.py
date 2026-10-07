@@ -358,3 +358,198 @@ def fail_loud(problems: list[str], out_dir: Path) -> "SystemExit":
             print(line, file=sys.stderr, flush=True)
             f.write(line + "\n")
     return SystemExit(3)
+
+
+# --- whole-turn lines (scripts/turn_lines.py): any start state, active opponent ---
+
+def turn_player_of(obs, player: int) -> int:
+    """The turn player at `obs` (absolute seat): the acting player when global[5] says so."""
+    return int(player) if int(obs["global"][5]) == 1 else 1 - int(player)
+
+
+def actor_field_of(obs, player: int, actor: int) -> int:
+    """Field cards (mzone + szone) controlled by `actor` from an obs seen by `player`."""
+    c, m = obs["cards"], obs["card_mask"]
+    ctrl = 0 if int(player) == int(actor) else 1
+    return int(sum(1 for i in np.flatnonzero(m) if int(c[i, 1]) in FIELD_LOCS and int(c[i, 3]) == ctrl))
+
+
+def lp_diff_of(obs, player: int, actor: int) -> int:
+    """LP(actor) - LP(opponent) from an obs seen by `player`."""
+    g = obs["global"]
+    if int(player) == int(actor):
+        return int(g[0]) - int(g[1])
+    return int(g[1]) - int(g[0])
+
+
+def dags_config(row: dict) -> DuelConfig:
+    """A DuelConfig for a DAGS starts.jsonl row (mains already in final shuffled order)."""
+    from ygo_zero.demos.dataset import record_config as _rc
+
+    if isinstance(row.get("config"), dict) and "deck0_main" in row["config"]:
+        return _rc({"config": row["config"]})
+    setup = tuple(Placement(*p) for p in row.get("setup", []))
+    return DuelConfig(
+        Deck(tuple(row["main0"]), tuple(row["extra0"])),
+        Deck(tuple(row["main1"]), tuple(row["extra1"])),
+        seed=int(row["seed"]), lp=int(row.get("lp", 8000)), hand=int(row.get("hand", 5)),
+        draw=int(row.get("draw", 1)), setup=setup, shuffle=False,
+    )  # fmt: skip
+
+
+def replay_prefix(engine: Engine, cfg: DuelConfig, prefix: list[int], auto_single: bool = True):
+    """Replay a prefix; returns (env, obs). Raises on game-over or an illegal choice."""
+    from ygo_zero.demos.game import _opts
+
+    env = CppEnv(engine, cfg, auto_single)
+    obs = env.reset()
+    if obs is None:
+        raise ValueError("game ended before the first decision")
+    for c in prefix:
+        if obs is None:
+            raise ValueError("game ended inside the prefix")
+        if not 0 <= int(c) < len(_opts(obs)):
+            raise ValueError(f"prefix choice {c} illegal with {len(_opts(obs))} options")
+        obs = env.step(int(c))
+    if obs is None:
+        raise ValueError("game ended at the end of the prefix")
+    return env, obs
+
+
+def run_turn(envs: list[CppEnv], pols: list, actor: int, turn_start: int,
+             opp: str = "policy", opp_pol=None, cap: int = CAP) -> list[dict]:
+    """One full turn for `actor` (turn number `turn_start`) across envs in lockstep.
+
+    Every env is already positioned at the start state (prefix replayed); its next turn number
+    must be `turn_start`. The actor's decisions come from `pols[i]` (greedy or sampler); every
+    other seat's decisions come from `opp_pol` greedily (opp="policy") or the passive responder
+    (opp="passive"). Stops per env at the next turn, the duel end, or `cap` actor+opp decisions.
+    Returns per env the same end-state dict as run_turn1 plus actor-view measures and the new
+    (post-prefix) choices.
+    """
+    raise RuntimeError("run_turn needs current observations: use run_turn_from_obs")
+
+
+def run_turn_from_obs(envs, obs_list, pols: list, actor: int, turn_start: int,
+                      opp: str = "policy", opp_pol=None, passive=None, cap: int = CAP) -> list[dict]:
+    """Lockstep turn play from already-observed states (see run_turn)."""
+    import numpy as np
+
+    if passive is None:
+        passive = Responder(0)
+    for p in {id(p): p for p in ([*pols] + ([opp_pol] if opp_pol is not None else []))}.values():
+        if getattr(p, "guard", None) is not None:
+            p.guard.reset()
+    obs = list(obs_list)
+    n_total = [0] * len(envs)
+    n_actor = [0] * len(envs)
+    n_opp = [0] * len(envs)
+    n_opp_options = [0] * len(envs)  # non-actor decisions with a real choice (>1 option)
+    last_field = [actor_field_of(o, e.player, actor) if o is not None else 0
+                  for o, e in zip(obs, envs, strict=True)]
+    last_lp = [lp_diff_of(o, e.player, actor) if o is not None else 0
+               for o, e in zip(obs, envs, strict=True)]
+    choices: list[list[int]] = [[] for _ in envs]
+    live = [True] * len(envs)
+    for i, (o, e) in enumerate(zip(obs, envs, strict=True)):
+        if o is None or _turn(o) != int(turn_start):
+            live[i] = False
+    while any(live):
+        actor_groups: dict[int, list[int]] = {}
+        opp_idx: list[int] = []
+        for i, e in enumerate(envs):
+            if not live[i]:
+                continue
+            if obs[i] is None or _turn(obs[i]) != int(turn_start) or n_total[i] >= cap:
+                live[i] = False
+                continue
+            if e.player == actor:
+                last_field[i] = actor_field_of(obs[i], e.player, actor)
+                last_lp[i] = lp_diff_of(obs[i], e.player, actor)
+                actor_groups.setdefault(id(pols[i]), []).append(i)
+            elif opp == "policy" and opp_pol is not None:
+                n_opp_options[i] += int(int(obs[i]["action_mask"].sum()) > 1)
+                opp_idx.append(i)
+            else:
+                n_opp_options[i] += int(int(obs[i]["action_mask"].sum()) > 1)
+                c = passive.passive(obs[i])
+                choices[i].append(int(c))
+                n_total[i] += 1
+                n_opp[i] += 1
+                obs[i] = e.step(int(c))
+        # one batched forward per distinct actor policy, plus one for the opponent policy
+        for pid, idx in actor_groups.items():
+            pol = next(p for p in pols if id(p) == pid)
+            buf = {k: np.stack([obs[i][k] for i in idx]) for k in obs[idx[0]]}
+            acts = pol(buf, np.arange(len(idx)), slots=np.array(idx))
+            for i, a in zip(idx, acts, strict=True):
+                assert envs[i].player == actor
+                n_total[i] += 1
+                n_actor[i] += 1
+                choices[i].append(int(a))
+                obs[i] = envs[i].step(int(a))
+        if opp_idx:
+            buf = {k: np.stack([obs[i][k] for i in opp_idx]) for k in obs[opp_idx[0]]}
+            acts = opp_pol(buf, np.arange(len(opp_idx)), slots=np.array(opp_idx))
+            for i, a in zip(opp_idx, acts, strict=True):
+                assert envs[i].player != actor
+                n_total[i] += 1
+                n_opp[i] += 1
+                choices[i].append(int(a))
+                obs[i] = envs[i].step(int(a))
+    out = []
+    for i, e in enumerate(envs):
+        fld, ofld, lp = last_field[i], 0, last_lp[i]
+        if obs[i] is not None:
+            fld = actor_field_of(obs[i], e.player, actor)
+            ofld = actor_field_of(obs[i], e.player, 1 - actor)
+            lp = lp_diff_of(obs[i], e.player, actor)
+        end = None if obs[i] is None else {k: np.array(v, copy=True) for k, v in obs[i].items()}
+        out.append({
+            "choices": choices[i], "actor_decisions": int(n_actor[i]),
+            "p0_decisions": int(n_actor[i]) if int(actor) == 0 else 0,
+            "opp_decisions": int(n_opp[i]), "opp_options": int(n_opp_options[i]),
+            "field": int(fld), "opp_field": int(ofld), "lp_diff": int(lp),
+            "stuck": bool(n_total[i] >= cap), "end_obs": end,
+            "winner": None if obs[i] is not None else e.winner, "player": e.player,
+        })
+    return out
+
+
+def replay_turn(engine: Engine, cfg: DuelConfig, choices: list[int], actor: int, turn_start: int,
+                auto_single: bool = True) -> dict:
+    """Replay a full choice list (prefix + turn) until the turn after `turn_start` starts.
+
+    Returns {actors, turns, field, opp_field, lp_diff, actor_decisions} with fields measured from
+    the actor's view (like run_turn_from_obs). Raises on an illegal choice.
+    """
+    from ygo_zero.demos.game import _opts
+
+    env = CppEnv(engine, cfg, auto_single)
+    obs = env.reset()
+    actors, turns, last_f, last_o, last_lp, n_actor = [], [], 0, 0, 0, 0
+    for c in choices:
+        if obs is None or _turn(obs) > int(turn_start):
+            break
+        actors.append(int(env.player))
+        turns.append(_turn(obs))
+        if env.player == actor:
+            last_f = actor_field_of(obs, env.player, actor)
+            last_lp = lp_diff_of(obs, env.player, actor)
+            n_actor += 1
+        n = len(_opts(obs))
+        if not 0 <= int(c) < n:
+            raise ValueError(f"choice {c} illegal with {n} options (player {env.player})")
+        obs = env.step(int(c))
+    # NOTE: choices from earlier turns (< turn_start, the prefix) are context: they are replayed
+    # and recorded above exactly like the turn's own decisions; the caller labels them.
+    fld, ofld, lp = last_f, last_o, last_lp
+    if obs is not None:
+        fld = actor_field_of(obs, env.player, actor)
+        ofld = actor_field_of(obs, env.player, 1 - actor)
+        lp = lp_diff_of(obs, env.player, actor)
+    end = None if obs is None else {k: np.array(v, copy=True) for k, v in obs.items()}
+    return {"actors": actors, "turns": turns, "field": int(fld), "opp_field": int(ofld),
+            "lp_diff": int(lp), "actor_decisions": int(n_actor),
+            "p0_decisions": int(n_actor) if int(actor) == 0 else 0,
+            "end_obs": end, "winner": None if obs is not None else env.winner, "player": env.player}
