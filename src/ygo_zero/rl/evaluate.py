@@ -71,7 +71,7 @@ def run_eval(
     if not no_ygoagent:
         from ygo_zero.eval.ygoagent import YgoAgentPolicy
 
-        ga = YgoAgentPolicy(seed=3)
+        ga = YgoAgentPolicy(seed=3, workers=8)  # interpreter pool: same moves, ~3x faster (NOTEBOOK 2026-10-07)
 
     res: dict = {"iter": it, "eval": {}}
     pairs = [(i, j) for i in range(len(ev_decks)) for j in range(len(ev_decks)) if i != j]

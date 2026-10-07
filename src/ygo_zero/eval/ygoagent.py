@@ -1297,6 +1297,7 @@ class YgoAgentPolicy:
         code_list_path: str | Path = CODE_LIST_PATH,
         seed: int = 0,
         sample: bool = False,
+        workers: int = 1,
     ) -> None:
         from ai_edge_litert.interpreter import Interpreter  # lazy: unit tests must not need it
 
@@ -1338,6 +1339,21 @@ class YgoAgentPolicy:
         self._out_h, self._out_c = hiddens[0]["index"], hiddens[1]["index"]
         self._out_probs = probs[0]["index"]
         self._states: dict[tuple[int, int], tuple[np.ndarray, np.ndarray]] = {}
+        # workers > 1: a pool of single-threaded batch-1 interpreters (the 0546 graph cannot be resized to a batch:
+        # XNNPack refuses and the plain kernels hit a fixed RESHAPE). invoke() releases the GIL, so rows run in
+        # parallel; measured 4.4 -> 1.35 ms/row invoke with 4-16 workers on a 4090 box (NOTEBOOK 2026-10-07).
+        self.workers = max(1, int(workers))
+        self._pool = None
+        self._interps = [self._interp]
+        if self.workers > 1:
+            from concurrent.futures import ThreadPoolExecutor
+
+            self._interps = []
+            for _ in range(self.workers):
+                it = Interpreter(model_content=blob, num_threads=1)
+                it.allocate_tensors()
+                self._interps.append(it)
+            self._pool = ThreadPoolExecutor(self.workers, thread_name_prefix="ygoagent")
 
     def _state(self, key: tuple[int, int]) -> tuple[np.ndarray, np.ndarray]:
         state = self._states.get(key)
@@ -1378,45 +1394,20 @@ class YgoAgentPolicy:
             keys = np.asarray(keys)
             assert len(keys) == len(rows), (len(keys), len(rows))
             game_of = lambda n, _r: int(keys[n])  # noqa: E731
+        keys_rc = [(game_of(n, int(r)), int(buf["player"][int(r)])) for n, r in enumerate(rows)]
+        if self._pool is None or len(rows) <= 1:
+            scored = [self._score(self._interp, buf, int(r), key) for r, key in zip(rows, keys_rc)]
+        else:
+            chunks = np.array_split(np.arange(len(rows)), min(self.workers, len(rows)))
+
+            def work(w: int) -> list:
+                it = self._interps[w]
+                return [self._score(it, buf, int(rows[n]), keys_rc[n]) for n in chunks[w]]
+
+            scored = [x for part in self._pool.map(work, range(len(chunks))) for x in part]
+        # Sampling stays on the calling thread, in row order: identical draws for any `workers`.
         out = np.empty(len(rows), np.int32)
-        for n, r in enumerate(rows):
-            r = int(r)
-            key = (game_of(n, r), int(buf["player"][r]))
-            h, c = self._state(key)
-            cards_enc, index_map = encode_cards(buf["cards"][r], self.code_to_id)
-            n_options = int(buf["action_mask"][r].sum())
-            self._interp.set_tensor(self._in_h, h)
-            self._interp.set_tensor(self._in_c, c)
-            self._interp.set_tensor(
-                self._in_actions,
-                np.ascontiguousarray(
-                    encode_actions(buf["actions"][r], n_options, index_map, self.code_to_id).reshape(
-                        1, MAX_ACTIONS, N_ACTION_FEATURES
-                    )
-                ),
-            )
-            self._interp.set_tensor(
-                self._in_cards, np.ascontiguousarray(cards_enc.reshape(1, N_CARDS, N_CARD_FEATURES))
-            )
-            self._interp.set_tensor(
-                self._in_global,
-                np.ascontiguousarray(encode_global(buf["global"][r]).reshape(1, N_GLOBAL_FEATURES)),
-            )
-            self._interp.set_tensor(
-                self._in_hist,
-                np.ascontiguousarray(
-                    encode_history(buf["history"][r], buf["history_mask"][r], self.code_to_id).reshape(
-                        1, N_HISTORY_ACTIONS, H_ACTION_FEATURES
-                    )
-                ),
-            )
-            self._interp.invoke()
-            h2 = np.array(self._interp.get_tensor(self._out_h), np.float32)
-            c2 = np.array(self._interp.get_tensor(self._out_c), np.float32)
-            self._states[key] = (h2, c2)
-            k = min(n_options, MAX_ACTIONS)
-            p = np.asarray(self._interp.get_tensor(self._out_probs), np.float32)[0, :k]
-            ok = scorable_options(int(buf["global"][r][21]), buf["actions"][r][:, 0], n_options)
+        for n, (p, ok, k) in enumerate(scored):
             if self.sample and np.isfinite(p).all() and float(p[ok].sum()) > 0:
                 q = p.copy()
                 q[~ok] = 0
@@ -1425,3 +1416,41 @@ class YgoAgentPolicy:
                 q = np.where(ok, p, -np.inf)
                 out[n] = int(np.argmax(q)) if k else 0
         return out
+
+    def _score(self, interp, buf: dict[str, np.ndarray], r: int,
+               key: tuple[int, int]) -> tuple[np.ndarray, np.ndarray, int]:
+        """One row through `interp`: updates the LSTM state of `key`, returns (probs[:k], scorable mask, k)."""
+        h, c = self._state(key)
+        cards_enc, index_map = encode_cards(buf["cards"][r], self.code_to_id)
+        n_options = int(buf["action_mask"][r].sum())
+        interp.set_tensor(self._in_h, h)
+        interp.set_tensor(self._in_c, c)
+        interp.set_tensor(
+            self._in_actions,
+            np.ascontiguousarray(
+                encode_actions(buf["actions"][r], n_options, index_map, self.code_to_id).reshape(
+                    1, MAX_ACTIONS, N_ACTION_FEATURES
+                )
+            ),
+        )
+        interp.set_tensor(self._in_cards, np.ascontiguousarray(cards_enc.reshape(1, N_CARDS, N_CARD_FEATURES)))
+        interp.set_tensor(
+            self._in_global, np.ascontiguousarray(encode_global(buf["global"][r]).reshape(1, N_GLOBAL_FEATURES))
+        )
+        interp.set_tensor(
+            self._in_hist,
+            np.ascontiguousarray(
+                encode_history(buf["history"][r], buf["history_mask"][r], self.code_to_id).reshape(
+                    1, N_HISTORY_ACTIONS, H_ACTION_FEATURES
+                )
+            ),
+        )
+        interp.invoke()
+        self._states[key] = (
+            np.array(interp.get_tensor(self._out_h), np.float32),
+            np.array(interp.get_tensor(self._out_c), np.float32),
+        )
+        k = min(n_options, MAX_ACTIONS)
+        p = np.asarray(interp.get_tensor(self._out_probs), np.float32)[0, :k].copy()
+        ok = scorable_options(int(buf["global"][r][21]), buf["actions"][r][:, 0], n_options)
+        return p, ok, k
