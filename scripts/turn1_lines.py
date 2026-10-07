@@ -83,17 +83,20 @@ def _row(deck, split, hand, source, kind, sample, cfg_dict, res, v, train_ok, au
 
 
 def _deck_task(task: dict) -> list[dict]:
-    """All rows for one deck: H random hands (greedy + K samples) + verified records (greedy + K + expert)."""
+    """Rows of one unit of work: one random hand (greedy + K samples) or one verified record (greedy + K + expert).
+
+    Units are single hands so the pool has no idle tail and results stream to disk as they finish."""
     from ygo_zero.demos.dataset import record_config
 
+    t0 = time.time()
     cfg, engine = _W["cfg"], _W["engine"]
     deck, split = task["deck"], task["split"]
-    H, K, S, train_ok = cfg["hands"], cfg["k"], cfg["seed"], task["train_ok"]
-    table = {name: Deck(tuple(m), tuple(e)) for name, (m, e) in task["table"].items()}
-    names = sorted(table)
+    K, S, train_ok = cfg["k"], cfg["seed"], task["train_ok"]
     rows: list[dict] = []
-    for h in range(H):
-        opp = opp_for(names, deck, S, h)
+    if task["source"] == "random":
+        h = task["hand"]
+        table = {name: Deck(tuple(m), tuple(e)) for name, (m, e) in task["table"].items()}
+        opp = opp_for(sorted(table), deck, S, h)
         dc = hand_config(table[deck], table[opp], stable_seed(S, deck, h))
         envs = [CppEnv(engine, dc) for _ in range(1 + K)]
         _W["sampler"].rng = np.random.default_rng(stable_seed(S, deck, h, "sample", "random"))
@@ -103,29 +106,30 @@ def _deck_task(task: dict) -> list[dict]:
         rows.append(_row(deck, split, h, "random", "greedy", -1, cd, res[0], vals[0], train_ok))
         for j in range(K):
             rows.append(_row(deck, split, h, "random", "sample", j, cd, res[1 + j], vals[1 + j], train_ok))
-    if split in ("train", "holdout"):
-        for i, rec in enumerate(verified_records(deck, H)):
-            dc = record_config(rec)
-            auto = rec.get("auto_single", True)
-            try:
-                envs = [CppEnv(engine, dc, auto) for _ in range(1 + K)]
-            except Exception:  # noqa: BLE001 - an unreadable record config skips the record
-                continue
+            rows[-1]["opp"] = opp
+        rows[0]["opp"] = opp
+    else:
+        i, rec = task["hand"], task["rec"]
+        dc = record_config(rec)
+        auto = rec.get("auto_single", True)
+        try:
+            envs = [CppEnv(engine, dc, auto) for _ in range(1 + K)]
             _W["sampler"].rng = np.random.default_rng(stable_seed(S, deck, i, "sample", "verified"))
             res = run_turn1(envs, [_W["greedy"]] + [_W["sampler"]] * K)
-            try:
-                exp = replay_turn1(engine, dc, [int(c) for c in rec["choices"]], auto)
-                exp["choices"] = [int(c) for c in rec["choices"]]
-            except Exception:  # noqa: BLE001 - a record that no longer replays is skipped
-                continue
-            vals = _score(res + [exp])
-            cd = rec["config"]
-            rows.append(_row(deck, split, i, "verified", "greedy", -1, cd, res[0], vals[0], train_ok, auto))
-            for j in range(K):
-                rows.append(_row(deck, split, i, "verified", "sample", j, cd, res[1 + j], vals[1 + j], train_ok, auto))
-            exp_row = _row(deck, split, i, "verified", "expert", -1, cd, exp, vals[-1], train_ok, auto)
-            exp_row["stuck"] = False
-            rows.append(exp_row)
+            exp = replay_turn1(engine, dc, [int(c) for c in rec["choices"]], auto)
+            exp["choices"] = [int(c) for c in rec["choices"]]
+        except Exception:  # noqa: BLE001 - a record that no longer replays is skipped
+            return []
+        vals = _score(res + [exp])
+        cd = rec["config"]
+        rows.append(_row(deck, split, i, "verified", "greedy", -1, cd, res[0], vals[0], train_ok, auto))
+        for j in range(K):
+            rows.append(_row(deck, split, i, "verified", "sample", j, cd, res[1 + j], vals[1 + j], train_ok, auto))
+        exp_row = _row(deck, split, i, "verified", "expert", -1, cd, exp, vals[-1], train_ok, auto)
+        exp_row["stuck"] = False
+        rows.append(exp_row)
+    for r in rows:
+        r["secs"] = round(time.time() - t0, 1)
     return rows
 
 
@@ -188,15 +192,43 @@ def main(argv: list[str] | None = None) -> int:
     wcfg = {"ckpt": str(args.ckpt), "critic": str(args.critic), "emb": str(args.emb),
             "seed": args.seed, "hands": args.hands, "k": args.k,
             "threads": args.threads, "device": args.device}
-    tasks = [{"deck": name, "split": split, "train_ok": train_ok, "table": table} for name, _ in decks]
+    tasks = []
+    for h in range(args.hands):  # hand-major: every deck gets its first hands early (milestone check)
+        for name, _ in decks:
+            tasks.append({"deck": name, "split": split, "train_ok": train_ok, "table": table, "source": "random",
+                          "hand": h})
+    if split in ("train", "holdout"):
+        for name, _ in decks:
+            for i, rec in enumerate(verified_records(name, args.hands)):
+                tasks.append({"deck": name, "split": split, "train_ok": train_ok, "source": "verified", "hand": i,
+                              "rec": rec})
+    args.out.mkdir(parents=True, exist_ok=True)
+    part = open(args.out / "lines.partial.jsonl", "w")
+    rows: list[dict] = []
+
+    def take(res: list[dict]) -> None:
+        rows.extend(res)
+        for r in res:
+            part.write(json.dumps(r) + "\n")
+        part.flush()
+        if res:
+            r0 = res[0]
+            print(f"PROGRESS {len(rows)} rows, task {take.n + 1}/{len(tasks)}: {r0['deck']} {r0['source']} "
+                  f"h{r0['hand']} {r0['secs']} s, greedy field {r0['field']}, {time.time() - t0:.0f} s total",
+                  flush=True)
+        take.n += 1
+
+    take.n = 0
     if args.procs <= 1:
         _init(wcfg)
-        nested = [_deck_task(t) for t in tasks]
+        for t in tasks:
+            take(_deck_task(t))
     else:
         ctx = mp.get_context("spawn")
         with ctx.Pool(min(args.procs, len(tasks)), initializer=_init, initargs=(wcfg,)) as pool:
-            nested = pool.map(_deck_task, tasks, chunksize=1)
-    rows = [r for part in nested for r in part]
+            for res in pool.imap_unordered(_deck_task, tasks, chunksize=1):
+                take(res)
+    part.close()
     rows.sort(key=lambda r: (r["deck"], r["source"], r["hand"],
                              {"greedy": 0, "sample": 1, "expert": 2}[r["kind"]], r["sample"]))
     problems: list[str] = []

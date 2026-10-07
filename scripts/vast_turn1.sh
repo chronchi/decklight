@@ -26,12 +26,18 @@ USAGE_PID=$!
 RC=0
 for split in train holdout gauntlet; do
   MD=0; [ "$split" = train ] && MD="${MAX_TRAIN:-40}"
+  # every 5 min the latest per-hand PROGRESS line goes to $OUT/PROGRESS (relayed into launcher.log by vast_job)
+  ( while sleep 300; do tail -n 200 "$OUT/$split.txt" 2>/dev/null | grep '^PROGRESS' | tail -1 | sed "s/^PROGRESS/PROGRESS $split/" >> "$OUT/PROGRESS"; done ) &
+  PROG_PID=$!
   timeout "${T1_CAP:-40m}" uv run --no-sync python scripts/turn1_lines.py --ckpt "$CKPT" --critic "$CRITIC" --decks "$split" \
     --hands "${HANDS:-20}" --k "${K:-32}" --seed 0 --out "$OUT/$split" --procs "$PR" --threads 1 --device cuda \
     --max-decks "$MD" > "$OUT/$split.txt" 2>&1
-  rc=$?; [ $rc -ne 0 ] && { alert "turn1_lines $split exit $rc: $(tail -3 "$OUT/$split.txt" | tr '\n' ' ')"; RC=$rc; }
+  rc=$?; kill $PROG_PID 2>/dev/null
+  # a capped split still leaves every finished hand in lines.partial.jsonl
+  [ ! -f "$OUT/$split/lines.jsonl" ] && [ -f "$OUT/$split/lines.partial.jsonl" ] && alert "$split capped: $(wc -l < "$OUT/$split/lines.partial.jsonl") partial rows kept"
+  [ $rc -ne 0 ] && { alert "turn1_lines $split exit $rc: $(tail -3 "$OUT/$split.txt" | tr '\n' ' ')"; RC=$rc; }
   [ -f "$OUT/$split/ALERT" ] && sed "s/^/ALERT $split: /" "$OUT/$split/ALERT" >> "$OUT/ALERT"
-  echo "PROGRESS $split done rc=$rc $(date +%T)" >> "$OUT/turn1.txt"
+  echo "PROGRESS $split done rc=$rc $(date +%T)" | tee -a "$OUT/turn1.txt" >> "$OUT/PROGRESS"
 done
 kill $USAGE_PID 2>/dev/null
 exit $RC
