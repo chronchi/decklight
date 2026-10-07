@@ -68,3 +68,9 @@ User: "more teacher examples in diverse scenarios … many different turns and s
   LP, turn), the engine validates them, the search teachers label them; muse also adjudicates states where the
   teachers disagree. Grounded labels, cents per scenario, no full LLM games (those stay stopped).
 The report card (ADR 0006) is unchanged and decides which data mixes stay.
+
+## Amendment 2026-10-06 22:40 — the search teacher peeks; plan v2 (docs/search_plan.md)
+The window/own-turn search clones replay the true hidden state, so it is an oracle, not the determinized search this
+ADR describes. S0 (oracle search vs raw base_r3, 0.636) proves a strong *teacher* exists, not a play-time searcher.
+Plan v2: value v3 (honest + privileged heads, self-play outcomes) → honest determinized search if the engine allows
+→ S0b gate (honest vs oracle) → Gumbel-style soft-target distillation → PPO with a privileged critic → loop.
