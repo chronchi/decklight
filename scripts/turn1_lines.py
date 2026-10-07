@@ -177,6 +177,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--threads", type=int, default=2)
     ap.add_argument("--device", default="cpu")
     ap.add_argument("--max-decks", type=int, default=0)
+    ap.add_argument("--task-timeout", type=int, default=300, help="s without any finished hand before giving up")
     args = ap.parse_args(argv)
     if args.hands < 1 or args.k < 1:
         print("turn1_lines: --hands and --k must be >= 1", file=sys.stderr)
@@ -226,7 +227,21 @@ def main(argv: list[str] | None = None) -> int:
     else:
         ctx = mp.get_context("spawn")
         with ctx.Pool(min(args.procs, len(tasks)), initializer=_init, initargs=(wcfg,)) as pool:
-            for res in pool.imap_unordered(_deck_task, tasks, chunksize=1):
+            it = pool.imap_unordered(_deck_task, tasks, chunksize=1)
+            while take.n < len(tasks):
+                try:  # watchdog: one hand hung in the engine for 30+ min (selfimit-data-20261007-1624, task 4985/4985)
+                    res = it.next(timeout=args.task_timeout)
+                except StopIteration:
+                    break
+                except mp.TimeoutError:
+                    msg = (f"no hand finished in {args.task_timeout} s: {len(tasks) - take.n} task(s) hung; "
+                           f"keeping the {take.n} finished")
+                    print(f"ALERT {msg}", file=sys.stderr, flush=True)
+                    args.out.mkdir(parents=True, exist_ok=True)
+                    with open(args.out / "ALERT", "a") as fa:
+                        fa.write(msg + "\n")
+                    pool.terminate()
+                    break
                 take(res)
     part.close()
     rows.sort(key=lambda r: (r["deck"], r["source"], r["hand"],
