@@ -28,6 +28,11 @@ uv run --no-sync python -c "import torch; assert torch.cuda.is_available()" || {
 ( while true; do echo "$(date +%T) $(nvidia-smi --query-gpu=utilization.gpu,memory.used --format=csv,noheader,nounits 2>/dev/null | tr -d ' ') $(cut -d' ' -f1 /proc/loadavg) $(free -m | awk '/Mem/{print $3}')"; sleep 30; done ) > "$OUT/usage.txt" 2>&1 &
 USAGE_PID=$!
 INIT=${INIT:-data/cache/rl_init/best.pt}
+# the card stage's playtest samples decks with verified lines (data/demos/*/verified): without them it dies at the
+# end of a multi-hour run (rl3long-20261006-1937). Check now.
+if [ "${CARD:-1}" != "0" ] && ! ls data/demos/*/verified/*.jsonl > /dev/null 2>&1; then
+  alert "no data/demos/*/verified: the card stage would fail (add data/demos to --data, or CARD=0)"; exit 3
+fi
 rl() {  # <out> <args...>
   local o="$1"; shift
   # shellcheck disable=SC2086
