@@ -1349,16 +1349,39 @@ class YgoAgentPolicy:
             self._states[key] = state
         return state
 
-    def __call__(self, buf: dict[str, np.ndarray], rows: np.ndarray) -> np.ndarray:
-        rows = np.asarray(rows)
-        # Drop LSTM states for games no longer in flight (each schedule index runs once).
-        live = {int(g) for g in np.asarray(buf["game"]).tolist()}
-        for key in [k for k in self._states if k[0] not in live]:
+    def reset_keys(self, game_ids) -> None:
+        """Drop LSTM states whose game token is in ``game_ids``.
+
+        RL rollouts run the VecEnv without a schedule, so ``buf["game"]`` is -1 for
+        every env and episode: callers there pass their own per-episode tokens via
+        ``keys`` and must call this when an episode ends, or states leak across
+        episodes (and envs, which share the -1 token).
+        """
+        drop = {int(g) for g in game_ids}
+        for key in [k for k in self._states if k[0] in drop]:
             del self._states[key]
+
+    def __call__(self, buf: dict[str, np.ndarray], rows: np.ndarray,
+                 keys: np.ndarray | None = None) -> np.ndarray:
+        rows = np.asarray(rows)
+        if keys is None:
+            # Schedule mode (eval/match play): buf["game"] is the schedule index.
+            live = {int(g) for g in np.asarray(buf["game"]).tolist()}
+            for key in [k for k in self._states if k[0] not in live]:
+                del self._states[key]
+            game_of = lambda _n, r: int(buf["game"][r])  # noqa: E731
+        else:
+            # Schedule-free mode (RL rollouts): buf["game"] is -1 for every row,
+            # so the caller passes one game token per row and owns cleanup via
+            # reset_keys. No auto-pruning here: tokens of episodes still in
+            # flight on other envs are not visible in this batch.
+            keys = np.asarray(keys)
+            assert len(keys) == len(rows), (len(keys), len(rows))
+            game_of = lambda n, _r: int(keys[n])  # noqa: E731
         out = np.empty(len(rows), np.int32)
         for n, r in enumerate(rows):
             r = int(r)
-            key = (int(buf["game"][r]), int(buf["player"][r]))
+            key = (game_of(n, r), int(buf["player"][r]))
             h, c = self._state(key)
             cards_enc, index_map = encode_cards(buf["cards"][r], self.code_to_id)
             n_options = int(buf["action_mask"][r].sum())

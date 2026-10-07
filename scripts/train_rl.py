@@ -39,6 +39,7 @@ from ygo_zero.engine.duel import Engine
 from ygo_zero.eval.bc_policy import _run_args
 from ygo_zero.model.policy import PolicyNet
 from ygo_zero.rl.evaluate import AsyncEvaluator, format_eval_line, run_eval
+from ygo_zero.rl.league import League
 from ygo_zero.rl.ppo import SlotStore, gae, gather, masked_log_softmax, ppo_loss, to_torch
 from ygo_zero.rl.rollout import Collector
 
@@ -137,6 +138,35 @@ def sync_actor(actor: PolicyNet, model: PolicyNet) -> None:
     """Copy fresh training weights into the rollout actor (call only with no collect running)."""
     actor.load_state_dict(model.state_dict())
     actor.eval()
+
+
+def league_snapshot(model: PolicyNet, league: League, it: int, snap_every: int, league_size: int) -> None:
+    """Every `snap_every` iterations freeze the current policy as a league opponent.
+
+    A deepcopy (same device and precision, eval mode, gradients off); the rollout
+    only calls it for logits, so the value head rides along unused. Call only when
+    no collect is running (overlap mode: the collector forwards the actor copy).
+    """
+    if league_size <= 0 or it % snap_every != 0:
+        return
+    snap = copy.deepcopy(model).eval()
+    for p in snap.parameters():
+        p.requires_grad_(False)
+    league.add_snapshot(f"snap:{it}", snap)
+
+
+def league_line(it: int, st: dict) -> str:
+    """One compact per-iteration league line (games / learner wr / sampling weight)."""
+    parts = [f"{name} g={d['games']} wr={d['wr']:.3f} w={d['pfsp_w']:.3f}"
+             for name, d in st.get("league", {}).items()]
+    return f"[league it {it}] " + " | ".join(parts)
+
+
+def league_fail_checks(it: int, st: dict, league: League, snap_every: int, league_size: int, fail) -> None:
+    if st.get("opp_games", 0) > 0 and st.get("opp_learner_samples", 0) == 0:
+        fail(f"iteration {it}: {st['opp_games']} opponent episodes but 0 learner samples from them")
+    if league_size > 0 and it >= 2 * snap_every and league.added == 0:
+        fail(f"iteration {it}: snapshots enabled (--snap-every {snap_every}) but none added")
 
 
 def gae_batch(store: SlotStore, finished: list, lam: float):
@@ -257,7 +287,15 @@ def main() -> None:
     ap.add_argument("--max-upload-gb", type=float, default=6.0, help="device-upload-once budget per iteration")
     ap.add_argument("--max-decisions", type=int, default=1500, help="per game, both seats")
     ap.add_argument("--trunc-reward", type=float, default=-0.5)
-    ap.add_argument("--p-bc", type=float, default=0.3, help="share of episodes vs the frozen BC policy")
+    ap.add_argument("--p-bc", type=float, default=0.3, help="share of episodes vs the frozen BC policy (ignored with --league 1)")
+    ap.add_argument("--league", type=int, choices=(0, 1), default=0,
+                    help="0: today's self-play/vs-BC mix (default); 1: PFSP league (snapshots + ygo-agent)")
+    ap.add_argument("--p-self", type=float, default=0.4, help="league: share of self-play episodes")
+    ap.add_argument("--p-ygoagent", type=float, default=0.15,
+                    help="league: absolute share of ygo-agent episodes (0 = off)")
+    ap.add_argument("--snap-every", type=int, default=40, help="league: freeze a snapshot every N iterations")
+    ap.add_argument("--league-size", type=int, default=6,
+                    help="league: newest snapshots kept as opponents (0 = no snapshots)")
     ap.add_argument("--rollout", type=int, default=32768, help="finished samples per PPO iteration")
     ap.add_argument("--store", type=int, default=400_000, help="sample slots (open + finished trajectories)")
     ap.add_argument("--epochs", type=int, default=2)
@@ -403,8 +441,22 @@ def main() -> None:
         # keeps using `rng` for minibatch permutations during the update.
         actor = copy.deepcopy(model).eval()
         col_rng = np.random.default_rng(args.seed + 0x1234)
+    league = None
+    ygo_pol = None
+    if args.league:
+        from ygo_zero.eval.ygoagent import MODEL_PATH as _YGO_MODEL
+
+        if args.p_ygoagent > 0 and args.p_self < 1 and not _YGO_MODEL.is_file():
+            fail(f"--league 1 needs the ygo-agent model for --p-ygoagent {args.p_ygoagent}: "
+                 f"{_YGO_MODEL} missing")
+        league = League(args.p_self, args.p_ygoagent, args.league_size, col_rng)
+        if args.p_ygoagent > 0 and args.p_self < 1:
+            from ygo_zero.eval.ygoagent import YgoAgentPolicy
+
+            ygo_pol = YgoAgentPolicy(seed=args.seed + 0x5EED, sample=True)
     col = Collector(vec, actor if actor is not None else model, ref, store, hist, known, dev,
-                    args.p_bc, args.trunc_reward, args.recv_batch, col_rng, args.precision)
+                    args.p_bc, args.trunc_reward, args.recv_batch, col_rng, args.precision,
+                    league, ygo_pol)
     it, t_train = 0, time.time()
     tot = {"games": 0, "trunc": 0, "decisions": 0}
     if args.overlap:
@@ -418,6 +470,8 @@ def main() -> None:
             t_it = time.time()
             finished, st = pending
             t_roll = pending_roll
+            if league is not None:
+                league_fail_checks(it, st, league, args.snap_every, args.league_size, fail)
             # Start the next batch in the background (actor weights: one update behind
             # after the first sync); the last --iters iteration has no next batch.
             task = None
@@ -458,6 +512,8 @@ def main() -> None:
                 store.release(s)
             assert actor is not None
             sync_actor(actor, model)
+            if league is not None:
+                league_snapshot(model, league, it, args.snap_every, args.league_size)
 
             if not warm and args.kl_coef > 0 and agg_mean.get("kl_bc") is not None and agg_mean["kl_bc"] == 0.0:
                 fail(f"iteration {it}: kl_bc exactly 0.0 with --kl-coef {args.kl_coef}")
@@ -476,9 +532,12 @@ def main() -> None:
                 "update_s": round(t_update, 1), "sps": round(len(slots) / dt, 1),
                 "store_free": store.free, "hours": round((time.time() - t_train) / 3600, 3),
                 "overlap": True, "wait_s": round(wait_s, 2),
+                **({"league": st["league"], "t_ga": round(st["t_ga"], 1)} if league is not None else {}),
                 **{k: round(v, 4) for k, v in agg_mean.items()},
             }  # fmt: skip
             print(json.dumps(rec), flush=True)
+            if league is not None:
+                print(league_line(it, st), flush=True)
             log.write(json.dumps(rec) + "\n")
             log.flush()
             out_of_time = (time.time() - t_train) / 3600 >= args.hours or (args.iters and it >= args.iters)
@@ -520,6 +579,8 @@ def main() -> None:
         t_roll = time.time() - t_it
         if not finished:
             fail(f"iteration {it}: collected 0 samples")
+        if league is not None:
+            league_fail_checks(it, st, league, args.snap_every, args.league_size, fail)
 
         # GAE per finished seat trajectory, then PPO epochs
         slots = np.concatenate([np.array(s, np.int64) for s, _ in finished])
@@ -617,6 +678,8 @@ def main() -> None:
         model.eval()
         for s, _ in finished:
             store.release(s)
+        if league is not None:
+            league_snapshot(model, league, it, args.snap_every, args.league_size)
 
         if not warm and args.kl_coef > 0 and agg_mean.get("kl_bc") is not None and agg_mean["kl_bc"] == 0.0:
             fail(f"iteration {it}: kl_bc exactly 0.0 with --kl-coef {args.kl_coef}")
@@ -633,10 +696,13 @@ def main() -> None:
             "dps": round(st["decisions"] / t_roll), "rollout_s": round(t_roll, 1), "iter_s": round(dt, 1),
             "t_env": round(st["t_env"], 1), "t_fwd": round(st["t_fwd"], 1),
             "update_s": round(t_update, 1), "sps": round(len(slots) / dt, 1),
-            "store_free": store.free, "hours": round((time.time() - t_train) / 3600, 3),
-            **{k: round(v, 4) for k, v in agg_mean.items()},
-        }  # fmt: skip
+                "store_free": store.free, "hours": round((time.time() - t_train) / 3600, 3),
+                **({"league": st["league"], "t_ga": round(st["t_ga"], 1)} if league is not None else {}),
+                **{k: round(v, 4) for k, v in agg_mean.items()},
+            }  # fmt: skip
         print(json.dumps(rec), flush=True)
+        if league is not None:
+            print(league_line(it, st), flush=True)
         log.write(json.dumps(rec) + "\n")
         log.flush()
         out_of_time = (time.time() - t_train) / 3600 >= args.hours or (args.iters and it >= args.iters)

@@ -8,6 +8,13 @@ BC policy (sampled, temperature 1; only the learner seat is stored).
 
 One `ref` forward covers every returned row: BC-opponent rows sample their action from it,
 learner rows keep its log-softmax as the cached KL reference (stored in fp16 by SlotStore).
+
+With a `league` (RL v2 part A), per-env episodes are drawn from the League mix instead:
+self-play, vs base (as above), vs a frozen snapshot (one forward per snapshot present in
+the batch, sampled temperature 1), or vs ygo-agent (`ygo(buf, rows, keys)` with the
+Collector's own per-env episode tokens, since buf["game"] is -1 without a schedule).
+The `ref` forward still covers every row so learner rows keep base as the KL anchor.
+`league=None` keeps today's behaviour bit-identical.
 """
 
 from __future__ import annotations
@@ -17,6 +24,7 @@ import time
 import numpy as np
 import torch
 
+from ygo_zero.rl.league import BASE, SELF, YGO, League
 from ygo_zero.rl.ppo import gather, masked_log_softmax, to_torch
 
 TRUNCATED = 3  # VecEnv.TRUNCATED: game cut by set_max_decisions
@@ -39,7 +47,7 @@ class Collector:
 
     def __init__(self, vec, model, ref, store, hist: int, known: bool, device: torch.device,
                  p_bc: float, trunc_reward: float, recv_batch: int, rng: np.random.Generator,
-                 precision: str = "fp32") -> None:
+                 precision: str = "fp32", league: League | None = None, ygo=None) -> None:
         self.vec = vec
         self.model = model
         self.ref = ref
@@ -52,12 +60,36 @@ class Collector:
         self.recv_batch = int(recv_batch)
         self.rng = rng
         self.precision = precision
+        self.league = league
+        self.ygo = ygo
         n = vec.num_envs
         self.buf = vec.buf
         self.traj: list[list[list[int]]] = [[[], []] for _ in range(n)]
-        self.vs_bc = rng.random(n) < self.p_bc
-        self.lseat = rng.integers(0, 2, n)
+        if league is None:
+            self.vs_bc = rng.random(n) < self.p_bc
+            self.lseat = rng.integers(0, 2, n)
+        else:
+            self.opp = np.array([league.sample() for _ in range(n)], dtype=object)
+            self.lseat = rng.integers(0, 2, n)
+            self.vs_bc = self.opp != SELF  # introspection only; episode draws go through league
+            self.ep_id = np.arange(n, dtype=np.int64)  # per-env episode token for ygo keys
+            self._ep_next = n
+            self._net_cache: dict[str, object] = {}
+            for name in set(self.opp.tolist()):
+                if name not in (SELF, BASE, YGO):
+                    self._net_cache[name] = league.get(name)
         vec.async_reset()
+
+    def _draw_episode(self, i: int) -> None:
+        """League path: record nothing here; draw the next episode type for env i."""
+        self.opp[i] = self.league.sample()
+        self.lseat[i] = self.rng.integers(0, 2)
+        self.vs_bc[i] = self.opp[i] != SELF
+        self.ep_id[i] = self._ep_next
+        self._ep_next += 1
+        name = str(self.opp[i])
+        if name not in (SELF, BASE, YGO) and name not in self._net_cache:
+            self._net_cache[name] = self.league.get(name)
 
     def _autocast(self):
         import contextlib
@@ -79,7 +111,11 @@ class Collector:
         bc_wins = 0.0
         decisions = 0
         lengths: list[int] = []
-        t_env = t_fwd = 0.0
+        t_env = t_fwd = t_ga = 0.0
+        lg = self.league is not None
+        lg_games: dict[str, int] = {}
+        lg_wins: dict[str, float] = {}
+        opp_games = opp_learner_samples = 0
         n = self.vec.num_envs
         buf = self.buf
         while n_fin < n_samples:
@@ -99,6 +135,7 @@ class Collector:
                 games += 1
                 trunc += w == TRUNCATED
                 lengths.append(len(self.traj[i][0]) + len(self.traj[i][1]))
+                n_ls = len(self.traj[i][int(self.lseat[i])]) if lg else 0
                 for seat in (0, 1):
                     sl = self.traj[i][seat]
                     if w == TRUNCATED:
@@ -111,11 +148,33 @@ class Collector:
                         finished.append((sl, rew))
                         n_fin += len(sl)
                     self.traj[i][seat] = []
-                if self.vs_bc[i]:
-                    bc_games += 1
-                    bc_wins += 0.5 if w not in (0, 1) else float(w == int(self.lseat[i]))
-                self.vs_bc[i] = self.rng.random() < self.p_bc
-                self.lseat[i] = self.rng.integers(0, 2)
+                if not lg:
+                    if self.vs_bc[i]:
+                        bc_games += 1
+                        bc_wins += 0.5 if w not in (0, 1) else float(w == int(self.lseat[i]))
+                    self.vs_bc[i] = self.rng.random() < self.p_bc
+                    self.lseat[i] = self.rng.integers(0, 2)
+                else:
+                    res = 0.5 if w not in (0, 1) else float(w == int(self.lseat[i]))
+                    name = str(self.opp[i])
+                    if name != SELF:
+                        self.league.record(name, res)
+                        lg_games[name] = lg_games.get(name, 0) + 1
+                        lg_wins[name] = lg_wins.get(name, 0.0) + res
+                        opp_games += 1
+                        opp_learner_samples += n_ls
+                        if name == BASE:
+                            bc_games += 1
+                            bc_wins += res
+                        elif name == YGO:
+                            self.ygo.reset_keys([int(self.ep_id[i])])
+                    else:
+                        lg_games[SELF] = lg_games.get(SELF, 0) + 1
+                    self._draw_episode(i)
+            if lg and self._net_cache:
+                live = set(self.opp.tolist())
+                for name in [k for k in self._net_cache if k not in live]:
+                    del self._net_cache[name]
             # Rows still in play (player -1 = idle schedule row: never sent again).
             player = buf["player"]
             ids = np.array([int(i) for i in ids if int(player[int(i)]) != -1], dtype=np.int64)
@@ -124,7 +183,10 @@ class Collector:
                     break
                 continue
             actor = np.array([int(player[int(i)]) for i in ids], dtype=np.int64)
-            is_learner = ~self.vs_bc[ids] | (actor == self.lseat[ids])
+            if not lg:
+                is_learner = ~self.vs_bc[ids] | (actor == self.lseat[ids])
+            else:
+                is_learner = (self.opp[ids] == SELF) | (actor == self.lseat[ids])
             l_ids = ids[is_learner]
             b_ids = ids[~is_learner]
             t1 = time.perf_counter()
@@ -137,12 +199,36 @@ class Collector:
                 ref_lp_cpu = ref_lp_all.float().cpu().numpy()
                 actions = np.zeros(len(ids), np.int32)
                 pos = {int(i): k for k, i in enumerate(ids)}
-                if len(b_ids):
-                    b_idx = np.array([pos[int(i)] for i in b_ids])
+                bb_ids = b_ids
+                if lg and len(b_ids):
+                    bb_ids = b_ids[self.opp[b_ids] == BASE]
+                if len(bb_ids):
+                    b_idx = np.array([pos[int(i)] for i in bb_ids])
                     b_lp, b_legal = ref_lp_all[b_idx], legal_all[b_idx]
                     act_b, _ = _sample_from_lp(b_lp, b_legal)
-                    for i, a in zip(b_ids, act_b):
+                    for i, a in zip(bb_ids, act_b):
                         actions[pos[int(i)]] = int(a)
+                if lg and len(b_ids):
+                    o_ids = b_ids[self.opp[b_ids] != BASE]
+                    snap_rows = o_ids[self.opp[o_ids] != YGO]
+                    for name in set(self.opp[snap_rows].tolist()) if len(snap_rows) else ():
+                        s_rows = snap_rows[self.opp[snap_rows] == name]
+                        s_idx = torch.from_numpy(
+                            np.array([pos[int(i)] for i in s_rows], np.int64)).to(self.device)
+                        tob_s = {k: v[s_idx] for k, v in tob_all.items()}
+                        s_logits = self._net_cache[name](tob_s)
+                        s_lp = masked_log_softmax(s_logits)
+                        act_s, _ = _sample_from_lp(s_lp, torch.isfinite(s_logits))
+                        for i, a in zip(s_rows, act_s):
+                            actions[pos[int(i)]] = int(a)
+                    ga_rows = o_ids[self.opp[o_ids] == YGO]
+                    if len(ga_rows):
+                        t2 = time.perf_counter()
+                        ga_keys = np.array([int(self.ep_id[int(i)]) for i in ga_rows])
+                        act_g = self.ygo(buf, np.asarray(ga_rows), keys=ga_keys)
+                        t_ga += time.perf_counter() - t2
+                        for i, a in zip(ga_rows, act_g):
+                            actions[pos[int(i)]] = int(a)
                 if len(l_ids):
                     l_idx = torch.from_numpy(np.array([pos[int(i)] for i in l_ids], np.int64)).to(self.device)
                     tob_l = {k: v[l_idx] for k, v in tob_all.items()}
@@ -161,4 +247,19 @@ class Collector:
             decisions += len(ids)
         stats = {"games": games, "trunc": trunc, "bc_games": bc_games, "bc_wins": bc_wins,
                  "decisions": decisions, "lengths": lengths, "t_env": t_env, "t_fwd": t_fwd}  # fmt: skip
+        if lg:
+            assert self.league is not None
+            probs = self.league.sampling_probs()
+            league_stats = {}
+            for name in probs:
+                g = lg_games.get(name, 0)
+                league_stats[name] = {
+                    "games": g,
+                    "wr": round(lg_wins.get(name, 0.0) / max(g, 1), 3),
+                    "pfsp_w": round(probs[name], 4),
+                }
+            stats["league"] = league_stats
+            stats["t_ga"] = t_ga
+            stats["opp_games"] = opp_games
+            stats["opp_learner_samples"] = opp_learner_samples
         return finished, stats
