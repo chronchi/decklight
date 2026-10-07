@@ -49,3 +49,6 @@ if [ "${RENDER:-0}" = "1" ]; then
 fi
 kill "$USAGE_PID" 2>/dev/null
 echo done > "$OUT/DONE"
+# fail loud: a card with any ALERT (e.g. a missing checkpoint, no report) is not a success (card-rl3long-0021 exited 0)
+[ -s "$OUT/ALERT" ] && exit 3
+exit 0
