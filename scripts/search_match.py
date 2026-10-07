@@ -93,8 +93,6 @@ def summarize(out: Path) -> dict:
     by_deck: dict[str, list[float]] = {}
     for r in recs:
         by_deck.setdefault(r["decks"][r["s_seat"]], []).append(s_score(r))
-    if worlds and worlds_fb / worlds > 0.2:
-        fail(f"honest-world fallback rate {worlds_fb / worlds:.3f} > 20% ({worlds_fb}/{worlds})")
     summ = {
         "games": n,
         "s_win_rate": round(wins / n, 3),
@@ -124,6 +122,9 @@ def summarize(out: Path) -> dict:
               f"fallback {summ['det_fallback_rate']} ({worlds_fb}/{worlds})", flush=True)
     for d in sorted(summ["per_deck"]):
         print(f"  {d}: {summ['per_deck'][d]} (n={summ['per_deck_n'][d]})", flush=True)
+    # after writing the summary, so a high fallback rate is reported with its numbers (the match is part-oracle)
+    if worlds and worlds_fb / worlds > 0.2:
+        fail(f"honest-world fallback rate {worlds_fb / worlds:.3f} > 20% ({worlds_fb}/{worlds})")
     return summ
 
 
