@@ -46,7 +46,7 @@ BASE="${BASE:-data/cache/bc_base/best.pt}"  # M1 teacher job: BASE=data/cache/rl
 if [ "$MODE" = "smoke" ]; then
   ONLY=(--only gold); EP_FT=1; EP_MIX=1; SKIP_SCRATCH=1; PT=(--decks 2 --hands 1 --seeds 1 --narrate 1 --samples 2 --ygoagent --selfplay 2); PT_CAP=12m
 else
-  ONLY=(); EP_FT=10; EP_MIX=3; SKIP_SCRATCH="${SKIP_SCRATCH:-0}"; PT=(--decks 8 --hands 3 --seeds 2 --narrate 2 --samples 4 --ygoagent --selfplay 10); PT_CAP=40m
+  ONLY=(${SHARD_ONLY:+--only $SHARD_ONLY}); EP_FT=10; EP_MIX=3; SKIP_SCRATCH="${SKIP_SCRATCH:-0}"; PT=(--decks 8 --hands 3 --seeds 2 --narrate 2 --samples 4 --ygoagent --selfplay 10); PT_CAP=40m
 fi
 [ -n "${PT_ARGS:-}" ] && read -ra PT <<< "$PT_ARGS"
 uv run --no-sync python scripts/build_bc_shards.py "${ONLY[@]}" --out data/cache/bc_shards --jobs "$J" > "$OUT/shards.txt" 2>&1
@@ -130,6 +130,11 @@ SW="${SW:-b3}"
 SK=(--init "$BASE" --epochs 4 --lr 1e-4 --batch 256 --select-on last --kinds "sw-$SW" "sw-${SW}_own" --require-kinds "sw-$SW" "sw-${SW}_own")
 want ft-kl1 && train ft-kl1 "${SK[@]}" --kl-init 1.0
 want ft-kl03 && train ft-kl03 "${SK[@]}" --kl-init 0.3
+# turn-1 self-imitation (NOTEBOOK 2026-10-07 16:45): base_r3's own best-of-16 turn-1 lines by end field (critic as veto,
+# scripts/select_turn1_lines.py, train-split decks only), KL-anchored to base_r3 like ft-kl* (SHARD_ONLY=selfimit)
+SI=(--init "$BASE" --epochs 4 --lr 1e-4 --batch 256 --select-on last --kinds selfimit --require-kinds selfimit)
+want ft-si-kl1 && train ft-si-kl1 "${SI[@]}" --kl-init 1.0
+want ft-si-kl03 && train ft-si-kl03 "${SI[@]}" --kl-init 0.3
 for V in mix-h32 mix-h128 mix-h256 mix-h512 mix-h32k mix-h128k mix-h256k mix-h512k mix-k; do
   want "$V" || continue
   H=${V#mix-h}; H=${H%k}; [ "$V" = mix-k ] && H=0
@@ -147,7 +152,7 @@ out = Path(sys.argv[1])
 best_v, best_s = "zero", -1.0
 best_hv, best_h = "zero", -1.0  # also playtest the best on unseen-deck gold (bcg-20261004-2223: mix won there)
 for v in ("zero", "ft-gold", "ft-mix", "ft-teach", "ft-teach-h", "ft-search", "ft-dw", "ft-all", "ft-t13", "ft-swv", "ft-swd", "ft-r2", "ft-r2t", "mix", "lines-gold", "mix-l", "mix-h32", "mix-h128", "mix-h256", "mix-h512",
-          "mix-h32k", "mix-h128k", "mix-h256k", "mix-h512k", "mix-k"):
+          "mix-h32k", "mix-h128k", "mix-h256k", "mix-h512k", "mix-k", "ft-r3", "ft-kl1", "ft-kl03", "ft-si-kl1", "ft-si-kl03"):
     m = out / v / "metrics.jsonl"
     if not m.exists():
         continue
