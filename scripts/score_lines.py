@@ -64,7 +64,14 @@ def _init(cfg: dict) -> None:
 
 
 def group_key(r: dict) -> tuple:
-    return (r["deck"], r["source"], r["hand"])
+    """One scored group: (deck, source, start) + actor/turn_start (old rows lack actor/turn_start,
+    so they default to actor 0, turn_start 1 and group exactly as before)."""
+    return (r["deck"], r["source"], r.get("start", r["hand"]),
+            int(r.get("actor", 0)), int(r.get("turn_start", 1)))
+
+
+def _fv(r: dict) -> tuple:
+    return (r.get("field", 0), r.get("v_p0", r.get("v_actor", 0.0)), -r.get("sample", 0))
 
 
 def pick_candidates(rows: list[dict], cands: int) -> list[dict]:
@@ -91,11 +98,12 @@ def pick_candidates(rows: list[dict], cands: int) -> list[dict]:
         return out
     freq = Counter(tuple(r["choices"]) for r in rows
                    if r.get("kind") == "sample" and not r.get("stuck"))
-    best_f = max(pool, key=lambda r: (r["field"], r["v_p0"], -r["sample"]))
+    best_f = max(pool, key=_fv)
     out.append(best_f)
     rest = [r for r in pool if tuple(r["choices"]) != tuple(best_f["choices"])]
     if rest and len(out) < cands:
-        best_v = max(rest, key=lambda r: (r["v_p0"], r["field"], -r["sample"]))
+        best_v = max(rest, key=lambda r: (r.get("v_p0", r.get("v_actor", 0.0)), r.get("field", 0),
+                                          -r.get("sample", 0)))
         out.append(best_v)
         rest = [r for r in rest if tuple(r["choices"]) != tuple(best_v["choices"])]
     if rest and len(out) < cands:
@@ -107,7 +115,8 @@ def pick_candidates(rows: list[dict], cands: int) -> list[dict]:
 def branch_turn(engine: Engine, row: dict) -> int | None:
     """Turn number at the end of a line's replay (None when the replayed duel ended).
 
-    Turn-1 lines run through the start of turn 2, so this is 2 for a live line.
+    Turn-1 lines run through the start of turn 2, so this is 2 for a live line; whole-turn
+    lines run through the start of turn_start + 1.
     """
     env = CppEnv(engine, record_config({"config": row["config"]}), row.get("auto_single", True))
     obs = env.reset()
@@ -118,11 +127,19 @@ def branch_turn(engine: Engine, row: dict) -> int | None:
     return None if obs is None else int(obs["global"][2])
 
 
-def _score_candidates(cand_rows: list[dict], deck: str, source: str, hand: int) -> list[dict]:
-    """Roll out each candidate line S times; returns the rows with rollout fields added."""
+def _score_candidates(cand_rows: list[dict], deck: str, source: str, hand: int | str) -> list[dict]:
+    """Roll out each candidate line S times; returns the rows with rollout fields added.
+
+    The score is from the actor's view (me=actor) with turn_start=actor's turn; horizon H=2
+    means through the end of the opponent's next turn. Same CRN seeding per start across
+    candidates (old rows: stable_seed(deck, source, hand), unchanged).
+    """
     cfg, engine = _W["cfg"], _W["engine"]
     S, H = cfg["samples"], cfg["horizon"]
-    gs = stable_seed(deck, source, hand) % (2**31 - 1)
+    me = int(cand_rows[0].get("actor", 0))
+    t0 = int(cand_rows[0].get("turn_start", 1))
+    skey = cand_rows[0].get("start", hand)
+    gs = stable_seed(deck, source, skey) % (2**31 - 1)
     bkey = f"board@h{H}"
     dkey = f"done@h{H}"
     vkey = f"value@h{H}"
@@ -139,8 +156,8 @@ def _score_candidates(cand_rows: list[dict], deck: str, source: str, hand: int) 
         wss.append(ws)
         # cand_action=0 for every branch + decision_k=0 + hand game_seed: sample s shares one
         # seed across candidates (common random numbers); s=0 is argmax, the rest sample.
-        jobs.append((ci, ws.rollouts_gen(dc, auto, branches, 0,
-                                         game_seed=gs, decision_k=0, turn_start=1)))
+        jobs.append((ci, ws.rollouts_gen(dc, auto, branches, me,
+                                         game_seed=gs, decision_k=0, turn_start=t0)))
     res = dict(drive_many(jobs, wss[0]._forward, cfg["width"]))
     scored = []
     for ci, row in enumerate(cand_rows):
@@ -160,14 +177,16 @@ def _score_candidates(cand_rows: list[dict], deck: str, source: str, hand: int) 
 
 def _group_task(task: dict) -> dict:
     key, rows = tuple(task["key"]), task["rows"]
-    deck, source, hand = key[0], key[1], int(key[2])
+    deck, source, hand = key[0], key[1], key[2]
     cands = pick_candidates(rows, task["cands"])
     if not cands:
         return {"key": list(key), "rows": []}
     return {"key": list(key), "rows": _score_candidates(cands, deck, source, hand)}
 
 
-def _alert(out: Path, problems: list[str]) -> None:
+def _alert(out: Path, problems: list[str] | str) -> None:
+    if isinstance(problems, str):
+        problems = [problems]
     ap = Path(str(out) + ".ALERT")
     ap.parent.mkdir(parents=True, exist_ok=True)
     with open(ap, "a") as f:
@@ -296,8 +315,8 @@ def main(argv: list[str] | None = None) -> int:
         g_roll.append(gr[0]["rollout"])
         if not sm:
             continue
-        bf = max(sm, key=lambda r: (r["field"], r["v_p0"]))
-        br = max(sm, key=lambda r: (r["rollout"], r["field"]))
+        bf = max(sm, key=lambda r: (r.get("field", 0), r.get("v_p0", r.get("v_actor", 0.0))))
+        br = max(sm, key=lambda r: (r["rollout"], r.get("field", 0)))
         f_roll.append(bf["rollout"])
         r_roll.append(br["rollout"])
         agree += tuple(bf["choices"]) == tuple(br["choices"])
