@@ -21,6 +21,7 @@ def main() -> None:
     ap.add_argument("--max-dph", type=float, default=0.15)
     ap.add_argument("--min-cpus", type=int, default=8)
     ap.add_argument("--no-gpu", action="store_true")
+    ap.add_argument("--num-gpus", type=int, default=1, help="GPUs per box (offer query num_gpus=N)")
     ap.add_argument("--cleanup", action="store_true")
     ap.add_argument("--data", nargs="*", default=[], help="repo paths under data/ to ship with the code")
     ap.add_argument("--extra-query", default="", help='extra vast offer filter, e.g. "compute_cap>=800"')
@@ -36,6 +37,7 @@ def main() -> None:
         args.max_dph,
         args.min_cpus,
         gpu=not args.no_gpu,
+        num_gpus=args.num_gpus,
         data_paths=tuple(args.data),
         extra_query=args.extra_query,
         min_gpu_ram_gb=args.min_gpu_ram,

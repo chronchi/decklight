@@ -33,10 +33,24 @@ INIT=${INIT:-data/cache/rl_init/best.pt}
 if [ "${CARD:-1}" != "0" ] && ! ls data/demos/*/verified/*.jsonl > /dev/null 2>&1; then
   alert "no data/demos/*/verified: the card stage would fail (add data/demos to --data, or CARD=0)"; exit 3
 fi
+export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True  # less fragmentation: train + async eval share one GPU
+NGPU="${NGPU:-1}"  # multi-GPU data-parallel: torchrun --nproc_per_node NGPU (vast_job.py --num-gpus N)
 rl() {  # <out> <args...>
   local o="$1"; shift
+  local launcher=(uv run --no-sync python) extra=()
+  if [ "$NGPU" -gt 1 ]; then
+    # --envs/--rollout/--minibatch/--store/--threads are per rank: divide the single-GPU defaults by NGPU so an
+    # iteration keeps the same total batch, minibatch and optimizer steps as a 1-GPU run (comparable
+    # hyperparameters, ~NGPU x faster iterations), unless RL_ARGS already sets them.
+    case "${RL_ARGS:-}" in *--threads*) ;; *) extra+=(--threads $(( (J - J / 2) / NGPU ))) ;; esac
+    case "${RL_ARGS:-}" in *--envs*) ;; *) extra+=(--envs $(( 512 / NGPU ))) ;; esac
+    case "${RL_ARGS:-}" in *--rollout*) ;; *) extra+=(--rollout $(( 32768 / NGPU ))) ;; esac
+    case "${RL_ARGS:-}" in *--minibatch*) ;; *) extra+=(--minibatch $(( 1024 / NGPU ))) ;; esac
+    case "${RL_ARGS:-}" in *--store*) ;; *) extra+=(--store $(( 400000 / NGPU ))) ;; esac
+    launcher=(uv run --no-sync torchrun --standalone --nproc_per_node "$NGPU")
+  fi
   # shellcheck disable=SC2086
-  uv run --no-sync python scripts/train_rl.py --init "$INIT" --out "$o" --device cuda "$@" ${RL_ARGS:-}
+  "${launcher[@]}" scripts/train_rl.py --init "$INIT" --out "$o" --device cuda "${extra[@]}" "$@" ${RL_ARGS:-}
 }
 if [ "$MODE" = "smoke" ]; then
   rl "$OUT/smoke" --iters 3 --rollout 4096 --envs 64 --eval-every 2 --eval-seeds 1 --ga-seeds 1 --value-warmup 1 \

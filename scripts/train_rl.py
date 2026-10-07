@@ -38,8 +38,11 @@ from ygo_zero.engine.cpp_env import VecEnv
 from ygo_zero.engine.duel import Engine
 from ygo_zero.eval.bc_policy import _run_args
 from ygo_zero.model.policy import PolicyNet
+from torch.nn.parallel import DistributedDataParallel as DDP
+
 from ygo_zero.rl.evaluate import AsyncEvaluator, format_eval_line, run_eval
 from ygo_zero.rl.league import League
+from ygo_zero.rl import dist as distmod
 from ygo_zero.rl.critic import critic_obs
 from ygo_zero.rl.ppo import SlotStore, explained_variance, gae, gather, masked_log_softmax, ppo_loss, \
     ppo_loss_priv, to_torch
@@ -237,12 +240,18 @@ def vrpo_targets_batch(store: SlotStore, finished: list, lam: float):
     return slots, adv, ret, adv_n, info
 
 
+def _fwd_of(m):
+    """Custom forwards (`forward_value`/`forward_q`/`_run`) bypass DDP's `forward` hook
+    (DDP has no such attributes), so unwrap to the underlying module for the calls."""
+    return m.module if isinstance(m, DDP) else m
+
+
 def ppo_update(model: PolicyNet, upd_model, opt, vopt, store: SlotStore, slots: np.ndarray,
                adv_n: np.ndarray, ret: np.ndarray, rng: np.random.Generator, dev: torch.device,
                *, clip: float, vf_coef: float, kl_coef: float, ent_coef: float, epochs: int,
                minibatch: int, warm: bool, precision: str, max_upload_gb: float, compile: bool,
                critic: PolicyNet | None = None, copt=None, priv_critic: bool = False,
-               adv: str = "gae") -> dict:
+               adv: str = "gae", upd_critic=None) -> dict:
     """Upload-once + PPO epochs over one batch. Returns per-iteration mean stats (raises on non-finite).
 
     With `priv_critic`, the value loss trains `critic` (via `copt`) on the privileged
@@ -254,6 +263,11 @@ def ppo_update(model: PolicyNet, upd_model, opt, vopt, store: SlotStore, slots: 
     (same coef/optimizer as the value loss); the policy loss is unchanged. Warm-up trains
     the Q head only. Stats gain `q_ev` (+ `adv_diff` / `vbar_mean` are logged by the caller
     from the batch targets). `adv="gae"` (default) is bit-identical to before.
+
+    Under DDP (process group initialized) every rank runs the same number of optimizer
+    steps per epoch: the MIN local minibatch count is all-reduced and each rank drops its
+    surplus tail minibatches, so no rank blocks on a collective the others have left.
+    Single-process (no process group) is bit-identical to before.
     """
     if dev.type == "cuda":
         torch.cuda.empty_cache()
@@ -296,7 +310,9 @@ def ppo_update(model: PolicyNet, upd_model, opt, vopt, store: SlotStore, slots: 
         finite_epoch = torch.ones((), dtype=torch.bool, device=dev)
         perm = rng.permutation(len(slots))
         mb_dev = torch.from_numpy(perm).to(dev) if upload_once else None
-        for k in range(0, len(perm), minibatch):
+        n_local = (len(perm) + minibatch - 1) // minibatch if len(perm) else 0
+        n_common = distmod.min_int(n_local, dev) if distmod.is_dist() else n_local
+        for k in range(0, min(len(perm), n_common * minibatch), minibatch):
             if upload_once:
                 idx = mb_dev[k : k + minibatch]
                 obs = {key: v[idx] for key, v in obs_dev.items()}
@@ -316,11 +332,13 @@ def ppo_update(model: PolicyNet, upd_model, opt, vopt, store: SlotStore, slots: 
                 r_t = torch.from_numpy(ret[mb]).to(dev)
                 cobs_t = to_torch({key: v[mb] for key, v in cobs_np.items()}, dev) \
                     if priv_critic else None
+            fwd = _fwd_of(upd_model)
+            cfwd = _fwd_of(upd_critic if upd_critic is not None else critic)
             if warm:
                 if adv == "vrpo" and priv_critic:
                     assert critic is not None and copt is not None
                     with _autocast(dev, precision):
-                        _, cq = critic.forward_q(cobs_t)
+                        _, cq = cfwd.forward_q(cobs_t)
                         qa = cq.gather(1, act[:, None]).squeeze(1)
                         loss = torch.nn.functional.mse_loss(qa.float(), r_t)
                     finite_epoch = finite_epoch & torch.isfinite(loss).detach()
@@ -329,73 +347,80 @@ def ppo_update(model: PolicyNet, upd_model, opt, vopt, store: SlotStore, slots: 
                     for n, p in critic.named_parameters():  # Q head only: trunk/value stay frozen
                         if not n.startswith("q_head.") and p.grad is not None:
                             p.grad = None
+                    distmod.average_grads_(critic)
                     copt.step()
                     s = {"vf": loss.detach(), "q_ev": explained_variance(qa, r_t)}
                 elif adv == "vrpo":
                     with _autocast(dev, precision):
-                        _, mq = upd_model.forward_q(obs)
+                        _, mq = fwd.forward_q(obs)
                         qa = mq.gather(1, act[:, None]).squeeze(1)
                         loss = torch.nn.functional.mse_loss(qa.float(), r_t)
                     finite_epoch = finite_epoch & torch.isfinite(loss).detach()
                     vopt.zero_grad(set_to_none=True)
                     loss.backward()
+                    distmod.average_grads_(model)
                     vopt.step()
                     s = {"vf": loss.detach(), "q_ev": explained_variance(qa, r_t)}
                 elif priv_critic:
                     assert critic is not None and copt is not None
                     with _autocast(dev, precision):
                         with torch.no_grad():  # critic value head only: no graph through the trunk
-                            _, cenc = critic._run(cobs_t)
-                        cv = critic.value_head(cenc[:, 0]).squeeze(-1)
+                            _, cenc = cfwd._run(cobs_t)
+                        cv = cfwd.value_head(cenc[:, 0]).squeeze(-1)
                         loss = torch.nn.functional.mse_loss(cv.float(), r_t)
                     finite_epoch = finite_epoch & torch.isfinite(loss).detach()
                     copt.zero_grad(set_to_none=True)
                     loss.backward()
+                    distmod.average_grads_(critic)
                     copt.step()
                     s = {"vf": loss.detach(), "critic_ev": explained_variance(cv, r_t)}
                 else:
                     with _autocast(dev, precision):
                         with torch.no_grad():  # value head only: no graph through the trunk
-                            _, enc = upd_model._run(obs)
-                        v = upd_model.value_head(enc[:, 0]).squeeze(-1)
+                            _, enc = fwd._run(obs)
+                        v = fwd.value_head(enc[:, 0]).squeeze(-1)
                         loss = torch.nn.functional.mse_loss(v.float(), r_t)
                     finite_epoch = finite_epoch & torch.isfinite(loss).detach()
                     vopt.zero_grad(set_to_none=True)
                     loss.backward()
+                    distmod.average_grads_(model)
                     vopt.step()
                     s = {"vf": loss.detach()}
             elif priv_critic:
                 assert critic is not None and copt is not None
                 with _autocast(dev, precision):
                     if adv == "vrpo":
-                        loss_pol, loss_crit, s = ppo_loss_vrpo_priv(upd_model, critic, rl, obs, cobs_t,
+                        loss_pol, loss_crit, s = ppo_loss_vrpo_priv(fwd, cfwd, rl, obs, cobs_t,
                                                                     act, olp, a_t, r_t, clip, vf_coef,
                                                                     kl_coef, ent_coef)  # fmt: skip
                     else:
-                        loss_pol, loss_crit, s = ppo_loss_priv(upd_model, critic, rl, obs, cobs_t, act,
+                        loss_pol, loss_crit, s = ppo_loss_priv(fwd, cfwd, rl, obs, cobs_t, act,
                                                                olp, a_t, r_t, clip, vf_coef, kl_coef,
                                                                ent_coef)  # fmt: skip
                 finite_epoch = finite_epoch & torch.isfinite(loss_pol).detach() \
                     & torch.isfinite(loss_crit).detach()
                 opt.zero_grad(set_to_none=True)
                 loss_pol.backward()
+                distmod.average_grads_(model)
                 torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
                 opt.step()
                 copt.zero_grad(set_to_none=True)
                 loss_crit.backward()
+                distmod.average_grads_(critic)
                 torch.nn.utils.clip_grad_norm_(critic.parameters(), 1.0)
                 copt.step()
             else:
                 with _autocast(dev, precision):
                     if adv == "vrpo":
-                        loss, s = ppo_loss_vrpo(upd_model, rl, obs, act, olp, a_t, r_t, clip, vf_coef,
+                        loss, s = ppo_loss_vrpo(fwd, rl, obs, act, olp, a_t, r_t, clip, vf_coef,
                                                 kl_coef, ent_coef)  # fmt: skip
                     else:
-                        loss, s = ppo_loss(upd_model, rl, obs, act, olp, a_t, r_t, clip, vf_coef,
+                        loss, s = ppo_loss(fwd, rl, obs, act, olp, a_t, r_t, clip, vf_coef,
                                            kl_coef, ent_coef)  # fmt: skip
                 finite_epoch = finite_epoch & torch.isfinite(loss).detach()
                 opt.zero_grad(set_to_none=True)
                 loss.backward()
+                distmod.average_grads_(model)
                 torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
                 opt.step()
             for key, val in s.items():
@@ -488,9 +513,17 @@ def main() -> None:
                     help="overlap the next rollout with the PPO update (background collect, one-iteration lag)")
     args = ap.parse_args()
     t_start = time.time()
-    torch.manual_seed(args.seed)
-    rng = np.random.default_rng(args.seed)
+    _dev_type = torch.device(args.device).type
+    dist_rank, dist_world = distmod.init_from_env(_dev_type)
+    is_dist = dist_world > 1
+    local_rank = int(os.environ.get("LOCAL_RANK", dist_rank)) if is_dist else 0
+    seed_rank = args.seed + 1000 * dist_rank
+    torch.manual_seed(seed_rank)
+    rng = np.random.default_rng(seed_rank)
     dev = torch.device(args.device)
+    if is_dist and dev.type == "cuda":
+        dev = torch.device(f"cuda:{local_rank}")
+        torch.cuda.set_device(dev)
     if args.recv_batch is None:
         args.recv_batch = max(1, args.envs // 4)
     if args.precision is None:
@@ -521,6 +554,8 @@ def main() -> None:
 
     def alert(msg: str):
         """Non-fatal ALERT (training continues): q_ev collapse warning."""
+        if is_dist and dist_rank != 0:
+            return
         line = f"ALERT train_rl: {msg}"
         print(line, flush=True)
         try:
@@ -528,6 +563,34 @@ def main() -> None:
                 f.write(line + "\n")
         except OSError:
             pass
+
+    def _any_true(local: bool) -> bool:
+        """Collective OR across ranks (single-process: the local value)."""
+        if not is_dist:
+            return local
+        t = torch.tensor([1 if local else 0], dtype=torch.long, device=dev)
+        torch.distributed.all_reduce(t, op=torch.distributed.ReduceOp.MAX)
+        return bool(t.item())
+
+    def dfail_if_any(local_bad: bool, msg_fn) -> None:
+        """Fail when ANY rank's local condition holds: ALERT from rank 0, all ranks exit 3.
+
+        All ranks must call this together (same point in the iteration) so no rank
+        blocks on a collective the others have left; torchrun then tears down the job.
+        """
+        bad = _any_true(local_bad)
+        if bad:
+            if dist_rank == 0:
+                fail(msg_fn())
+            else:
+                raise SystemExit(3)
+
+    def check_params_match(tag: str) -> None:
+        """Iteration-1 + every-eval param checksum: ALERT + exit when ranks differ."""
+        if not is_dist:
+            return
+        ok = distmod.checksum_ok(model, dev)
+        dfail_if_any(not ok, lambda: f"{tag}: policy parameters differ across ranks")
 
     qev_bad = 0
 
@@ -588,13 +651,34 @@ def main() -> None:
                   f"({'privileged critic' if args.priv_critic else 'policy net'} built with q=True)")
     # Update forward only: rollout Collector keeps the eager `model`; the compiled
     # module shares parameters with it, so optimizer steps and saved state_dicts are unchanged.
-    upd_model = torch.compile(model, dynamic=True) if args.compile else model
+    # Under DDP the policy (and privileged critic) are wrapped for gradient averaging;
+    # forwards for the update go through the DDP wrapper, the rollout keeps the eager
+    # `model`. find_unused_parameters=True: the warm-up value/Q-only steps backprop
+    # only the head (trunk computed under no_grad), and with --priv-critic the
+    # policy's own value head never gets a gradient (ppo_loss_priv trains the
+    # critic's head instead) — both leave parameters unused in some backward.
+    # --compile is skipped under DDP (eager forwards); single-process is unchanged.
+    if is_dist:
+        ddp_kwargs = {"find_unused_parameters": True}
+        if dev.type == "cuda":
+            ddp_kwargs["device_ids"] = [local_rank]
+        model_ddp = DDP(model, **ddp_kwargs)
+        critic_ddp = DDP(critic, **ddp_kwargs) if critic is not None else None
+        upd_model = model_ddp
+        upd_critic = critic_ddp
+        if args.compile and dist_rank == 0:
+            print("[ddp] --compile skipped under DDP (eager forwards)", flush=True)
+    else:
+        upd_model = torch.compile(model, dynamic=True) if args.compile else model
+        upd_critic = critic
 
-    log = (args.out / "metrics.jsonl").open("a")
-    arch = {k: a.get(k) for k in ("d", "layers", "heads", "hist", "known")}
-    log.write(json.dumps({"args": {**arch, "rl": {k: str(v) for k, v in vars(args).items()}}, "eval_decks": ev_names,
-                          "train_decks": len(train_decks)}) + "\n")  # fmt: skip
-    log.flush()
+    log = (args.out / "metrics.jsonl").open("a") if dist_rank == 0 else None
+    if dist_rank == 0:
+        assert log is not None
+        arch = {k: a.get(k) for k in ("d", "layers", "heads", "hist", "known")}
+        log.write(json.dumps({"args": {**arch, "rl": {k: str(v) for k, v in vars(args).items()}}, "eval_decks": ev_names,
+                              "train_decks": len(train_decks)}) + "\n")  # fmt: skip
+        log.flush()
 
     engine = Engine()
 
@@ -637,6 +721,59 @@ def main() -> None:
         if recs:
             log.flush()
 
+    # ---- DDP (multi-GPU) per-iteration sync ---------------------------------
+    def _ddp_sum(vals: list[float]) -> list[float]:
+        """All-reduce SUM of a list of floats (one collective; no-op single-process)."""
+        if not is_dist:
+            return list(vals)
+        t = torch.tensor(vals, dtype=torch.float64, device=dev)
+        torch.distributed.all_reduce(t, op=torch.distributed.ReduceOp.SUM)
+        return [float(x) for x in t.tolist()]
+
+    def _ddp_league_sync(st: dict) -> None:
+        """Average league EMAs across ranks, then sum per-opponent games/wins in place.
+
+        Must run on every rank (collectives); only rank 0 logs the resulting global `st`.
+        """
+        if not is_dist or league is None:
+            return
+        assert league is not None
+        distmod.sync_league_ema(league)
+        names = sorted(st.get("league", {}))
+        if not names:
+            return
+        games = [float(st["league"][n]["games"]) for n in names]
+        wins = [float(st["league"][n]["wr"]) * float(st["league"][n]["games"]) for n in names]
+        tot = _ddp_sum(games + wins)
+        probs = league.sampling_probs()
+        for i, n in enumerate(names):
+            g, w = tot[i], tot[len(names) + i]
+            st["league"][n] = {"games": int(g), "wr": round(w / max(g, 1), 3),
+                               "pfsp_w": round(probs.get(n, 0.0), 4)}
+
+    def _ddp_checks(it: int, st: dict) -> None:
+        """Fail-loud checks across ranks: any rank's local trigger fails the job.
+
+        Local messages print on their own rank (torchrun interleaves all ranks' stdout
+        into train.txt); the ALERT comes from rank 0, then every rank exits non-zero.
+        Single-process calls the checks with `fail` directly (bit-identical).
+        """
+        if not is_dist:
+            if league is not None:
+                league_fail_checks(it, st, league, args.snap_every, args.league_size, fail)
+            priv_fail_checks(it, st, bool(args.priv_critic), fail)
+            dags_fail_checks(it, st, args.dags_p, vec, fail)
+            return
+        msgs: list[str] = []
+        if league is not None:
+            league_fail_checks(it, st, league, args.snap_every, args.league_size, msgs.append)
+        priv_fail_checks(it, st, bool(args.priv_critic), msgs.append)
+        dags_fail_checks(it, st, args.dags_p, vec, msgs.append)
+        for m in msgs:
+            print(f"ALERT train_rl: {m} (rank {dist_rank})", flush=True)
+        dfail_if_any(bool(msgs),
+                     lambda: f"iteration {it}: fail check triggered on some rank (see logs)")
+
     if args.eval_mode == "async":
         evals_path = args.out / "evals.jsonl"
 
@@ -653,13 +790,17 @@ def main() -> None:
 
         asev = AsyncEvaluator(_eval_cmd, args.out)
 
-    evaluate(0)
-    recorded.add(0)
-    eval_started.add(0)
+    if dist_rank == 0:
+        evaluate(0)
+        recorded.add(0)
+        eval_started.add(0)
+    if is_dist:
+        distmod.barrier()
 
     # rollout state: async collector owns the envs + trajectory bookkeeping
+    # (--envs/--rollout/--store/--threads are per rank; seeds offset by rank).
     N = args.envs
-    vec = VecEnv(engine, train_decks, N, args.threads, seed=args.seed)
+    vec = VecEnv(engine, train_decks, N, args.threads, seed=seed_rank)
     vec.set_max_decisions(args.max_decisions)
     if args.dags_starts is not None or args.dags_p > 0:
         if args.dags_starts is None:
@@ -670,8 +811,9 @@ def main() -> None:
             starts = load_starts(args.dags_starts)
         except (OSError, ValueError) as e:
             fail(f"cannot load --dags-starts {args.dags_starts}: {e}")
-        vec.set_starts(starts, args.dags_p, args.seed + 0xDA65)
-        print(f"[dags] {len(starts)} starts p={args.dags_p}", flush=True)
+        vec.set_starts(starts, args.dags_p, seed_rank + 0xDA65)
+        if dist_rank == 0:
+            print(f"[dags] {len(starts)} starts p={args.dags_p}", flush=True)
     store = SlotStore(args.store, gather(vec.buf, np.arange(1), hist, known, priv=bool(args.priv_critic)),
                       vrpo=(args.adv == "vrpo"))
     actor = critic_actor = None
@@ -685,7 +827,7 @@ def main() -> None:
         if args.priv_critic:
             assert critic is not None
             critic_actor = copy.deepcopy(critic).eval()
-        col_rng = np.random.default_rng(args.seed + 0x1234)
+        col_rng = np.random.default_rng(seed_rank + 0x1234)
     league = None
     ygo_pol = None
     if args.league:
@@ -698,7 +840,7 @@ def main() -> None:
         if args.p_ygoagent > 0 and args.p_self < 1:
             from ygo_zero.eval.ygoagent import YgoAgentPolicy
 
-            ygo_pol = YgoAgentPolicy(seed=args.seed + 0x5EED, sample=True, workers=args.ga_workers)
+            ygo_pol = YgoAgentPolicy(seed=seed_rank + 0x5EED, sample=True, workers=args.ga_workers)
     try:
         col = Collector(vec, actor if actor is not None else model, ref, store, hist, known, dev,
                         args.p_bc, args.trunc_reward, args.recv_batch, col_rng, args.precision,
@@ -713,33 +855,39 @@ def main() -> None:
         t0 = time.time()
         pending = col.collect(args.rollout)
         pending_roll = time.time() - t0
-        if not pending[0]:
-            fail("iteration 1: collected 0 samples")
+        dfail_if_any(not pending[0], lambda: "iteration 1: collected 0 samples")
         while True:
             it += 1
             t_it = time.time()
             finished, st = pending
             t_roll = pending_roll
-            if league is not None:
-                league_fail_checks(it, st, league, args.snap_every, args.league_size, fail)
-            priv_fail_checks(it, st, bool(args.priv_critic), fail)
-            dags_fail_checks(it, st, args.dags_p, vec, fail)
+            _ddp_league_sync(st)
+            _ddp_checks(it, st)
             # Start the next batch in the background (actor weights: one update behind
             # after the first sync); the last --iters iteration has no next batch.
             task = None
             if not (args.iters and it >= args.iters):
                 task = CollectTask(col, args.rollout).start()
             vrpo_info: dict = {}
-            if args.adv == "vrpo":
-                try:
+            batch_ok = True
+            try:
+                if args.adv == "vrpo":
                     slots, adv, ret, adv_n, vrpo_info = vrpo_targets_batch(store, finished, args.lam)
-                except RuntimeError:
-                    fail(f"iteration {it}: non-finite Q/Vbar/advantage/return")
+                else:
+                    slots, adv, ret, adv_n = gae_batch(store, finished, args.lam)
+            except RuntimeError:
+                batch_ok = False
+                slots = np.zeros(0, np.int64)
+                adv = ret = adv_n = np.zeros(0, np.float32)
+            dfail_if_any(not batch_ok, lambda: f"iteration {it}: non-finite Q/Vbar/advantage/return")
+            if is_dist:
+                _gmean, _gstd, _ = distmod.global_adv_stats(adv, dev)
+                adv_n = ((adv - _gmean) / (_gstd + 1e-8)).astype(np.float32)
             else:
-                slots, adv, ret, adv_n = gae_batch(store, finished, args.lam)
-            if len(slots) == 0:
-                fail(f"iteration {it}: collected 0 samples")
+                _gstd = float(adv.std())
+            dfail_if_any(len(slots) == 0, lambda: f"iteration {it}: collected 0 samples")
             warm = it <= args.value_warmup
+            upd_ok = True
             try:
                 agg_mean, t_update = ppo_update(
                     model, upd_model, opt, vopt, store, slots, adv_n, ret, rng, dev,
@@ -747,9 +895,13 @@ def main() -> None:
                     ent_coef=args.ent_coef, epochs=args.epochs, minibatch=args.minibatch,
                     warm=warm, precision=args.precision, max_upload_gb=args.max_upload_gb,
                     compile=args.compile, critic=critic, copt=copt,
-                    priv_critic=bool(args.priv_critic), adv=args.adv)
+                    priv_critic=bool(args.priv_critic), adv=args.adv, upd_critic=upd_critic)
             except RuntimeError:
-                fail(f"iteration {it}: non-finite loss")
+                upd_ok = False
+                agg_mean, t_update = {}, 0.0
+            dfail_if_any(not upd_ok, lambda: f"iteration {it}: non-finite loss")
+            if is_dist and it == 1:
+                check_params_match("iteration 1")
             note_qev(it, agg_mean, warm)
             wait_s = 0.0
             if task is not None:
@@ -779,59 +931,103 @@ def main() -> None:
             if league is not None:
                 league_snapshot(model, league, it, args.snap_every, args.league_size)
 
-            if not warm and args.kl_coef > 0 and agg_mean.get("kl_bc") is not None and agg_mean["kl_bc"] == 0.0:
-                fail(f"iteration {it}: kl_bc exactly 0.0 with --kl-coef {args.kl_coef}")
+            _kl_zero = (not warm and args.kl_coef > 0 and agg_mean.get("kl_bc") is not None
+                        and agg_mean["kl_bc"] == 0.0)
+            dfail_if_any(_kl_zero,
+                         lambda: f"iteration {it}: kl_bc exactly 0.0 with --kl-coef {args.kl_coef}")
             dt = time.time() - t_it
-            tot["games"] += st["games"]
-            tot["trunc"] += st["trunc"]
-            tot["decisions"] += st["decisions"]
-            rec = {
-                "iter": it, "warmup": warm, "samples": len(slots), "games": st["games"],
-                "trunc_rate": round(st["trunc"] / max(st["games"], 1), 3),
-                "mean_game_decisions": round(float(np.mean(st["lengths"])) if st["lengths"] else 0.0, 1),
-                "train_vs_bc_sampled": round(st["bc_wins"] / max(st["bc_games"], 1), 3), "bc_games": st["bc_games"],
-                "dags_games": st["dags_games"], "dags_wr": st["dags_wr"], "dags_bad": st["dags_bad"],
-                "adv_std": round(float(adv.std()), 3), "ret_mean": round(float(ret.mean()), 3),
-                "dps": round(st["decisions"] / t_roll), "rollout_s": round(t_roll, 1), "iter_s": round(dt, 1),
-                "t_env": round(st["t_env"], 1), "t_fwd": round(st["t_fwd"], 1),
-                "update_s": round(t_update, 1), "sps": round(len(slots) / dt, 1),
-                "store_free": store.free, "hours": round((time.time() - t_train) / 3600, 3),
-                "overlap": True, "wait_s": round(wait_s, 2),
-                **({"vbar_mean": round(vrpo_info["vbar_mean"], 4),
-                    "adv_diff": round(vrpo_info["adv_diff"], 4)} if vrpo_info else {}),
-                **({"league": st["league"], "t_ga": round(st["t_ga"], 1)} if league is not None else {}),
-                **{k: round(v, 4) for k, v in agg_mean.items()},
-            }  # fmt: skip
-            print(json.dumps(rec), flush=True)
-            if league is not None:
-                print(league_line(it, st), flush=True)
-            log.write(json.dumps(rec) + "\n")
-            log.flush()
-            out_of_time = (time.time() - t_train) / 3600 >= args.hours or (args.iters and it >= args.iters)
-            if args.eval_mode == "async":
+            # Global numbers for rank 0's log line (one SUM collective + sps min/max).
+            _sps_local = len(slots) / max(dt, 1e-9)
+            if is_dist:
+                _lkeys = sorted(agg_mean)
+                _lsum = _ddp_sum([float(agg_mean[k]) for k in _lkeys])
+                agg_mean = {k: v / dist_world for k, v in zip(_lkeys, _lsum)}
+                _cs = _ddp_sum([float(len(slots)), float(st["games"]), float(st["trunc"]),
+                                 float(st["decisions"]), float(st["bc_games"]), float(st["bc_wins"]),
+                                 float(st["dags_games"]),
+                                 float(st["dags_wr"]) * float(st["dags_games"]),
+                                 float(np.sum(st["lengths"])) if st["lengths"] else 0.0,
+                                 float(len(st["lengths"])), float(ret.sum()) if len(ret) else 0.0,
+                                 float(len(ret))])
+                (_g_samples, _g_games, _g_trunc, _g_dec, _g_bcg, _g_bcw, _g_dg, _g_dw,
+                 _g_sumlen, _g_nlen, _g_sumret, _g_nret) = _cs
+                _g_adv_std, _g_ret_mean = _gstd, _g_sumret / max(_g_nret, 1)
+                _sps_min = distmod.min_scalar(_sps_local, dev)
+                _sps_max = distmod.max_scalar(_sps_local, dev)
+            else:
+                _g_samples, _g_games, _g_trunc, _g_dec = (float(len(slots)), float(st["games"]),
+                                                          float(st["trunc"]), float(st["decisions"]))
+                _g_bcg, _g_bcw = float(st["bc_games"]), float(st["bc_wins"])
+                _g_dg = float(st["dags_games"])
+                _g_dw = float(st["dags_wr"]) * float(st["dags_games"])
+                _g_adv_std = _gstd
+                _g_ret_mean = float(ret.mean()) if len(ret) else 0.0
+                _g_sumlen = float(np.sum(st["lengths"])) if st["lengths"] else 0.0
+                _g_nlen = float(len(st["lengths"]))
+                _sps_min = _sps_max = _sps_local
+            if dist_rank == 0:
+                tot["games"] += _g_games
+                tot["trunc"] += _g_trunc
+                tot["decisions"] += _g_dec
+                rec = {
+                    "iter": it, "warmup": warm, "samples": _g_samples, "games": _g_games,
+                    "trunc_rate": round(_g_trunc / max(_g_games, 1), 3),
+                    "mean_game_decisions": round(_g_sumlen / max(_g_nlen, 1), 1),
+                    "train_vs_bc_sampled": round(_g_bcw / max(_g_bcg, 1), 3), "bc_games": _g_bcg,
+                    "dags_games": _g_dg, "dags_wr": round(_g_dw / max(_g_dg, 1), 3),
+                    "dags_bad": st["dags_bad"],
+                    "adv_std": round(float(_g_adv_std), 3), "ret_mean": round(float(_g_ret_mean), 3),
+                    "dps": round(_g_dec / t_roll), "rollout_s": round(t_roll, 1), "iter_s": round(dt, 1),
+                    "t_env": round(st["t_env"], 1), "t_fwd": round(st["t_fwd"], 1),
+                    "update_s": round(t_update, 1), "sps": round(_g_samples / dt, 1),
+                    "store_free": store.free, "hours": round((time.time() - t_train) / 3600, 3),
+                    "overlap": True, "wait_s": round(wait_s, 2),
+                    **({"world_size": dist_world, "sps_min": round(_sps_min, 1),
+                        "sps_max": round(_sps_max, 1)} if is_dist else {}),
+                    **({"vbar_mean": round(vrpo_info["vbar_mean"], 4),
+                        "adv_diff": round(vrpo_info["adv_diff"], 4)} if vrpo_info else {}),
+                    **({"league": st["league"], "t_ga": round(st["t_ga"], 1)} if league is not None else {}),
+                    **{k: round(v, 4) for k, v in agg_mean.items()},
+                }  # fmt: skip
+                print(json.dumps(rec), flush=True)
+                if league is not None:
+                    print(league_line(it, st), flush=True)
+                assert log is not None
+                log.write(json.dumps(rec) + "\n")
+                log.flush()
+            _local_done = (time.time() - t_train) / 3600 >= args.hours or (args.iters and it >= args.iters)
+            out_of_time = distmod.bcast_flag(_local_done if dist_rank == 0 else False)
+            if args.eval_mode == "async" and dist_rank == 0:
                 assert asev is not None
                 relay(asev.poll())
             if it % args.eval_every == 0 or out_of_time:
-                save_last(it)
-                if args.eval_mode == "sync":
-                    evaluate(it)
-                    recorded.add(it)
-                    eval_started.add(it)
-                else:
-                    assert asev is not None
-                    ck = args.out / f"iter-{it:04d}.pt"
-                    torch.save(policy_state(model), ck)
-                    save_critic_pt()
-                    if asev.maybe_start(it, ck):
+                if is_dist:
+                    check_params_match(f"eval it {it}")
+                if dist_rank == 0:
+                    save_last(it)
+                    if args.eval_mode == "sync":
+                        evaluate(it)
+                        recorded.add(it)
                         eval_started.add(it)
                     else:
-                        print(f"[eval it {it}] skipped (previous eval running)", flush=True)
+                        assert asev is not None
+                        ck = args.out / f"iter-{it:04d}.pt"
+                        torch.save(policy_state(model), ck)
+                        save_critic_pt()
+                        if dev.type == "cuda":  # the eval subprocess loads 2 nets on the same GPU: give back the update's
+                            torch.cuda.empty_cache()  # cached blocks first (A10 it 80 eval OOM, NOTEBOOK 2026-10-07 12:20)
+                        if asev.maybe_start(it, ck):
+                            eval_started.add(it)
+                        else:
+                            print(f"[eval it {it}] skipped (previous eval running)", flush=True)
+                if is_dist and args.eval_mode == "sync":
+                    distmod.barrier()  # other ranks wait while rank 0 evaluates
             if out_of_time:
                 if task is not None:
                     # Speculatively collected one batch too many: discard it, free its slots.
                     for s, _ in pending[0]:
                         store.release(s)
-                if args.eval_mode == "async":
+                if args.eval_mode == "async" and dist_rank == 0:
                     assert asev is not None
                     relay(asev.poll())
                     relay(asev.wait())
@@ -845,26 +1041,32 @@ def main() -> None:
         t_it = time.time()
         finished, st = col.collect(args.rollout)
         t_roll = time.time() - t_it
-        if not finished:
-            fail(f"iteration {it}: collected 0 samples")
-        if league is not None:
-            league_fail_checks(it, st, league, args.snap_every, args.league_size, fail)
-        priv_fail_checks(it, st, bool(args.priv_critic), fail)
-        dags_fail_checks(it, st, args.dags_p, vec, fail)
+        dfail_if_any(not finished, lambda: f"iteration {it}: collected 0 samples")
+        _ddp_league_sync(st)
+        _ddp_checks(it, st)
 
         # GAE per finished seat trajectory, then PPO epochs
         # (VRPO: expected-SARSA(λ) targets from the stored rollout-time π/Q instead)
         vrpo_info2: dict = {}
-        if args.adv == "vrpo":
-            try:
+        batch_ok2 = True
+        try:
+            if args.adv == "vrpo":
                 slots, adv, ret, adv_n, vrpo_info2 = vrpo_targets_batch(store, finished, args.lam)
-            except RuntimeError:
-                fail(f"iteration {it}: non-finite Q/Vbar/advantage/return")
+            else:
+                slots, adv, ret, adv_n = gae_batch(store, finished, args.lam)
+        except RuntimeError:
+            batch_ok2 = False
+            slots = np.zeros(0, np.int64)
+            adv = ret = adv_n = np.zeros(0, np.float32)
+        dfail_if_any(not batch_ok2, lambda: f"iteration {it}: non-finite Q/Vbar/advantage/return")
+        if is_dist:
+            _gmean2, _gstd2, _ = distmod.global_adv_stats(adv, dev)
+            adv_n = ((adv - _gmean2) / (_gstd2 + 1e-8)).astype(np.float32)
         else:
-            slots, adv, ret, adv_n = gae_batch(store, finished, args.lam)
-        if len(slots) == 0:
-            fail(f"iteration {it}: collected 0 samples")
+            _gstd2 = float(adv.std())
+        dfail_if_any(len(slots) == 0, lambda: f"iteration {it}: collected 0 samples")
         warm = it <= args.value_warmup
+        upd_ok2 = True
         try:
             agg_mean, t_update = ppo_update(
                 model, upd_model, opt, vopt, store, slots, adv_n, ret, rng, dev,
@@ -872,63 +1074,110 @@ def main() -> None:
                 ent_coef=args.ent_coef, epochs=args.epochs, minibatch=args.minibatch,
                 warm=warm, precision=args.precision, max_upload_gb=args.max_upload_gb,
                 compile=args.compile, critic=critic, copt=copt,
-                priv_critic=bool(args.priv_critic), adv=args.adv)
+                priv_critic=bool(args.priv_critic), adv=args.adv, upd_critic=upd_critic)
         except RuntimeError:
-            fail(f"iteration {it}: non-finite loss")
+            upd_ok2 = False
+            agg_mean, t_update = {}, 0.0
+        dfail_if_any(not upd_ok2, lambda: f"iteration {it}: non-finite loss")
+        if is_dist and it == 1:
+            check_params_match("iteration 1")
         note_qev(it, agg_mean, warm)
         for s, _ in finished:
             store.release(s)
         if league is not None:
             league_snapshot(model, league, it, args.snap_every, args.league_size)
 
-        if not warm and args.kl_coef > 0 and agg_mean.get("kl_bc") is not None and agg_mean["kl_bc"] == 0.0:
-            fail(f"iteration {it}: kl_bc exactly 0.0 with --kl-coef {args.kl_coef}")
+        _kl_zero2 = (not warm and args.kl_coef > 0 and agg_mean.get("kl_bc") is not None
+                     and agg_mean["kl_bc"] == 0.0)
+        dfail_if_any(_kl_zero2,
+                     lambda: f"iteration {it}: kl_bc exactly 0.0 with --kl-coef {args.kl_coef}")
         dt = time.time() - t_it
-        tot["games"] += st["games"]
-        tot["trunc"] += st["trunc"]
-        tot["decisions"] += st["decisions"]
-        rec = {
-            "iter": it, "warmup": warm, "samples": len(slots), "games": st["games"],
-            "trunc_rate": round(st["trunc"] / max(st["games"], 1), 3),
-            "mean_game_decisions": round(float(np.mean(st["lengths"])) if st["lengths"] else 0.0, 1),
-            "train_vs_bc_sampled": round(st["bc_wins"] / max(st["bc_games"], 1), 3), "bc_games": st["bc_games"],
-            "dags_games": st["dags_games"], "dags_wr": st["dags_wr"], "dags_bad": st["dags_bad"],
-            "adv_std": round(float(adv.std()), 3), "ret_mean": round(float(ret.mean()), 3),
-            "dps": round(st["decisions"] / t_roll), "rollout_s": round(t_roll, 1), "iter_s": round(dt, 1),
-            "t_env": round(st["t_env"], 1), "t_fwd": round(st["t_fwd"], 1),
-                "update_s": round(t_update, 1), "sps": round(len(slots) / dt, 1),
-                "store_free": store.free, "hours": round((time.time() - t_train) / 3600, 3),
-                **({"vbar_mean": round(vrpo_info2["vbar_mean"], 4),
-                    "adv_diff": round(vrpo_info2["adv_diff"], 4)} if vrpo_info2 else {}),
-                **({"league": st["league"], "t_ga": round(st["t_ga"], 1)} if league is not None else {}),
-                **{k: round(v, 4) for k, v in agg_mean.items()},
-            }  # fmt: skip
-        print(json.dumps(rec), flush=True)
-        if league is not None:
-            print(league_line(it, st), flush=True)
-        log.write(json.dumps(rec) + "\n")
-        log.flush()
-        out_of_time = (time.time() - t_train) / 3600 >= args.hours or (args.iters and it >= args.iters)
-        if args.eval_mode == "async":
+        _sps_local2 = len(slots) / max(dt, 1e-9)
+        if is_dist:
+            _lkeys2 = sorted(agg_mean)
+            _lsum2 = _ddp_sum([float(agg_mean[k]) for k in _lkeys2])
+            agg_mean = {k: v / dist_world for k, v in zip(_lkeys2, _lsum2)}
+            _cs2 = _ddp_sum([float(len(slots)), float(st["games"]), float(st["trunc"]),
+                              float(st["decisions"]), float(st["bc_games"]), float(st["bc_wins"]),
+                              float(st["dags_games"]),
+                              float(st["dags_wr"]) * float(st["dags_games"]),
+                              float(np.sum(st["lengths"])) if st["lengths"] else 0.0,
+                              float(len(st["lengths"])), float(ret.sum()) if len(ret) else 0.0,
+                              float(len(ret))])
+            (_g_samples, _g_games, _g_trunc, _g_dec, _g_bcg, _g_bcw, _g_dg, _g_dw,
+             _g_sumlen, _g_nlen, _g_sumret, _g_nret) = _cs2
+            _g_adv_std, _g_ret_mean = _gstd2, _g_sumret / max(_g_nret, 1)
+            _sps_min = distmod.min_scalar(_sps_local2, dev)
+            _sps_max = distmod.max_scalar(_sps_local2, dev)
+        else:
+            _g_samples, _g_games, _g_trunc, _g_dec = (float(len(slots)), float(st["games"]),
+                                                      float(st["trunc"]), float(st["decisions"]))
+            _g_bcg, _g_bcw = float(st["bc_games"]), float(st["bc_wins"])
+            _g_dg = float(st["dags_games"])
+            _g_dw = float(st["dags_wr"]) * float(st["dags_games"])
+            _g_adv_std = _gstd2
+            _g_ret_mean = float(ret.mean()) if len(ret) else 0.0
+            _g_sumlen = float(np.sum(st["lengths"])) if st["lengths"] else 0.0
+            _g_nlen = float(len(st["lengths"]))
+            _sps_min = _sps_max = _sps_local2
+        if dist_rank == 0:
+            tot["games"] += _g_games
+            tot["trunc"] += _g_trunc
+            tot["decisions"] += _g_dec
+            rec = {
+                "iter": it, "warmup": warm, "samples": _g_samples, "games": _g_games,
+                "trunc_rate": round(_g_trunc / max(_g_games, 1), 3),
+                "mean_game_decisions": round(_g_sumlen / max(_g_nlen, 1), 1),
+                "train_vs_bc_sampled": round(_g_bcw / max(_g_bcg, 1), 3), "bc_games": _g_bcg,
+                "dags_games": _g_dg, "dags_wr": round(_g_dw / max(_g_dg, 1), 3),
+                "dags_bad": st["dags_bad"],
+                "adv_std": round(float(_g_adv_std), 3), "ret_mean": round(float(_g_ret_mean), 3),
+                "dps": round(_g_dec / t_roll), "rollout_s": round(t_roll, 1), "iter_s": round(dt, 1),
+                "t_env": round(st["t_env"], 1), "t_fwd": round(st["t_fwd"], 1),
+                    "update_s": round(t_update, 1), "sps": round(_g_samples / dt, 1),
+                    "store_free": store.free, "hours": round((time.time() - t_train) / 3600, 3),
+                    **({"world_size": dist_world, "sps_min": round(_sps_min, 1),
+                        "sps_max": round(_sps_max, 1)} if is_dist else {}),
+                    **({"vbar_mean": round(vrpo_info2["vbar_mean"], 4),
+                        "adv_diff": round(vrpo_info2["adv_diff"], 4)} if vrpo_info2 else {}),
+                    **({"league": st["league"], "t_ga": round(st["t_ga"], 1)} if league is not None else {}),
+                    **{k: round(v, 4) for k, v in agg_mean.items()},
+                }  # fmt: skip
+            print(json.dumps(rec), flush=True)
+            if league is not None:
+                print(league_line(it, st), flush=True)
+            assert log is not None
+            log.write(json.dumps(rec) + "\n")
+            log.flush()
+        _local_done2 = (time.time() - t_train) / 3600 >= args.hours or (args.iters and it >= args.iters)
+        out_of_time = distmod.bcast_flag(_local_done2 if dist_rank == 0 else False)
+        if args.eval_mode == "async" and dist_rank == 0:
             assert asev is not None
             relay(asev.poll())
         if it % args.eval_every == 0 or out_of_time:
-            save_last(it)
-            if args.eval_mode == "sync":
-                evaluate(it)
-                recorded.add(it)
-                eval_started.add(it)
-            else:
-                assert asev is not None
-                ck = args.out / f"iter-{it:04d}.pt"
-                torch.save(policy_state(model), ck)
-                save_critic_pt()
-                if asev.maybe_start(it, ck):
+            if is_dist:
+                check_params_match(f"eval it {it}")
+            if dist_rank == 0:
+                save_last(it)
+                if args.eval_mode == "sync":
+                    evaluate(it)
+                    recorded.add(it)
                     eval_started.add(it)
                 else:
-                    print(f"[eval it {it}] skipped (previous eval running)", flush=True)
+                    assert asev is not None
+                    ck = args.out / f"iter-{it:04d}.pt"
+                    torch.save(policy_state(model), ck)
+                    save_critic_pt()
+                    if dev.type == "cuda":  # the eval subprocess loads 2 nets on the same GPU: give back the update's
+                        torch.cuda.empty_cache()  # cached blocks first (A10 it 80 eval OOM, NOTEBOOK 2026-10-07 12:20)
+                    if asev.maybe_start(it, ck):
+                        eval_started.add(it)
+                    else:
+                        print(f"[eval it {it}] skipped (previous eval running)", flush=True)
+            if is_dist and args.eval_mode == "sync":
+                distmod.barrier()  # other ranks wait while rank 0 evaluates
         if out_of_time:
-            if args.eval_mode == "async":
+            if args.eval_mode == "async" and dist_rank == 0:
                 assert asev is not None
                 relay(asev.poll())
                 relay(asev.wait())
@@ -937,8 +1186,10 @@ def main() -> None:
                     recorded.add(it)
                     eval_started.add(it)
             break
-    print(f"done: {it} iterations, {tot['games']} games, {tot['decisions']} decisions, "
-          f"{(time.time() - t_start) / 3600:.2f} h", flush=True)  # fmt: skip
+    if dist_rank == 0:
+        print(f"done: {it} iterations, {tot['games']} games, {tot['decisions']} decisions, "
+              f"{(time.time() - t_start) / 3600:.2f} h", flush=True)  # fmt: skip
+    distmod.teardown()
 
 
 if __name__ == "__main__":

@@ -103,6 +103,7 @@ class JobSpec:
     disk_gb: int = 30
     image: str = "python:3.12-bookworm"  # has gcc/g++/git/curl; torch + CUDA libs come from PyPI via uv
     gpu: bool = True
+    num_gpus: int = 1
     extra_query: str = ""
     setup: str = "bash scripts/vast_setup.sh"
     data_paths: tuple[str, ...] = ()  # extra repo paths to ship despite EXCLUDES (e.g. "data/demos/lines")
@@ -138,7 +139,7 @@ def find_offer(
 ) -> dict:
     q = (f"reliability>0.98 rentable=true verified=true disk_space>={spec.disk_gb} inet_down>=200 "
          f"cpu_cores_effective>={spec.min_cpus} dph<={spec.max_dph}")  # fmt: skip
-    q += f" num_gpus=1 gpu_ram>={spec.min_gpu_ram_gb}" if spec.gpu else " num_gpus=0"
+    q += f" num_gpus={spec.num_gpus} gpu_ram>={spec.min_gpu_ram_gb}" if spec.gpu else " num_gpus=0"
     q += f" {spec.extra_query}" if spec.extra_query else ""
     offers = [
         o
@@ -290,14 +291,15 @@ def stall_check(host: str, port: int, rdir: str, log: Path, stalled: bool, minut
 def relay_alerts(
     host: str, port: int, rdir: str, log: Path, seen: int, filename: str = "ALERT", prefix: str = "ALERT "
 ) -> int:
-    """Fail loud: copy new lines of the job's runs/<name>/<filename> file into the launcher log as they appear,
+    """Fail loud: copy new lines of the job's runs/<name>/<filename> (and runs/<name>/*/<filename>: train_rl writes
+    rl/ALERT, missed until 2026-10-07) into the launcher log as they appear,
     each prefixed with `prefix` (unless already prefixed), so a broken variant (ALERT) or training progress
     (PROGRESS, eval lines tailed by vast_rl.sh) is visible within one poll instead of at the end of the job.
     A missing file is normal (other job types have no PROGRESS): no error. Returns the number of lines
     relayed so far."""
     try:
         out = subprocess.run(
-            ["ssh", *SSH_OPTS, "-p", str(port), f"root@{host}", f"cat {rdir}/{filename} 2>/dev/null"],
+            ["ssh", *SSH_OPTS, "-p", str(port), f"root@{host}", f"cat {rdir}/{filename} {rdir}/*/{filename} 2>/dev/null"],
             capture_output=True, text=True, timeout=60, check=False,
         )  # fmt: skip
     except subprocess.TimeoutExpired:
