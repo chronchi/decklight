@@ -102,3 +102,15 @@ advances … plan, and then you can take the decision here." Claude decides; thi
    end, honest search only.
 
 Budget for 1–5 ≈ $X of the ≈ $X credit.
+
+## Status 2026-10-07 02:45 (NOTEBOOK)
+- Step 0: rl3long is not accepted (h2h 60.7% but new-card 45%, combo halved); base_r3 stays.
+- Steps 2–3 done:
+  - S0b: honest + value_ppo3 0.688 and oracle + value_ppo3 0.703, so **honest search is the teacher**.
+  - value_ppo3 (the PPO critic) replaces v2 as the search value. Value v3's honest/privileged heads drop in
+    priority: the PPO critic already serves.
+- Next:
+  - S2: distil honest-search labels (value_ppo3, h1) with soft targets.
+  - Meanwhile ft-r3: distillation of the oracle sw3 labels, already paid for.
+  - Wind-Up investigation.
+  - `--det-fallback skip`.
