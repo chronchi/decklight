@@ -46,6 +46,84 @@ def obs_equal(a: dict | None, b: dict | None) -> bool:
     return True
 
 
+# Columns of an option row that describe what the option *means* (obs.py `option_row`):
+# [kind, row_of, code, desc_hi, desc_lo, arg, msg_type, loc, ctrl, step]. Cols 1
+# (position in the obs card table) and 9 (a counter) are excluded from the key.
+_CMP_COLS = [0, 2, 3, 4, 5, 6, 7, 8]
+
+
+def option_key(row) -> tuple[int, ...]:
+    """Meaning of one option row (all columns except `row_of` and `step`)."""
+    return (int(row[0]), int(row[2]), int(row[3]), int(row[4]),
+            int(row[5]), int(row[6]), int(row[7]), int(row[8]))
+
+
+def key_rank_of_choice(obs: dict, idx: int) -> tuple[tuple[int, ...], int]:
+    """Key of the chosen option plus its rank among the legal options with the same key
+    (0 for the first, 1 for the second identical copy, ...; ordered by option index)."""
+    acts = obs["actions"]
+    mask = obs["action_mask"].astype(bool)
+    key = option_key(acts[int(idx)])
+    rank = 0
+    for j in range(int(idx)):
+        if bool(mask[j]) and option_key(acts[j]) == key:
+            rank += 1
+    return key, rank
+
+
+def find_by_key_rank(obs: dict, key: tuple[int, ...], rank: int) -> int | None:
+    """Legal option index with this key and rank, or the last copy with the key when fewer
+    copies exist, or None when no legal option has the key."""
+    acts = obs["actions"]
+    mask = obs["action_mask"].astype(bool)
+    matches = [j for j in range(len(mask)) if bool(mask[j]) and option_key(acts[j]) == key]
+    if not matches:
+        return None
+    if int(rank) < len(matches):
+        return matches[int(rank)]
+    return matches[-1]
+
+
+def prefix_keys_for(engine, config, prefix: list[int], auto_single: bool = True,
+                    ) -> list[tuple[tuple[int, ...], int]]:
+    """(key, rank) of every choice of `prefix` in the true game (for the Determinizer)."""
+    env = CppEnv(engine, config, auto_single)
+    obs = env.reset()
+    out = []
+    for c in prefix:
+        out.append(key_rank_of_choice(obs, int(c)))
+        obs = env.step(int(c))
+    return out
+
+
+def root_obs_equal(a: dict | None, b: dict | None) -> bool:
+    """`me`'s root-obs comparison for semantic replay: `actions` matches on the meaning
+    columns only (`_CMP_COLS`), the mask and every other array match exactly."""
+    if a is None or b is None:
+        return a is None and b is None
+    if set(a.keys()) != set(b.keys()):
+        return False
+    for k in a:
+        va, vb = a[k], b[k]
+        if k == "actions":
+            if not isinstance(va, np.ndarray) or not isinstance(vb, np.ndarray):
+                return False
+            if va.shape != vb.shape:
+                return False
+            if not np.array_equal(va[:, _CMP_COLS], vb[:, _CMP_COLS]):
+                return False
+        elif isinstance(va, np.ndarray) or isinstance(vb, np.ndarray):
+            if not isinstance(va, np.ndarray) or not isinstance(vb, np.ndarray):
+                return False
+            if va.shape != vb.shape or va.dtype != vb.dtype:
+                return False
+            if not np.array_equal(va, vb):
+                return False
+        elif va != vb:
+            return False
+    return True
+
+
 def _is_public(loc: int, pos: int, is_pub: bool) -> bool:
     """Mirror of `Board::is_public` (cpp/ygoenv/env.cpp): is this card public to a non-holder?"""
     if loc == C.LOCATION_GRAVE:
@@ -98,20 +176,28 @@ class _Deck:
 class Determinizer:
     """Draws honest worlds for one searched decision by rejection sampling.
 
-    `sample() -> DuelConfig | None`: permute the codes among each team's hidden slots (a
+    `sample() -> (DuelConfig, resolved_prefix) | None`: permute the codes among each team's hidden slots (a
     face-down MZONE slot only swaps with monster codes, a face-down SZONE slot only with
-    spell/trap codes), rebuild with `shuffle=False`, replay `prefix`, and accept only if the
-    replay raises nothing and the obs for `me` at the end equals `root_obs` exactly. After
-    `tries` rejections returns None (the caller falls back to the true config).
+    spell/trap codes), rebuild with `shuffle=False`, replay `prefix_keys` by meaning, and accept only if the
+    replay raises nothing and `me`'s obs at the end matches `root_obs` on the meaning columns
+    (`root_obs_equal`). After `tries` rejections returns None (the caller falls back to the true config).
+    `resolved_prefix` is the world's own option indices, so branches extend it with the root candidate
+    index (the root options are identical by the obs check). Without `prefix_keys` (None) replays the
+    raw `prefix` indices with the exact `obs_equal` check (the old behaviour, for comparison).
+    Rejections are counted by reason in `reasons`: `no_key` (no legal option has the recorded key),
+    `replay_error` (the env ended early or a step raised), `obs_mismatch` (root obs differs).
     """
 
     def __init__(self, engine, config, auto_single: bool, me: int, prefix: list[int],
-                 seen: set[int], root_obs: dict, rng, tries: int = 8) -> None:
+                 seen: set[int], root_obs: dict, rng, tries: int = 8,
+                 prefix_keys: list[tuple[tuple[int, ...], int]] | None = None) -> None:
         self.engine = engine
         self.config = config
         self.auto_single = auto_single
         self.me = me
         self.prefix = list(prefix)
+        self.prefix_keys = (None if prefix_keys is None
+                            else [(tuple(k), int(r)) for k, r in prefix_keys])
         self.seen = set(seen)
         self.root_obs = root_obs
         self.rng = rng
@@ -120,6 +206,7 @@ class Determinizer:
         self.accepted = 0
         self.fallbacks = 0
         self.seconds = 0.0
+        self.reasons: dict[str, int] = {"no_key": 0, "replay_error": 0, "obs_mismatch": 0}
         # Slot map: at reset, DECK cards are all main-origin, so the main block starts at the
         # lowest deck cardid; main cardids are consecutive in main_of(team) order (verified below).
         probe = CppEnv(engine, config, auto_single)
@@ -256,9 +343,10 @@ class Determinizer:
         )
 
     def sample(self):
-        """One honest world, or None after `tries` rejections (caller falls back to truth)."""
+        """One honest world + its own option indices, or None after `tries` rejections."""
         t0 = time.perf_counter()
         try:
+            semantic = self.prefix_keys is not None
             for _ in range(self.tries):
                 self.proposals += 1
                 mains = self._propose_mains()
@@ -268,13 +356,35 @@ class Determinizer:
                 try:
                     env = CppEnv(self.engine, world, self.auto_single)
                     obs = env.reset()
-                    for c in self.prefix:
-                        obs = env.step(c)
+                    if semantic:
+                        assert self.prefix_keys is not None
+                        resolved: list[int] = []
+                        failed: str | None = None
+                        for key, rank in self.prefix_keys:
+                            if obs is None:
+                                failed = "replay_error"
+                                break
+                            idx = find_by_key_rank(obs, key, rank)
+                            if idx is None:
+                                failed = "no_key"
+                                break
+                            resolved.append(idx)
+                            obs = env.step(idx)
+                        if failed is not None:
+                            self.reasons[failed] += 1
+                            continue
+                    else:
+                        resolved = list(self.prefix)
+                        for c in self.prefix:
+                            obs = env.step(c)
                 except Exception:
+                    self.reasons["replay_error"] += 1
                     continue
-                if obs_equal(obs, self.root_obs):
+                ok = root_obs_equal(obs, self.root_obs) if semantic else obs_equal(obs, self.root_obs)
+                if ok:
                     self.accepted += 1
-                    return world
+                    return world, resolved
+                self.reasons["obs_mismatch"] += 1
             self.fallbacks += 1
             return None
         finally:

@@ -143,6 +143,7 @@ def main() -> None:
     ap.add_argument("--conf-skip", type=float, default=0.9, help="skip search when softmax(z).max() >= this")
     ap.add_argument("--own-frac", type=float, default=1.0, help="share of S own-turn decisions searched")
     ap.add_argument("--own-turn1", type=int, default=0, choices=(0, 1), help="also search S turn-1 plays")
+    ap.add_argument("--det-tries", type=int, default=8, help="rejection-sampling proposals per honest world")
     ap.add_argument("--honest", type=int, default=0, choices=(0, 1), help="search determinized worlds (honest search)")
     ap.add_argument("--width", type=int, default=32, help="games searched concurrently")
     ap.add_argument("--batch", type=int, default=512, help="max obs per policy forward")
@@ -207,7 +208,7 @@ def main() -> None:
             yield idx, search_game_gen(
                 engine, cfg, ws, s_seat, argmax_select, game_seed=idx,
                 own_turn1=bool(args.own_turn1), conf_skip=args.conf_skip, own_frac=args.own_frac,
-                honest=bool(args.honest),
+                honest=bool(args.honest), det_tries=args.det_tries,
             )  # fmt: skip
 
     args.out.mkdir(parents=True, exist_ok=True)

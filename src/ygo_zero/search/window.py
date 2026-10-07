@@ -125,7 +125,7 @@ class WindowSearch:
 
     def rollouts_gen(self, config: DuelConfig, auto_single: bool, prefixes, me: int, end_turn: int = 0,
                         game_seed: int = 0, decision_k: int = 0, turn_start: int | None = None,
-                        worlds: list[DuelConfig] | None = None):
+                        worlds: list[DuelConfig | tuple[DuelConfig, list[int]]] | None = None):
         """Play each branch out with the policy until the largest horizon ends (or the duel ends / max_rollout).
 
         `prefixes` is either the legacy list of choice prefixes (one branch per prefix, argmax rollouts,
@@ -138,9 +138,11 @@ class WindowSearch:
         Rollouts run under a LoopGuard (exact repeats within a turn mask the options already taken), and a branch
         that still hits max_rollout is scored as a loss for `me`: a candidate that sends play into a loop must not
         look as good as the position it froze in (round 1 learned such loops, NOTEBOOK 2026-10-06).
-        With `worlds` (honest search), branch `(p, j, cand, s)` is built from `worlds[s % len(worlds)]`
-        instead of `config`, so all candidates of sample s share one world (common random worlds).
-        `None` = today's behaviour (bit-identical).
+        With `worlds` (honest search), a list of `(world_config, world_prefix)` tuples, branch
+        `(p, j, cand, s)` is built from `worlds[s % len(worlds)]` as `world_prefix + [p[-1]]`
+        (p[-1] is the candidate; the root options are identical by the determinizer's obs check),
+        so all candidates of sample s share one world (common random worlds). `None` = today's
+        behaviour (bit-identical).
         """
         hs = self._hs()
         # Legacy call: list of prefixes -> one argmax branch each, single horizon ending at end_turn.
@@ -157,10 +159,18 @@ class WindowSearch:
         B = len(branches)
         envs, obs = [], []
         for p, _, _, s in branches:
-            cfg = worlds[s % len(worlds)] if worlds is not None else config
+            if worlds is None:
+                cfg, pp = config, p
+            else:
+                w = worlds[s % len(worlds)]
+                if isinstance(w, tuple):
+                    cfg, wprefix = w
+                    pp = list(wprefix) + [p[-1]]
+                else:  # plain DuelConfig (tests): today's replay of p
+                    cfg, pp = w, p
             e = CppEnv(self.engine, cfg, auto_single)
             o = e.reset()
-            for c in p:
+            for c in pp:
                 o = e.step(c)
             envs.append(e)
             obs.append(o)

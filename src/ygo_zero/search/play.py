@@ -35,7 +35,7 @@ import numpy as np
 from ygo_zero.engine.cpp_env import CppEnv
 from ygo_zero.engine.duel import DuelConfig, Engine
 from ygo_zero.eval.loopguard import LoopGuard
-from ygo_zero.search.determinize import Determinizer, SeenTracker
+from ygo_zero.search.determinize import Determinizer, SeenTracker, key_rank_of_choice
 from ygo_zero.search.turn1 import _masked
 from ygo_zero.search.window import WindowSearch, is_window
 
@@ -76,6 +76,7 @@ class GameResult:
     det_accepted: int = 0  # ... accepted (root obs identical to the truth)
     det_fallbacks: int = 0  # ... rejected after `tries` (fell back to the true config)
     det_s: float = 0.0  # wall seconds spent drawing honest worlds
+    choice_keys: list = field(default_factory=list)  # (key, rank) of every choice (semantic replay)
 
 
 def search_game_gen(
@@ -91,6 +92,7 @@ def search_game_gen(
     max_decisions: int = 3000,
     auto_single: bool = True,
     honest: bool = False,
+    det_tries: int = 8,
 ):
     """Play one live game; S (absolute seat `s_seat`) searches, R plays raw. Returns a GameResult.
 
@@ -142,11 +144,15 @@ def search_game_gen(
                         det = Determinizer(
                             engine, config, auto_single, me, res.choices, tracker.seen,
                             obs, random.Random(f"{search.seed}:{game_seed}:{k}:det"),
+                            prefix_keys=res.choice_keys, tries=det_tries,
                         )
                         worlds = []
                         for _ in range(search.samples):
-                            w = det.sample()
-                            worlds.append(w if w is not None else config)
+                            got = det.sample()
+                            if got is None:
+                                worlds.append((config, list(res.choices)))
+                            else:
+                                worlds.append(got)
                         res.det_proposals += det.proposals
                         res.det_accepted += det.accepted
                         res.det_fallbacks += det.fallbacks
@@ -169,6 +175,8 @@ def search_game_gen(
                     if a != a_pol:
                         res.n_override += 1
         guard.note(0, key, a)
+        if tracker is not None:
+            res.choice_keys.append(key_rank_of_choice(obs, a))
         res.choices.append(a)
         res.actors.append(me)
         obs = env.step(a)

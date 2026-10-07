@@ -11,7 +11,10 @@ import numpy as np
 from ygo_zero.engine import constants as C
 from ygo_zero.engine.cpp_env import CppEnv
 from ygo_zero.engine.duel import DuelConfig
-from ygo_zero.search.determinize import Determinizer, SeenTracker, _Deck, obs_equal
+from ygo_zero.search.determinize import (
+    Determinizer, SeenTracker, _Deck, find_by_key_rank, key_rank_of_choice,
+    obs_equal, prefix_keys_for, root_obs_equal,
+)
 
 LOCATIONS = (C.LOCATION_DECK, C.LOCATION_HAND, C.LOCATION_MZONE, C.LOCATION_SZONE,
              C.LOCATION_GRAVE, C.LOCATION_REMOVED, C.LOCATION_EXTRA)
@@ -86,22 +89,51 @@ def test_identity_world_replays_bit_identically(engine, decks):
 
 
 def _decision_points(engine, cfg, seed, n=25):
-    """(prefix, me, root_obs, trackers) at turn>=2 decision points of a random game."""
+    """(prefix, prefix_keys, me, root_obs, trackers) at turn>=2 decision points of a random game."""
     rng = random.Random(seed)
     env = CppEnv(engine, cfg, True)
     obs = env.reset()
     t0, t1 = SeenTracker(0), SeenTracker(1)
     t0.update(env)
     t1.update(env)
+    keys: list = []
     pts = []
     while obs is not None and len(env.choices) < 600:
         if int(obs["global"][2]) >= 2:
-            pts.append((list(env.choices), int(env.player), obs, {0: set(t0.seen), 1: set(t1.seen)}))
+            pts.append((list(env.choices), list(keys), int(env.player), obs, {0: set(t0.seen), 1: set(t1.seen)}))
         legal = np.flatnonzero(obs["action_mask"]).tolist()
-        obs = env.step(rng.choice(legal))
+        c = rng.choice(legal)
+        keys.append(key_rank_of_choice(obs, int(c)))
+        obs = env.step(c)
         t0.update(env)
         t1.update(env)
     return pts
+
+
+def test_identity_world_semantic_replay_reproduces_prefix(engine, decks):
+    """Semantic replay of the true config reproduces the true prefix indices exactly."""
+    cfg = _cfg(decks, 31)
+    rng = random.Random(7)
+    env = CppEnv(engine, cfg, True)
+    obs = env.reset()
+    prefix, pkeys = [], []
+    while obs is not None and len(prefix) < 120:
+        legal = np.flatnonzero(obs["action_mask"]).tolist()
+        c = rng.choice(legal)
+        pkeys.append(key_rank_of_choice(obs, int(c)))
+        prefix.append(int(c))
+        obs = env.step(c)
+    assert len(prefix) >= 50
+    assert prefix_keys_for(engine, cfg, prefix, True) == pkeys
+    probe = CppEnv(engine, cfg, True)
+    o = probe.reset()
+    resolved = []
+    for key, rank in pkeys:
+        idx = find_by_key_rank(o, key, rank)
+        assert idx is not None
+        resolved.append(idx)
+        o = probe.step(idx)
+    assert resolved == prefix
 
 
 def _table(engine, cfg, prefix):
@@ -115,29 +147,31 @@ def _table(engine, cfg, prefix):
 
 
 def test_determinizer_accepts_consistent_worlds(engine, decks):
-    """Every accepted world gives `me` the identical root obs; seen cards keep their codes;
+    """Every accepted world matches `me`'s root obs (meaning columns); seen cards keep their codes;
     over >= 20 decision points at least one accepted world changes the hidden hand."""
     cfgs = [_cfg(decks, s) for s in (21, 22)]
     n_pts, n_diff, n_acc = 0, 0, 0
     for gi, cfg in enumerate(cfgs):
-        for prefix, me, root_obs, seen in _decision_points(engine, cfg, seed=100 + gi):
+        for prefix, pkeys, me, root_obs, seen in _decision_points(engine, cfg, seed=100 + gi):
             if n_pts >= 24:
                 break
             det = Determinizer(engine, cfg, True, me, prefix, seen[me], root_obs,
-                               random.Random(f"test:{gi}:{n_pts}"), tries=8)
+                               random.Random(f"test:{gi}:{n_pts}"), tries=8,
+                               prefix_keys=pkeys)
             for _ in range(2):
-                world = det.sample()
-                if world is None:
+                got = det.sample()
+                if got is None:
                     continue
+                world, resolved = got
                 n_acc += 1
-                # root obs identical
+                # root obs matches under the semantic comparison
                 env = CppEnv(engine, world, True)
                 obs = env.reset()
-                for c in prefix:
+                for c in resolved:
                     obs = env.step(c)
-                assert obs_equal(obs, root_obs)
+                assert root_obs_equal(obs, root_obs)
                 # cards in `seen` keep their codes (cardids are creation-ordered, same in both)
-                true_tab, world_tab = _table(engine, cfg, prefix), _table(engine, world, prefix)
+                true_tab, world_tab = _table(engine, cfg, prefix), _table(engine, world, resolved)
                 for cid in seen[me]:
                     keys = [k for k in true_tab if k[1] == cid]
                     assert keys, f"seen cardid {cid} missing from true table"
@@ -150,6 +184,7 @@ def test_determinizer_accepts_consistent_worlds(engine, decks):
                 env_w.reset()
                 for c in prefix:
                     env_t.step(c)
+                for c in resolved:
                     env_w.step(c)
                 ct, cw = env_t.cards(), env_w.cards()
                 ht = sorted(int(ct["code"][i]) for i in range(len(ct["code"]))
@@ -168,8 +203,43 @@ def test_determinizer_accepts_consistent_worlds(engine, decks):
     assert n_diff >= 1, "no accepted world changed the opponent hidden hand"
 
 
+def test_semantic_accepts_more_than_index(engine, decks):
+    """Over >= 20 decision points, semantic replay accepts more proposals than index replay."""
+    cfgs = [_cfg(decks, s) for s in (21, 22)]
+    n_pts = 0
+    sem_p = sem_a = 0
+    idx_p = idx_a = 0
+    for gi, cfg in enumerate(cfgs):
+        for prefix, pkeys, me, root_obs, seen in _decision_points(engine, cfg, seed=300 + gi):
+            if n_pts >= 24:
+                break
+            d_sem = Determinizer(engine, cfg, True, me, prefix, seen[me], root_obs,
+                                 random.Random(f"sem:{gi}:{n_pts}"), tries=8,
+                                 prefix_keys=pkeys)
+            for _ in range(2):
+                if d_sem.sample() is not None:
+                    pass
+            d_idx = Determinizer(engine, cfg, True, me, prefix, seen[me], root_obs,
+                                 random.Random(f"sem:{gi}:{n_pts}"), tries=8)
+            for _ in range(2):
+                if d_idx.sample() is not None:
+                    pass
+            sem_p += d_sem.proposals
+            sem_a += d_sem.accepted
+            idx_p += d_idx.proposals
+            idx_a += d_idx.accepted
+            n_pts += 1
+        if n_pts >= 24:
+            break
+    assert n_pts >= 20, f"only {n_pts} decision points"
+    assert sem_p > 0 and idx_p > 0
+    assert sem_a / sem_p > idx_a / idx_p, (
+        f"semantic {sem_a}/{sem_p}={sem_a / sem_p:.3f} not above index {idx_a}/{idx_p}={idx_a / idx_p:.3f}"
+    )
+
+
 def test_rollouts_worlds_none_unchanged_and_true_world_matches(engine, decks):
-    """rollouts_gen(worlds=None) is today's behaviour; worlds=[true config] scores the same."""
+    """rollouts_gen(worlds=None) is today's behaviour; worlds=[(true config, true prefix)] scores the same."""
     from ygo_zero.search.turn1 import drive_many
     from ygo_zero.search.window import WindowSearch
 
@@ -203,12 +273,12 @@ def test_rollouts_worlds_none_unchanged_and_true_world_matches(engine, decks):
 
     base = run(None, 1)
     assert isinstance(base, dict)
-    same = run([cfg], 1)
+    same = run([(cfg, prefix)], 1)
     assert same.keys() == base.keys()
     for k in base:
         assert same[k] == base[k], f"{k}: {same[k]} != {base[k]}"
     # multi-sample averages match too
-    assert run([cfg, cfg], 2) == run(None, 2)
+    assert run([(cfg, prefix), (cfg, prefix)], 2) == run(None, 2)
 
 
 def test_search_game_honest_ends_with_det_counters(engine, decks):
