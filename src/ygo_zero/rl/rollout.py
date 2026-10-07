@@ -49,7 +49,7 @@ class Collector:
     def __init__(self, vec, model, ref, store, hist: int, known: bool, device: torch.device,
                  p_bc: float, trunc_reward: float, recv_batch: int, rng: np.random.Generator,
                  precision: str = "fp32", league: League | None = None, ygo=None,
-                 critic=None, priv_critic: bool = False) -> None:
+                 critic=None, priv_critic: bool = False, adv: str = "gae") -> None:
         self.vec = vec
         self.model = model
         self.ref = ref
@@ -70,6 +70,15 @@ class Collector:
             raise ValueError("--priv-critic 1 needs a critic net")
         self.critic = critic
         self.priv_critic = bool(priv_critic)
+        if adv not in ("gae", "vrpo"):
+            raise ValueError(f"unknown adv {adv!r} (want 'gae' or 'vrpo')")
+        self.adv = adv
+        if adv == "vrpo":
+            # Fail fast: the Q head must exist on the net the targets read it from.
+            owner = critic if priv_critic else model
+            if not getattr(owner, "has_q", False):
+                raise ValueError("--adv vrpo needs a Q-capable critic "
+                                 f"({'privileged critic' if priv_critic else 'policy net'} built with q=True)")
         n = vec.num_envs
         self.buf = vec.buf
         self.traj: list[list[list[int]]] = [[[], []] for _ in range(n)]
@@ -105,6 +114,37 @@ class Collector:
         if self.precision == "bf16" and self.device.type == "cuda":
             return torch.autocast(self.device.type, dtype=torch.bfloat16)
         return contextlib.nullcontext()
+
+    @staticmethod
+    def _pad64(x: np.ndarray) -> np.ndarray:
+        """Pad a [B, W<=64] row array to width 64 (policy pads logits to the full option count,
+        which is 64 in the VecEnv; the store is fixed at 64 like ref_lp)."""
+        if x.shape[1] == 64:
+            return x
+        assert x.shape[1] < 64, x.shape
+        return np.pad(x, ((0, 0), (0, 64 - x.shape[1])))
+
+    def _forward_learner_vrpo(self, tob_l, ob_l):
+        """Learner forward for `--adv vrpo`: (logits, vbar_as_value, pi_cpu, q_cpu).
+
+        pi is the behaviour policy's full per-option distribution (0 on illegal options);
+        Q comes from the critic (privileged critic when `--priv-critic 1`, else the policy
+        net's own Q head, single forward). The stored `value` is V̄(s) = Σ_a π Q.
+        Non-finite values are stored as-is and fail loud in the batch targets.
+        """
+        if self.critic is None:
+            logits, q = self.model.forward_q(tob_l)
+        else:
+            logits = self.model(tob_l)
+            cobs_l = to_torch(critic_obs(ob_l, ob_l["priv_code"]), self.device)
+            _, q = self.critic.forward_q(cobs_l)
+        legal = torch.isfinite(logits)
+        lp = masked_log_softmax(logits)
+        pi = (lp.exp() * legal).float().cpu().numpy()
+        q_cpu = q.float().cpu().numpy()
+        vbar_rows = (pi * q_cpu).sum(-1)
+        v = torch.from_numpy(vbar_rows.astype(np.float32)).to(logits.device)
+        return logits, v, self._pad64(pi), self._pad64(q_cpu)
 
     def collect(self, n_samples: int) -> tuple[list[tuple[list[int], float]], dict]:
         """Collect until `n_samples` finished samples are ready. Returns (finished, stats).
@@ -242,16 +282,21 @@ class Collector:
                     l_idx = torch.from_numpy(np.array([pos[int(i)] for i in l_ids], np.int64)).to(self.device)
                     tob_l = {k: v[l_idx] for k, v in tob_all.items() if k != "priv_code"}
                     ob_l = {k: v[np.array([pos[int(i)] for i in l_ids])] for k, v in ob_all.items()}
-                    if self.critic is None:
+                    if self.adv == "vrpo":
+                        logits, v, pi_cpu, q_cpu = self._forward_learner_vrpo(tob_l, ob_l)
+                    elif self.critic is None:
                         logits, v = self.model.forward_value(tob_l)
+                        pi_cpu = q_cpu = None
                     else:
                         logits = self.model(tob_l)
                         cobs_l = to_torch(critic_obs(ob_l, ob_l["priv_code"]), self.device)
                         _, v = self.critic.forward_value(cobs_l)
+                        pi_cpu = q_cpu = None
                     lp = masked_log_softmax(logits)
                     act_l, lp_l = _sample_from_lp(lp, torch.isfinite(logits))
                     slots = self.store.put(ob_l, act_l, lp_l, v.float().cpu().numpy(),
-                                           ref_lp_cpu[[pos[int(i)] for i in l_ids]])
+                                           ref_lp_cpu[[pos[int(i)] for i in l_ids]],
+                                           pi=pi_cpu, q=q_cpu)
                     if self.priv_critic:
                         priv_rows += len(l_ids)
                         priv_nonzero += int((ob_l["priv_code"] > 0).sum())

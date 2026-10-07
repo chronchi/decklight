@@ -44,6 +44,7 @@ from ygo_zero.rl.critic import critic_obs
 from ygo_zero.rl.ppo import SlotStore, explained_variance, gae, gather, masked_log_softmax, ppo_loss, \
     ppo_loss_priv, to_torch
 from ygo_zero.rl.rollout import Collector
+from ygo_zero.rl.vrpo import ppo_loss_vrpo, ppo_loss_vrpo_priv, vrpo_batch as _vrpo_batch
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -71,30 +72,35 @@ def _autocast(dev: torch.device, prec: str):
     return contextlib.nullcontext()
 
 
-def load_net(ckpt: Path, emb: dict, a: dict, value: bool) -> PolicyNet:
+def load_net(ckpt: Path, emb: dict, a: dict, value: bool, q: bool = False) -> PolicyNet:
     net = PolicyNet(emb, d=a.get("d", 256), layers=a.get("layers", 4), heads=a.get("heads", 4), dropout=0.0,
-                    hist=int(a.get("hist", 0) or 0), known=bool(a.get("known", False)), value=value)  # fmt: skip
+                    hist=int(a.get("hist", 0) or 0), known=bool(a.get("known", False)), value=value,
+                    q=q)  # fmt: skip
     state = torch.load(ckpt, map_location="cpu")
     state = state.get("model", state)
     missing, unexpected = net.load_state_dict({k: v.float() if v.is_floating_point() else v for k, v in state.items()},
                                               strict=False)  # fmt: skip
-    assert not unexpected and all(k.startswith("value_head.") for k in missing), (missing, unexpected)
+    ok = all(k.startswith("value_head.") or (q and k.startswith("q_head.")) for k in missing)
+    assert not unexpected and ok, (missing, unexpected)
     return net
 
 
-def load_critic(ckpt: Path, emb: dict, a: dict) -> PolicyNet:
+def load_critic(ckpt: Path, emb: dict, a: dict, q: bool = False) -> PolicyNet:
     """Privileged critic: PolicyNet(known=True, value=True), init from `--critic-init`.
 
     Non-strict load: the checkpoint may lack the known inputs (a BC checkpoint trained
     without --known) and/or the value head (any BC checkpoint); only those may be missing.
+    With `q=True` the critic also carries the VRPO Q head, which may additionally be missing
+    (a BC/GAE checkpoint); it stays at its zero init then, so Q(s,.) == V(s) at start.
     """
     net = PolicyNet(emb, d=a.get("d", 256), layers=a.get("layers", 4), heads=a.get("heads", 4), dropout=0.0,
-                    hist=int(a.get("hist", 0) or 0), known=True, value=True)  # fmt: skip
+                    hist=int(a.get("hist", 0) or 0), known=True, value=True, q=q)  # fmt: skip
     state = torch.load(ckpt, map_location="cpu")
     state = state.get("model", state)
     missing, unexpected = net.load_state_dict({k: v.float() if v.is_floating_point() else v for k, v in state.items()},
                                               strict=False)  # fmt: skip
     assert not unexpected and all(k.startswith("value_head.") or k.startswith("known_emb.")
+                                  or (q and k.startswith("q_head."))
                                   for k in missing), (missing, unexpected)
     if any(k.startswith("known_emb.") for k in missing):
         # Zero, not N(0,1): the critic then starts as exactly the init net, except hidden rows now carry their code.
@@ -112,7 +118,7 @@ def sample(logits: torch.Tensor) -> tuple[np.ndarray, np.ndarray]:
 
 def policy_state(model: PolicyNet) -> dict:
     return {k: v.half() if v.is_floating_point() else v for k, v in model.state_dict().items()
-            if not k.startswith("value_head.")}  # fmt: skip
+            if not k.startswith("value_head.") and not k.startswith("q_head.")}  # fmt: skip
 
 
 class CollectTask:
@@ -210,17 +216,35 @@ def gae_batch(store: SlotStore, finished: list, lam: float):
     return slots, adv, ret, adv_n
 
 
+def vrpo_targets_batch(store: SlotStore, finished: list, lam: float):
+    """Expected-SARSA(λ) per finished seat trajectory (VRPO). Returns (slots, adv, ret, adv_n, info).
+
+    `info` has `vbar_mean` and `adv_diff` (mean |A_vrpo − A_gae| with GAE from V̄ as the value).
+    Raises RuntimeError on non-finite Q, V̄, advantages or returns (fail loud)."""
+    slots, adv, ret, adv_n, info = _vrpo_batch(store, finished, lam)
+    bad = (~np.isfinite(adv)).any() or (~np.isfinite(ret)).any()
+    if bad or not np.isfinite(info["vbar_mean"]) or not np.isfinite(info["adv_diff"]):
+        raise RuntimeError("non-finite Q/Vbar/advantage/return in VRPO targets")
+    return slots, adv, ret, adv_n, info
+
+
 def ppo_update(model: PolicyNet, upd_model, opt, vopt, store: SlotStore, slots: np.ndarray,
                adv_n: np.ndarray, ret: np.ndarray, rng: np.random.Generator, dev: torch.device,
                *, clip: float, vf_coef: float, kl_coef: float, ent_coef: float, epochs: int,
                minibatch: int, warm: bool, precision: str, max_upload_gb: float, compile: bool,
-               critic: PolicyNet | None = None, copt=None, priv_critic: bool = False) -> dict:
+               critic: PolicyNet | None = None, copt=None, priv_critic: bool = False,
+               adv: str = "gae") -> dict:
     """Upload-once + PPO epochs over one batch. Returns per-iteration mean stats (raises on non-finite).
 
     With `priv_critic`, the value loss trains `critic` (via `copt`) on the privileged
     obs built from the stored `priv_code`, while the policy loss (pg + KL - entropy)
     trains the policy; stats gain `critic_ev` / `policy_ev`. `--value-warmup` then
     trains the critic alone.
+
+    With `adv="vrpo"` the critic loss is MSE of Q(s,a) to the expected-SARSA(λ) target G
+    (same coef/optimizer as the value loss); the policy loss is unchanged. Warm-up trains
+    the Q head only. Stats gain `q_ev` (+ `adv_diff` / `vbar_mean` are logged by the caller
+    from the batch targets). `adv="gae"` (default) is bit-identical to before.
     """
     if dev.type == "cuda":
         torch.cuda.empty_cache()
@@ -284,7 +308,31 @@ def ppo_update(model: PolicyNet, upd_model, opt, vopt, store: SlotStore, slots: 
                 cobs_t = to_torch({key: v[mb] for key, v in cobs_np.items()}, dev) \
                     if priv_critic else None
             if warm:
-                if priv_critic:
+                if adv == "vrpo" and priv_critic:
+                    assert critic is not None and copt is not None
+                    with _autocast(dev, precision):
+                        _, cq = critic.forward_q(cobs_t)
+                        qa = cq.gather(1, act[:, None]).squeeze(1)
+                        loss = torch.nn.functional.mse_loss(qa.float(), r_t)
+                    finite_epoch = finite_epoch & torch.isfinite(loss).detach()
+                    copt.zero_grad(set_to_none=True)
+                    loss.backward()
+                    for n, p in critic.named_parameters():  # Q head only: trunk/value stay frozen
+                        if not n.startswith("q_head.") and p.grad is not None:
+                            p.grad = None
+                    copt.step()
+                    s = {"vf": loss.detach(), "q_ev": explained_variance(qa, r_t)}
+                elif adv == "vrpo":
+                    with _autocast(dev, precision):
+                        _, mq = upd_model.forward_q(obs)
+                        qa = mq.gather(1, act[:, None]).squeeze(1)
+                        loss = torch.nn.functional.mse_loss(qa.float(), r_t)
+                    finite_epoch = finite_epoch & torch.isfinite(loss).detach()
+                    vopt.zero_grad(set_to_none=True)
+                    loss.backward()
+                    vopt.step()
+                    s = {"vf": loss.detach(), "q_ev": explained_variance(qa, r_t)}
+                elif priv_critic:
                     assert critic is not None and copt is not None
                     with _autocast(dev, precision):
                         with torch.no_grad():  # critic value head only: no graph through the trunk
@@ -310,9 +358,14 @@ def ppo_update(model: PolicyNet, upd_model, opt, vopt, store: SlotStore, slots: 
             elif priv_critic:
                 assert critic is not None and copt is not None
                 with _autocast(dev, precision):
-                    loss_pol, loss_crit, s = ppo_loss_priv(upd_model, critic, rl, obs, cobs_t, act,
-                                                           olp, a_t, r_t, clip, vf_coef, kl_coef,
-                                                           ent_coef)  # fmt: skip
+                    if adv == "vrpo":
+                        loss_pol, loss_crit, s = ppo_loss_vrpo_priv(upd_model, critic, rl, obs, cobs_t,
+                                                                    act, olp, a_t, r_t, clip, vf_coef,
+                                                                    kl_coef, ent_coef)  # fmt: skip
+                    else:
+                        loss_pol, loss_crit, s = ppo_loss_priv(upd_model, critic, rl, obs, cobs_t, act,
+                                                               olp, a_t, r_t, clip, vf_coef, kl_coef,
+                                                               ent_coef)  # fmt: skip
                 finite_epoch = finite_epoch & torch.isfinite(loss_pol).detach() \
                     & torch.isfinite(loss_crit).detach()
                 opt.zero_grad(set_to_none=True)
@@ -325,8 +378,12 @@ def ppo_update(model: PolicyNet, upd_model, opt, vopt, store: SlotStore, slots: 
                 copt.step()
             else:
                 with _autocast(dev, precision):
-                    loss, s = ppo_loss(upd_model, rl, obs, act, olp, a_t, r_t, clip, vf_coef,
-                                       kl_coef, ent_coef)  # fmt: skip
+                    if adv == "vrpo":
+                        loss, s = ppo_loss_vrpo(upd_model, rl, obs, act, olp, a_t, r_t, clip, vf_coef,
+                                                kl_coef, ent_coef)  # fmt: skip
+                    else:
+                        loss, s = ppo_loss(upd_model, rl, obs, act, olp, a_t, r_t, clip, vf_coef,
+                                           kl_coef, ent_coef)  # fmt: skip
                 finite_epoch = finite_epoch & torch.isfinite(loss).detach()
                 opt.zero_grad(set_to_none=True)
                 loss.backward()
@@ -388,6 +445,8 @@ def main() -> None:
     ap.add_argument("--lr", type=float, default=2e-5)
     ap.add_argument("--clip", type=float, default=0.2)
     ap.add_argument("--lam", type=float, default=0.95)
+    ap.add_argument("--adv", choices=("gae", "vrpo"), default="gae",
+                    help="gae: GAE advantages (default); vrpo: Q-critic + expected-SARSA(λ) advantages")
     ap.add_argument("--vf-coef", type=float, default=0.5)
     ap.add_argument("--ent-coef", type=float, default=0.003)
     ap.add_argument("--kl-coef", type=float, default=0.1)
@@ -433,6 +492,43 @@ def main() -> None:
         except OSError:
             pass
         raise SystemExit(3)
+
+    def fail2(msg: str):
+        """Startup usage error (exit 2): --adv vrpo without a Q-capable critic."""
+        line = f"ALERT train_rl: {msg}"
+        print(line, flush=True)
+        try:
+            with open(args.out / "ALERT", "a") as f:
+                f.write(line + "\n")
+        except OSError:
+            pass
+        raise SystemExit(2)
+
+    def alert(msg: str):
+        """Non-fatal ALERT (training continues): q_ev collapse warning."""
+        line = f"ALERT train_rl: {msg}"
+        print(line, flush=True)
+        try:
+            with open(args.out / "ALERT", "a") as f:
+                f.write(line + "\n")
+        except OSError:
+            pass
+
+    qev_bad = 0
+
+    def note_qev(it: int, agg_mean: dict, warm: bool) -> None:
+        """q_ev < -1 for 5 consecutive iterations after warm-up → ALERT (no exit)."""
+        nonlocal qev_bad
+        if args.adv != "vrpo" or warm:
+            return
+        qev = agg_mean.get("q_ev")
+        if qev is not None and qev < -1:
+            qev_bad += 1
+            if qev_bad >= 5:
+                alert(f"iteration {it}: q_ev {qev:.3f} < -1 for 5 consecutive iterations")
+                qev_bad = 0
+        else:
+            qev_bad = 0
     if dev.type == "cuda":
         torch.backends.cuda.matmul.allow_tf32 = True
         torch.backends.cudnn.allow_tf32 = True
@@ -451,7 +547,9 @@ def main() -> None:
     a = _run_args(args.init)
     hist, known = int(a.get("hist", 0) or 0), bool(a.get("known", False))
     emb = dict(np.load(args.emb))
-    model = load_net(args.init, emb, a, value=True).to(dev).eval()
+    use_q_policy = args.adv == "vrpo" and not args.priv_critic
+    use_q_critic = args.adv == "vrpo" and bool(args.priv_critic)
+    model = load_net(args.init, emb, a, value=True, q=use_q_policy).to(dev).eval()
     ref = load_net(args.init, emb, a, value=False).to(dev).eval()
     for p in ref.parameters():
         p.requires_grad_(False)
@@ -460,11 +558,19 @@ def main() -> None:
     _fused = {"fused": True} if args.fused_adam and dev.type == "cuda" else {}
     opt = torch.optim.AdamW([{"params": trunk}, {"params": vparams, "lr": 1e-4}], lr=args.lr,
                             weight_decay=0.0, **_fused)
-    vopt = torch.optim.AdamW(model.value_head.parameters(), lr=3e-4, **_fused)
+    if use_q_policy:
+        vopt = torch.optim.AdamW(model.q_head.parameters(), lr=3e-4, **_fused)
+    else:
+        vopt = torch.optim.AdamW(model.value_head.parameters(), lr=3e-4, **_fused)
     critic, copt = None, None
     if args.priv_critic:
-        critic = load_critic(args.critic_init or args.init, emb, a).to(dev).eval()
+        critic = load_critic(args.critic_init or args.init, emb, a, q=use_q_critic).to(dev).eval()
         copt = torch.optim.AdamW(critic.parameters(), lr=3e-4, **_fused)
+    if args.adv == "vrpo":
+        owner = critic if args.priv_critic else model
+        if owner is None or not getattr(owner, "has_q", False):
+            fail2("--adv vrpo needs a Q-capable critic "
+                  f"({'privileged critic' if args.priv_critic else 'policy net'} built with q=True)")
     # Update forward only: rollout Collector keeps the eager `model`; the compiled
     # module shares parameters with it, so optimizer steps and saved state_dicts are unchanged.
     upd_model = torch.compile(model, dynamic=True) if args.compile else model
@@ -540,7 +646,8 @@ def main() -> None:
     N = args.envs
     vec = VecEnv(engine, train_decks, N, args.threads, seed=args.seed)
     vec.set_max_decisions(args.max_decisions)
-    store = SlotStore(args.store, gather(vec.buf, np.arange(1), hist, known, priv=bool(args.priv_critic)))
+    store = SlotStore(args.store, gather(vec.buf, np.arange(1), hist, known, priv=bool(args.priv_critic)),
+                      vrpo=(args.adv == "vrpo"))
     actor = critic_actor = None
     col_rng = rng
     if args.overlap:
@@ -566,11 +673,14 @@ def main() -> None:
             from ygo_zero.eval.ygoagent import YgoAgentPolicy
 
             ygo_pol = YgoAgentPolicy(seed=args.seed + 0x5EED, sample=True)
-    col = Collector(vec, actor if actor is not None else model, ref, store, hist, known, dev,
-                    args.p_bc, args.trunc_reward, args.recv_batch, col_rng, args.precision,
-                    league, ygo_pol,
-                    critic=(critic_actor if critic_actor is not None else critic),
-                    priv_critic=bool(args.priv_critic))
+    try:
+        col = Collector(vec, actor if actor is not None else model, ref, store, hist, known, dev,
+                        args.p_bc, args.trunc_reward, args.recv_batch, col_rng, args.precision,
+                        league, ygo_pol,
+                        critic=(critic_actor if critic_actor is not None else critic),
+                        priv_critic=bool(args.priv_critic), adv=args.adv)
+    except ValueError as e:
+        fail2(str(e))
     it, t_train = 0, time.time()
     tot = {"games": 0, "trunc": 0, "decisions": 0}
     if args.overlap:
@@ -592,7 +702,14 @@ def main() -> None:
             task = None
             if not (args.iters and it >= args.iters):
                 task = CollectTask(col, args.rollout).start()
-            slots, adv, ret, adv_n = gae_batch(store, finished, args.lam)
+            vrpo_info: dict = {}
+            if args.adv == "vrpo":
+                try:
+                    slots, adv, ret, adv_n, vrpo_info = vrpo_targets_batch(store, finished, args.lam)
+                except RuntimeError:
+                    fail(f"iteration {it}: non-finite Q/Vbar/advantage/return")
+            else:
+                slots, adv, ret, adv_n = gae_batch(store, finished, args.lam)
             if len(slots) == 0:
                 fail(f"iteration {it}: collected 0 samples")
             warm = it <= args.value_warmup
@@ -603,9 +720,10 @@ def main() -> None:
                     ent_coef=args.ent_coef, epochs=args.epochs, minibatch=args.minibatch,
                     warm=warm, precision=args.precision, max_upload_gb=args.max_upload_gb,
                     compile=args.compile, critic=critic, copt=copt,
-                    priv_critic=bool(args.priv_critic))
+                    priv_critic=bool(args.priv_critic), adv=args.adv)
             except RuntimeError:
                 fail(f"iteration {it}: non-finite loss")
+            note_qev(it, agg_mean, warm)
             wait_s = 0.0
             if task is not None:
                 t_join = time.time()
@@ -651,6 +769,8 @@ def main() -> None:
                 "update_s": round(t_update, 1), "sps": round(len(slots) / dt, 1),
                 "store_free": store.free, "hours": round((time.time() - t_train) / 3600, 3),
                 "overlap": True, "wait_s": round(wait_s, 2),
+                **({"vbar_mean": round(vrpo_info["vbar_mean"], 4),
+                    "adv_diff": round(vrpo_info["adv_diff"], 4)} if vrpo_info else {}),
                 **({"league": st["league"], "t_ga": round(st["t_ga"], 1)} if league is not None else {}),
                 **{k: round(v, 4) for k, v in agg_mean.items()},
             }  # fmt: skip
@@ -704,7 +824,15 @@ def main() -> None:
         priv_fail_checks(it, st, bool(args.priv_critic), fail)
 
         # GAE per finished seat trajectory, then PPO epochs
-        slots, adv, ret, adv_n = gae_batch(store, finished, args.lam)
+        # (VRPO: expected-SARSA(λ) targets from the stored rollout-time π/Q instead)
+        vrpo_info2: dict = {}
+        if args.adv == "vrpo":
+            try:
+                slots, adv, ret, adv_n, vrpo_info2 = vrpo_targets_batch(store, finished, args.lam)
+            except RuntimeError:
+                fail(f"iteration {it}: non-finite Q/Vbar/advantage/return")
+        else:
+            slots, adv, ret, adv_n = gae_batch(store, finished, args.lam)
         if len(slots) == 0:
             fail(f"iteration {it}: collected 0 samples")
         warm = it <= args.value_warmup
@@ -715,9 +843,10 @@ def main() -> None:
                 ent_coef=args.ent_coef, epochs=args.epochs, minibatch=args.minibatch,
                 warm=warm, precision=args.precision, max_upload_gb=args.max_upload_gb,
                 compile=args.compile, critic=critic, copt=copt,
-                priv_critic=bool(args.priv_critic))
+                priv_critic=bool(args.priv_critic), adv=args.adv)
         except RuntimeError:
             fail(f"iteration {it}: non-finite loss")
+        note_qev(it, agg_mean, warm)
         for s, _ in finished:
             store.release(s)
         if league is not None:
@@ -737,8 +866,10 @@ def main() -> None:
             "adv_std": round(float(adv.std()), 3), "ret_mean": round(float(ret.mean()), 3),
             "dps": round(st["decisions"] / t_roll), "rollout_s": round(t_roll, 1), "iter_s": round(dt, 1),
             "t_env": round(st["t_env"], 1), "t_fwd": round(st["t_fwd"], 1),
-            "update_s": round(t_update, 1), "sps": round(len(slots) / dt, 1),
+                "update_s": round(t_update, 1), "sps": round(len(slots) / dt, 1),
                 "store_free": store.free, "hours": round((time.time() - t_train) / 3600, 3),
+                **({"vbar_mean": round(vrpo_info2["vbar_mean"], 4),
+                    "adv_diff": round(vrpo_info2["adv_diff"], 4)} if vrpo_info2 else {}),
                 **({"league": st["league"], "t_ga": round(st["t_ga"], 1)} if league is not None else {}),
                 **{k: round(v, 4) for k, v in agg_mean.items()},
             }  # fmt: skip

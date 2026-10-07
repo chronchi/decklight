@@ -124,13 +124,19 @@ class PolicyNet(nn.Module):
         hist: int = 0,
         known: bool = False,
         value: bool = False,
+        q: bool = False,
     ):
         """`hist`: long-memory window (obs v2, ADR 0005). 0 = v1 exactly (same parameters, old state dicts
         load with strict=True); > 0 adds a learned recency-position embedding and widens the turns-ago
         embedding to 32 buckets. `known`: card-knowledge memory (obs v2). False = exactly the step-A
         parameters (old state dicts load with strict=True); True adds a card_known embedding and feeds
         `known_code` to CardText where `card_known == 1`. `value`: adds a state-value head on the global token
-        (RL); `forward` is unchanged, `forward_value` returns (logits, value in [-1, 1])."""
+        (RL); `forward` is unchanged, `forward_value` returns (logits, value in [-1, 1]). `q`: adds a
+        per-option Q head on the same per-option encoding the logits head uses (VRPO); `q=False` (default)
+        leaves parameters, state dict and outputs bit-identical. With `value=True, q=True`,
+        `forward_q` returns Q(s,a) = V(s) + residual(s,a) with a zero-initialized residual, so
+        Q(s,.) == V(s) exactly at init; with `value=False, q=True` it returns the residual alone
+        (zeros at init). Illegal options are finite (never NaN); callers mask them via the logits."""
         super().__init__()
         self.hist = hist
         self.trim = (
@@ -178,6 +184,13 @@ class PolicyNet(nn.Module):
             self.value_head = nn.Sequential(
                 nn.LayerNorm(d), nn.Linear(d, d), nn.GELU(), nn.Linear(d, 1), nn.Tanh()
             )
+        self.has_q = bool(q)
+        if q:
+            self.q_head = nn.Sequential(nn.Linear(3 * d, d), nn.GELU(), nn.Linear(d, 1))
+            # Zero only the output layer: residual == 0 at init, yet the hidden layer still gets gradients
+            # (zeroing both layers would leave every weight with a zero gradient, only the last bias would move).
+            nn.init.zeros_(self.q_head[-1].weight)
+            nn.init.zeros_(self.q_head[-1].bias)
 
     def encode_cards(
         self,
@@ -236,7 +249,34 @@ class PolicyNet(nn.Module):
         logits, enc = self._run(obs)
         return logits, self.value_head(enc[:, 0]).squeeze(-1)
 
+    def forward_q(self, obs: dict[str, torch.Tensor]) -> tuple[torch.Tensor, torch.Tensor]:
+        """(logits, Q[B, n_opt]): Q(s,a) = V(s) + q_head(feat) when value_head exists, else q_head(feat).
+
+        The residual head is zero-initialized, so with a value head Q(s,.) == V(s) exactly at init
+        on legal options. Illegal/padded options come out as 0 (finite, never NaN/inf); callers mask
+        them via the logits (pi == 0 there, so Vbar/sampling are unaffected). Requires `q=True`."""
+        if not getattr(self, "has_q", False) or not hasattr(self, "q_head"):
+            raise AttributeError("this PolicyNet was built with q=False: no Q head (use q=True)")
+        logits, resid, enc, _, mask = self._run_features(obs, want_q=True)
+        assert resid is not None
+        if hasattr(self, "value_head"):
+            v = self.value_head(enc[:, 0]).squeeze(-1)
+            q = v.unsqueeze(1) + resid
+        else:
+            q = resid
+        q = torch.where(mask, q, q.detach() * 0.0)  # illegal/pad -> 0, never NaN/inf
+        return logits, q
+
     def _run(self, obs: dict[str, torch.Tensor]) -> tuple[torch.Tensor, torch.Tensor]:
+        logits, _, enc, _, _ = self._run_features(obs, want_q=False)
+        return logits, enc
+
+    def _run_features(self, obs: dict[str, torch.Tensor], want_q: bool = False
+                      ) -> tuple[torch.Tensor, torch.Tensor | None, torch.Tensor, int, torch.Tensor]:
+        """Shared encoder + per-option features. Returns (logits, resid_or_None, enc, n_opt, legal_mask).
+
+        `resid` is the raw q_head output (before adding V) when want_q, else None. `legal_mask` is
+        [B, n_opt_full] (True = legal). Bit-identical to the old `_run` when want_q=False."""
         n_opt = 0
         if self.trim:
             obs, n_opt = trim_obs(obs)
@@ -289,8 +329,15 @@ class PolicyNet(nn.Module):
         q = self.act_norm(act + card_ctx)
         att, _ = self.cross(q, enc, enc, key_padding_mask=~keep)
         glob_ctx = enc[:, :1].expand(-1, a.shape[1], -1)
-        logits = self.head(torch.cat([q + att, card_ctx, glob_ctx], -1)).squeeze(-1)
+        feat = torch.cat([q + att, card_ctx, glob_ctx], -1)
+        logits = self.head(feat).squeeze(-1)
         logits = logits.masked_fill(~obs["action_mask"], float("-inf"))
+        resid = self.q_head(feat).squeeze(-1) if want_q else None
+        legal = obs["action_mask"]
         if n_opt > logits.shape[1]:
-            logits = torch.nn.functional.pad(logits, (0, n_opt - logits.shape[1]), value=float("-inf"))
-        return logits, enc
+            pad = n_opt - logits.shape[1]
+            logits = torch.nn.functional.pad(logits, (0, pad), value=float("-inf"))
+            legal = torch.nn.functional.pad(legal, (0, pad), value=False)
+            if resid is not None:
+                resid = torch.nn.functional.pad(resid, (0, pad), value=0.0)
+        return logits, resid, enc, n_opt, legal

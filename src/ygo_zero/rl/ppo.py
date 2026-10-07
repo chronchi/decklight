@@ -49,14 +49,22 @@ def to_torch(obs: dict[str, np.ndarray], device: torch.device) -> dict[str, torc
 
 
 class SlotStore:
-    """Fixed-capacity sample store: obs arrays + action, old log-prob, old value; slots handed out and freed."""
+    """Fixed-capacity sample store: obs arrays + action, old log-prob, old value; slots handed out and freed.
 
-    def __init__(self, capacity: int, example: dict[str, np.ndarray]) -> None:
+    VRPO (`vrpo=True`) additionally stores the behaviour policy's full per-option
+    probabilities (`pi`, fp16 like `ref_lp`) and the critic's Q(s,.) (`q`, fp16).
+    `vrpo=False` (default) keeps today's layout and behaviour bit-identical.
+    """
+
+    def __init__(self, capacity: int, example: dict[str, np.ndarray], vrpo: bool = False) -> None:
         self.obs = {k: np.zeros((capacity,) + v.shape[1:], v.dtype) for k, v in example.items()}
         self.action = np.zeros(capacity, np.int64)
         self.logp = np.zeros(capacity, np.float32)
         self.value = np.zeros(capacity, np.float32)
         self.ref_lp = np.zeros((capacity, 64), np.float16)
+        self.vrpo = bool(vrpo)
+        self.pi: np.ndarray | None = np.zeros((capacity, 64), np.float16) if vrpo else None
+        self.q: np.ndarray | None = np.zeros((capacity, 64), np.float16) if vrpo else None
         self._free = list(range(capacity - 1, -1, -1))
         self._lock = threading.Lock()
 
@@ -65,7 +73,8 @@ class SlotStore:
         with self._lock:
             return len(self._free)
 
-    def put(self, obs: dict[str, np.ndarray], action, logp, value, ref_lp=None) -> np.ndarray:
+    def put(self, obs: dict[str, np.ndarray], action, logp, value, ref_lp=None,
+            pi=None, q=None) -> np.ndarray:
         n = len(action)
         with self._lock:
             if n > len(self._free):
@@ -78,6 +87,20 @@ class SlotStore:
             self.ref_lp[slots] = 0
         else:
             self.ref_lp[slots] = np.asarray(ref_lp, dtype=np.float16)
+        if pi is not None or q is not None:
+            if self.pi is None or self.q is None:
+                cap = self.action.shape[0]
+                self.pi = np.zeros((cap, 64), np.float16)
+                self.q = np.zeros((cap, 64), np.float16)
+            assert self.pi is not None and self.q is not None
+            if pi is None:
+                self.pi[slots] = 0
+            else:
+                self.pi[slots] = np.asarray(pi, dtype=np.float16)
+            if q is None:
+                self.q[slots] = 0
+            else:
+                self.q[slots] = np.asarray(q, dtype=np.float16)
         return slots
 
     def release(self, slots) -> None:
