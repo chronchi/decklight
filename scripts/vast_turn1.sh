@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Turn-1 line headroom on a vast box: scripts/turn1_lines.py over the train, holdout and gauntlet splits in turn, all
-# cores as worker processes. Env: CKPT, CRITIC, HANDS (20), K (32), MAX_TRAIN (40), T1_CAP (40m per split).
+# cores as worker processes. Env: CKPT, CRITIC, HANDS (20), K (32), MAX_TRAIN (40; 0 = all), T1_CAP (40m per split),
+# SPLITS ("train holdout gauntlet"), SEED (0).
 # Usage: bash scripts/vast_turn1.sh <name>. Results: runs/<name>/<split>/{lines.jsonl,summary.json}, <split>.txt, ALERT
 set -uo pipefail
 export PATH="$HOME/.local/bin:$PATH"
@@ -24,13 +25,13 @@ echo "cores $J, gpu ${GMB}MB, ram avail ${RGB}G -> $PR procs" > "$OUT/turn1.txt"
 ( while true; do echo "$(date +%T) $(nvidia-smi --query-gpu=utilization.gpu,memory.used --format=csv,noheader,nounits 2>/dev/null | tr -d ' ') $(cut -d' ' -f1 /proc/loadavg) $(free -g | awk '/Mem/{print $3}')G"; sleep 30; done ) > "$OUT/usage.txt" 2>&1 &
 USAGE_PID=$!
 RC=0
-for split in train holdout gauntlet; do
+for split in ${SPLITS:-train holdout gauntlet}; do
   MD=0; [ "$split" = train ] && MD="${MAX_TRAIN:-40}"
   # every 5 min the latest per-hand PROGRESS line goes to $OUT/PROGRESS (relayed into launcher.log by vast_job)
   ( while sleep 300; do tail -n 200 "$OUT/$split.txt" 2>/dev/null | grep '^PROGRESS' | tail -1 | sed "s/^PROGRESS/PROGRESS $split/" >> "$OUT/PROGRESS"; done ) &
   PROG_PID=$!
   timeout "${T1_CAP:-40m}" uv run --no-sync python scripts/turn1_lines.py --ckpt "$CKPT" --critic "$CRITIC" --decks "$split" \
-    --hands "${HANDS:-20}" --k "${K:-32}" --seed 0 --out "$OUT/$split" --procs "$PR" --threads 1 --device cuda \
+    --hands "${HANDS:-20}" --k "${K:-32}" --seed "${SEED:-0}" --out "$OUT/$split" --procs "$PR" --threads 1 --device cuda \
     --max-decks "$MD" > "$OUT/$split.txt" 2>&1
   rc=$?; kill $PROG_PID 2>/dev/null
   # a capped split still leaves every finished hand in lines.partial.jsonl

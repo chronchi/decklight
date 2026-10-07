@@ -28,7 +28,7 @@ from ygo_zero.demos.game import _opts, hidden_card, option_desc  # noqa: E402
 from ygo_zero.demos.names import CardNames  # noqa: E402
 from ygo_zero.engine.cpp_env import CppEnv  # noqa: E402
 from ygo_zero.engine.duel import Engine  # noqa: E402
-from ygo_zero.eval.turn1 import config_from_dict  # noqa: E402
+from ygo_zero.demos.dataset import record_config  # noqa: E402
 
 LOC = {2: "hand", 3: "M", 4: "S", 5: "GY", 6: "banished", 7: "extra"}
 
@@ -45,16 +45,19 @@ def board(obs, nn: dict, me: int) -> str:
 
 
 def render(row: dict, engine: Engine, nn: dict) -> list[str]:
-    env = CppEnv(engine, config_from_dict(row["config"]))
+    env = CppEnv(engine, record_config(row), row.get("auto_single", True))
     obs = env.reset()
-    hand = [nn.get(int(r[0]), "?") for r, mk in zip(obs["cards"], obs["card_mask"], strict=True)
-            if mk and int(r[1]) == 2 and int(r[3]) == 0]  # fmt: skip
-    out = [f"    hand: {', '.join(hand)}"]
+    hand = None  # read at player 0's first decision (the first obs can be player 1's view, our hand hidden)
+    out = ["    hand: ?"]
     last = None
     for c in row["choices"]:
         if obs is None:
             break
         o = _opts(obs)
+        if env.player == 0 and hand is None:
+            hand = [nn.get(int(r[0]), "?") for r, mk in zip(obs["cards"], obs["card_mask"], strict=True)
+                    if mk and int(r[1]) == 2 and int(r[3]) == 0]  # fmt: skip
+            out[0] = f"    hand now: {', '.join(hand)}"
         if env.player == 0 and len(o) > 1:
             k, code = o[int(c)]
             nm = nn.get(code, "") if code else hidden_card(obs, int(c))
@@ -145,7 +148,7 @@ def main() -> int:
             r = p.get(kind)
             if r is None:
                 continue
-            same = kind == "best_f" and r is p["best_v"]
+            same = kind == "best_f" and r is p["best_v"] and "best_v" in a.kinds.split(",")
             print(f"  -- {kind}{' (= best_v)' if same else ''}" + (f" sample {r.get('sample')}" if kind.startswith("best") else ""))
             if not same:
                 print("\n".join(render(r, engine, nn)))

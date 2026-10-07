@@ -28,6 +28,7 @@ sys.path.insert(0, str(ROOT / "src"))
 from ygo_zero.demos.game import _opts  # noqa: E402
 from ygo_zero.engine.cpp_env import CppEnv  # noqa: E402
 from ygo_zero.engine.duel import Engine  # noqa: E402
+from ygo_zero.demos.dataset import record_config  # noqa: E402
 from ygo_zero.eval.turn1 import FIELD_LOCS, config_from_dict, my_field  # noqa: E402
 
 
@@ -49,7 +50,7 @@ def replay_line(engine: Engine, cfg_dict: dict, choices: list[int],
     Returns (actors, turns, field) with the end field measured exactly the way turn1_lines does.
     Raises on an illegal choice: the line must replay exactly.
     """
-    env = CppEnv(engine, config_from_dict(cfg_dict), auto_single)
+    env = CppEnv(engine, record_config({"config": cfg_dict}), auto_single)  # the BC replay (iter_samples) uses record_config
     obs = env.reset()
     actors, turns, last = [], [], 0
     for c in choices:
