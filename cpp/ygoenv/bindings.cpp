@@ -144,6 +144,7 @@ PYBIND11_MODULE(_ygoenv, m) {
       .def_readonly("index", &Episode::index)
       .def_readonly("winner", &Episode::winner)
       .def_readonly("turns", &Episode::turns)
+      .def_readonly("dags", &Episode::dags)
       .def_readonly("choices", &Episode::choices);
 
   py::class_<VecEnv>(m, "VecEnv")
@@ -190,9 +191,44 @@ PYBIND11_MODULE(_ygoenv, m) {
              for (auto& [d0, d1, seed] : games) eps.push_back(Episode{d0, d1, seed, -1, -1, 0, {}});
              v.set_schedule(std::move(eps));
            })
+      .def("set_starts",
+           [](VecEnv& v, py::list starts, double p, uint64_t seed) {
+             // One start: (main0, extra0, main1, extra1, duel_seed, prefix[, hand, draw, lp, setup]).
+             // The mains are already in final (shuffled) order; setup rows are (team, code, loc, seq[, pos]).
+             std::vector<DagsStart> out;
+             for (auto item : starts) {
+               py::tuple t = py::cast<py::tuple>(item);
+               if (t.size() != 6 && t.size() != 10)
+                 throw std::invalid_argument("set_starts: each start is a 6- or 10-tuple");
+               DagsStart s;
+               s.main0 = t[0].cast<std::vector<uint32_t>>();
+               s.extra0 = t[1].cast<std::vector<uint32_t>>();
+               s.main1 = t[2].cast<std::vector<uint32_t>>();
+               s.extra1 = t[3].cast<std::vector<uint32_t>>();
+               s.seed = t[4].cast<uint64_t>();
+               s.prefix = t[5].cast<std::vector<int>>();
+               s.hand = t.size() == 10 ? t[6].cast<uint32_t>() : 5;
+               s.draw = t.size() == 10 ? t[7].cast<uint32_t>() : 1;
+               s.lp = t.size() == 10 ? t[8].cast<uint32_t>() : 8000;
+               if (t.size() == 10) {
+                 for (auto row : t[9].cast<py::list>()) {
+                   py::tuple r = py::cast<py::tuple>(row);
+                   if (r.size() != 4 && r.size() != 5)
+                     throw std::invalid_argument("set_starts: setup rows are 4- or 5-tuples");
+                   s.setup.push_back({r[0].cast<uint8_t>(), r[1].cast<uint32_t>(), r[2].cast<uint32_t>(),
+                                      r[3].cast<uint32_t>(), r.size() == 5 ? r[4].cast<uint32_t>() : 0});
+                 }
+               }
+               out.push_back(std::move(s));
+             }
+             v.set_starts(std::move(out), p, seed);
+           },
+           py::arg("starts"), py::arg("p"), py::arg("seed"))
       .def("set_max_decisions", &VecEnv::set_max_decisions)
       .def_readonly_static("TRUNCATED_WINNER", &VecEnv::TRUNCATED_WINNER)
       .def_property_readonly("remaining", &VecEnv::remaining)
+      .def_property_readonly("dags_used", &VecEnv::dags_used)
+      .def_property_readonly("dags_bad", &VecEnv::dags_bad)
       .def_readonly("num_envs", &VecEnv::num_envs)
       .def("buffers", [](py::object self) {
         auto& v = self.cast<VecEnv&>();
@@ -216,6 +252,8 @@ PYBIND11_MODULE(_ygoenv, m) {
         d["winner"] = py::array(py::dtype("int32"), {v.num_envs}, {4}, v.winner.data(), self);
         d["done"] = py::array(py::dtype("bool"), {v.num_envs}, {1}, v.done.data(), self);
         d["game"] = py::array(py::dtype("int64"), {v.num_envs}, {8}, v.game.data(), self);
+        d["dags"] = py::array(py::dtype("bool"), {v.num_envs}, {1}, v.dags.data(), self);
+        d["dags_last"] = py::array(py::dtype("bool"), {v.num_envs}, {1}, v.dags_last.data(), self);
         return d;
       });
 }

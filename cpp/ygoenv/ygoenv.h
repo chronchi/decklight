@@ -311,6 +311,18 @@ struct Episode {
   int64_t index = -1;  // position in the schedule (scheduled mode), else -1
   int winner, turns;
   std::vector<int> choices;
+  int dags = 0;  // 1 = this episode started from a DAGS prefix (mid-game start)
+};
+
+// A mid-game start (RL v2 DAGS): final (shuffled) deck orders + duel seed/hand/draw/lp/setup
+// plus the prefix of option indices to replay inside start_episode. The episode begins at the
+// first live decision after the prefix; the prefix decisions are never returned by recv.
+struct DagsStart {
+  std::vector<uint32_t> main0, extra0, main1, extra1;
+  uint64_t seed = 0;
+  std::vector<int> prefix;
+  uint32_t hand = 5, draw = 1, lp = 8000;
+  std::vector<Placement> setup;
 };
 
 // N envs stepped in parallel by a persistent thread pool. Finished envs restart at once with a fresh
@@ -330,6 +342,13 @@ class VecEnv {
   // Idle envs have player = -1 and an empty action mask, and ignore their action. Call before reset().
   void set_schedule(std::vector<Episode> games);
   int64_t remaining() const;  // scheduled games not finished yet
+  // DAGS (RL v2): with probability `p` start non-scheduled episodes mid-game from one of `starts`
+  // (uniform pick). `p = 0` (the default) consumes no extra random numbers: behaviour is
+  // bit-identical to no starts. Bad prefixes (duel ends / choice out of range during the replay)
+  // fall back to a normal start and count as `dags_bad`. Call before reset().
+  void set_starts(std::vector<DagsStart> starts, double p, uint64_t seed);
+  int64_t dags_used() const { return dags_used_.load(); }
+  int64_t dags_bad() const { return dags_bad_.load(); }
   // Cut an episode after n decisions (0 = never): it finishes with winner TRUNCATED_WINNER (RL rollouts).
   void set_max_decisions(int n);
   static constexpr int TRUNCATED_WINNER = 3;
@@ -340,6 +359,8 @@ class VecEnv {
   std::vector<int32_t> winner;   // after step: winner of the episode that just ended in env i, else -1
   std::vector<uint8_t> done;     // after step: env i finished an episode (obs[i] is the next one's start)
   std::vector<int64_t> game;     // schedule index of the game now in env i (-1: idle or unscheduled)
+  std::vector<uint8_t> dags;       // dags[i]: the episode now in env i started from a prefix
+  std::vector<uint8_t> dags_last;  // dags_last[i]: the episode that just ended in env i did (valid with done[i])
 
  private:
   Engine& engine_;
@@ -352,6 +373,10 @@ class VecEnv {
   bool scheduled_ = false;
   size_t next_game_ = 0;
   int64_t unfinished_ = 0;
+  std::vector<uint64_t> dags_rng_;
+  std::vector<DagsStart> starts_;
+  double dags_p_ = 0.0;
+  std::atomic<int64_t> dags_used_{0}, dags_bad_{0};
   std::vector<uint8_t> idle_;
   std::vector<std::exception_ptr> errors_;
   const int32_t* actions_ = nullptr;
@@ -377,6 +402,7 @@ class VecEnv {
   void worker();
   void work(int i, int32_t action, bool reset_flag);
   void start_episode(int i);
+  bool try_dags(int i, Episode& ep);  // true = a prefix start was installed (dags[i] = 1)
   void require_all_held() const;
 };
 

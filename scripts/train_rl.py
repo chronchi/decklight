@@ -203,6 +203,15 @@ def priv_fail_checks(it: int, st: dict, priv_critic: bool, fail) -> None:
              f"(the privileged feature is not reaching the critic)")
 
 
+def dags_fail_checks(it: int, st: dict, dags_p: float, vec, fail) -> None:
+    """DAGS fail-loud: p > 0 must produce DAGS episodes, and prefixes must mostly replay."""
+    if dags_p > 0 and st.get("dags_games", 0) == 0:
+        fail(f"iteration {it}: --dags-p {dags_p} but 0 DAGS episodes finished")
+    bad, used = int(vec.dags_bad), int(vec.dags_used) + int(vec.dags_bad)
+    if used > 0 and bad / used > 0.2:
+        fail(f"iteration {it}: DAGS prefix failure rate {bad}/{used} > 0.2")
+
+
 def gae_batch(store: SlotStore, finished: list, lam: float):
     """GAE per finished seat trajectory. Returns (slots, adv, ret, adv_n)."""
     slots = np.concatenate([np.array(s, np.int64) for s, _ in finished])
@@ -430,6 +439,10 @@ def main() -> None:
     ap.add_argument("--max-decisions", type=int, default=1500, help="per game, both seats")
     ap.add_argument("--trunc-reward", type=float, default=-0.5)
     ap.add_argument("--p-bc", type=float, default=0.3, help="share of episodes vs the frozen BC policy (ignored with --league 1)")
+    ap.add_argument("--dags-starts", type=Path, default=None,
+                    help="DAGS starts file (scripts/build_dags_starts.py output); unset = no mid-game starts")
+    ap.add_argument("--dags-p", type=float, default=0.0,
+                    help="share of episodes starting mid-game from --dags-starts (0 = off, bit-identical)")
     ap.add_argument("--league", type=int, choices=(0, 1), default=0,
                     help="0: today's self-play/vs-BC mix (default); 1: PFSP league (snapshots + ygo-agent)")
     ap.add_argument("--p-self", type=float, default=0.4, help="league: share of self-play episodes")
@@ -455,6 +468,8 @@ def main() -> None:
                     help="1: separate privileged critic (sees hidden cards); the policy stays honest")
     ap.add_argument("--critic-init", type=Path, default=None,
                     help="critic init checkpoint (default: --init)")
+    ap.add_argument("--ga-workers", type=int, default=8,
+                    help="league ygo-agent: TFLite interpreter pool size (same moves as 1, ~3x faster)")
     ap.add_argument("--eval-every", type=int, default=10)
     ap.add_argument("--eval-seeds", type=int, default=6, help="vs BC: seeds per ordered deck pair")
     ap.add_argument("--ga-seeds", type=int, default=1, help="vs ygo-agent: seeds per deck pair")
@@ -646,6 +661,17 @@ def main() -> None:
     N = args.envs
     vec = VecEnv(engine, train_decks, N, args.threads, seed=args.seed)
     vec.set_max_decisions(args.max_decisions)
+    if args.dags_starts is not None or args.dags_p > 0:
+        if args.dags_starts is None:
+            fail(f"--dags-p {args.dags_p} without --dags-starts")
+        from ygo_zero.rl.dags import load_starts
+
+        try:
+            starts = load_starts(args.dags_starts)
+        except (OSError, ValueError) as e:
+            fail(f"cannot load --dags-starts {args.dags_starts}: {e}")
+        vec.set_starts(starts, args.dags_p, args.seed + 0xDA65)
+        print(f"[dags] {len(starts)} starts p={args.dags_p}", flush=True)
     store = SlotStore(args.store, gather(vec.buf, np.arange(1), hist, known, priv=bool(args.priv_critic)),
                       vrpo=(args.adv == "vrpo"))
     actor = critic_actor = None
@@ -672,7 +698,7 @@ def main() -> None:
         if args.p_ygoagent > 0 and args.p_self < 1:
             from ygo_zero.eval.ygoagent import YgoAgentPolicy
 
-            ygo_pol = YgoAgentPolicy(seed=args.seed + 0x5EED, sample=True)
+            ygo_pol = YgoAgentPolicy(seed=args.seed + 0x5EED, sample=True, workers=args.ga_workers)
     try:
         col = Collector(vec, actor if actor is not None else model, ref, store, hist, known, dev,
                         args.p_bc, args.trunc_reward, args.recv_batch, col_rng, args.precision,
@@ -697,6 +723,7 @@ def main() -> None:
             if league is not None:
                 league_fail_checks(it, st, league, args.snap_every, args.league_size, fail)
             priv_fail_checks(it, st, bool(args.priv_critic), fail)
+            dags_fail_checks(it, st, args.dags_p, vec, fail)
             # Start the next batch in the background (actor weights: one update behind
             # after the first sync); the last --iters iteration has no next batch.
             task = None
@@ -763,6 +790,7 @@ def main() -> None:
                 "trunc_rate": round(st["trunc"] / max(st["games"], 1), 3),
                 "mean_game_decisions": round(float(np.mean(st["lengths"])) if st["lengths"] else 0.0, 1),
                 "train_vs_bc_sampled": round(st["bc_wins"] / max(st["bc_games"], 1), 3), "bc_games": st["bc_games"],
+                "dags_games": st["dags_games"], "dags_wr": st["dags_wr"], "dags_bad": st["dags_bad"],
                 "adv_std": round(float(adv.std()), 3), "ret_mean": round(float(ret.mean()), 3),
                 "dps": round(st["decisions"] / t_roll), "rollout_s": round(t_roll, 1), "iter_s": round(dt, 1),
                 "t_env": round(st["t_env"], 1), "t_fwd": round(st["t_fwd"], 1),
@@ -822,6 +850,7 @@ def main() -> None:
         if league is not None:
             league_fail_checks(it, st, league, args.snap_every, args.league_size, fail)
         priv_fail_checks(it, st, bool(args.priv_critic), fail)
+        dags_fail_checks(it, st, args.dags_p, vec, fail)
 
         # GAE per finished seat trajectory, then PPO epochs
         # (VRPO: expected-SARSA(λ) targets from the stored rollout-time π/Q instead)
@@ -863,6 +892,7 @@ def main() -> None:
             "trunc_rate": round(st["trunc"] / max(st["games"], 1), 3),
             "mean_game_decisions": round(float(np.mean(st["lengths"])) if st["lengths"] else 0.0, 1),
             "train_vs_bc_sampled": round(st["bc_wins"] / max(st["bc_games"], 1), 3), "bc_games": st["bc_games"],
+            "dags_games": st["dags_games"], "dags_wr": st["dags_wr"], "dags_bad": st["dags_bad"],
             "adv_std": round(float(adv.std()), 3), "ret_mean": round(float(ret.mean()), 3),
             "dps": round(st["decisions"] / t_roll), "rollout_s": round(t_roll, 1), "iter_s": round(dt, 1),
             "t_env": round(st["t_env"], 1), "t_fwd": round(st["t_fwd"], 1),

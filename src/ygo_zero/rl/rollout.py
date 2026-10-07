@@ -157,6 +157,8 @@ class Collector:
         n_fin = 0
         games = trunc = bc_games = 0
         bc_wins = 0.0
+        dags_games = 0
+        dags_wins = 0.0
         decisions = 0
         lengths: list[int] = []
         t_env = t_fwd = t_ga = 0.0
@@ -176,6 +178,7 @@ class Collector:
             # FIRST: finish episodes that just ended (their rows already show the next episode).
             done = buf["done"]
             winner = buf["winner"]
+            dags_last = buf.get("dags_last")  # None on buffers predating DAGS: no episode is tagged
             for i in ids:
                 i = int(i)
                 if not bool(done[i]):
@@ -183,6 +186,7 @@ class Collector:
                 w = int(winner[i])
                 games += 1
                 trunc += w == TRUNCATED
+                is_dags = bool(dags_last[i]) if dags_last is not None else False
                 lengths.append(len(self.traj[i][0]) + len(self.traj[i][1]))
                 n_ls = len(self.traj[i][int(self.lseat[i])]) if lg else 0
                 for seat in (0, 1):
@@ -201,10 +205,16 @@ class Collector:
                     if self.vs_bc[i]:
                         bc_games += 1
                         bc_wins += 0.5 if w not in (0, 1) else float(w == int(self.lseat[i]))
+                    if is_dags:
+                        dags_games += 1
+                        dags_wins += 0.5 if w not in (0, 1) else float(w == int(self.lseat[i]))
                     self.vs_bc[i] = self.rng.random() < self.p_bc
                     self.lseat[i] = self.rng.integers(0, 2)
                 else:
                     res = 0.5 if w not in (0, 1) else float(w == int(self.lseat[i]))
+                    if is_dags:
+                        dags_games += 1
+                        dags_wins += res
                     name = str(self.opp[i])
                     if name != SELF:
                         self.league.record(name, res)
@@ -308,7 +318,10 @@ class Collector:
             self.vec.send(np.asarray(ids, dtype=np.int32), np.asarray(actions, dtype=np.int32))
             decisions += len(ids)
         stats = {"games": games, "trunc": trunc, "bc_games": bc_games, "bc_wins": bc_wins,
-                 "decisions": decisions, "lengths": lengths, "t_env": t_env, "t_fwd": t_fwd}  # fmt: skip
+                 "decisions": decisions, "lengths": lengths, "t_env": t_env, "t_fwd": t_fwd,
+                 "dags_games": dags_games,
+                 "dags_wr": round(dags_wins / max(dags_games, 1), 3),
+                 "dags_bad": int(getattr(self.vec, "dags_bad", 0))}  # fmt: skip
         if self.priv_critic:
             stats["priv_rows"] = priv_rows
             stats["priv_nonzero"] = priv_nonzero

@@ -147,6 +147,21 @@ class VecEnv:
         """Cut every episode after n decisions (0 = never); it finishes with winner `TRUNCATED` (RL rollouts)."""
         self._v.set_max_decisions(n)
 
+    def set_starts(self, starts, p: float, seed: int) -> None:
+        """DAGS mid-game starts (RL v2): `starts` is a list of
+        `(main0, extra0, main1, extra1, duel_seed, prefix[, hand, draw, lp, setup])` with the mains
+        already in final (shuffled) order. With probability `p` a non-scheduled episode starts from
+        one of them (uniform pick). `p = 0` keeps behaviour bit-identical. Call before `reset`."""
+        self._v.set_starts(list(starts), float(p), int(seed))
+
+    @property
+    def dags_used(self) -> int:
+        return self._v.dags_used
+
+    @property
+    def dags_bad(self) -> int:
+        return self._v.dags_bad
+
     @property
     def remaining(self) -> int:
         return self._v.remaining
