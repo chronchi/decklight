@@ -124,6 +124,12 @@ want ft-r2t && train ft-r2t "${R2[@]}" teacher=0.25 teacher_pass=0.25 --require-
 # with the board score at horizon 1 on every unsure decision (S0's best teacher, 0.696 vs raw base_r3); own-turn
 # labels weighted like windows this time (S0 searched both)
 want ft-r3 && train ft-r3 "${R2[@]}" teacher=0.5 teacher_pass=0.5 sw-b3=2 sw-b3_own=2 --require-kinds sw-b3 sw-b3_own
+# search plan v2 S2 (NOTEBOOK 2026-10-07 03:35): ft-r3's BC mix dragged base_r3 back toward BC. Search labels only,
+# anchored to the init policy by KL(pi_init || pi) (--kl-init); SW (default b3) picks the sw-<SW> label set.
+SW="${SW:-b3}"
+SK=(--init "$BASE" --epochs 4 --lr 1e-4 --batch 256 --select-on last --kinds "sw-$SW" "sw-${SW}_own" --require-kinds "sw-$SW" "sw-${SW}_own")
+want ft-kl1 && train ft-kl1 "${SK[@]}" --kl-init 1.0
+want ft-kl03 && train ft-kl03 "${SK[@]}" --kl-init 0.3
 for V in mix-h32 mix-h128 mix-h256 mix-h512 mix-h32k mix-h128k mix-h256k mix-h512k mix-k; do
   want "$V" || continue
   H=${V#mix-h}; H=${H%k}; [ "$V" = mix-k ] && H=0
