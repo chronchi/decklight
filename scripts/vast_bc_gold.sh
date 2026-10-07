@@ -120,6 +120,10 @@ R2=(--init "$BASE" --epochs "$EP_MIX" --lr 2e-4 --select-on last --kind-frac lin
     sw-d3=0 sw-d3_own=0)
 want ft-r2 && train ft-r2 "${R2[@]}" teacher=0.5 teacher_pass=0.5 --require-kinds sw-v2 sw-v2_own
 want ft-r2t && train ft-r2t "${R2[@]}" teacher=0.25 teacher_pass=0.25 --require-kinds sw-v2 sw-v2_own
+# round 3 (search plan v2, NOTEBOOK 2026-10-06 23:50): from base_r3 (PPO), round-2 mix + sw-b3 = oracle window search
+# with the board score at horizon 1 on every unsure decision (S0's best teacher, 0.696 vs raw base_r3); own-turn
+# labels weighted like windows this time (S0 searched both)
+want ft-r3 && train ft-r3 "${R2[@]}" teacher=0.5 teacher_pass=0.5 sw-b3=2 sw-b3_own=2 --require-kinds sw-b3 sw-b3_own
 for V in mix-h32 mix-h128 mix-h256 mix-h512 mix-h32k mix-h128k mix-h256k mix-h512k mix-k; do
   want "$V" || continue
   H=${V#mix-h}; H=${H%k}; [ "$V" = mix-k ] && H=0
