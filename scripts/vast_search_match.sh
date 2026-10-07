@@ -27,8 +27,9 @@ FIRST_ARGS="${VARIANTS%%;*}"; FIRST_ARGS="${FIRST_ARGS#*|}"
 uv run --no-sync python scripts/search_match.py --ckpt "$CKPT" --device cuda --out "$OUT/probe" --nproc 1000 --proc 0 \
   ${SM_ARGS:-} $FIRST_ARGS > "$OUT/probe.txt" 2>&1 &
 PP=$!; sleep 90
+kill -0 $PP 2>/dev/null || { alert "probe died before 90 s: $(tail -1 "$OUT/probe.txt")"; exit 3; }
 GMB=$(nvidia-smi --query-compute-apps=used_memory --format=csv,noheader,nounits | sort -n | tail -1)
-RMB=$(( $(ps -o rss= --ppid $PP 2>/dev/null | sort -n | tail -1) / 1024 ))
+RKB=$(ps -o rss= --ppid $PP 2>/dev/null | sort -n | tail -1); RMB=$(( ${RKB:-0} / 1024 ))
 kill $PP 2>/dev/null; sleep 3; for c in $(ps -o pid= --ppid $PP 2>/dev/null); do kill "$c" 2>/dev/null; done
 GTOT=$(nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits | head -1)
 RTOT=$(free -m | awk '/Mem/{print $2}')
