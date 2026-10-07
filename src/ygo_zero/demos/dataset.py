@@ -30,6 +30,9 @@ GOLD_LABEL_WEIGHT = {"gold": 1.0, "pass": 0.5}
 # turn-1 search teacher records (scripts/gen_search.py, ADR 0006 M2): search = player 0's searched move, opp = the
 # passive opponent (not trained)
 SEARCH_LABEL_WEIGHT = {"search": 1.0}
+# turn-1 self-imitation records (scripts/select_turn1_lines.py): self = player 0's own improved line, opp = the
+# passive opponent (not trained)
+SELFIMIT_LABEL_WEIGHT = {"self": 1.0}
 # mid-game search teacher (scripts/gen_window.py, M3): searched response windows and own-turn plays; skip = not trained
 WINDOW_LABEL_WEIGHT = {"window": 1.0, "own": 1.0}
 _PASSIVE_KINDS = (Kind.PASS, Kind.NO, Kind.FINISH, Kind.CANCEL)
@@ -77,6 +80,7 @@ def sample_kind(source: str | Path, label: str) -> str:
     - files under `teacher/` -> teacher_pass if label == "pass" else teacher
     - files under `dagger/` -> dagger_pass if label == "pass" else dagger
     - files under `search/` -> search
+    - files under `selfimit/` -> selfimit
     - files under `window/` -> window_own if label == "own" else window
     - files under `sw-<name>/` (relabelled self-play window search, ADR 0007) -> sw-<name>_own if label == "own"
       else sw-<name>, so each labelling is its own kind in --kind-frac
@@ -96,6 +100,8 @@ def sample_kind(source: str | Path, label: str) -> str:
         return "dagger_pass" if label == "pass" else "dagger"
     if "search" in parts:
         return "search"
+    if "selfimit" in parts:
+        return "selfimit"
     if "window" in parts:
         return "window_own" if label == "own" else "window"
     if any(p.startswith("expanded") for p in parts):
@@ -250,6 +256,7 @@ def iter_samples(engine: Engine, path: Path) -> Iterator[tuple[dict, int, float,
         judges = load_judgements(f)
         weights = GOLD_LABEL_WEIGHT if ("gold" in f.parts or "teacher" in f.parts or "dagger" in f.parts) else LABEL_WEIGHT
         weights = SEARCH_LABEL_WEIGHT if "search" in f.parts else weights
+        weights = SELFIMIT_LABEL_WEIGHT if "selfimit" in f.parts else weights
         weights = WINDOW_LABEL_WEIGHT if ("window" in f.parts or any(q.startswith("sw-") for q in f.parts[:-1])) else weights
         for rec in load_records(f):
             if starved_opening(rec):

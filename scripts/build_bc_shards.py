@@ -16,6 +16,7 @@ SOURCES = {  # tag -> globs of record files (verified lines and their hand-varia
     "games": ["data/demos/games/*.jsonl"],  # ADR 0004 L2-L4 (deck label = actor's deck)
     "gold": ["data/demos/gold/*.jsonl"],  # hand-played full games (scripts/hand_play.py; kinds gold / gold_pass)
     "search": ["data/demos/search/*.jsonl"],  # turn-1 search teacher (scripts/gen_search.py; kind search)
+    "selfimit": ["data/demos/selfimit/*/*.jsonl"],  # turn-1 self-imitation (scripts/select_turn1_lines.py; kind selfimit)
     "teacher": ["data/demos/teacher/*.jsonl"],  # ygo-agent self-play (scripts/gen_teacher.py; kinds teacher / teacher_pass)
     "dagger": ["data/demos/dagger/*.jsonl"],  # DAgger on our policy's states (scripts/gen_dagger.py; kinds dagger / dagger_pass)
     "window": ["data/demos/window/*.jsonl"],  # mid-game search teacher (scripts/gen_window.py; kinds window / window_own)
