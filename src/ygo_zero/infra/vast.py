@@ -139,7 +139,8 @@ def find_offer(
 ) -> dict:
     q = (f"reliability>0.98 rentable=true verified=true disk_space>={spec.disk_gb} inet_down>=200 "
          f"cpu_cores_effective>={spec.min_cpus} dph<={spec.max_dph}")  # fmt: skip
-    q += f" num_gpus={spec.num_gpus} gpu_ram>={spec.min_gpu_ram_gb}" if spec.gpu else " num_gpus=0"
+    # compute_cap>=750: the cu128 torch wheels have no kernels for sm_70 (V100 → "no kernel image", ddpsmoke 2026-10-07)
+    q += f" num_gpus={spec.num_gpus} gpu_ram>={spec.min_gpu_ram_gb} compute_cap>=750" if spec.gpu else " num_gpus=0"
     q += f" {spec.extra_query}" if spec.extra_query else ""
     offers = [
         o
