@@ -35,6 +35,8 @@ SPG=${SP_GAMES:-4000}; SPP=${SP_PROCS:-16}; TG=${TEACHER_GAMES:-10000}
 TP=${TEACHER_PROCS:-$(( $(nproc) / 4 ))}; [ "$TP" -lt 1 ] && TP=1
 WG=${WINDOW_GAMES:-1500}; WP=${WPROCS:-12}; S=${SAMPLES:-2}; WCAP=${WCAP:-120m}
 alert() { echo "ALERT $*" | tee -a "$OUT/ALERT"; }
+# fragmentation: per-proc GPU memory grew 0.45 -> 1.45 GB over sw3/sw4 and OOMed workers; search_match (S0b, 30 procs) has this
+export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 uv sync --group dev --group ml --group gauntlet -q --no-install-package torch
 export UV_HTTP_TIMEOUT=300
 for try in 1 2 3; do
