@@ -10,6 +10,10 @@
 #include "lua.h"
 #include "ygoenv.h"
 
+#ifndef QUERY_CARDID
+#define QUERY_CARDID 0x4000000
+#endif
+
 namespace ygo {
 
 // Precompile a script with the core's own Lua build (same liblua.a, so the bytecode format matches) and keep
@@ -393,6 +397,7 @@ static size_t parse_card(const uint8_t* buf, size_t pos, CardState& c) {
         break;
       }
       case QUERY_CODE: c.code = rd<uint32_t>(body); break;
+      case QUERY_CARDID: c.cardid = rd<uint32_t>(body); break;
       case QUERY_POSITION: c.position = rd<uint32_t>(body); break;
       case QUERY_TYPE: c.type = rd<uint32_t>(body); break;
       case QUERY_LEVEL: c.level = rd<uint32_t>(body); break;
@@ -438,6 +443,44 @@ Bytes Duel::query_field() {
   uint32_t length = 0;
   auto* buf = static_cast<const uint8_t*>(OCG_DuelQueryField(handle_, &length));
   return Bytes(buf, buf + length);
+}
+
+std::vector<DebugCard> Duel::cards_debug() {
+  constexpr uint32_t FLAGS = QUERY_CODE | QUERY_POSITION | QUERY_CARDID | QUERY_IS_PUBLIC;
+  constexpr uint32_t LOCS[] = {LOCATION_DECK, LOCATION_HAND, LOCATION_MZONE, LOCATION_SZONE,
+                               LOCATION_GRAVE, LOCATION_REMOVED, LOCATION_EXTRA};
+  std::vector<DebugCard> out;
+  for (uint8_t p = 0; p < 2; ++p)
+    for (uint32_t loc : LOCS) {
+      OCG_QueryInfo info{FLAGS, p, loc, 0, 0};
+      uint32_t length = 0;
+      auto* buf = static_cast<const uint8_t*>(OCG_DuelQueryLocation(handle_, &length, &info));
+      size_t pos = 4;
+      uint32_t seq = 0;
+      while (pos < length) {
+        if (rd<uint16_t>(buf + pos) == 0) {
+          pos += 2;
+        } else {
+          CardState c;
+          c.controller = p;
+          c.location = loc;
+          c.sequence = seq;
+          pos = parse_card(buf, pos, c);
+          DebugCard d;
+          d.controller = p;
+          d.location = loc;
+          d.sequence = seq;
+          d.position = c.position;
+          d.code = c.code;
+          d.cardid = c.cardid;
+          d.is_public = c.is_public;
+          if (loc == LOCATION_HAND && seq < hand_known_[p].size()) d.known = hand_known_[p][seq];
+          out.push_back(d);
+        }
+        ++seq;
+      }
+    }
+  return out;
 }
 
 }  // namespace ygo

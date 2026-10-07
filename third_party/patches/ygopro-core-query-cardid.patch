@@ -1,0 +1,24 @@
+diff --git a/card.cpp b/card.cpp
+index 526af70..ba63554 100644
+--- a/card.cpp
++++ b/card.cpp
+@@ -132,6 +132,7 @@ void card::get_infos(uint32_t query_flag) {
+ 	CHECK_AND_INSERT(QUERY_BASE_DEFENSE, get_base_defense());
+ 	CHECK_AND_INSERT(QUERY_REASON, current.reason);
+ 	CHECK_AND_INSERT(QUERY_COVER, cover);
++	CHECK_AND_INSERT(QUERY_CARDID, cardid);
+ 	if(query_flag & QUERY_REASON_CARD) {
+ 		insert_value<uint16_t>(pduel->query_buffer, sizeof(uint32_t) + sizeof(uint16_t) + sizeof(uint64_t));
+ 		insert_value<uint32_t>(pduel->query_buffer, QUERY_REASON_CARD);
+diff --git a/ocgapi_constants.h b/ocgapi_constants.h
+index cdc0f4c..9442e65 100644
+--- a/ocgapi_constants.h
++++ b/ocgapi_constants.h
+@@ -191,6 +191,7 @@
+ #define QUERY_LINK         0x800000
+ #define QUERY_IS_HIDDEN	   0x1000000
+ #define QUERY_COVER        0x2000000
++#define QUERY_CARDID       0x4000000
+ #define QUERY_END          0x80000000
+ 
+ /* Link Markers */

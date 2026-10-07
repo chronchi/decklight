@@ -69,6 +69,8 @@ def main() -> None:
     ap.add_argument("--rollout-temp", type=float, default=1.0)
     ap.add_argument("--select", type=str, default=None, help="score key selecting the target (default: board/value@h<H0>)")
     ap.add_argument("--tie-eps", type=float, default=0.0, help="candidates within eps of best form the target set")
+    ap.add_argument("--conf-skip", type=float, default=1.01,
+                    help="skip decisions whose policy top probability is >= this (S0 used 0.9; 1.01 = search all)")
     ap.add_argument("--own-frac", type=float, default=0.1, help="share of own-turn decisions (turn >= 2) searched")
     ap.add_argument("--width", type=int, default=32)
     ap.add_argument("--batch", type=int, default=512)
@@ -97,7 +99,7 @@ def main() -> None:
                       seed=args.seed, value=value,
                       horizons=tuple(args.horizons) if args.horizons else None,
                       samples=args.samples, rollout_temp=args.rollout_temp,
-                      select=args.select, tie_eps=args.tie_eps)  # fmt: skip
+                      select=args.select, tie_eps=args.tie_eps, conf_skip=args.conf_skip)  # fmt: skip
     games = load_games(args.records, args.games, args.seed, args.proc, args.nproc)
     args.out.mkdir(parents=True, exist_ok=True)
     eff_hs = tuple(args.horizons) if args.horizons else (args.horizon,)

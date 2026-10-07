@@ -85,10 +85,16 @@ def summarize(out: Path) -> dict:
     capped_share = capped / branches if branches else 0.0
     if capped_share > 0.2:
         fail(f"capped-branch share {capped_share:.3f} > 20% ({capped}/{branches})")
+    props = sum(r.get("det_proposals", 0) for r in recs)
+    worlds_acc = sum(r.get("det_accepted", 0) for r in recs)
+    worlds_fb = sum(r.get("det_fallbacks", 0) for r in recs)
+    worlds = worlds_acc + worlds_fb
     lo, hi = wilson(wins, n)
     by_deck: dict[str, list[float]] = {}
     for r in recs:
         by_deck.setdefault(r["decks"][r["s_seat"]], []).append(s_score(r))
+    if worlds and worlds_fb / worlds > 0.2:
+        fail(f"honest-world fallback rate {worlds_fb / worlds:.3f} > 20% ({worlds_fb}/{worlds})")
     summ = {
         "games": n,
         "s_win_rate": round(wins / n, 3),
@@ -102,6 +108,9 @@ def summarize(out: Path) -> dict:
         "mean_turns": round(statistics.mean(r["turns"] for r in recs), 1),
         "cut": sum(1 for r in recs if r.get("truncated")),
     }
+    if worlds:
+        summ["det_accept_rate"] = round(worlds_acc / props, 3) if props else 0.0
+        summ["det_fallback_rate"] = round(worlds_fb / worlds, 3)
     (out / "summary.json").write_text(json.dumps(summ, indent=1))
     print(
         f"S win rate {summ['s_win_rate']} [{summ['ci'][0]}, {summ['ci'][1]}] n={n}; "
@@ -110,6 +119,9 @@ def summarize(out: Path) -> dict:
         f"mean turns {summ['mean_turns']}, cut {summ['cut']}",
         flush=True,
     )
+    if worlds:
+        print(f"honest worlds: accept {summ['det_accept_rate']} ({worlds_acc}/{props}), "
+              f"fallback {summ['det_fallback_rate']} ({worlds_fb}/{worlds})", flush=True)
     for d in sorted(summ["per_deck"]):
         print(f"  {d}: {summ['per_deck'][d]} (n={summ['per_deck_n'][d]})", flush=True)
     return summ
@@ -131,6 +143,7 @@ def main() -> None:
     ap.add_argument("--conf-skip", type=float, default=0.9, help="skip search when softmax(z).max() >= this")
     ap.add_argument("--own-frac", type=float, default=1.0, help="share of S own-turn decisions searched")
     ap.add_argument("--own-turn1", type=int, default=0, choices=(0, 1), help="also search S turn-1 plays")
+    ap.add_argument("--honest", type=int, default=0, choices=(0, 1), help="search determinized worlds (honest search)")
     ap.add_argument("--width", type=int, default=32, help="games searched concurrently")
     ap.add_argument("--batch", type=int, default=512, help="max obs per policy forward")
     ap.add_argument("--nproc", type=int, default=1)
@@ -194,6 +207,7 @@ def main() -> None:
             yield idx, search_game_gen(
                 engine, cfg, ws, s_seat, argmax_select, game_seed=idx,
                 own_turn1=bool(args.own_turn1), conf_skip=args.conf_skip, own_frac=args.own_frac,
+                honest=bool(args.honest),
             )  # fmt: skip
 
     args.out.mkdir(parents=True, exist_ok=True)
@@ -212,6 +226,8 @@ def main() -> None:
                     "n_searched": res.n_searched, "n_override": res.n_override,
                     "search_s": round(res.search_s, 3),
                     "n_branches": res.n_branches, "n_capped": res.n_capped,
+                    "det_proposals": res.det_proposals, "det_accepted": res.det_accepted,
+                    "det_fallbacks": res.det_fallbacks, "det_s": round(res.det_s, 3),
                 }) + "\n")  # fmt: skip
                 got += 1
                 tot_s += res.n_searched

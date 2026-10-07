@@ -75,7 +75,7 @@ struct CardState {
   uint32_t code = 0, position = 0, type = 0, level = 0, rank = 0, attribute = 0;
   uint64_t race = 0;
   int32_t attack = 0, defense = 0, base_attack = 0, base_defense = 0;
-  uint32_t owner = 0, status = 0;
+  uint32_t owner = 0, status = 0, cardid = 0;
   bool is_public = false;
   uint32_t lscale = 0, rscale = 0, link = 0, link_marker = 0;
   std::vector<uint32_t> overlay;
@@ -86,6 +86,16 @@ struct ChainLink {
   uint32_t code, controller, location, sequence, position;
   uint32_t trig_controller, trig_location, trig_sequence;
   uint64_t description;
+};
+
+// One card anywhere on the board, for honest-search determinization: its identity (code),
+// its creation id (cardid, deterministic given the creation order) and whether the opponent
+// knows a HAND card's identity. Queried with CODE | POSITION | CARDID | IS_PUBLIC only.
+struct DebugCard {
+  uint32_t controller = 0, location = 0, sequence = 0;
+  uint32_t position = 0, code = 0, cardid = 0;
+  bool is_public = false;
+  uint8_t known = 0;  // hand_known_: 1 = the other player knows this HAND card's identity
 };
 
 class Duel {
@@ -101,6 +111,7 @@ class Duel {
 
   std::vector<std::optional<CardState>> query_location(uint8_t controller, uint32_t location);
   Bytes query_field();
+  std::vector<DebugCard> cards_debug();  // every card of both players (DECK/HAND/MZONE/SZONE/GRAVE/REMOVED/EXTRA)
 
   Engine& engine;
   DuelConfig config;
@@ -256,8 +267,9 @@ class Env {
    int player() const { return dec_->player; }
    int num_options() const { return static_cast<int>(opts_.size()); }
    const Duel& duel() const { return *duel_; }
-   int knowledge_resyncs() const { return duel_->knowledge_resyncs(); }
-   int history_len() const { return static_cast<int>(history_.size()); }
+    int knowledge_resyncs() const { return duel_->knowledge_resyncs(); }
+    int history_len() const { return static_cast<int>(history_.size()); }
+    std::vector<DebugCard> cards() { return duel_->cards_debug(); }
    // All recorded entries in absolute form: stored row (10) + actor, turn, phase, public.
    std::vector<std::array<int32_t, HLOG_COLS>> history_log() const;
 

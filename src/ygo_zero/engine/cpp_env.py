@@ -44,6 +44,35 @@ class CppEnv:
     def step(self, index: int):
         return self._env.step(index)
 
+    def cards(self) -> dict:
+        """Every card of both players (DECK/HAND/MZONE/SZONE/GRAVE/REMOVED/EXTRA) with its
+        creation id: dict of numpy arrays `player, location, sequence, position, code, cardid,
+        is_public, known` (`known` = the other player knows this HAND card's identity)."""
+        import numpy as np
+
+        rows = self._env.cards()
+        n = len(rows)
+        out = {
+            "player": np.empty(n, np.int64),
+            "location": np.empty(n, np.int64),
+            "sequence": np.empty(n, np.int64),
+            "position": np.empty(n, np.int64),
+            "code": np.empty(n, np.int64),
+            "cardid": np.empty(n, np.int64),
+            "is_public": np.empty(n, np.bool_),
+            "known": np.empty(n, np.bool_),
+        }
+        for i, c in enumerate(rows):
+            out["player"][i] = c.controller
+            out["location"][i] = c.location
+            out["sequence"][i] = c.sequence
+            out["position"][i] = c.position
+            out["code"][i] = c.code
+            out["cardid"][i] = c.cardid
+            out["is_public"][i] = c.is_public
+            out["known"][i] = c.known
+        return out
+
     def __getattr__(self, name):  # done, winner, player, turn, errors, choices, decisions, truncated
         return getattr(self._env, name)
 

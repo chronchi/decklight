@@ -86,7 +86,8 @@ class WindowSearch:
     def __init__(self, engine: Engine, logits: LogitsFn, k: int = 4, horizon: int = 1, own_frac: float = 0.0,
                  max_rollout: int = 300, batch: int = 512, seed: int = 0, value: ValueFn | None = None,
                  horizons: tuple[int, ...] | list[int] | None = None, samples: int = 1,
-                 rollout_temp: float = 1.0, select: str | None = None, tie_eps: float = 0.0) -> None:  # fmt: skip
+                 rollout_temp: float = 1.0, select: str | None = None, tie_eps: float = 0.0,
+                 conf_skip: float = 1.01) -> None:  # fmt: skip
         self.engine, self.logits, self.k, self.horizon = engine, logits, k, horizon
         self.value, self.win = value, (1.0 if value is not None else WIN)
         self.own_frac, self.max_rollout, self.batch = own_frac, max_rollout, batch
@@ -96,6 +97,7 @@ class WindowSearch:
         self.rollout_temp = rollout_temp
         self.select = select
         self.tie_eps = tie_eps
+        self.conf_skip = conf_skip  # game_gen skips decisions whose policy top probability is >= this (1.01 = never)
         self.capped = 0  # rollout branches that hit max_rollout (scored as a loss); gen_window prints it
 
     def _hs(self) -> tuple[int, ...]:
@@ -122,7 +124,8 @@ class WindowSearch:
         return (passes[:1] + acts)[: max(self.k, 2)]
 
     def rollouts_gen(self, config: DuelConfig, auto_single: bool, prefixes, me: int, end_turn: int = 0,
-                       game_seed: int = 0, decision_k: int = 0, turn_start: int | None = None):
+                        game_seed: int = 0, decision_k: int = 0, turn_start: int | None = None,
+                        worlds: list[DuelConfig] | None = None):
         """Play each branch out with the policy until the largest horizon ends (or the duel ends / max_rollout).
 
         `prefixes` is either the legacy list of choice prefixes (one branch per prefix, argmax rollouts,
@@ -135,6 +138,9 @@ class WindowSearch:
         Rollouts run under a LoopGuard (exact repeats within a turn mask the options already taken), and a branch
         that still hits max_rollout is scored as a loss for `me`: a candidate that sends play into a loop must not
         look as good as the position it froze in (round 1 learned such loops, NOTEBOOK 2026-10-06).
+        With `worlds` (honest search), branch `(p, j, cand, s)` is built from `worlds[s % len(worlds)]`
+        instead of `config`, so all candidates of sample s share one world (common random worlds).
+        `None` = today's behaviour (bit-identical).
         """
         hs = self._hs()
         # Legacy call: list of prefixes -> one argmax branch each, single horizon ending at end_turn.
@@ -150,8 +156,9 @@ class WindowSearch:
         n_cands = max((j for _, j, _, _ in branches), default=-1) + 1
         B = len(branches)
         envs, obs = [], []
-        for p, _, _, _ in branches:
-            e = CppEnv(self.engine, config, auto_single)
+        for p, _, _, s in branches:
+            cfg = worlds[s % len(worlds)] if worlds is not None else config
+            e = CppEnv(self.engine, cfg, auto_single)
             o = e.reset()
             for c in p:
                 o = e.step(c)
@@ -318,7 +325,8 @@ class WindowSearch:
             if kind is not None:
                 z = _masked((yield [obs])[0], obs)
                 cands = self._candidates(z, obs, kind == "window")
-                if len(cands) >= 2:
+                ez = np.exp(z - z.max())
+                if len(cands) >= 2 and float(ez.max() / ez.sum()) < self.conf_skip:
                     sel = self._select_key()
                     branches = [(choices[:k] + [x], j, x, s) for j, x in enumerate(cands)
                                 for s in range(self.samples)]

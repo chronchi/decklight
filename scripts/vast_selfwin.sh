@@ -6,6 +6,7 @@
 #    board / value / done (won within h turns) / cards at horizons 1 and 3; targets select value@h1, and the search
 #    log keeps every score so other labellings are derived offline (scripts/relabel_window.py)
 # Env: BASE (policy best.pt, required), VALUE (default data/cache/value_v2/best.pt), SP_GAMES (4000), SP_PROCS (16),
+#   WIN_SEARCH (window search flags, default '--horizons 1 3 --select value@h1 --own-frac 0.1'),
 #   TEACHER_GAMES (10000; 0 skips the stage), TEACHER_PROCS (cores/4), WINDOW_GAMES (1500), WPROCS (12), SAMPLES (2),
 #   WCAP (window stage timeout, 120m).
 # Usage: bash scripts/vast_selfwin.sh <name>. Results: runs/<name>/{selfplay,teacher,window}/p<k>/, selfwin.txt, ALERT
@@ -81,8 +82,8 @@ if [ "$n_sp" -gt 0 ]; then
   W_PIDS=()
   for p in $(seq 0 $((WP - 1))); do
     timeout "$WCAP" uv run --no-sync python scripts/gen_window.py --ckpt "$BASE" --value "$VALUE" --device cuda --width 32 \
-      --records "$OUT/selfplay/p*/*.jsonl" --games "$WG" --proc "$p" --nproc "$WP" --k 4 --horizons 1 3 \
-      --samples "$S" --rollout-temp 1.0 --select value@h1 --own-frac 0.1 --seed 11 \
+      --records "$OUT/selfplay/p*/*.jsonl" --games "$WG" --proc "$p" --nproc "$WP" --k 4 \
+      --samples "$S" --rollout-temp 1.0 ${WIN_SEARCH:---horizons 1 3 --select value@h1 --own-frac 0.1} --seed 11 \
       --out "$OUT/window/p$p" > "$OUT/window-$p.txt" 2>&1 &
     W_PIDS+=($!)
   done

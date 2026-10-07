@@ -120,7 +120,21 @@ PYBIND11_MODULE(_ygoenv, m) {
       .def_property_readonly("errors", [](const Env& e) { return e.duel().errors; })
       .def_readonly("choices", &Env::choices)
       .def_readonly("decisions", &Env::decisions)
-      .def_readonly("truncated", &Env::truncated);
+      .def_readonly("truncated", &Env::truncated)
+      .def("cards", [](Env& e) {
+        py::gil_scoped_release nogil;
+        return e.cards();
+      });
+
+  py::class_<DebugCard>(m, "DebugCard")
+      .def_readonly("controller", &DebugCard::controller)
+      .def_readonly("location", &DebugCard::location)
+      .def_readonly("sequence", &DebugCard::sequence)
+      .def_readonly("position", &DebugCard::position)
+      .def_readonly("code", &DebugCard::code)
+      .def_readonly("cardid", &DebugCard::cardid)
+      .def_readonly("is_public", &DebugCard::is_public)
+      .def_readonly("known", &DebugCard::known);
 
   py::class_<Episode>(m, "Episode")
       .def_readonly("deck0", &Episode::deck0)

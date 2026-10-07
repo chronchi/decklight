@@ -35,6 +35,7 @@ import numpy as np
 from ygo_zero.engine.cpp_env import CppEnv
 from ygo_zero.engine.duel import DuelConfig, Engine
 from ygo_zero.eval.loopguard import LoopGuard
+from ygo_zero.search.determinize import Determinizer, SeenTracker
 from ygo_zero.search.turn1 import _masked
 from ygo_zero.search.window import WindowSearch, is_window
 
@@ -71,6 +72,10 @@ class GameResult:
     n_branches: int = 0  # rollout branches launched over the game
     n_capped: int = 0  # of those that hit max_rollout (scored as losses)
     searched_idx: list[int] = field(default_factory=list)  # decision indices searched
+    det_proposals: int = 0  # honest worlds proposed (rejection-sampling tries)
+    det_accepted: int = 0  # ... accepted (root obs identical to the truth)
+    det_fallbacks: int = 0  # ... rejected after `tries` (fell back to the true config)
+    det_s: float = 0.0  # wall seconds spent drawing honest worlds
 
 
 def search_game_gen(
@@ -85,11 +90,19 @@ def search_game_gen(
     own_frac: float = 1.0,
     max_decisions: int = 3000,
     auto_single: bool = True,
+    honest: bool = False,
 ):
-    """Play one live game; S (absolute seat `s_seat`) searches, R plays raw. Returns a GameResult."""
+    """Play one live game; S (absolute seat `s_seat`) searches, R plays raw. Returns a GameResult.
+
+    With `honest`, S's searched decisions roll out from determinized worlds (everything S has
+    not seen re-sampled consistently with S's observation) instead of the true hidden state.
+    """
     rng = random.Random(search.seed * 1_000_003 + game_seed)
     env = CppEnv(engine, config, auto_single)
     obs = env.reset()
+    tracker = SeenTracker(s_seat) if honest else None
+    if tracker is not None:
+        tracker.update(env)
     guard = LoopGuard()  # one slot: both seats share it, as one VecEnv row does in playtest matches
     res = GameResult(winner=None, truncated=False, turns=1)
     capped0 = search.capped
@@ -124,9 +137,23 @@ def search_game_gen(
                         for j, x in enumerate(cands)
                         for s in range(search.samples)
                     ]
+                    worlds = None
+                    if tracker is not None:
+                        det = Determinizer(
+                            engine, config, auto_single, me, res.choices, tracker.seen,
+                            obs, random.Random(f"{search.seed}:{game_seed}:{k}:det"),
+                        )
+                        worlds = []
+                        for _ in range(search.samples):
+                            w = det.sample()
+                            worlds.append(w if w is not None else config)
+                        res.det_proposals += det.proposals
+                        res.det_accepted += det.accepted
+                        res.det_fallbacks += det.fallbacks
+                        res.det_s += det.seconds
                     scores_all = yield from search.rollouts_gen(
                         config, auto_single, branches, me, turn_start=turn,
-                        game_seed=game_seed, decision_k=k,
+                        game_seed=game_seed, decision_k=k, worlds=worlds,
                     )  # fmt: skip
                     res.search_s += time.perf_counter() - t0
                     sel_scores = (
@@ -145,6 +172,8 @@ def search_game_gen(
         res.choices.append(a)
         res.actors.append(me)
         obs = env.step(a)
+        if tracker is not None:
+            tracker.update(env)
     res.truncated = obs is not None
     res.winner = None if res.truncated else int(env.winner)
     res.n_capped = search.capped - capped0
