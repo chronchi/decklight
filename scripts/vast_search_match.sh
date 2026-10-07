@@ -20,22 +20,28 @@ read -r Q P < /sys/fs/cgroup/cpu.max 2>/dev/null || Q=max
 J=$(nproc); [ "$Q" != max ] && J=$(( Q / P ))
 ( while true; do echo "$(date +%T) $(nvidia-smi --query-gpu=utilization.gpu,memory.used --format=csv,noheader,nounits 2>/dev/null | tr -d ' ') $(cut -d' ' -f1 /proc/loadavg) $(free -g | awk '/Mem/{print $3}')G"; sleep 30; done ) > "$OUT/usage.txt" 2>&1 &
 USAGE_PID=$!
-export OMP_NUM_THREADS=1 MKL_NUM_THREADS=1
+export OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 # measure one process (GPU memory, RSS) on the first variant's args, then size the pool
 FIRST_ARGS="${VARIANTS%%;*}"; FIRST_ARGS="${FIRST_ARGS#*|}"
 # shellcheck disable=SC2086
 uv run --no-sync python scripts/search_match.py --ckpt "$CKPT" --device cuda --out "$OUT/probe" --nproc 1000 --proc 0 \
   ${SM_ARGS:-} $FIRST_ARGS > "$OUT/probe.txt" 2>&1 &
-PP=$!; sleep 90
-kill -0 $PP 2>/dev/null || { alert "probe died before 90 s: $(tail -1 "$OUT/probe.txt")"; exit 3; }
-GMB=$(nvidia-smi --query-compute-apps=used_memory --format=csv,noheader,nounits | sort -n | tail -1)
-RKB=$(ps -o rss= --ppid $PP 2>/dev/null | sort -n | tail -1); RMB=$(( ${RKB:-0} / 1024 ))
+PP=$!; GMB=0; RMB=0
+# peak over 150 s: per-process GPU memory grows after load (the 90 s single reading of s0-2021 said 256 MB; procs
+# really used 270-800 MB and 17/45 hit CUDA OOM)
+for i in $(seq 15); do
+  sleep 10
+  kill -0 $PP 2>/dev/null || { alert "probe died before 150 s: $(tail -1 "$OUT/probe.txt")"; exit 3; }
+  g=$(nvidia-smi --query-compute-apps=used_memory --format=csv,noheader,nounits | sort -n | tail -1)
+  r=$(ps -o rss= --ppid $PP 2>/dev/null | sort -n | tail -1)
+  [ "${g:-0}" -gt "$GMB" ] && GMB=$g; [ $(( ${r:-0} / 1024 )) -gt "$RMB" ] && RMB=$(( ${r:-0} / 1024 ))
+done
 kill $PP 2>/dev/null; sleep 3; for c in $(ps -o pid= --ppid $PP 2>/dev/null); do kill "$c" 2>/dev/null; done
 GTOT=$(nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits | head -1)
 RTOT=$(free -m | awk '/Mem/{print $2}')
-[ -n "$GMB" ] && [ "$GMB" -gt 0 ] || { alert "probe: no GPU memory reading (see probe.txt)"; GMB=1500; }
+[ "$GMB" -gt 0 ] || { alert "probe: no GPU memory reading (see probe.txt)"; exit 3; }
 [ "$RMB" -gt 0 ] || RMB=2000
-NP=$(python3 -c "print(max(1, min($J, int($GTOT*0.85/($GMB*1.2)), int($RTOT*0.8/($RMB*1.3)))))")
+NP=$(python3 -c "print(max(1, min($J, int($GTOT*0.85/($GMB*1.5)), int($RTOT*0.8/($RMB*1.3)))))")
 echo "cores $J, gpu ${GTOT}MB, ram ${RTOT}MB; probe gpu ${GMB}MB rss ${RMB}MB per proc -> $NP procs" | tee "$OUT/sizing.txt"
 IFS=';' read -ra VS <<< "$VARIANTS"
 for v in "${VS[@]}"; do
