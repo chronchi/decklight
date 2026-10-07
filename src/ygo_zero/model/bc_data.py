@@ -30,6 +30,10 @@ OBS_KEYS = (
 # Card-knowledge memory (obs v2, docs/obs_spec.md): stored in shards when the env produced it.
 KNOWN_KEYS = ("card_known", "known_code")
 
+# Gumbel-style soft targets (train_bc --soft-targets): per-sample search candidates and their
+# selection scores. Fixed width K (current search data: k <= 4 candidates); -1-padded indices.
+SOFT_K = 8
+
 # Option-row columns (docs/action_spec.md): 0 kind, 1 card row, 2 code, 3 effect_code,
 # 4 effect_idx, 5 arg, 6 msg, 7 location, 8 controller, 9 step.
 PLACE_KIND = 19
@@ -142,6 +146,8 @@ def _shard_one(job: tuple[str, str, str]) -> tuple[str, int]:
     known_cols: dict[str, list] = {k: [] for k in KNOWN_KEYS}
     has_known: bool | None = None  # all samples of one file either carry the keys or not
     action, weight, line, deck, kind, equiv = [], [], [], [], [], []
+    soft_idx_rows: list = []  # per-sample search candidates (option indices, -1 padded to SOFT_K)
+    soft_q_rows: list = []  # per-sample selection scores aligned with soft_idx (0 padded)
     hlog_rows: list = []  # per-record logs in first-seen order (shared refs from iter_samples meta)
     hlog_start, hlog_end, seath, turnh = [], [], [], []
     log_off: dict[int, int] = {}
@@ -170,6 +176,17 @@ def _shard_one(job: tuple[str, str, str]) -> tuple[str, int]:
                     eq[b] = True
         action.append(a)
         weight.append(w)
+        si = np.full(SOFT_K, -1, dtype=np.int16)
+        sq = np.zeros(SOFT_K, dtype=np.float16)
+        soft = meta.get("soft")
+        if soft is not None:
+            cands, scores = soft
+            if len(cands) > SOFT_K:
+                raise ValueError(f"record has {len(cands)} search candidates > SOFT_K={SOFT_K}: {src_file}")
+            si[: len(cands)] = np.asarray(cands, dtype=np.int16)
+            sq[: len(scores)] = np.asarray(scores, dtype=np.float16)
+        soft_idx_rows.append(si)
+        soft_q_rows.append(sq)
         line.append(base_line(meta["line_id"]))
         deck.append(meta["deck"])
         kind.append(meta.get("kind", "unknown"))
@@ -206,6 +223,8 @@ def _shard_one(job: tuple[str, str, str]) -> tuple[str, int]:
         **{k: np.stack(v) for k, v in cols.items()},
         action=np.array(action, dtype=np.int64),
         equiv=np.stack(equiv),
+        soft_idx=np.stack(soft_idx_rows),
+        soft_q=np.stack(soft_q_rows),
         weight=np.array(weight, dtype=np.float32),
         line=np.array(line),
         deck=np.array(deck),
@@ -293,6 +312,11 @@ def load_shards(shard_dir: Path) -> dict[str, np.ndarray]:
             eq = np.zeros((n, p["actions"].shape[1]), dtype=bool)
             eq[np.arange(n), p["action"]] = True
             p["equiv"] = eq
+    for p in parts:  # backward compat: shards written before search soft targets existed
+        if "soft_idx" not in p or "soft_q" not in p:
+            n = len(p["action"])
+            p.setdefault("soft_idx", np.full((n, SOFT_K), -1, dtype=np.int16))
+            p.setdefault("soft_q", np.zeros((n, SOFT_K), dtype=np.float16))
     if any("hlog" in p for p in parts) and not all("hlog" in p for p in parts):
         raise ValueError("mixed shards with and without hlog in one directory: rebuild them together")
     if any("card_known" in p for p in parts) and not all(

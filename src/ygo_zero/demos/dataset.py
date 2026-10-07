@@ -12,6 +12,8 @@ not samples at all.
 """
 
 import json
+import math
+import re
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -166,6 +168,49 @@ def judge_interrupt_scores(judgement: dict | None) -> dict[tuple[int, int], list
     return out
 
 
+# `select=<score>` in a record's `source` string names the selection score (default value@h1).
+_SELECT_RE = re.compile(r"select=([^\s;,]+)")
+_DEFAULT_SELECT = "value@h1"
+
+
+def search_soft_targets(rec: dict) -> dict[int, tuple[list[int], list[float]]]:
+    """Per-decision search candidates and their selection scores, keyed by decision index.
+
+    Each searched decision stores `cands` (option indices) with `scores` aligned to them; records
+    with per-score breakdowns (`scores_all`) use the `select=` score from `source`. Entries with no
+    candidates, a cands/scores length mismatch, or non-finite scores are skipped (they train on the
+    hard target instead). This feeds the Gumbel-style soft targets in train_bc (--soft-targets).
+    """
+    sel = _DEFAULT_SELECT
+    src = rec.get("source") or ""
+    m = _SELECT_RE.search(src)
+    if m:
+        sel = m.group(1)
+    out: dict[int, tuple[list[int], list[float]]] = {}
+    for s in rec.get("search") or []:
+        if not isinstance(s, dict):
+            continue
+        try:
+            k = int(s["k"])
+            cands = [int(a) for a in s.get("cands", [])]
+        except (TypeError, ValueError, KeyError):
+            continue
+        sa = s.get("scores_all")
+        if not isinstance(sa, dict):
+            sa = {}
+        scores = sa.get(sel, s.get("scores", []))
+        try:
+            scores = [float(x) for x in scores]
+        except (TypeError, ValueError):
+            continue
+        if not cands or len(cands) != len(scores):
+            continue
+        if not all(math.isfinite(x) for x in scores):
+            continue
+        out[k] = (cands, scores)
+    return out
+
+
 def record_config(rec: dict, seed: int | None = None) -> DuelConfig:
     """The DuelConfig stored in a verified record (optionally with another seed from `seeds_ok`)."""
     c = rec["config"]
@@ -212,6 +257,7 @@ def iter_samples(engine: Engine, path: Path) -> Iterator[tuple[dict, int, float,
             out: list = []  # buffered: a record that fails to replay is skipped whole (never half-yielded)
             try:
                 judge = judges.get(rec.get("line_id")) or judges.get(rec.get("game_id"))
+                soft = search_soft_targets(rec)  # decision index -> (cands, selection scores)
                 iscores = judge_interrupt_scores(judge)
                 used: dict[tuple[int, int], int] = {}
                 for seed in [rec["config"]["seed"]]:
@@ -273,6 +319,8 @@ def iter_samples(engine: Engine, path: Path) -> Iterator[tuple[dict, int, float,
                             }
                             if alt is not None:
                                 meta["alt"] = alt
+                            if k in soft:
+                                meta["soft"] = soft[k]
                             out.append(({key: v.copy() for key, v in obs.items()}, action, weight, meta))
                         obs = env.step(choice)
                     if "actors" not in rec:  # a combo line: teach the stop (records end at the last combo step)

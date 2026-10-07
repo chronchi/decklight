@@ -44,6 +44,7 @@ def batches(data, idx, bs, device, shuffle, rng, hist=0, hist_salient=True, know
         raise ValueError("--hist needs shards built with history logs (hlog): rebuild the shards")
     if known and not all(k in data for k in KNOWN_KEYS):
         raise ValueError("--known needs shards built with card knowledge (card_known/known_code): rebuild the shards")
+    has_soft = "soft_idx" in data and "soft_q" in data
     for i in range(0, len(idx), bs):
         j = idx[i : i + bs]
         obs = {k: torch.from_numpy(data[k][j]).to(device, non_blocking=True) for k in OBS_KEYS}
@@ -63,11 +64,18 @@ def batches(data, idx, bs, device, shuffle, rng, hist=0, hist_salient=True, know
         else:  # old shards: equiv = one-hot of the action
             eq = torch.zeros(len(j), obs["actions"].shape[1], dtype=torch.bool, device=device)
             eq[torch.arange(len(j), device=device), act] = True
+        if has_soft:
+            si = torch.from_numpy(data["soft_idx"][j]).to(device, non_blocking=True)
+            sq = torch.from_numpy(data["soft_q"][j]).to(device, non_blocking=True)
+        else:
+            si, sq = None, None
         yield (
             obs,
             act,
             torch.from_numpy(data["weight"][j]).to(device),
             eq,
+            si,
+            sq,
             j,
         )
 
@@ -92,6 +100,54 @@ def kl_to_init(logits: torch.Tensor, ref_logits: torch.Tensor, mask: torch.Tenso
     return torch.where(mask, p_ref * diff, torch.zeros((), device=logp.device, dtype=logp.dtype)).sum(-1)
 
 
+def gumbel_soft_target(
+    ref_logits: torch.Tensor, mask: torch.Tensor, soft_idx: torch.Tensor | None,
+    soft_q: torch.Tensor | None, scale: float, norm: str = "minmax",
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Gumbel-MuZero-style improved policy pi' = softmax(prior + c * q_hat) over legal options.
+
+    ref_logits/mask are [B, A] (mask bool, legal options); soft_idx [B, K] holds searched option
+    indices (-1 padded) with selection scores soft_q [B, K] aligned to them. The completed Q is the
+    search score on searched candidates and v_mix (the prior-weighted mean candidate score) on
+    unsearched legal options; q_hat is the min-max normalised Q (all zeros when max == min, so the
+    target is then just the prior). Returns (pi_prime [B, A], has_soft [B]): rows without (legal)
+    search info carry the prior and False. Illegal entries are exactly 0.
+    """
+    B, A = ref_logits.shape
+    device = ref_logits.device
+    logp_prior = torch.log_softmax(ref_logits.float().masked_fill(~mask, float("-inf")), dim=-1)
+    prior = logp_prior.exp()
+    if soft_idx is None or soft_q is None:
+        return prior, torch.zeros(B, dtype=torch.bool, device=device)
+    idx = soft_idx.long().clamp(min=0)
+    valid = (soft_idx >= 0) & (soft_idx < A)
+    # padded slots point at a scratch column (dropped below): scatter_ with duplicate indices is
+    # unordered, so pads must never share a column with a real candidate
+    idx_safe = torch.where(valid, idx, torch.full((), A, device=device))
+    is_cand = torch.zeros((B, A + 1), dtype=torch.bool, device=device)
+    is_cand.scatter_(1, idx_safe, valid)
+    is_cand = is_cand[:, :A]
+    searched = is_cand & mask
+    has = searched.any(-1)
+    qvals = torch.zeros((B, A + 1), dtype=torch.float32, device=device)
+    qvals.scatter_(1, idx_safe, torch.where(valid, soft_q.float(), torch.zeros((), device=device)))
+    qvals = qvals[:, :A]
+    w = torch.where(searched, prior, torch.zeros((), device=device, dtype=prior.dtype))
+    v_mix = (w * torch.where(searched, qvals, torch.zeros((), device=device))).sum(-1, keepdim=True) / w.sum(
+        -1, keepdim=True
+    ).clamp(min=1e-12)
+    q_full = torch.where(searched, qvals, v_mix)
+    mn = torch.where(mask, q_full, torch.full((), float("inf"), device=device)).amin(-1, keepdim=True)
+    mx = torch.where(mask, q_full, torch.full((), float("-inf"), device=device)).amax(-1, keepdim=True)
+    if norm == "minmax":
+        q_hat = torch.where(mask, (q_full - mn) / ((mx - mn) + 1e-6), torch.zeros((), device=device))
+    else:  # "none": raw value scores (in [-1, 1]); a near-tie stays a near-tie instead of being stretched to c
+        q_hat = torch.where(mask, q_full, torch.zeros((), device=device))
+    improved = logp_prior + scale * q_hat
+    improved = improved.masked_fill(~mask, float("-inf"))
+    return torch.softmax(improved.float(), -1), has
+
+
 def evaluate(model, data, idx, bs, device, amp, set_target=True, hist=0, hist_salient=True, known=False,
              ref=None):
     model.eval()
@@ -106,7 +162,7 @@ def evaluate(model, data, idx, bs, device, amp, set_target=True, hist=0, hist_sa
     has_turn = "turn" in data
     with torch.no_grad():
         kl_sum = 0.0
-        for obs, act, w, eq, j in batches(data, idx, bs, device, False, None, hist, hist_salient, known):
+        for obs, act, w, eq, _si, _sq, j in batches(data, idx, bs, device, False, None, hist, hist_salient, known):
             with torch.autocast(device.type, dtype=torch.bfloat16, enabled=amp):
                 logits = model(obs)
             logits = logits.float()
@@ -278,6 +334,14 @@ def main() -> None:
     ap.add_argument("--init", type=Path, default=None, help="start from this checkpoint (fine-tune)")
     ap.add_argument("--kl-init", type=float, default=0.0,
                     help="KL(pi_init || pi) anchor coef to the --init weights (0 = off)")
+    ap.add_argument("--soft-targets", choices=["off", "gumbel"], default="off",
+                    help="off = hard targets (default, unchanged); gumbel = distill the search improved "
+                    "policy softmax(prior + c*q_hat) on samples with search info (requires --init)")
+    ap.add_argument("--soft-scale", type=float, default=5.0,
+                    help="c in softmax(prior + c*q_hat) for --soft-targets gumbel")
+    ap.add_argument("--soft-norm", choices=["none", "minmax"], default="none",
+                    help="q_hat = raw value score in [-1, 1] (none) or min-max over the legal options (minmax, "
+                    "Gumbel MuZero; stretches near-ties to the full scale c)")
     ap.add_argument("--gold-games", type=int, default=None, help="train on the first N gold games only (by number)")
     ap.add_argument("--val-frac-kind", nargs="*", default=None, metavar="KIND=FRAC",
                     help="val share for these kinds' lines (default 0.1 for every kind)")
@@ -293,6 +357,9 @@ def main() -> None:
         ap.error("--set-target and --label-smoothing are mutually exclusive")
     if args.kl_init and not args.init:
         print("error: --kl-init requires --init", flush=True)
+        raise SystemExit(2)
+    if args.soft_targets == "gumbel" and not args.init:
+        print("error: --soft-targets gumbel requires --init (the search prior)", flush=True)
         raise SystemExit(2)
     if args.threads:
         torch.set_num_threads(args.threads)
@@ -327,10 +394,11 @@ def main() -> None:
         state = state.get("model", state)
         model.load_state_dict({k: v.float() if v.is_floating_point() else v for k, v in state.items()})
     ref = None
-    if args.kl_init:
+    if args.kl_init or args.soft_targets == "gumbel":
         import copy
 
         ref = copy.deepcopy(model).eval().requires_grad_(False)
+    soft = args.soft_targets == "gumbel"
     n_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     print(f"params {n_params / 1e6:.2f}M device {device} amp {amp}", flush=True)
     opt = torch.optim.AdamW([p for p in model.parameters() if p.requires_grad], lr=args.lr, weight_decay=args.wd)
@@ -369,9 +437,9 @@ def main() -> None:
         best_epoch = -1
         torch.save({k: v.half() if v.is_floating_point() else v for k, v in model.state_dict().items()}, args.out / "best.pt")
     for ep in range(args.epochs):
-        run = {"loss": 0.0, "n": 0, "kl": 0.0}
+        run = {"loss": 0.0, "n": 0, "kl": 0.0, "soft_n": 0, "soft_ent": 0.0, "soft_agree": 0.0}
         ep_idx = epoch_train_idx(data, idx["train"], kind_frac, rng)
-        for obs, act, w, eq, j in batches(data, ep_idx, args.batch, device, True, rng,
+        for obs, act, w, eq, si, sq, j in batches(data, ep_idx, args.batch, device, True, rng,
                                             args.hist, not args.hist_all, args.known):
             with torch.autocast(device.type, dtype=torch.bfloat16, enabled=amp):
                 logits = model(obs)
@@ -381,12 +449,31 @@ def main() -> None:
                 per = F.cross_entropy(
                     logits.float(), act, reduction="none", label_smoothing=args.label_smoothing
                 )
-            loss = (per * w).sum() / w.sum()
             if ref is not None:
                 with torch.no_grad(), torch.autocast(device.type, dtype=torch.bfloat16, enabled=amp):
                     ref_logits = ref(obs)
+                if soft:
+                    mask = obs["action_mask"]
+                    pi_prime, has_soft = gumbel_soft_target(
+                        ref_logits.float(), mask, si, sq, args.soft_scale, args.soft_norm)
+                    if not torch.isfinite(pi_prime).all():
+                        print(f"ALERT {args.out.name}: non-finite soft target in epoch {ep}", flush=True)
+                        raise SystemExit(3)
+                    if has_soft.any():
+                        # CE(pi', p): legal options only, via zero-filled factors so 0 * -inf never forms
+                        logp = torch.log_softmax(logits.float().masked_fill(~mask, float("-inf")), dim=-1)
+                        pp = torch.where(mask, pi_prime, torch.zeros((), device=logits.device))
+                        lp = torch.where(mask, logp, torch.zeros((), device=logits.device))
+                        per = torch.where(has_soft, -(pp * lp).sum(-1), per)
+                        ent = -(pp * torch.where(mask, pi_prime.clamp_min(1e-30).log(),
+                                                torch.zeros((), device=logits.device))).sum(-1)
+                        run["soft_n"] += int(has_soft.sum())
+                        run["soft_ent"] += ent[has_soft].sum().item()
+                        run["soft_agree"] += (pi_prime.argmax(-1) == act)[has_soft].sum().item()
                 kl = kl_to_init(logits.float(), ref_logits.float(), obs["action_mask"])
-                loss = loss + args.kl_init * kl.mean()
+                loss = (per * w).sum() / w.sum() + args.kl_init * kl.mean()
+            else:
+                loss = (per * w).sum() / w.sum()
             opt.zero_grad(set_to_none=True)
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
@@ -401,9 +488,18 @@ def main() -> None:
             if not math.isfinite(train_kl):
                 print(f"ALERT {args.out.name}: KL is NaN", flush=True)
                 raise SystemExit(3)
+        if soft:
+            if run["soft_n"] == 0:
+                print(f"ALERT {args.out.name}: --soft-targets gumbel with 0 soft samples in epoch {ep}",
+                      flush=True)
+                raise SystemExit(3)
         if args.merge_last > 1:
             recent = (recent + [{k: v.detach().to("cpu", copy=True) for k, v in model.state_dict().items()}])[-args.merge_last:]
         rec = {"epoch": ep, "time": round(time.time() - t0, 1), "n_train": len(ep_idx), "train_loss": run["loss"] / max(run["n"], 1)}
+        if soft:
+            rec["soft_n"] = run["soft_n"]
+            rec["soft_ent"] = run["soft_ent"] / run["soft_n"]
+            rec["soft_argmax_agree"] = run["soft_agree"] / run["soft_n"]
         if ref is not None:
             rec["train_kl"] = train_kl
         if ep == 0:
