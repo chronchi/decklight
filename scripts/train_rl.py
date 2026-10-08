@@ -932,6 +932,16 @@ def main() -> None:
             starts = load_starts(args.dags_starts)
         except (OSError, ValueError) as e:
             fail(f"cannot load --dags-starts {args.dags_starts}: {e}")
+        if int(args.learner_gauntlet) == 0:
+            # overfitting rule: DAGS episodes are not tracked by deck index (learner_ga cannot see them), so a start
+            # on a gauntlet deck would train the learner on it silently. data/cache/dags/starts.jsonl (2026-10-07)
+            # is 95% gauntlet-vs-gauntlet (ygo-agent teacher games); use starts-train.jsonl (NOTEBOOK 2026-10-08).
+            g_mains = {tuple(sorted(d.main)) for d in g_decks}
+            n_bad = sum(1 for l in Path(args.dags_starts).read_text().splitlines() if l.strip()
+                        and any(tuple(sorted(json.loads(l)[k])) in g_mains for k in ("main0", "main1")))
+            if n_bad:
+                fail(f"--dags-starts {args.dags_starts}: {n_bad} starts use a gauntlet deck "
+                     f"(overfitting rule, --learner-gauntlet 0)")
         vec.set_starts(starts, args.dags_p, seed_rank + 0xDA65)
         if dist_rank == 0:
             print(f"[dags] {len(starts)} starts p={args.dags_p}", flush=True)

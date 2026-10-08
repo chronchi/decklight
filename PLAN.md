@@ -41,7 +41,16 @@ Reviews: `docs/reviews/2026-10-08-{opus-5.5,muse-spark-1.3}.md`; decisions: NOTE
      to avoid confounding. Our plan runs them together. The curriculum and hinting code is not built yet.
    - **Expectation:** +2–5 pp from RL at our budget; 50% vs ygo-agent by RL alone probably needs ~10× the budget.
 
-**Stop:** self-imitation rounds, long PPO from base_r3, argmax search-label distillation, field/critic/val-agreement
+**Outcome of step 2 (2026-10-08, NOTEBOOK 15:40):** the search-teacher students failed. 92.7k labels from live
+searched games; soft c5/c10, min-max c5 and hard labels all scored ≤ base_r3 on the paired 744 deals (hard −3.6 pp,
+p = 0.08). The search's gain is per-game lookahead over near-ties, not a pattern the policy absorbs. **Decision**
+(user, 2026-10-08: "Search at play + RL (Recommended)"):
+- base_r3 + honest search counts as our player from now on (57.1% vs ygo-agent, E2);
+- step 3 RL goes ahead (league + curriculum; the hint term, which is also search copying, is a later ablation);
+- RL checkpoints are gated both raw and with search;
+- the DAGS starts are rebuilt from train decks only (`starts-train.jsonl`).
+
+**Stop:** self-imitation rounds, long PPO from base_r3, distilling the search into the policy (argmax or soft), field/critic/val-agreement
 proxies for selection, head-to-head vs base_r3 as the gate, infra work before a signal.
 
 ## 0. Current strategy (2026-10-05, ADR 0006 — read this first; §1-5 below are the original plan and background)
