@@ -3,6 +3,29 @@
 Goal: give the system a `.ydk`; it learns to pilot that deck at (eventually) beyond-pro level,
 and a *new* deck should need little or no extra training. Planned 2026-10-01.
 
+## 0a. Next steps after the strategy review (2026-10-08 — user-agreed; supersedes the M-order below where they differ)
+
+Why: since base_r3 (vs ygo-agent 42.3%) ~10 attempts were neutral or worse; they all trained, selected and judged
+against base_r3 itself, and the RL league's ygo-agent games mostly used decks ygo-agent cannot read (bug).
+Reviews: `docs/reviews/2026-10-08-{opus-5.5,muse-spark-1.3}.md`; decisions: NOTEBOOK 2026-10-08 03:20–04:40.
+
+0. **E0 (laptop, $X):** deck-aware league (ygo-agent only on gauntlet-vs-gauntlet episodes, fixed extra opponents,
+   per-opponent win rates) + paired ygo-agent gate on ~744 deals (sign test) as the primary acceptance metric.
+1. **Search vs ygo-agent (E2, ~$X):** base_r3 + honest test-time search vs ygo-agent on the card's deals,
+   paired against base_r3's raw games. Decides step 2.
+2. **If search wins: large search-teacher round (teacher → student):** many games played with search, including vs
+   ygo-agent and the mixed opponents; train on **soft targets** (full score distribution per searched decision,
+   `--soft-targets gumbel`) plus game-outcome value labels; **200–400k labels** with the current $X credit (lighter
+   search: k=4 × 1 rollout, only uncertain decisions; size after a ~$X throughput probe), BC from scratch or a
+   large fine-tune, then repeat (expert iteration).
+3. **RL with the fixed league** (gauntlet-focused, mixed opponents: ygo-agent on its decks, base_r3, older checkpoints,
+   greedy) plus Kolibri **pass-rate curriculum** (§3.2.2.5: train on positions the agent sometimes solves) and
+   **hinted self-distillation** (OPSD §3.2.1.4: on failures show the expert/search line in context, distil hinted →
+   unhinted). If search does not beat ygo-agent, this becomes step 2.
+
+**Stop:** self-imitation rounds, long PPO from base_r3, argmax search-label distillation, field/critic/val-agreement
+proxies for selection, head-to-head vs base_r3 as the gate, infra work before a signal.
+
 ## 0. Current strategy (2026-10-05, ADR 0006 — read this first; §1-5 below are the original plan and background)
 
 **One loop:** policy → **search teacher** (our policy + engine look-ahead, hidden cards determinized) → better
