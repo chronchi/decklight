@@ -603,6 +603,11 @@ def main() -> None:
     ap.add_argument("--no-ygoagent", action="store_true")
     ap.add_argument("--hours", type=float, default=1.0, help="stop (then final eval) after this much training")
     ap.add_argument("--iters", type=int, default=0, help="stop after this many iterations (0 = by --hours)")
+    ap.add_argument("--resume", type=Path, default=None,
+                    help="continue a run from its rl/ dir: last.pt (policy, critic, optimizers, iteration), "
+                         "curriculum.json and the iter-NNNN.pt league snapshots; --init stays the KL/eval anchor, "
+                         "--iters counts from iteration 0, --hours is this segment's budget. PFSP win-rate EMAs "
+                         "restart at 0.5 and the iteration-0 eval is skipped.")
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--fused-adam", dest="fused_adam", action=argparse.BooleanOptionalAction, default=None,
                     help="fused AdamW kernels (default: on when --device is cuda)")
@@ -752,6 +757,40 @@ def main() -> None:
     if args.priv_critic:
         critic = load_critic(args.critic_init or args.init, emb, a, q=use_q_critic).to(dev).eval()
         copt = torch.optim.AdamW(critic.parameters(), lr=3e-4, **_fused)
+    it0 = 0
+    if args.resume is not None:
+        rpath = args.resume / "last.pt"
+        if not rpath.is_file():
+            fail2(f"--resume {args.resume}: no last.pt")
+        rck = torch.load(rpath, map_location=dev, weights_only=False)
+        if args.priv_critic and "critic" not in rck:
+            fail2(f"--resume {rpath}: --priv-critic 1 but the checkpoint has no critic")
+        model.load_state_dict(rck["model"])
+        opt.load_state_dict(rck["opt"])
+        if args.priv_critic:
+            assert critic is not None and copt is not None
+            critic.load_state_dict(rck["critic"])
+            copt.load_state_dict(rck["copt"])
+        it0 = int(rck["iter"])
+        if it0 <= 0:
+            fail2(f"--resume {rpath}: iteration {it0}")
+        if args.iters and it0 >= args.iters:
+            fail2(f"--resume {rpath}: already at iteration {it0} >= --iters {args.iters}")
+        # invariant: the loaded policy is the one evaluated at it0 (fp16 iter checkpoint), not --init
+        iref = args.resume / f"iter-{it0:04d}.pt"
+        if iref.is_file():
+            ist = torch.load(iref, map_location=dev, weights_only=False)
+            ist = ist.get("model", ist)
+            mst = model.state_dict()
+            bad = [k for k, v in ist.items() if k in mst and v.is_floating_point()
+                   and not torch.allclose(mst[k].float(), v.float(), atol=2e-3, rtol=2e-2)]
+            if bad:
+                fail2(f"--resume: last.pt (it {it0}) differs from {iref.name} in {len(bad)} tensors, e.g. {bad[0]}")
+        isd = ref.state_dict()
+        if all(torch.equal(v, isd[k]) for k, v in model.state_dict().items() if k in isd):
+            fail2(f"--resume {rpath}: the loaded policy equals --init {args.init}")
+        if dist_rank == 0:
+            print(f"[resume] {rpath} at iteration {it0}", flush=True)
     if args.adv == "vrpo":
         owner = critic if args.priv_critic else model
         if owner is None or not getattr(owner, "has_q", False):
@@ -911,7 +950,7 @@ def main() -> None:
     cur = None
     hint = None
     starts: list = []
-    if dist_rank == 0:
+    if dist_rank == 0 and args.resume is None:
         evaluate(0)
         recorded.add(0)
         eval_started.add(0)
@@ -978,6 +1017,23 @@ def main() -> None:
         bonus = {2 * s + seat: b for s, b in bonus.items() for seat in (0, 1)}
         cur = PassRate(2 * len(starts), eps=args.curric_eps, min_n=args.curric_min_n,
                        hint_bonus=bonus)
+        if args.resume is not None:
+            cpath = args.resume / "curriculum.json"
+            if not cpath.is_file():
+                fail(f"--resume {args.resume}: --curric 1 but no curriculum.json")
+            try:
+                cur = PassRate.load(cpath)
+            except (OSError, ValueError, KeyError) as e:
+                fail(f"--resume: cannot load {cpath}: {e}")
+            if cur.n_starts != 2 * len(starts) or cur.min_n != args.curric_min_n or cur.eps != args.curric_eps:
+                fail(f"--resume: {cpath} has {cur.n_starts} slots, min_n {cur.min_n}, eps {cur.eps}; this run "
+                     f"has {2 * len(starts)}, {args.curric_min_n}, {args.curric_eps} (same --dags-starts?)")
+            cur.hint_bonus = bonus
+            vec.set_start_weights(cur.start_weights())
+            if dist_rank == 0:
+                s_ = cur.stats()
+                print(f"[resume] curriculum seen {s_['seen']} solved {s_['solved']} hopeless {s_['hopeless']}",
+                      flush=True)
         if dist_rank == 0:
             print(f"[curric] {len(starts)} starts every={args.curric_every} eps={args.curric_eps} "
                   f"min_n={args.curric_min_n} drop_solved={args.curric_drop_solved} "
@@ -1061,6 +1117,20 @@ def main() -> None:
                             p_greedy=args.league_greedy_share, ga_ygo_share=args.ga_ygo_share)
         except ValueError as e:
             fail2(str(e))
+        if args.resume is not None and args.league_size > 0:
+            # snapshots were taken every --snap-every iterations, at the same iterations as the iter-NNNN.pt
+            # eval checkpoints (fp16 copies of the same weights); restore the newest --league-size
+            snap_its = [k for k in range(args.snap_every, it0 + 1, args.snap_every)][-args.league_size:]
+            for k in snap_its:
+                spath = args.resume / f"iter-{k:04d}.pt"
+                if not spath.is_file():
+                    fail(f"--resume: league snapshot {spath} missing")
+                snet = load_net(spath, emb, a, value=False).to(dev).eval()
+                for p_ in snet.parameters():
+                    p_.requires_grad_(False)
+                league.add_snapshot(f"snap:{k}", snet)
+            if dist_rank == 0:
+                print(f"[resume] league snapshots {[f'snap:{k}' for k in snap_its]}", flush=True)
         if args.p_ygoagent > 0 and args.p_self < 1 and args.ga_episode_share <= 0:
             from ygo_zero.eval.ygoagent import YgoAgentPolicy
 
@@ -1162,7 +1232,7 @@ def main() -> None:
                  f"({n_drop}/{len(slots)} samples from solved starts)")
         return slots[keep], adv[keep], ret[keep], adv_n[keep], n_drop
 
-    it, t_train = 0, time.time()
+    it, t_train = it0, time.time()
     tot = {"games": 0, "trunc": 0, "decisions": 0}
     if args.overlap:
         t0 = time.time()

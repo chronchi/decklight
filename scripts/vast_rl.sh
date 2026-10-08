@@ -72,8 +72,9 @@ echo "exit $TRAIN_RC" >> "$OUT/train.txt"
 if [ "$TRAIN_RC" -ne 0 ]; then
   alert "train_rl exit $TRAIN_RC: skipping card stage"
 fi
-# keep the eval checkpoints small: last.pt (with optimizer) only for a resume; drop it to save the pull
-rm -f "$OUT/rl/last.pt"
+# keep the eval checkpoints small: last.pt (with optimizer) only for a resume (train_rl --resume); drop it to save
+# the pull unless KEEP_LAST=1
+[ "${KEEP_LAST:-0}" = 1 ] || rm -f "$OUT/rl/last.pt"
 # card stage (same box): pick top CARD_K iters by the mean eval wr of CARD_BY ("+"-joined eval keys, default vs_bc;
 # rl3long showed vs_bc alone picks base-overfit checkpoints) (excluding iter 0) and report-card them
 if [ "$TRAIN_RC" -eq 0 ] && [ "${CARD:-1}" != "0" ]; then
