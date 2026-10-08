@@ -20,7 +20,9 @@ Searching is `WindowSearch._candidates` plus `rollouts_gen` on the branches
 search's selected score with the same tie rule as `game_gen`
 (`max(..., key=(score, -j))`: ties keep the policy's order, so firing must earn
 its card). The policy's own pick is the guard-masked argmax; an override is
-counted when the search plays something else.
+counted when the search plays something else. Every searched decision is also
+appended to `GameResult.log` (candidates + selection scores + kind, for teacher
+records); `decision_turns` records every decision's turn.
 """
 
 from __future__ import annotations
@@ -78,6 +80,8 @@ class GameResult:
     det_skipped: int = 0  # ... skipped searches (det_fallback="skip", no world accepted)
     det_s: float = 0.0  # wall seconds spent drawing honest worlds
     choice_keys: list = field(default_factory=list)  # (key, rank) of every choice (semantic replay)
+    log: list[dict] = field(default_factory=list)  # one entry per searched S decision (teacher records)
+    decision_turns: list[int] = field(default_factory=list)  # turn number of every decision
 
 
 def search_game_gen(
@@ -130,6 +134,7 @@ def search_game_gen(
         me = int(env.player)
         res.choices.append(int(c))
         res.actors.append(me)
+        res.decision_turns.append(int(obs["global"][2]))
         if tracker is not None:
             res.choice_keys.append(key_rank_of_choice(obs, int(c)))
         obs = env.step(int(c))
@@ -205,6 +210,13 @@ def search_game_gen(
                         res.n_searched += 1
                         res.n_branches += len(branches)
                         res.searched_idx.append(k)
+                        res.log.append({
+                            "k": k, "kind": "window" if window else "own", "turn": turn,
+                            "cands": [int(x) for x in cands],
+                            "scores": [float(x) for x in sel_scores],
+                            "scores_all": {search._select_key(): [float(x) for x in sel_scores]},
+                            "chosen": int(a), "played": int(a_pol),
+                        })
                         if a != a_pol:
                             res.n_override += 1
         guard.note(0, key, a)
@@ -212,6 +224,7 @@ def search_game_gen(
             res.choice_keys.append(key_rank_of_choice(obs, a))
         res.choices.append(a)
         res.actors.append(me)
+        res.decision_turns.append(turn)
         obs = env.step(a)
         if tracker is not None:
             tracker.update(env)

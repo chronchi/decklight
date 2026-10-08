@@ -19,12 +19,21 @@ deals as playtest's `--ygoagent` match (decks/gauntlet, ring pairs, seeds,
 both seats). The search's internal rollouts still model the opponent with
 the base policy; only R's outer-game decisions come from ygo-agent. Rows
 gain the paired-gate fields deck_s/deck_r/s_first/win/cut.
+
+Teacher generation (PLAN §0a step 2): `--save-records DIR` writes every
+finished game as a gen_window-format record to `DIR/<S deck>.jsonl` (soft
+targets for train_bc --soft-targets); `--opp ckpt` (R = --opp-ckpt, raw
+argmax) and `--opp greedy` (R = GreedyPolicy) add cheaper opponent mixes;
+`--deal-mode train` draws fresh deals from pool − HOLDOUT − kewl-tune (or
+decks/gauntlet for ygoagent) with duel seeds from `--seed-base`, `--games`
+games total, both seats. Without these flags everything is bit-identical.
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import os
 import random
 import statistics
 import sys
@@ -115,6 +124,32 @@ def sample_decks(n: int, seed: int) -> list[str]:
     )
 
 
+def train_schedule(names: list[str], games: int, seed_base: int, hold: set[str]) -> list[tuple[int, int, int, int, int]]:
+    """Data-generation deals: random distinct deck pairs, duel seeds from seed_base, seats alternate.
+    Entry: (di, dj, seed, s_seat, idx), same shape as the eval schedules. Holdout decks are never drawn."""
+    rng = random.Random(seed_base)
+    sched = []
+    for i in range(games):
+        di = rng.randrange(len(names))
+        dj = rng.randrange(len(names) - 1)
+        if dj >= di:
+            dj += 1
+        if names[di] in hold or names[dj] in hold:
+            fail(f"train schedule drew a holdout deck: {names[di]} vs {names[dj]}")
+        sched.append((di, dj, seed_base + i, i % 2, i))
+    return sched
+
+
+def config_dict(cfg) -> dict:
+    """A DuelConfig as a JSON-able dict (same keys as verified records' configs)."""
+    return {
+        "deck0_main": list(cfg.deck0.main), "deck0_extra": list(cfg.deck0.extra),
+        "deck1_main": list(cfg.deck1.main), "deck1_extra": list(cfg.deck1.extra),
+        "seed": int(cfg.seed), "lp": int(cfg.lp), "hand": int(cfg.hand), "draw": int(cfg.draw),
+        "setup": [list(p) for p in cfg.setup], "shuffle": bool(cfg.shuffle),
+    }  # fmt: skip
+
+
 def s_score(rec: dict) -> float:
     """S's score of a game record: 1 win, 0 loss, 0.5 draw/cut (as in playtest matches)."""
     w, seat = rec["winner"], rec["s_seat"]
@@ -140,6 +175,9 @@ def summarize(out: Path) -> dict:
     no_ya = [r for r in recs if r.get("ya_decisions") == 0]
     if no_ya:
         fail(f"{len(no_ya)} games where ygo-agent made 0 decisions (routing broke)")
+    no_opp = [r for r in recs if r.get("opp_decisions") == 0]
+    if no_opp:
+        fail(f"{len(no_opp)} games where R made 0 decisions (routing broke)")
     n = len(recs)
     wins = sum(s_score(r) for r in recs)
     searched = sum(r["n_searched"] for r in recs)
@@ -237,12 +275,21 @@ def main() -> None:
     ap.add_argument("--det-fallback", default="true", choices=("true", "skip"),
                     help="failed world: fall back to the true config, or skip the decision")
     ap.add_argument("--honest", type=int, default=0, choices=(0, 1), help="search determinized worlds (honest search)")
-    ap.add_argument("--opp", default="self", choices=("self", "ygoagent"),
-                    help="R: the raw base policy (self) or ygo-agent 0546 (ygoagent, gauntlet deals)")
+    ap.add_argument("--opp", default="self", choices=("self", "ygoagent", "ckpt", "greedy"),
+                    help="R: the raw base policy (self), ygo-agent 0546 (ygoagent, gauntlet deals), "
+                         "another BC checkpoint raw argmax (ckpt, --opp-ckpt), or GreedyPolicy (greedy)")
+    ap.add_argument("--opp-ckpt", type=Path, default=None, help="--opp ckpt: R's BC checkpoint")
     ap.add_argument("--gauntlet-decks", type=Path, default=ROOT / "decks/gauntlet",
                     help="--opp ygoagent: ygo-agent's own lists (as in playtest --ygoagent)")
     ap.add_argument("--ga-opps", type=int, default=4, help="--opp ygoagent: each deck vs its next k decks")
     ap.add_argument("--ga-seeds", type=int, default=1, help="--opp ygoagent: seeds per pair (playtest uses 1)")
+    ap.add_argument("--deal-mode", default="eval", choices=("eval", "train"),
+                    help="eval: the report-card / gauntlet schedules; train: fresh --games deals from "
+                         "pool - HOLDOUT - kewl-tune (gauntlet lists for ygoagent), seeds from --seed-base")
+    ap.add_argument("--seed-base", type=int, default=100000, help="--deal-mode train: first duel seed")
+    ap.add_argument("--games", type=int, default=0, help="--deal-mode train: total games over all procs")
+    ap.add_argument("--save-records", type=Path, default=None,
+                    help="write every game as a gen_window-format teacher record to DIR/<S deck>.jsonl")
     ap.add_argument("--width", type=int, default=32, help="games searched concurrently")
     ap.add_argument("--batch", type=int, default=512, help="max obs per policy forward")
     ap.add_argument("--nproc", type=int, default=1)
@@ -281,7 +328,11 @@ def main() -> None:
         raise AssertionError("WindowSearch.logits is unused: play.py drives rollouts via drive_many")
 
     route: dict[int, tuple[int, int] | None] = {}  # id(obs) -> None (rollout) | (game idx, s_seat)
-    ya_n: dict[int, int] = {}  # game idx -> ygo-agent decisions (0 in a finished game = routing broke)
+    r_n: dict[int, int] = {}  # game idx -> R outer decisions (0 in a finished game = routing broke)
+    routed = args.opp != "self"  # R leaves the base policy: every obs is tagged, R's go to R's policy
+    hold: set[str] = set()
+    if args.deal_mode == "train" or routed:
+        hold = set((ROOT / "decks/pool/HOLDOUT").read_text().split()) | {"kewl-tune"}
     opp = None
     if args.opp == "ygoagent":
         from ygo_zero.eval.ygoagent import YgoAgentPolicy
@@ -292,7 +343,21 @@ def main() -> None:
             fail(f"only {len(gfiles)} gauntlet decks in {args.gauntlet_decks}")
         names = [p.stem for p in gfiles]
         decks = [load_ydk(f) for f in gfiles]
-        sched = ga_schedule(names, args.ga_opps, args.ga_seeds)
+        if args.deal_mode == "train":
+            if args.games <= 0:
+                fail("--deal-mode train needs --games N")
+            sched = train_schedule(names, args.games, args.seed_base, hold)
+        else:
+            sched = ga_schedule(names, args.ga_opps, args.ga_seeds)
+    elif args.deal_mode == "train":
+        if args.games <= 0:
+            fail("--deal-mode train needs --games N")
+        pool = sorted(p.stem for p in (ROOT / "decks" / "pool").glob("*.ydk"))
+        names = [d for d in pool if d not in hold]
+        if len(names) < 2:
+            fail(f"only {len(names)} train decks after exclusions")
+        decks = None
+        sched = train_schedule(names, args.games, args.seed_base, hold)
     else:
         names = sample_decks(args.decks, args.seed)
         if len(names) < 2:
@@ -304,6 +369,22 @@ def main() -> None:
             for s in range(args.seeds):
                 for s_seat in (0, 1):
                     sched.append((di, dj, s, s_seat, len(sched)))
+    if args.opp == "ckpt":
+        if args.opp_ckpt is None:
+            ap.error("--opp ckpt needs --opp-ckpt PATH")
+        opp = BCPolicy(args.opp_ckpt, args.emb, threads=1, device=args.device, batch=args.batch)
+
+        def opp_logits(obs_list: list[dict]) -> np.ndarray:
+            out = [opp.logits(_batch(obs_list[i : i + args.batch])) for i in range(0, len(obs_list), args.batch)]
+            lg = np.concatenate(out)
+            if bool(np.isnan(lg).any()):
+                raise RuntimeError("ALERT search_match: NaN logits from the --opp-ckpt forward")
+            return lg
+
+    elif args.opp == "greedy":
+        from ygo_zero.eval.policies import GreedyPolicy
+
+        opp = GreedyPolicy(seed=3)
     if args.games_limit:
         sched = sched[: args.games_limit]
     mine = sched[args.proc :: args.nproc]
@@ -311,15 +392,15 @@ def main() -> None:
           flush=True)
 
     def forward(obs_list: list[dict]) -> np.ndarray:
-        if opp is None:
+        if not routed:
             return base_logits(obs_list)
-        # R's outer decisions go to ygo-agent; everything else (S outer + all rollouts,
+        # R's outer decisions go to R's policy; everything else (S outer + all rollouts,
         # which model the opponent with the base policy) goes to the base forward.
-        base_at, base_obs, ya_at, ya_obs, ya_keys, ya_me = [], [], [], [], [], []
+        base_at, base_obs, r_at, r_obs, r_keys, r_me = [], [], [], [], [], []
         for i, o in enumerate(obs_list):
             tag = route.pop(id(o), ...)
             if tag is ...:
-                fail("untagged obs in the batch (opp=ygoagent): every request passes through tag_game")
+                fail(f"untagged obs in the batch (opp={args.opp}): every request passes through tag_game")
             if tag is None:
                 base_at.append(i)
                 base_obs.append(o)
@@ -329,11 +410,11 @@ def main() -> None:
                     base_at.append(i)
                     base_obs.append(o)
                 else:
-                    ya_at.append(i)
-                    ya_obs.append(o)
-                    ya_keys.append(idx)
-                    ya_n[idx] = ya_n.get(idx, 0) + 1
-                    ya_me.append(seat_of(o))
+                    r_at.append(i)
+                    r_obs.append(o)
+                    r_keys.append(idx)
+                    r_n[idx] = r_n.get(idx, 0) + 1
+                    r_me.append(seat_of(o))
         if len(route) > 10_000:  # obs tagged but never forwarded: a recycled id() could misroute R to base
             fail(f"{len(route)} stale route tags (obs tagged but never forwarded)")
         a_width = int(obs_list[0]["action_mask"].shape[0])
@@ -344,22 +425,44 @@ def main() -> None:
                 fail(f"policy width {b.shape[1]} != action options {a_width}")
             for k, i in enumerate(base_at):
                 lg[i] = b[k]
-        if ya_obs:
-            buf = _batch(ya_obs)
-            buf["player"] = np.array(ya_me, np.int64)  # CppEnv obs carry no seat; global[4] does
-            acts = opp(buf, np.arange(len(ya_obs)), keys=np.array(ya_keys, np.int64))
-            for i, a in zip(ya_at, acts, strict=True):  # one-hot argmax: the inner argmax plays R's pick
-                lg[i, int(a)] = 1.0
+        if r_obs:
+            if args.opp == "ygoagent":
+                buf = _batch(r_obs)
+                buf["player"] = np.array(r_me, np.int64)  # CppEnv obs carry no seat; global[4] does
+                acts = opp(buf, np.arange(len(r_obs)), keys=np.array(r_keys, np.int64))
+                for i, a in zip(r_at, acts, strict=True):  # one-hot argmax: the inner argmax plays R's pick
+                    lg[i, int(a)] = 1.0
+            elif args.opp == "greedy":
+                buf = _batch(r_obs)
+                buf["player"] = np.array(r_me, np.int64)
+                acts = opp(buf, np.arange(len(r_obs)))
+                for i, a in zip(r_at, acts, strict=True):  # one-hot: the inner argmax plays R's pick
+                    lg[i, int(a)] = 1.0
+            else:  # ckpt: R plays another BC checkpoint raw (argmax through the shared guard discipline)
+                b = opp_logits(r_obs)
+                if b.shape[1] != a_width:
+                    fail(f"opp policy width {b.shape[1]} != action options {a_width}")
+                for k, i in enumerate(r_at):
+                    lg[i] = b[k]
         return lg
+
+    cfgs: dict[int, DuelConfig] = {}  # game idx -> DuelConfig (teacher records + replay check)
 
     def jobs():
         for di, dj, s, s_seat, idx in mine:
-            if opp is None:
+            if args.opp == "ygoagent":
+                seat0, seat1 = (di, dj) if s_seat == 0 else (dj, di)
+                cfg = DuelConfig(decks[seat0], decks[seat1], seed=s)
+            else:
+                if args.deal_mode == "train" and (names[di] in hold or names[dj] in hold):
+                    fail(f"train game drew a holdout deck: {names[di]} vs {names[dj]}")
                 cfg = DuelConfig(
                     load_ydk(ROOT / "decks" / "pool" / f"{names[di]}.ydk"),
                     load_ydk(ROOT / "decks" / "pool" / f"{names[dj]}.ydk"),
                     seed=s,
                 )
+            cfgs[idx] = cfg
+            if not routed:
                 ws = WindowSearch(
                     engine, never, k=args.k, horizon=args.horizon, samples=args.samples,
                     rollout_temp=args.rollout_temp, batch=args.batch, seed=args.seed, value=value,
@@ -370,8 +473,6 @@ def main() -> None:
                     honest=bool(args.honest), det_tries=args.det_tries, det_fallback=args.det_fallback,
                 )  # fmt: skip
             else:
-                seat0, seat1 = (di, dj) if s_seat == 0 else (dj, di)
-                cfg = DuelConfig(decks[seat0], decks[seat1], seed=s)
                 ws = RouteWindowSearch(
                     engine, never, k=args.k, horizon=args.horizon, samples=args.samples,
                     rollout_temp=args.rollout_temp, batch=args.batch, seed=args.seed, value=value,
@@ -385,18 +486,77 @@ def main() -> None:
             yield idx, gen
 
     args.out.mkdir(parents=True, exist_ok=True)
+    if args.save_records is not None:
+        args.save_records.mkdir(parents=True, exist_ok=True)
+    sel_key = f"value@h{args.horizon}" if args.value else f"board@h{args.horizon}"
     path = args.out / f"games-{args.proc}.jsonl"
-    got, tot_s = 0, 0
+
+    def write_teacher_record(idx: int, s_seat: int, seat_decks: list[str], res) -> int:
+        """Append one gen_window-format teacher record for S's deck; replay-check it first.
+        Returns the label count (non-skip labels == searched S decisions)."""
+        from ygo_zero.demos.dataset import record_config
+        from ygo_zero.engine.cpp_env import CppEnv
+
+        n = len(res.choices)
+        if len(res.actors) != n or len(res.decision_turns) != n:
+            fail(f"game {idx}: choices/actors/turns length mismatch")
+        targets: list[int | None] = [None] * n
+        labels = ["skip"] * n
+        slog = []
+        for e in res.log:
+            k = int(e["k"])
+            cands = [int(x) for x in e.get("cands", [])]
+            scores = [float(x) for x in e.get("scores", [])]
+            if not cands or len(cands) != len(scores):
+                fail(f"game {idx}: searched decision {k} without cands/scores")
+            targets[k] = int(e["chosen"])
+            labels[k] = "window" if e.get("kind") == "window" else "own"
+            sall = e.get("scores_all") or {sel_key: scores}
+            slog.append({"k": k, "kind": e.get("kind"), "cands": cands, "scores": scores,
+                         "scores_all": {kk: [float(x) for x in col] for kk, col in sall.items()},
+                         "chosen": int(e["chosen"]), "played": int(e["played"])})
+        deck_s = seat_decks[s_seat]
+        trec = {
+            "decks": list(seat_decks), "config": config_dict(cfgs[idx]), "auto_single": True,
+            "choices": [int(c) for c in res.choices], "actors": [int(a) for a in res.actors],
+            "turns": [int(t) for t in res.decision_turns], "winner": res.winner,
+            "truncated": bool(res.truncated),
+            "game_id": f"st-{idx}", "line_id": f"{deck_s}/st-{idx}",
+            "targets": targets, "labels": labels, "notes": [], "search": slog,
+            "source": f"search-teacher k={args.k} samples={args.samples} horizon={args.horizon} "
+                      f"select={sel_key} conf_skip={args.conf_skip} own_frac={args.own_frac} "
+                      f"value={args.value} honest={int(args.honest)} "
+                      f"det_fallback={args.det_fallback} opp={args.opp} deal={args.deal_mode}",
+        }
+        env = CppEnv(engine, record_config(trec), True)  # the record must replay from its own config
+        obs = env.reset()
+        for c in trec["choices"]:
+            if obs is None:
+                fail(f"game {idx}: teacher record replay ended early")
+            obs = env.step(int(c))
+        if (obs is None) == bool(res.truncated):
+            fail(f"game {idx}: teacher record replay diverges (truncated={res.truncated})")
+        if not res.truncated and int(env.winner) != res.winner:
+            fail(f"game {idx}: teacher record replay diverges (winner {env.winner} != {res.winner})")
+        line = (json.dumps(trec) + "\n").encode()  # one write() under O_APPEND: procs share deck files
+        fd = os.open(args.save_records / f"{deck_s}.jsonl", os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o644)
+        try:
+            os.write(fd, line)
+        finally:
+            os.close(fd)
+        return sum(1 for lb in labels if lb != "skip")
+
+    got, tot_s, tot_labels = 0, 0, 0
     try:
         with path.open("w") as f:
             for idx, res in drive_many(jobs(), forward, args.width):
                 di, dj, s, s_seat, _ = sched[idx]
                 if res.winner is None and not res.truncated:
                     fail(f"game {idx} ended with neither winner nor truncation")
-                if opp is not None:
+                if args.opp == "ygoagent":
                     opp.reset_keys([idx])  # drop ygo-agent's LSTM state for the finished game
                 rec = {
-                    "decks": [names[di], names[dj]] if opp is None else
+                    "decks": [names[di], names[dj]] if args.opp != "ygoagent" else
                              [names[di if s_seat == 0 else dj], names[dj if s_seat == 0 else di]],
                     "seed": s, "s_seat": s_seat, "game_idx": idx,
                     "winner": res.winner, "truncated": res.truncated, "turns": res.turns,
@@ -408,14 +568,18 @@ def main() -> None:
                     "det_fallbacks": res.det_fallbacks, "det_skipped": res.det_skipped,
                     "det_fallback": args.det_fallback, "det_s": round(res.det_s, 3),
                 }
-                if opp is not None:  # paired-gate fields (playtest per_game format + search stats)
+                if args.opp == "ygoagent":  # paired-gate fields (playtest per_game format + search stats)
                     w = res.winner
-                    rec.update(deck_s=names[di], deck_r=names[dj], s_first=(s_seat == 0), ya_decisions=ya_n.pop(idx, 0),
+                    rec.update(deck_s=names[di], deck_r=names[dj], s_first=(s_seat == 0), ya_decisions=r_n.pop(idx, 0),
                                win=1.0 if w == s_seat else (0.0 if w in (0, 1) else 0.5),
                                cut=res.truncated)
+                elif routed:
+                    rec.update(opp_decisions=r_n.pop(idx, 0))
                 f.write(json.dumps(rec) + "\n")
                 got += 1
                 tot_s += res.n_searched
+                if args.save_records is not None:
+                    tot_labels += write_teacher_record(idx, s_seat, rec["decks"], res)
                 if got % 10 == 0:
                     print(f"{got}/{len(mine)} games, searched {tot_s}, {time.time() - t0:.0f} s", flush=True)
     except RuntimeError as e:
@@ -434,6 +598,12 @@ def main() -> None:
           f"({capped}/{branches}), wall {time.time() - t0:.0f} s", flush=True)
     if tot_s == 0 and args.nproc == 1 and not args.raw:
         fail("0 searched decisions overall")
+    if args.save_records is not None:
+        if got == 0:
+            fail(f"0 records written to {args.save_records}")
+        if tot_labels == 0 and not args.raw:
+            fail(f"0 search labels written to {args.save_records}")
+        print(f"proc {args.proc}: {tot_labels} search labels -> {args.save_records}", flush=True)
     if share > 0.2:
         fail(f"capped-branch share {share:.3f} > 20% ({capped}/{branches})")
 
