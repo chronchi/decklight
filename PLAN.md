@@ -22,6 +22,24 @@ Reviews: `docs/reviews/2026-10-08-{opus-5.5,muse-spark-1.3}.md`; decisions: NOTE
    greedy) plus Kolibri **pass-rate curriculum** (§3.2.2.5: train on positions the agent sometimes solves) and
    **hinted self-distillation** (OPSD §3.2.1.4: on failures show the expert/search line in context, distil hinted →
    unhinted). If search does not beat ygo-agent, this becomes step 2.
+   Gaps filled from the muse league-plan check (`docs/reviews/2026-10-08-league-plan-muse.md`; the plan above stands,
+   these are additions):
+   - **Opponent shares made explicit:** ygo-agent ≈ 25% of episodes, all gauntlet pairs (`--ga-episode-share 0.5
+     --ga-ygo-share 0.5`); self 30%; ft-swv (base_r2) fixed 10%; greedy 5%; the rest base_r3 + snapshots (PFSP). Do
+     not go ygo-agent-heavy: that overfits one fixed opponent and its 31 lists, against the unseen-deck goal.
+   - **Pre-registered gate and kill rule:** the gate is the paired 744-deal ygo-agent sign test (≥ +4 pp, p < 0.05),
+     with guards that new-card and holdout results stay ≥ −5 pp. Kill at it80 if in-run vs ygo-agent < base − 2 pp.
+     h2h vs base_r3 is only a guard.
+   - **Curriculum detail:** drop zero-variance groups (positions solved K/K or 0/K) from the PPO batch; their
+     advantage is pure noise (the VRPO lesson). Positions are DAGS starts and dealt hands.
+   - **Hinting, honestly named:** we have no hint-conditioned policy, so "hinted → unhinted" means fine-tuning on
+     successes banked with the search line's help. Gate it on play-outs vs two opponents, never on field count (r1–r3
+     learned resource-spending hacks).
+   - **Extra option, kickstarting:** a decaying KL toward ygo-agent's own move probabilities on gauntlet states. It is
+     the only teacher stronger than us; needs a new loss term.
+   - **Disagreement (open):** muse would run the league alone first and add the curriculum and hinting in a second run,
+     to avoid confounding. Our plan runs them together. The curriculum and hinting code is not built yet.
+   - **Expectation:** +2–5 pp from RL at our budget; 50% vs ygo-agent by RL alone probably needs ~10× the budget.
 
 **Stop:** self-imitation rounds, long PPO from base_r3, argmax search-label distillation, field/critic/val-agreement
 proxies for selection, head-to-head vs base_r3 as the gate, infra work before a signal.
