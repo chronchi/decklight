@@ -210,3 +210,19 @@ def test_train_schedule_never_draws_holdout():
         assert di != dj and s == 100000 + idx and s_seat == idx % 2
     with pytest.raises(SystemExit):  # every pair holds a holdout stem: the first draw fails
         search_match.train_schedule(["kewl-tune", "x"], 4, 7, {"kewl-tune", "x"})
+
+
+def test_teacher_gen_claim_queue(engine, tmp_path):
+    """--save-records turns on the dynamic claim queue: two procs on one out dir never play the same game,
+    together play every game, and a proc that finds every game claimed exits cleanly with 0 games."""
+    search_match = _load("search_match")
+    emb = _pool_emb(tmp_path)
+    ckpt = _tiny_ckpt(tmp_path, emb, "base", 0)
+    out = tmp_path / "m-self"
+    for proc in (0, 1):  # sequential: proc 0 claims all 3 games, proc 1 finds none left
+        _run_kind(search_match, tmp_path, emb, ckpt, "self",
+                  ["--games", "3", "--nproc", "2", "--proc", str(proc)])
+    rows = [json.loads(x) for p in sorted(out.glob("games-*.jsonl")) for x in p.read_text().splitlines() if x.strip()]
+    idx = [r["game_idx"] for r in rows]
+    assert sorted(idx) == [0, 1, 2], idx
+    assert sorted(int(p.name) for p in (out / "claims").iterdir()) == [0, 1, 2]

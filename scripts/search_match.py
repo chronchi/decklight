@@ -291,6 +291,11 @@ def main() -> None:
     ap.add_argument("--save-records", type=Path, default=None,
                     help="write every game as a gen_window-format teacher record to DIR/<S deck>.jsonl")
     ap.add_argument("--width", type=int, default=32, help="games searched concurrently")
+    ap.add_argument("--claim", type=int, choices=(0, 1), default=None,
+                    help="1: procs claim games one by one from <out>/claims (dynamic work queue, no idle tail; "
+                         "at most --claim-width in flight); 0: static i %% nproc shards. Default: 1 with "
+                         "--save-records (teacher generation), else 0 (eval schedules stay per-proc deterministic)")
+    ap.add_argument("--claim-width", type=int, default=8, help="--claim 1: max games in flight per proc")
     ap.add_argument("--batch", type=int, default=512, help="max obs per policy forward")
     ap.add_argument("--nproc", type=int, default=1)
     ap.add_argument("--proc", type=int, default=0)
@@ -399,7 +404,30 @@ def main() -> None:
         opp = GreedyPolicy(seed=3)
     if args.games_limit:
         sched = sched[: args.games_limit]
-    mine = sched[args.proc :: args.nproc]
+    claim = bool(args.save_records is not None if args.claim is None else args.claim)
+    if claim and args.out is None:
+        ap.error("--claim 1 needs --out (claims live in <out>/claims)")
+    if claim:
+        # dynamic queue (teacher-r1 2026-10-08: static shards left 30 of 32 cores idle for hours behind the procs
+        # dealt the slowest deck pairings): every proc walks the whole schedule from its own offset and plays a game
+        # only if it creates <out>/claims/<idx> first (O_EXCL is atomic); few games in flight so claims stay late.
+        # A proc that dies loses its in-flight games (never replayed): fine for teacher data, not for eval cards.
+        args.width = min(args.width, args.claim_width)
+        claim_dir = args.out / "claims"
+        claim_dir.mkdir(parents=True, exist_ok=True)
+        off = (args.proc * len(sched)) // max(args.nproc, 1)
+        mine = sched[off:] + sched[:off]
+    else:
+        mine = sched[args.proc :: args.nproc]
+
+    def claimed(idx: int) -> bool:
+        if not claim:
+            return True
+        try:
+            os.close(os.open(claim_dir / str(idx), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644))
+            return True
+        except FileExistsError:
+            return False
     print(f"opp {args.opp}, decks {names}: {len(sched)} games, proc {args.proc}/{args.nproc} runs {len(mine)}",
           flush=True)
 
@@ -462,6 +490,8 @@ def main() -> None:
 
     def jobs():
         for di, dj, s, s_seat, idx in mine:
+            if not claimed(idx):
+                continue
             if args.opp == "ygoagent":
                 seat0, seat1 = (di, dj) if s_seat == 0 else (dj, di)
                 cfg = DuelConfig(decks[seat0], decks[seat1], seed=s)
@@ -593,7 +623,7 @@ def main() -> None:
                 if args.save_records is not None:
                     tot_labels += write_teacher_record(idx, s_seat, rec["decks"], res)
                 if got % 10 == 0:
-                    print(f"{got}/{len(mine)} games, searched {tot_s}, {time.time() - t0:.0f} s", flush=True)
+                    print(f"{got}/{len(mine) if not claim else '?'} games, searched {tot_s}, {time.time() - t0:.0f} s", flush=True)
     except RuntimeError as e:
         if str(e).startswith("ALERT search_match:"):
             print(str(e), flush=True)
@@ -611,9 +641,11 @@ def main() -> None:
     if tot_s == 0 and args.nproc == 1 and not args.raw:
         fail("0 searched decisions overall")
     if args.save_records is not None:
-        if got == 0:
+        # claim mode: a proc may legitimately get 0 games when the others claimed them all
+        all_taken = claim and sum(1 for _ in claim_dir.iterdir()) >= len(sched)
+        if got == 0 and not all_taken:
             fail(f"0 records written to {args.save_records}")
-        if tot_labels == 0 and not args.raw:
+        if tot_labels == 0 and not args.raw and got > 0:
             fail(f"0 search labels written to {args.save_records}")
         print(f"proc {args.proc}: {tot_labels} search labels -> {args.save_records}", flush=True)
     if share > 0.2:
