@@ -143,6 +143,13 @@ STA=(--init "$BASE" --epochs 4 --lr 1e-4 --batch 256 --select-on last --kinds "s
      --require-kinds "sw-$ST" "sw-${ST}_own" --soft-targets gumbel)
 want ft-st-c5 && train ft-st-c5 "${STA[@]}" --soft-scale 5
 want ft-st-c10 && train ft-st-c10 "${STA[@]}" --soft-scale 10
+# student-r1 (NOTEBOOK 2026-10-08 14:10): with --soft-norm none the selection-score spread (median 0.085) barely tilts
+# the prior (soft argmax agrees with the search's pick on 60% at c5 / 66% at c10; val agreement fell below base_r3).
+# Sharper targets: min-max-normalised q (Gumbel MuZero) at c = 5, and the search's chosen move as a hard label.
+want ft-st-mm5 && train ft-st-mm5 "${STA[@]}" --soft-norm minmax --soft-scale 5
+STH=(--init "$BASE" --epochs 4 --lr 1e-4 --batch 256 --select-on last --kinds "sw-$ST" "sw-${ST}_own"
+     --require-kinds "sw-$ST" "sw-${ST}_own")
+want ft-st-hard && train ft-st-hard "${STH[@]}"
 for V in mix-h32 mix-h128 mix-h256 mix-h512 mix-h32k mix-h128k mix-h256k mix-h512k mix-k; do
   want "$V" || continue
   H=${V#mix-h}; H=${H%k}; [ "$V" = mix-k ] && H=0
@@ -160,7 +167,7 @@ out = Path(sys.argv[1])
 best_v, best_s = "zero", -1.0
 best_hv, best_h = "zero", -1.0  # also playtest the best on unseen-deck gold (bcg-20261004-2223: mix won there)
 for v in ("zero", "ft-gold", "ft-mix", "ft-teach", "ft-teach-h", "ft-search", "ft-dw", "ft-all", "ft-t13", "ft-swv", "ft-swd", "ft-r2", "ft-r2t", "mix", "lines-gold", "mix-l", "mix-h32", "mix-h128", "mix-h256", "mix-h512",
-          "mix-h32k", "mix-h128k", "mix-h256k", "mix-h512k", "mix-k", "ft-r3", "ft-kl1", "ft-kl03", "ft-si-kl1", "ft-si-kl03", "ft-st-c5", "ft-st-c10"):
+          "mix-h32k", "mix-h128k", "mix-h256k", "mix-h512k", "mix-k", "ft-r3", "ft-kl1", "ft-kl03", "ft-si-kl1", "ft-si-kl03", "ft-st-c5", "ft-st-c10", "ft-st-mm5", "ft-st-hard"):
     m = out / v / "metrics.jsonl"
     if not m.exists():
         continue
