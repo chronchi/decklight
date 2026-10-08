@@ -25,7 +25,8 @@ PR=$J; [ $(( GMB / 800 )) -lt $PR ] && PR=$(( GMB / 800 )); [ $(( RGB * 2 / 3 ))
 echo "cores $J, gpu ${GMB}MB, ram avail ${RGB}G -> $PR procs" | tee "$OUT/sizing.txt"
 ( while true; do echo "$(date +%T) $(nvidia-smi --query-gpu=utilization.gpu,memory.used --format=csv,noheader,nounits 2>/dev/null | tr -d ' ') $(cut -d' ' -f1 /proc/loadavg) $(free -g | awk '/Mem/{print $3}')G"; sleep 30; done ) > "$OUT/usage.txt" 2>&1 &
 USAGE_PID=$!
-relay() { ( while sleep 300; do grep '^PROGRESS' "$1" 2>/dev/null | tail -1 | sed "s/^PROGRESS/PROGRESS $2/" >> "$OUT/PROGRESS"; done ) & echo $!; }
+# the loop must not hold the $(...) pipe open, or the caller waits forever (turnlines-20261007-1842 hung 40 min)
+relay() { ( while sleep 300; do grep '^PROGRESS' "$1" 2>/dev/null | tail -1 | sed "s/^PROGRESS/PROGRESS $2/" >> "$OUT/PROGRESS"; done ) > /dev/null 2>&1 & echo $!; }
 RC=0
 for src in dags turn1; do
   if [ $src = dags ]; then ARGS=(--starts dags --n "${N_DAGS:-2500}"); else ARGS=(--starts turn1 --n "${N_T1:-6}"); fi
