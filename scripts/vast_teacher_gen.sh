@@ -47,9 +47,9 @@ NP=$(python3 -c "print(max(1, min($J, int($GTOT*0.85/($GMB*1.5)), int($RTOT*0.8/
 echo "cores $J, gpu ${GTOT}MB, ram ${RTOT}MB; probe gpu ${GMB}MB rss ${RMB}MB per proc -> $NP procs" | tee "$OUT/sizing.txt"
 count_labels() {  # $1 = records dir: "<games> games, <labels> labels"
   RD="$1" python3 -c "
-import glob, json
+import glob, json, os
 g = n = 0
-for f in glob.glob('$RD' + '/*.jsonl'):
+for f in glob.glob(os.environ['RD'] + '/*.jsonl'):  # not '\$RD': bash expands it before RD= applies
     for line in open(f):
         if line.strip():
             g += 1

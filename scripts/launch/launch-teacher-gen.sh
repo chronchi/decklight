@@ -7,7 +7,7 @@ cd "$(dirname "$0")/../.."
 for f in data/cache/base_r3/best.pt data/cache/base_r2/best.pt data/cache/value_ppo3/best.pt data/models/0546_26550M.tflite; do
   [ -f "$f" ] || { echo "missing $f"; exit 3; }
 done
-N=teacher-$(date +%Y%m%d-%H%M); echo $N
+N=${NAME_PREFIX:-teacher}-$(date +%Y%m%d-%H%M); echo $N
 TOTAL=${TOTAL:-6000}
 NY=$(python3 -c "print(int($TOTAL*0.35))")
 NS=$(python3 -c "print(int($TOTAL*0.30))")
