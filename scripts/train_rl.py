@@ -13,6 +13,13 @@ greedy learner vs greedy BC (both seats, 4 train + 4 holdout decks) and vs ygo-a
 decks/gauntlet, each vs its next 4), via the same
 play_match/BCPolicy path as scripts/playtest.py. Never read the training win rates as progress.
 
+League (`--league 1`): PFSP mix over self / base / snapshots / ygo-agent, plus fixed
+checkpoints (`--league-fixed name=path` with `--league-fixed-share`) and the scripted
+greedy policy (`--league-greedy-share`). `--ga-episode-share F` makes F of episodes
+gauntlet-vs-gauntlet (drawn by the VecEnv); ygo-agent only plays those (share G of
+them via `--ga-ygo-share`), so every ygo-agent training game is a report-card matchup.
+With F = 0 (and no fixed/greedy shares) the league draws are bit-identical to before.
+
 Output (`--out`): metrics.jsonl (first record "args" carries the BC architecture so BCPolicy/playtest load the
 checkpoints), iter-NNNN.pt (fp16 policy weights at each eval, no value head), last.pt (full, with optimizer).
 """
@@ -472,7 +479,19 @@ def main() -> None:
                     help="0: today's self-play/vs-BC mix (default); 1: PFSP league (snapshots + ygo-agent)")
     ap.add_argument("--p-self", type=float, default=0.4, help="league: share of self-play episodes")
     ap.add_argument("--p-ygoagent", type=float, default=0.15,
-                    help="league: absolute share of ygo-agent episodes (0 = off)")
+                    help="league: absolute share of ygo-agent episodes (0 = off; inert with --ga-episode-share > 0)")
+    ap.add_argument("--ga-episode-share", type=float, default=0.0,
+                    help="deck-aware league: share of episodes drawn gauntlet-vs-gauntlet "
+                    "(0 = off, bit-identical); ygo-agent only plays those, via --ga-ygo-share")
+    ap.add_argument("--ga-ygo-share", type=float, default=0.5,
+                    help="within gauntlet-vs-gauntlet episodes, share played vs ygo-agent "
+                    "(the rest use the league draw without YGO)")
+    ap.add_argument("--league-fixed", action="append", default=[], metavar="name=path",
+                    help="extra fixed league opponent from a checkpoint (repeatable, e.g. ft-swv=path/best.pt)")
+    ap.add_argument("--league-fixed-share", type=float, default=0.0,
+                    help="league: absolute episode share for the --league-fixed pool (split inside by PFSP)")
+    ap.add_argument("--league-greedy-share", type=float, default=0.0,
+                    help="league: absolute episode share vs the scripted greedy policy (0 = off)")
     ap.add_argument("--snap-every", type=int, default=40, help="league: freeze a snapshot every N iterations")
     ap.add_argument("--league-size", type=int, default=6,
                     help="league: newest snapshots kept as opponents (0 = no snapshots)")
@@ -828,25 +847,81 @@ def main() -> None:
             assert critic is not None
             critic_actor = copy.deepcopy(critic).eval()
         col_rng = np.random.default_rng(seed_rank + 0x1234)
+    ga_start = len(train_decks) - len(g_decks)
+    try:
+        vec.set_ga_share(args.ga_episode_share, ga_start, len(g_decks))
+    except Exception as e:  # noqa: BLE001 - C++ range/share errors must fail the job here
+        fail(f"bad gauntlet pool (--ga-episode-share {args.ga_episode_share}, "
+             f"ga slice [{ga_start}, {ga_start + len(g_decks)})): {e}")
+    if args.ga_episode_share > 0:
+        if not args.league:
+            fail("--ga-episode-share > 0 needs --league 1 (deck-aware draws live in the league path)")
+        if not g_decks:
+            fail("--ga-episode-share > 0 needs a non-empty --gauntlet-decks dir")
+        if args.p_ygoagent > 0:
+            print(f"[league] --ga-episode-share {args.ga_episode_share}: --p-ygoagent "
+                  f"{args.p_ygoagent} is inert (ygo-agent share is "
+                  f"--ga-episode-share * --ga-ygo-share = "
+                  f"{args.ga_episode_share * args.ga_ygo_share:.3f})", flush=True)
     league = None
     ygo_pol = None
+    greedy_pol = None
+    fixed_nets: dict[str, PolicyNet] = {}
     if args.league:
         from ygo_zero.eval.ygoagent import MODEL_PATH as _YGO_MODEL
 
-        if args.p_ygoagent > 0 and args.p_self < 1 and not _YGO_MODEL.is_file():
-            fail(f"--league 1 needs the ygo-agent model for --p-ygoagent {args.p_ygoagent}: "
-                 f"{_YGO_MODEL} missing")
-        league = League(args.p_self, args.p_ygoagent, args.league_size, col_rng)
-        if args.p_ygoagent > 0 and args.p_self < 1:
+        need_ygo = (args.p_ygoagent > 0 and args.p_self < 1 and args.ga_episode_share <= 0) or \
+            (args.ga_episode_share > 0 and args.ga_ygo_share > 0)
+        if need_ygo and not _YGO_MODEL.is_file():
+            fail(f"--league 1 needs the ygo-agent model ({_YGO_MODEL} missing)")
+        for spec in args.league_fixed or []:
+            if "=" not in spec:
+                fail(f"--league-fixed {spec!r}: want name=path")
+            name, spath = spec.split("=", 1)
+            name, spath = name.strip(), Path(spath)
+            if not name:
+                fail(f"--league-fixed {spec!r}: empty name")
+            if name in fixed_nets:
+                fail(f"--league-fixed {name!r} given twice")
+            if not spath.is_file():
+                fail(f"--league-fixed {name!r}: {spath} missing")
+            try:
+                fnet = load_net(spath, emb, a, value=False).eval()
+            except Exception as e:  # noqa: BLE001 - architecture mismatch must fail the job here
+                fail(f"--league-fixed {name!r}: cannot load {spath} with the --init architecture: {e}")
+            for p in fnet.parameters():
+                p.requires_grad_(False)
+            fixed_nets[name] = fnet
+        if args.league_greedy_share > 0:
+            from ygo_zero.eval.policies import GreedyPolicy
+
+            greedy_pol = GreedyPolicy(seed_rank + 0x617771)
+        try:
+            league = League(args.p_self, args.p_ygoagent, args.league_size, col_rng,
+                            fixed=fixed_nets, p_fixed=args.league_fixed_share,
+                            p_greedy=args.league_greedy_share, ga_ygo_share=args.ga_ygo_share)
+        except ValueError as e:
+            fail2(str(e))
+        if args.p_ygoagent > 0 and args.p_self < 1 and args.ga_episode_share <= 0:
             from ygo_zero.eval.ygoagent import YgoAgentPolicy
 
             ygo_pol = YgoAgentPolicy(seed=seed_rank + 0x5EED, sample=True, workers=args.ga_workers)
+        if args.ga_episode_share > 0 and args.ga_ygo_share > 0:
+            from ygo_zero.eval.ygoagent import YgoAgentPolicy
+
+            ygo_pol = YgoAgentPolicy(seed=seed_rank + 0x5EED, sample=True, workers=args.ga_workers)
+        if dist_rank == 0:
+            print(f"[league] gauntlet slice [{ga_start}, {ga_start + len(g_decks)}) "
+                  f"ga_share={args.ga_episode_share} ga_ygo={args.ga_ygo_share} "
+                  f"fixed={sorted(fixed_nets)}", flush=True)
     try:
         col = Collector(vec, actor if actor is not None else model, ref, store, hist, known, dev,
                         args.p_bc, args.trunc_reward, args.recv_batch, col_rng, args.precision,
                         league, ygo_pol,
                         critic=(critic_actor if critic_actor is not None else critic),
-                        priv_critic=bool(args.priv_critic), adv=args.adv)
+                        priv_critic=bool(args.priv_critic), adv=args.adv,
+                        greedy=greedy_pol, ga_share=args.ga_episode_share,
+                        ga_range=(ga_start, len(g_decks)), fail=fail)
     except ValueError as e:
         fail2(str(e))
     it, t_train = 0, time.time()

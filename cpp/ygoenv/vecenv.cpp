@@ -27,7 +27,7 @@ static std::vector<uint32_t> shuffled_main(std::vector<uint32_t> main, uint64_t 
 
 VecEnv::VecEnv(Engine& engine, std::vector<Deck> decks, int num_envs, int num_threads, uint64_t seed, bool auto_single)
     : num_envs(num_envs), obs(num_envs), player(num_envs, 0), winner(num_envs, -1), done(num_envs, 0), game(num_envs, -1),
-      dags(num_envs, 0), dags_last(num_envs, 0),
+      dags(num_envs, 0), dags_last(num_envs, 0), ga(num_envs, 0), deck0(num_envs, -1), deck1(num_envs, -1),
       engine_(engine), decks_(std::move(decks)), auto_single_(auto_single), envs_(num_envs), rng_(num_envs),
       dags_rng_(num_envs),
       current_(num_envs), idle_(num_envs, 0), errors_(num_envs), slot_(num_envs, Slot::HELD),
@@ -68,6 +68,16 @@ int64_t VecEnv::remaining() const {
 }
 
 void VecEnv::set_max_decisions(int n) { max_decisions_ = n; }
+
+void VecEnv::set_ga_share(double p, int start, int count) {
+  if (!(p >= 0.0 && p <= 1.0)) throw std::invalid_argument("ga share must be in [0, 1]");
+  if (start < 0 || count < 0 || start + count > static_cast<int>(decks_.size()))
+    throw std::out_of_range("gauntlet slice out of deck range");
+  if (p > 0.0 && count == 0) throw std::invalid_argument("ga share > 0 needs a non-empty gauntlet slice");
+  ga_p_ = p;
+  ga_start_ = start;
+  ga_count_ = count;
+}
 
 void VecEnv::set_starts(std::vector<DagsStart> starts, double p, uint64_t seed) {
   if (!(p >= 0.0 && p <= 1.0)) throw std::invalid_argument("dags p must be in [0, 1]");
@@ -121,6 +131,8 @@ bool VecEnv::try_dags(int i, Episode& ep) {
   ep.dags = 1;
   envs_[i] = std::move(env);
   dags[i] = 1;
+  ga[i] = 0;
+  deck0[i] = deck1[i] = -1;
   ++dags_used_;
   return true;
 }
@@ -133,6 +145,8 @@ void VecEnv::start_episode(int i) {
       if (next_game_ >= schedule_.size()) {
         idle_[i] = 1;
         game[i] = -1;
+        ga[i] = 0;
+        deck0[i] = deck1[i] = -1;
         envs_[i].reset();
         obs[i].clear();
         return;
@@ -140,14 +154,31 @@ void VecEnv::start_episode(int i) {
       ep = schedule_[next_game_++];
     }
     game[i] = ep.index;
+    ga[i] = 0;
+    deck0[i] = static_cast<int32_t>(ep.deck0);
+    deck1[i] = static_cast<int32_t>(ep.deck1);
   } else if (try_dags(i, ep)) {
     return;
+  } else if (ga_p_ > 0.0 && ga_count_ > 0 &&
+             static_cast<double>(splitmix(rng_[i]) >> 11) * (1.0 / 9007199254740992.0) < ga_p_) {
+    // Gauntlet-vs-gauntlet episode (deck-aware league): both decks from the gauntlet slice.
+    ep.deck0 = ga_start_ + static_cast<int>(splitmix(rng_[i]) % ga_count_);
+    ep.deck1 = ga_start_ + static_cast<int>(splitmix(rng_[i]) % ga_count_);
+    ep.seed = splitmix(rng_[i]);
+    ep.dags = 0;
+    ga[i] = 1;
+    deck0[i] = static_cast<int32_t>(ep.deck0);
+    deck1[i] = static_cast<int32_t>(ep.deck1);
   } else {
+    // ga_p_ == 0 consumes no random numbers here: bit-identical to no gauntlet pool.
     int n = static_cast<int>(decks_.size());
     ep.deck0 = static_cast<int>(splitmix(rng_[i]) % n);
     ep.deck1 = static_cast<int>(splitmix(rng_[i]) % n);
     ep.seed = splitmix(rng_[i]);
     ep.dags = 0;
+    ga[i] = 0;
+    deck0[i] = static_cast<int32_t>(ep.deck0);
+    deck1[i] = static_cast<int32_t>(ep.deck1);
   }
   dags[i] = 0;
   const Deck &a = decks_[ep.deck0], &b = decks_[ep.deck1];

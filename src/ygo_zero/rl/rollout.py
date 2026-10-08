@@ -11,10 +11,18 @@ learner rows keep its log-softmax as the cached KL reference (stored in fp16 by 
 
 With a `league` (RL v2 part A), per-env episodes are drawn from the League mix instead:
 self-play, vs base (as above), vs a frozen snapshot (one forward per snapshot present in
-the batch, sampled temperature 1), or vs ygo-agent (`ygo(buf, rows, keys)` with the
+the batch, sampled temperature 1), vs a fixed checkpoint (same path as snapshots),
+vs greedy (`greedy(buf, rows)`), or vs ygo-agent (`ygo(buf, rows, keys)` with the
 Collector's own per-env episode tokens, since buf["game"] is -1 without a schedule).
 The `ref` forward still covers every row so learner rows keep base as the KL anchor.
 `league=None` keeps today's behaviour bit-identical.
+
+Gauntlet-aware mode (`ga_share > 0`): the VecEnv draws gauntlet-vs-gauntlet episodes
+itself (flagged in `buf["ga"]` with deck indices in `buf["deck0/1"]`) and the League
+draw goes through `draw_ga`, so ygo-agent only plays gauntlet-vs-gauntlet and
+pool-deck episodes never draw YGO. Finished YGO episodes whose decks miss the
+gauntlet slice fail loud at the end of `collect` (`fail` callback or RuntimeError).
+`ga_share = 0` keeps the league path bit-identical.
 """
 
 from __future__ import annotations
@@ -24,7 +32,7 @@ import time
 import numpy as np
 import torch
 
-from ygo_zero.rl.league import BASE, SELF, YGO, League
+from ygo_zero.rl.league import BASE, GREEDY, SELF, YGO, League
 from ygo_zero.rl.critic import critic_obs
 from ygo_zero.rl.ppo import gather, masked_log_softmax, to_torch
 
@@ -49,7 +57,9 @@ class Collector:
     def __init__(self, vec, model, ref, store, hist: int, known: bool, device: torch.device,
                  p_bc: float, trunc_reward: float, recv_batch: int, rng: np.random.Generator,
                  precision: str = "fp32", league: League | None = None, ygo=None,
-                 critic=None, priv_critic: bool = False, adv: str = "gae") -> None:
+                 critic=None, priv_critic: bool = False, adv: str = "gae",
+                 greedy=None, ga_share: float = 0.0, ga_range: tuple[int, int] | None = None,
+                 fail=None) -> None:
         self.vec = vec
         self.model = model
         self.ref = ref
@@ -64,6 +74,12 @@ class Collector:
         self.precision = precision
         self.league = league
         self.ygo = ygo
+        self.greedy = greedy
+        self.ga_share = float(ga_share)
+        self.ga_range = ga_range
+        self._fail = fail
+        if self.ga_share < 0.0 or self.ga_share > 1.0:
+            raise ValueError(f"ga_share={ga_share} not in [0, 1]")
         # Privileged critic (RL v2 part B): values come from `critic` on the privileged
         # obs; the policy forward then needs logits only. None keeps today's behaviour.
         if priv_critic and critic is None:
@@ -83,9 +99,11 @@ class Collector:
         self.buf = vec.buf
         self.traj: list[list[list[int]]] = [[[], []] for _ in range(n)]
         if league is None:
+            if self.ga_share > 0:
+                raise ValueError("ga_share > 0 needs a league (deck-aware draws condition on buf['ga'])")
             self.vs_bc = rng.random(n) < self.p_bc
             self.lseat = rng.integers(0, 2, n)
-        else:
+        elif self.ga_share <= 0:
             self.opp = np.array([league.sample() for _ in range(n)], dtype=object)
             self.lseat = rng.integers(0, 2, n)
             self.vs_bc = self.opp != SELF  # introspection only; episode draws go through league
@@ -93,20 +111,70 @@ class Collector:
             self._ep_next = n
             self._net_cache: dict[str, object] = {}
             for name in set(self.opp.tolist()):
-                if name not in (SELF, BASE, YGO):
+                if name not in (SELF, BASE, YGO, GREEDY):
                     self._net_cache[name] = league.get(name)
+            if league.p_greedy > 0 and greedy is None:
+                raise ValueError("league p_greedy > 0 needs a greedy buf policy")
+        else:
+            # Gauntlet-aware mode: the C++ VecEnv draws each episode's decks (gauntlet
+            # vs pool, flagged in buf["ga"]) before Python sees it, so the initial
+            # opponents cannot be drawn yet; each env draws on first sighting (before
+            # its first decision is acted on) and on every later episode end, conditioned
+            # on the actual current decks. Never draws YGO for a pool-deck episode.
+            for k in ("ga", "deck0", "deck1"):
+                if k not in vec.buf:
+                    raise ValueError(f"ga_share > 0 needs buf[{k!r}] (rebuild the C++ env)")
+            if ga_range is None:
+                raise ValueError("ga_share > 0 needs ga_range=(start, count)")
+            if league.p_greedy > 0 and greedy is None:
+                raise ValueError("league p_greedy > 0 needs a greedy buf policy")
+            if league.ga_ygo_share > 0 and ygo is None:
+                raise ValueError("league ga_ygo_share > 0 needs the ygo-agent policy")
+            self.opp = np.full(n, None, dtype=object)
+            self.lseat = rng.integers(0, 2, n)
+            self.vs_bc = np.zeros(n, dtype=bool)
+            self.ep_id = np.arange(n, dtype=np.int64)
+            self._ep_next = n
+            self._net_cache = {}
+            self.ep_d0 = np.full(n, -1, dtype=np.int64)  # deck indices of the episode now on each env
+            self.ep_d1 = np.full(n, -1, dtype=np.int64)
+            self.ygo_bad = 0  # finished YGO episodes whose decks missed the gauntlet slice
         vec.async_reset()
 
     def _draw_episode(self, i: int) -> None:
         """League path: record nothing here; draw the next episode type for env i."""
-        self.opp[i] = self.league.sample()
+        if self.ga_share <= 0:
+            self.opp[i] = self.league.sample()
+            self.lseat[i] = self.rng.integers(0, 2)
+            self.vs_bc[i] = self.opp[i] != SELF
+            self.ep_id[i] = self._ep_next
+            self._ep_next += 1
+            name = str(self.opp[i])
+            if name not in (SELF, BASE, YGO, GREEDY) and name not in self._net_cache:
+                self._net_cache[name] = self.league.get(name)
+            return
+        self._draw_ga(i, first=False)
+
+    def _draw_ga(self, i: int, first: bool) -> None:
+        """Gauntlet-aware draw for env i, conditioned on its current episode's decks.
+
+        `buf["ga"][i]` / `deck0/1[i]` already show the episode being drawn for (the
+        VecEnv starts it before Python processes the previous finish; for `first`
+        draws, before the first decision). `first` keeps the init episode token.
+        """
+        assert self.league is not None
+        ga = bool(self.buf["ga"][i])
+        d0, d1 = int(self.buf["deck0"][i]), int(self.buf["deck1"][i])
+        opp = self.league.draw_ga(ga)
+        self.opp[i] = opp
         self.lseat[i] = self.rng.integers(0, 2)
-        self.vs_bc[i] = self.opp[i] != SELF
-        self.ep_id[i] = self._ep_next
-        self._ep_next += 1
-        name = str(self.opp[i])
-        if name not in (SELF, BASE, YGO) and name not in self._net_cache:
-            self._net_cache[name] = self.league.get(name)
+        self.vs_bc[i] = opp != SELF
+        if not first:
+            self.ep_id[i] = self._ep_next
+            self._ep_next += 1
+        self.ep_d0[i], self.ep_d1[i] = d0, d1
+        if opp not in (SELF, BASE, YGO, GREEDY) and opp not in self._net_cache:
+            self._net_cache[opp] = self.league.get(opp)
 
     def _autocast(self):
         import contextlib
@@ -215,6 +283,8 @@ class Collector:
                     if is_dags:
                         dags_games += 1
                         dags_wins += res
+                    if self.opp[i] is None:
+                        raise RuntimeError("episode finished before its first opponent draw")
                     name = str(self.opp[i])
                     if name != SELF:
                         self.league.record(name, res)
@@ -227,6 +297,14 @@ class Collector:
                             bc_wins += res
                         elif name == YGO:
                             self.ygo.reset_keys([int(self.ep_id[i])])
+                            if self.ga_share > 0:
+                                assert self.ga_range is not None
+                                lo, cnt = self.ga_range
+                                d0, d1 = int(self.ep_d0[i]), int(self.ep_d1[i])
+                                if not (lo <= d0 < lo + cnt and lo <= d1 < lo + cnt):
+                                    self.ygo_bad += 1
+                        elif name == GREEDY:
+                            pass  # stateless buf policy: nothing to reset
                     else:
                         lg_games[SELF] = lg_games.get(SELF, 0) + 1
                     self._draw_episode(i)
@@ -241,6 +319,11 @@ class Collector:
                 if n_fin >= n_samples:
                     break
                 continue
+            if lg and self.ga_share > 0:
+                # Gauntlet-aware first sighting: draw before any row is acted on.
+                for i in ids:
+                    if self.opp[int(i)] is None:
+                        self._draw_ga(int(i), first=True)
             actor = np.array([int(player[int(i)]) for i in ids], dtype=np.int64)
             if not lg:
                 is_learner = ~self.vs_bc[ids] | (actor == self.lseat[ids])
@@ -269,7 +352,7 @@ class Collector:
                         actions[pos[int(i)]] = int(a)
                 if lg and len(b_ids):
                     o_ids = b_ids[self.opp[b_ids] != BASE]
-                    snap_rows = o_ids[self.opp[o_ids] != YGO]
+                    snap_rows = o_ids[(self.opp[o_ids] != YGO) & (self.opp[o_ids] != GREEDY)]
                     for name in set(self.opp[snap_rows].tolist()) if len(snap_rows) else ():
                         s_rows = snap_rows[self.opp[snap_rows] == name]
                         s_idx = torch.from_numpy(
@@ -281,12 +364,23 @@ class Collector:
                         for i, a in zip(s_rows, act_s):
                             actions[pos[int(i)]] = int(a)
                     ga_rows = o_ids[self.opp[o_ids] == YGO]
+                    if len(ga_rows) and self.ga_share > 0:  # live check: the episode ygo-agent plays now
+                        lo, cnt = self.ga_range
+                        d = np.stack([buf["deck0"][ga_rows], buf["deck1"][ga_rows]])
+                        self.ygo_bad += int((((d < lo) | (d >= lo + cnt)).any(0)).sum())
                     if len(ga_rows):
                         t2 = time.perf_counter()
                         ga_keys = np.array([int(self.ep_id[int(i)]) for i in ga_rows])
                         act_g = self.ygo(buf, np.asarray(ga_rows), keys=ga_keys)
                         t_ga += time.perf_counter() - t2
                         for i, a in zip(ga_rows, act_g):
+                            actions[pos[int(i)]] = int(a)
+                    gr_rows = o_ids[self.opp[o_ids] == GREEDY]
+                    if len(gr_rows):
+                        if self.greedy is None:
+                            raise RuntimeError("league drew 'greedy' with no greedy policy")
+                        act_gr = self.greedy(buf, np.asarray(gr_rows))
+                        for i, a in zip(gr_rows, act_gr):
                             actions[pos[int(i)]] = int(a)
                 if len(l_ids):
                     l_idx = torch.from_numpy(np.array([pos[int(i)] for i in l_ids], np.int64)).to(self.device)
@@ -317,6 +411,15 @@ class Collector:
             t_fwd += time.perf_counter() - t1
             self.vec.send(np.asarray(ids, dtype=np.int32), np.asarray(actions, dtype=np.int32))
             decisions += len(ids)
+        if lg and self.ga_share > 0 and self.ygo_bad:
+            msg = (f"{self.ygo_bad} ygo-agent episodes with decks outside the gauntlet slice "
+                   f"{self.ga_range} (deck-aware league invariant broken)")
+            line = f"ALERT rollout: {msg}"
+            print(line, flush=True)
+            if self._fail is not None:
+                self._fail(msg)
+            else:
+                raise RuntimeError(line)
         stats = {"games": games, "trunc": trunc, "bc_games": bc_games, "bc_wins": bc_wins,
                  "decisions": decisions, "lengths": lengths, "t_env": t_env, "t_fwd": t_fwd,
                  "dags_games": dags_games,

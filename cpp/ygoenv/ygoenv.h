@@ -351,6 +351,12 @@ class VecEnv {
   int64_t dags_bad() const { return dags_bad_.load(); }
   // Cut an episode after n decisions (0 = never): it finishes with winner TRUNCATED_WINNER (RL rollouts).
   void set_max_decisions(int n);
+  // Gauntlet pool (deck-aware RL league): with probability `p` a non-scheduled,
+  // non-DAGS episode draws both decks uniformly from decks[start, start+count)
+  // (the gauntlet slice of the deck list) instead of the whole list, and flags
+  // ga[i] = 1 for it. `p = 0` (the default) consumes no extra random numbers:
+  // behaviour is bit-identical to no gauntlet pool. Call before reset().
+  void set_ga_share(double p, int start, int count);
   static constexpr int TRUNCATED_WINNER = 3;
 
   const int num_envs;
@@ -361,6 +367,9 @@ class VecEnv {
   std::vector<int64_t> game;     // schedule index of the game now in env i (-1: idle or unscheduled)
   std::vector<uint8_t> dags;       // dags[i]: the episode now in env i started from a prefix
   std::vector<uint8_t> dags_last;  // dags_last[i]: the episode that just ended in env i did (valid with done[i])
+  std::vector<uint8_t> ga;         // ga[i]: the episode now in env i is gauntlet-vs-gauntlet
+  std::vector<int32_t> deck0;      // deck indices of the episode now in env i (-1: DAGS prefix or idle)
+  std::vector<int32_t> deck1;
 
  private:
   Engine& engine_;
@@ -376,6 +385,8 @@ class VecEnv {
   std::vector<uint64_t> dags_rng_;
   std::vector<DagsStart> starts_;
   double dags_p_ = 0.0;
+  double ga_p_ = 0.0;
+  int ga_start_ = 0, ga_count_ = 0;
   std::atomic<int64_t> dags_used_{0}, dags_bad_{0};
   std::vector<uint8_t> idle_;
   std::vector<std::exception_ptr> errors_;

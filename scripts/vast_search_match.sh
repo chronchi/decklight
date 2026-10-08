@@ -24,7 +24,7 @@ export OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 PYTORCH_CUDA_ALLOC_CONF=expandable_se
 # measure one process (GPU memory, RSS) on the first variant's args, then size the pool
 FIRST_ARGS="${VARIANTS%%;*}"; FIRST_ARGS="${FIRST_ARGS#*|}"
 # shellcheck disable=SC2086
-uv run --no-sync python scripts/search_match.py --ckpt "$CKPT" --device cuda --out "$OUT/probe" --nproc 1000 --proc 0 \
+uv run --no-sync python scripts/search_match.py --ckpt "$CKPT" --device cuda --out "$OUT/probe" --nproc "${PROBE_NPROC:-1000}" --proc 0 \
   ${SM_ARGS:-} $FIRST_ARGS > "$OUT/probe.txt" 2>&1 &
 PP=$!; GMB=0; RMB=0
 # peak over 150 s: per-process GPU memory grows after load (the 90 s single reading of s0-2021 said 256 MB; procs

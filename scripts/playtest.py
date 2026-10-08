@@ -10,8 +10,8 @@
 3. narrate: N games policy vs greedy written turn by turn to runs/<run>/playtest/game-<k>.txt for a human audit.
 4. `--vs-ckpt`: head-to-head vs another BC checkpoint (e.g. the base model) on the same deck pairs, both seats.
 5. `--ygoagent`: matches vs ygo-agent 0546 on `--gauntlet-decks` (default decks/gauntlet: its own 31 lists, inside its
-   864-card vocabulary), each deck vs its next `--ga-opps` decks, both seats (248 games; was 4 decks/72 games until
-   2026-10-05).
+   864-card vocabulary), each deck vs its next `--ga-opps` decks, both seats, `--ga-seeds` seeds per ordered pair
+   (248 games at the default 1; was 4 decks/72 games until 2026-10-05).
 6. `--selfplay K`: K full games policy vs itself (both seats), saved in hand_play's state format under
    runs/<run>/playtest/selfplay/<name>/state.json, for the same muse review as the gold games (dump_game.py).
 The combo test runs the greedy run and the K samples of a hand in lockstep (one batched forward per step) and
@@ -257,6 +257,8 @@ def main() -> None:
     ap.add_argument("--ygoagent", action="store_true", help="matches vs ygo-agent 0546 on --gauntlet-decks")
     ap.add_argument("--gauntlet-decks", type=Path, default=ROOT / "decks/gauntlet", help="ygo-agent's own lists")
     ap.add_argument("--ga-opps", type=int, default=4, help="vs ygo-agent: each gauntlet deck vs its next k decks")
+    ap.add_argument("--ga-seeds", type=int, default=1,
+                    help="vs ygo-agent: seeds per ordered gauntlet pair (1 = today's 248 games; 3 ~= 744)")
     ap.add_argument("--vs-ckpt", type=Path, default=None, help="head-to-head vs this BC checkpoint (e.g. the base)")
     ap.add_argument("--newcards", type=Path, default=None,
                     help="new-card test (ADR 0007): matches on these unseen-archetype decks (decks/newcards) vs greedy and --vs-ckpt")
@@ -368,7 +370,8 @@ def main() -> None:
         gfiles = sorted(args.gauntlet_decks.glob("*.ydk"))
         gdecks = [load_ydk(f) for f in gfiles]
         match("ygoagent", YgoAgentPolicy(seed=3), gdecks,
-              [f.resolve().relative_to(ROOT.resolve()).as_posix() for f in gfiles], 1, args.ga_opps)  # 31 lists x 4 opponents x 2 seats
+              [f.resolve().relative_to(ROOT.resolve()).as_posix() for f in gfiles],
+              args.ga_seeds, args.ga_opps)  # 31 lists x 4 opponents x seeds x 2 seats
     if args.newcards:  # every deck plays every other new-card deck, both seats: generalization to unseen cards
         nfiles = sorted(args.newcards.glob("*.ydk"))
         ndecks = [load_ydk(f) for f in nfiles]
