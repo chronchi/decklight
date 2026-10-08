@@ -1121,6 +1121,14 @@ def main() -> None:
             print(f"[curriculum it {it}] seen {s['seen']}/{s['starts']} "
                   f"trainable {s['trainable']} solved {s['solved']} hopeless {s['hopeless']} "
                   f"ess {s['ess_share']}", flush=True)
+        # oversized start set (rl5league-20261008-1513: 27k slots, ~1 visit each): the pass rates never reach
+        # min_n, the weights stay uniform and the curriculum is inert; fail loud at it 40 instead of at the end
+        if it == 40:
+            n_ready = sum(1 for c in cur.n if c >= cur.min_n)
+            n_seen = sum(1 for c in cur.n if c > 0)
+            if n_seen and n_ready < 0.05 * n_seen:
+                fail(f"iteration {it}: curriculum inert: {n_ready}/{n_seen} seen slots have >= {cur.min_n} "
+                     f"games (too many --dags-starts for the run; subsample them)")
 
     def curric_check_push_seen(it: int, st: dict) -> None:
         """After the first push, DAGS episodes must carry a start index (fail loud)."""
