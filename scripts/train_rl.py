@@ -20,6 +20,13 @@ gauntlet-vs-gauntlet (drawn by the VecEnv); ygo-agent only plays those (share G 
 them via `--ga-ygo-share`), so every ygo-agent training game is a report-card matchup.
 With F = 0 (and no fixed/greedy shares) the league draws are bit-identical to before.
 
+Curriculum (`--curric 1`, PLAN section 0a step 3): pass-rate tracking over the DAGS
+starts (src/ygo_zero/rl/curriculum.py) with weights pushed every `--curric-every`
+iterations; solved/hopeless starts are dropped from the PPO batch
+(`--curric-drop-solved 0` keeps them). Hinted self-distillation (`--hint-bank` +
+`--hint-coef C`, banked by scripts/hint_bank.py): `C x CE(policy, banked action)`
+on a minibatch of banked decisions per PPO update. Both default off (bit-identical).
+
 Output (`--out`): metrics.jsonl (first record "args" carries the BC architecture so BCPolicy/playtest load the
 checkpoints), iter-NNNN.pt (fp16 policy weights at each eval, no value head), last.pt (full, with optimizer).
 """
@@ -257,8 +264,8 @@ def ppo_update(model: PolicyNet, upd_model, opt, vopt, store: SlotStore, slots: 
                adv_n: np.ndarray, ret: np.ndarray, rng: np.random.Generator, dev: torch.device,
                *, clip: float, vf_coef: float, kl_coef: float, ent_coef: float, epochs: int,
                minibatch: int, warm: bool, precision: str, max_upload_gb: float, compile: bool,
-               critic: PolicyNet | None = None, copt=None, priv_critic: bool = False,
-               adv: str = "gae", upd_critic=None) -> dict:
+                critic: PolicyNet | None = None, copt=None, priv_critic: bool = False,
+                adv: str = "gae", upd_critic=None, hint: dict | None = None) -> dict:
     """Upload-once + PPO epochs over one batch. Returns per-iteration mean stats (raises on non-finite).
 
     With `priv_critic`, the value loss trains `critic` (via `copt`) on the privileged
@@ -270,6 +277,14 @@ def ppo_update(model: PolicyNet, upd_model, opt, vopt, store: SlotStore, slots: 
     (same coef/optimizer as the value loss); the policy loss is unchanged. Warm-up trains
     the Q head only. Stats gain `q_ev` (+ `adv_diff` / `vbar_mean` are logged by the caller
     from the batch targets). `adv="gae"` (default) is bit-identical to before.
+
+    With `hint` ({"obs": numpy obs dict, "act": int32 actions, "coef": C, "batch": B};
+    `--hint-bank`), after the PPO epochs one extra policy step minimizes
+    `C x CE(policy(obs), banked action)` on a minibatch of B banked decisions
+    (hinted self-distillation: the bank holds successes found with the search's
+    help; there is no hint-conditioned policy, so this is fine-tuning on hinted
+    successes). Skipped during value warm-up. Stats gain `hint_ce` / `hint_acc`.
+    `hint=None` (default) is bit-identical to before.
 
     Under DDP (process group initialized) every rank runs the same number of optimizer
     steps per epoch: the MIN local minibatch count is all-reduced and each rank drops its
@@ -442,6 +457,36 @@ def ppo_update(model: PolicyNet, upd_model, opt, vopt, store: SlotStore, slots: 
             break
     if bad_loss:
         raise RuntimeError("non-finite loss")
+    if hint is not None and not warm and float(hint.get("coef", 0.0)) > 0.0:
+        # One hint-distillation step per PPO update (not per minibatch, so the coef
+        # means the same regardless of --epochs/--minibatch). Raises on non-finite.
+        hobs_np, hact_np = hint["obs"], np.ascontiguousarray(hint["act"])
+        hn_all = len(hact_np)
+        hn = min(int(hint.get("batch", 256)), hn_all)
+        hidx = rng.choice(hn_all, hn, replace=False)
+        hobs = to_torch({k: np.ascontiguousarray(v[hidx]) for k, v in hobs_np.items()}, dev)
+        hact = torch.from_numpy(np.ascontiguousarray(hact_np[hidx])).to(dev)
+        fwd_h = _fwd_of(upd_model)
+        model.train()
+        with _autocast(dev, precision):
+            hlogits = fwd_h(hobs)
+            hlp = masked_log_softmax(hlogits)
+            hce = -hlp.gather(1, hact[:, None]).squeeze(1).mean()
+            hacc = (hlogits.argmax(1) == hact).float().mean()
+        if not (bool(torch.isfinite(hce).item()) and bool(torch.isfinite(hacc).item())):
+            raise RuntimeError("non-finite hint loss")
+        opt.zero_grad(set_to_none=True)
+        (float(hint["coef"]) * hce).backward()
+        distmod.average_grads_(model)
+        torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+        opt.step()
+        for key, val in (("hint_ce", hce.detach()), ("hint_acc", hacc.detach())):
+            t = val.detach()
+            if key in agg_sum:
+                agg_sum[key] = agg_sum[key] + t
+            else:
+                agg_sum[key] = t.clone()
+        agg_n += 1
     agg_mean = {k: float((v / agg_n).item()) for k, v in agg_sum.items()} if agg_n else {}
     t_update = time.time() - t_up
     model.eval()
@@ -475,6 +520,25 @@ def main() -> None:
                     help="DAGS starts file (scripts/build_dags_starts.py output); unset = no mid-game starts")
     ap.add_argument("--dags-p", type=float, default=0.0,
                     help="share of episodes starting mid-game from --dags-starts (0 = off, bit-identical)")
+    ap.add_argument("--curric", type=int, choices=(0, 1), default=0,
+                    help="1: pass-rate curriculum over the DAGS starts (Kolibri 3.2.2.5; "
+                    "0 = uniform starts, bit-identical)")
+    ap.add_argument("--curric-every", type=int, default=5,
+                    help="push fresh start weights to the VecEnv every N iterations")
+    ap.add_argument("--curric-eps", type=float, default=0.02,
+                    help="floor weight per start (exploration + solved/hopeless share)")
+    ap.add_argument("--curric-min-n", type=int, default=4,
+                    help="episodes per start before it can count as solved/hopeless")
+    ap.add_argument("--curric-drop-solved", type=int, choices=(0, 1), default=1,
+                    help="1: drop zero-variance groups (starts solved K/K or 0/K) from the PPO batch")
+    ap.add_argument("--hint-bank", type=Path, default=None,
+                    help="hinted self-distillation bank (scripts/hint_bank.py output); unset = off")
+    ap.add_argument("--hint-coef", type=float, default=0.0,
+                    help="auxiliary loss coef C: C x CE(policy(obs), banked action) per PPO update (0 = off)")
+    ap.add_argument("--hint-batch", type=int, default=256,
+                    help="banked decisions per PPO update's hint step")
+    ap.add_argument("--hint-start-bonus", type=float, default=0.0,
+                    help="extra curriculum weight for starts present in the hint bank (0 = off, needs --curric 1)")
     ap.add_argument("--league", type=int, choices=(0, 1), default=0,
                     help="0: today's self-play/vs-BC mix (default); 1: PFSP league (snapshots + ygo-agent)")
     ap.add_argument("--p-self", type=float, default=0.4, help="league: share of self-play episodes")
@@ -630,6 +694,13 @@ def main() -> None:
         torch.backends.cuda.matmul.allow_tf32 = True
         torch.backends.cudnn.allow_tf32 = True
     args.out.mkdir(parents=True, exist_ok=True)
+    # Fail fast on incompatible curriculum/hint flags (before evaluate(0) runs any games).
+    if args.curric and not args.dags_p > 0:
+        fail(f"--curric 1 without --dags-p > 0 (positions are DAGS starts)")
+    if (args.hint_coef > 0 or args.hint_start_bonus > 0) and args.hint_bank is None:
+        fail("--hint-coef/--hint-start-bonus need --hint-bank (no bank to distil)")
+    if args.hint_start_bonus > 0 and not args.curric:
+        fail("--hint-start-bonus > 0 needs --curric 1")
 
     # decks: training pool = pool - holdout + gauntlet; eval = fixed 4 train + 4 holdout sample
     hold = set((ROOT / "decks/pool/HOLDOUT").read_text().split()) | {"kewl-tune"}
@@ -716,11 +787,17 @@ def main() -> None:
             ckpt["copt"] = copt.state_dict()
         torch.save(ckpt, args.out / "last.pt")
 
+    def save_curriculum() -> None:
+        """Write the tracker next to the checkpoints (resumable, auditable)."""
+        if cur is not None and dist_rank == 0:
+            cur.save(args.out / "curriculum.json")
+
     def evaluate(it: int) -> dict:
         """Synchronous eval: save iter-NNNN.pt, run in-process, print + log the record."""
         ck = args.out / f"iter-{it:04d}.pt"
         torch.save(policy_state(model), ck)
         save_critic_pt()
+        save_curriculum()
         res = run_eval(ck, args.init, args.emb, ev_names, hold, args.gauntlet_decks, args.eval_seeds,
                        args.ga_seeds, args.ga_opps, args.no_ygoagent, args.device, args.threads, it=it)  # fmt: skip
         print(format_eval_line(res), flush=True)
@@ -809,6 +886,11 @@ def main() -> None:
 
         asev = AsyncEvaluator(_eval_cmd, args.out)
 
+    # Curriculum tracker / hint bank are set up with the VecEnv below; pre-initialized so
+    # evaluate(0) (which checkpoints the tracker) can run before that.
+    cur = None
+    hint = None
+    starts: list = []
     if dist_rank == 0:
         evaluate(0)
         recorded.add(0)
@@ -833,6 +915,43 @@ def main() -> None:
         vec.set_starts(starts, args.dags_p, seed_rank + 0xDA65)
         if dist_rank == 0:
             print(f"[dags] {len(starts)} starts p={args.dags_p}", flush=True)
+    # Hint bank (offline successes found with the search's help): replay now (engine
+    # only), so a banked action that is illegal at replay fails the job here, not mid-run.
+    # (Flag-compatibility failures already raised before evaluate(0); only loads remain.)
+    if args.hint_bank is not None:
+        from ygo_zero.rl.hints import load_bank
+        from ygo_zero.rl.ppo import model_keys
+
+        try:
+            bank = load_bank(args.hint_bank, engine, hist, known, tuple(model_keys(hist, known)))
+        except ValueError as e:
+            fail(f"bad hint bank {args.hint_bank}: {e}")
+        hint = {"obs": bank["obs"], "act": bank["act"], "coef": float(args.hint_coef),
+                "batch": int(args.hint_batch), "rows": bank["rows"]}
+        if dist_rank == 0:
+            print(f"[hint] {bank['rows']} games, {bank['n_decisions']} decisions "
+                  f"from {args.hint_bank} (coef {args.hint_coef})", flush=True)
+    # Pass-rate curriculum over the DAGS starts (Kolibri 3.2.2.5): weights are pushed
+    # to the VecEnv every --curric-every iterations (no push = uniform = bit-identical).
+    cur = None
+    if args.curric:
+        if "start" not in vec.buf:
+            fail("--curric 1 needs buf['start'] (rebuild the C++ env)")
+        from ygo_zero.rl.curriculum import PassRate
+
+        bonus = {}
+        if args.hint_start_bonus > 0:
+            assert hint is not None  # flag-compatibility checked before evaluate(0)
+            bonus = {s: float(args.hint_start_bonus) for s in bank["start_ids"]
+                     if 0 <= s < len(starts)}
+        # slots are (start, seat) pairs: slot = 2*start + seat (rollout.py fin_starts)
+        bonus = {2 * s + seat: b for s, b in bonus.items() for seat in (0, 1)}
+        cur = PassRate(2 * len(starts), eps=args.curric_eps, min_n=args.curric_min_n,
+                       hint_bonus=bonus)
+        if dist_rank == 0:
+            print(f"[curric] {len(starts)} starts every={args.curric_every} eps={args.curric_eps} "
+                  f"min_n={args.curric_min_n} drop_solved={args.curric_drop_solved} "
+                  f"hint_bonus_starts={len(bonus)}", flush=True)
     store = SlotStore(args.store, gather(vec.buf, np.arange(1), hist, known, priv=bool(args.priv_critic)),
                       vrpo=(args.adv == "vrpo"))
     actor = critic_actor = None
@@ -924,6 +1043,77 @@ def main() -> None:
                         ga_range=(ga_start, len(g_decks)), fail=fail)
     except ValueError as e:
         fail2(str(e))
+    curric_pushed = False
+
+    def curric_record(finished, st: dict, it: int) -> None:
+        """Feed finished learner episodes into the PassRate tracker (fail on bad indices)."""
+        if cur is None:
+            return
+        assert cur is not None
+        fin_starts = st.get("fin_starts", [])
+        if len(fin_starts) != len(finished):
+            fail(f"iteration {it}: {len(finished)} finished trajectories but "
+                 f"{len(fin_starts)} start indices")
+        for (_, rew), fst in zip(finished, fin_starts, strict=True):
+            fsti = int(fst)
+            if fsti < -1 or fsti >= cur.n_starts:
+                fail(f"iteration {it}: buf['start'] {fsti} out of range "
+                     f"[-1, {cur.n_starts})")
+            if fsti >= 0:
+                cur.record(fsti, 1.0 if rew > 0 else (0.5 if rew == 0 else 0.0))
+
+    def curric_push(it: int, st: dict) -> None:
+        """Push fresh start weights every --curric-every iterations (PROGRESS line)."""
+        nonlocal curric_pushed
+        if cur is None or it % args.curric_every != 0:
+            return
+        w = cur.start_weights()
+        if (not w or any(not np.isfinite(x) for x in w) or not sum(w) > 0.0
+                or any(x < 0.0 for x in w)):
+            fail(f"iteration {it}: curriculum weights all zero or non-finite")
+        try:
+            vec.set_start_weights(w)
+        except ValueError as e:
+            fail(f"iteration {it}: cannot push curriculum weights: {e}")
+        curric_pushed = True
+        if dist_rank == 0:
+            s = cur.stats()
+            print(f"[curriculum it {it}] seen {s['seen']}/{s['starts']} "
+                  f"trainable {s['trainable']} solved {s['solved']} hopeless {s['hopeless']} "
+                  f"ess {s['ess_share']}", flush=True)
+
+    def curric_check_push_seen(it: int, st: dict) -> None:
+        """After the first push, DAGS episodes must carry a start index (fail loud)."""
+        if cur is None or not curric_pushed:
+            return
+        n_dags = sum(1 for f in st.get("fin_starts", []) if int(f) >= 0)
+        dfail_if_any(n_dags == 0,
+                     lambda: f"iteration {it}: 0 DAGS episodes with a start index >= 0 "
+                             f"after the first curriculum push")
+
+    def curric_filter(finished, fin_starts, slots: np.ndarray, adv: np.ndarray, ret: np.ndarray,
+                      adv_n: np.ndarray, it: int):
+        """Drop zero-variance groups (solved K/K or hopeless 0/K starts) from the batch."""
+        if cur is None or not args.curric_drop_solved:
+            return slots, adv, ret, adv_n, 0
+        assert cur is not None
+        drop = cur.solved_mask([int(f) for f in fin_starts])
+        if not any(drop):
+            return slots, adv, ret, adv_n, 0
+        keep = np.zeros(len(slots), bool)
+        pos = 0
+        for (s, _), d in zip(finished, drop, strict=True):
+            n = len(s)
+            if not d:
+                keep[pos:pos + n] = True
+            pos += n
+        assert pos == len(slots), (pos, len(slots))
+        n_drop = len(slots) - int(keep.sum())
+        if n_drop >= len(slots):
+            fail(f"iteration {it}: curriculum dropped the whole PPO batch "
+                 f"({n_drop}/{len(slots)} samples from solved starts)")
+        return slots[keep], adv[keep], ret[keep], adv_n[keep], n_drop
+
     it, t_train = 0, time.time()
     tot = {"games": 0, "trunc": 0, "decisions": 0}
     if args.overlap:
@@ -938,6 +1128,9 @@ def main() -> None:
             t_roll = pending_roll
             _ddp_league_sync(st)
             _ddp_checks(it, st)
+            curric_record(finished, st, it)
+            curric_push(it, st)
+            curric_check_push_seen(it, st)
             # Start the next batch in the background (actor weights: one update behind
             # after the first sync); the last --iters iteration has no next batch.
             task = None
@@ -960,6 +1153,11 @@ def main() -> None:
                 adv_n = ((adv - _gmean) / (_gstd + 1e-8)).astype(np.float32)
             else:
                 _gstd = float(adv.std())
+            if cur is not None and args.curric_drop_solved:
+                slots, adv, ret, adv_n, _n_drop = curric_filter(
+                    finished, st.get("fin_starts", []), slots, adv, ret, adv_n, it)
+                if dist_rank == 0 and _n_drop:
+                    print(f"[curriculum it {it}] dropped {_n_drop} solved-start samples", flush=True)
             dfail_if_any(len(slots) == 0, lambda: f"iteration {it}: collected 0 samples")
             warm = it <= args.value_warmup
             upd_ok = True
@@ -970,7 +1168,8 @@ def main() -> None:
                     ent_coef=args.ent_coef, epochs=args.epochs, minibatch=args.minibatch,
                     warm=warm, precision=args.precision, max_upload_gb=args.max_upload_gb,
                     compile=args.compile, critic=critic, copt=copt,
-                    priv_critic=bool(args.priv_critic), adv=args.adv, upd_critic=upd_critic)
+                    priv_critic=bool(args.priv_critic), adv=args.adv, upd_critic=upd_critic,
+                    hint=hint)
             except RuntimeError:
                 upd_ok = False
                 agg_mean, t_update = {}, 0.0
@@ -1051,6 +1250,8 @@ def main() -> None:
                     "train_vs_bc_sampled": round(_g_bcw / max(_g_bcg, 1), 3), "bc_games": _g_bcg,
                     "dags_games": _g_dg, "dags_wr": round(_g_dw / max(_g_dg, 1), 3),
                     "dags_bad": st["dags_bad"],
+                    **({"curric": cur.stats()} if cur is not None else {}),
+                    **({"hint_rows": hint["rows"]} if hint is not None else {}),
                     "adv_std": round(float(_g_adv_std), 3), "ret_mean": round(float(_g_ret_mean), 3),
                     "dps": round(_g_dec / t_roll), "rollout_s": round(t_roll, 1), "iter_s": round(dt, 1),
                     "t_env": round(st["t_env"], 1), "t_fwd": round(st["t_fwd"], 1),
@@ -1080,6 +1281,7 @@ def main() -> None:
                     check_params_match(f"eval it {it}")
                 if dist_rank == 0:
                     save_last(it)
+                    save_curriculum()
                     if args.eval_mode == "sync":
                         evaluate(it)
                         recorded.add(it)
@@ -1119,6 +1321,9 @@ def main() -> None:
         dfail_if_any(not finished, lambda: f"iteration {it}: collected 0 samples")
         _ddp_league_sync(st)
         _ddp_checks(it, st)
+        curric_record(finished, st, it)
+        curric_push(it, st)
+        curric_check_push_seen(it, st)
 
         # GAE per finished seat trajectory, then PPO epochs
         # (VRPO: expected-SARSA(λ) targets from the stored rollout-time π/Q instead)
@@ -1139,6 +1344,11 @@ def main() -> None:
             adv_n = ((adv - _gmean2) / (_gstd2 + 1e-8)).astype(np.float32)
         else:
             _gstd2 = float(adv.std())
+        if cur is not None and args.curric_drop_solved:
+            slots, adv, ret, adv_n, _n_drop = curric_filter(
+                finished, st.get("fin_starts", []), slots, adv, ret, adv_n, it)
+            if dist_rank == 0 and _n_drop:
+                print(f"[curriculum it {it}] dropped {_n_drop} solved-start samples", flush=True)
         dfail_if_any(len(slots) == 0, lambda: f"iteration {it}: collected 0 samples")
         warm = it <= args.value_warmup
         upd_ok2 = True
@@ -1149,7 +1359,8 @@ def main() -> None:
                 ent_coef=args.ent_coef, epochs=args.epochs, minibatch=args.minibatch,
                 warm=warm, precision=args.precision, max_upload_gb=args.max_upload_gb,
                 compile=args.compile, critic=critic, copt=copt,
-                priv_critic=bool(args.priv_critic), adv=args.adv, upd_critic=upd_critic)
+                priv_critic=bool(args.priv_critic), adv=args.adv, upd_critic=upd_critic,
+                hint=hint)
         except RuntimeError:
             upd_ok2 = False
             agg_mean, t_update = {}, 0.0
@@ -1206,6 +1417,8 @@ def main() -> None:
                 "train_vs_bc_sampled": round(_g_bcw / max(_g_bcg, 1), 3), "bc_games": _g_bcg,
                 "dags_games": _g_dg, "dags_wr": round(_g_dw / max(_g_dg, 1), 3),
                 "dags_bad": st["dags_bad"],
+                **({"curric": cur.stats()} if cur is not None else {}),
+                **({"hint_rows": hint["rows"]} if hint is not None else {}),
                 "adv_std": round(float(_g_adv_std), 3), "ret_mean": round(float(_g_ret_mean), 3),
                 "dps": round(_g_dec / t_roll), "rollout_s": round(t_roll, 1), "iter_s": round(dt, 1),
                 "t_env": round(st["t_env"], 1), "t_fwd": round(st["t_fwd"], 1),
@@ -1234,6 +1447,7 @@ def main() -> None:
                 check_params_match(f"eval it {it}")
             if dist_rank == 0:
                 save_last(it)
+                save_curriculum()
                 if args.eval_mode == "sync":
                     evaluate(it)
                     recorded.add(it)

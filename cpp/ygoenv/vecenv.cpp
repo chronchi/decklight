@@ -28,6 +28,7 @@ static std::vector<uint32_t> shuffled_main(std::vector<uint32_t> main, uint64_t 
 VecEnv::VecEnv(Engine& engine, std::vector<Deck> decks, int num_envs, int num_threads, uint64_t seed, bool auto_single)
     : num_envs(num_envs), obs(num_envs), player(num_envs, 0), winner(num_envs, -1), done(num_envs, 0), game(num_envs, -1),
       dags(num_envs, 0), dags_last(num_envs, 0), ga(num_envs, 0), deck0(num_envs, -1), deck1(num_envs, -1),
+      start(num_envs, -1),
       engine_(engine), decks_(std::move(decks)), auto_single_(auto_single), envs_(num_envs), rng_(num_envs),
       dags_rng_(num_envs),
       current_(num_envs), idle_(num_envs, 0), errors_(num_envs), slot_(num_envs, Slot::HELD),
@@ -69,6 +70,24 @@ int64_t VecEnv::remaining() const {
 
 void VecEnv::set_max_decisions(int n) { max_decisions_ = n; }
 
+void VecEnv::set_start_weights(std::vector<double> weights) {
+  if (weights.size() != starts_.size())
+    throw std::invalid_argument("start weights length must match the starts list");
+  double total = 0.0;
+  for (double w : weights) {
+    if (!(w >= 0.0)) throw std::invalid_argument("start weights must be >= 0");
+    total += w;
+  }
+  if (!(total > 0.0)) throw std::invalid_argument("start weights sum must be > 0");
+  start_cum_.resize(weights.size());
+  double run = 0.0;
+  for (size_t k = 0; k < weights.size(); ++k) {
+    run += weights[k];
+    start_cum_[k] = run;
+  }
+  start_total_ = total;
+}
+
 void VecEnv::set_ga_share(double p, int start, int count) {
   if (!(p >= 0.0 && p <= 1.0)) throw std::invalid_argument("ga share must be in [0, 1]");
   if (start < 0 || count < 0 || start + count > static_cast<int>(decks_.size()))
@@ -83,14 +102,17 @@ void VecEnv::set_starts(std::vector<DagsStart> starts, double p, uint64_t seed) 
   if (!(p >= 0.0 && p <= 1.0)) throw std::invalid_argument("dags p must be in [0, 1]");
   starts_ = std::move(starts);
   dags_p_ = p;
+  start_cum_.clear();  // a new starts list drops the old curriculum weights
+  start_total_ = 0.0;
   for (int i = 0; i < num_envs; ++i) {
     uint64_t s = seed ^ (0xC2B2AE3D27D4EB4Full * (i + 1));
     dags_rng_[i] = splitmix(s);
   }
 }
 
-// DAGS mid-game start (non-scheduled mode only): with probability dags_p_ pick a start uniformly,
-// build the Env from its final deck orders, reset, then step through the prefix. The episode then
+// DAGS mid-game start (non-scheduled mode only): with probability dags_p_ pick a start uniformly
+// (or proportionally to the curriculum weights set by set_start_weights), build the Env from its
+// final deck orders, reset, then step through the prefix. The episode then
 // begins at the first live decision. A duel that ends, or a choice out of range, during the prefix
 // discards the start (counts dags_bad) and the caller falls back to a normal start. With p = 0
 // (or no starts) this consumes no random numbers: behaviour stays bit-identical.
@@ -98,7 +120,15 @@ bool VecEnv::try_dags(int i, Episode& ep) {
   if (dags_p_ <= 0.0 || starts_.empty()) return false;
   double u = static_cast<double>(splitmix(dags_rng_[i]) >> 11) * (1.0 / 9007199254740992.0);
   if (u >= dags_p_) return false;
-  const DagsStart& s = starts_[splitmix(dags_rng_[i]) % starts_.size()];
+  size_t idx;
+  if (!start_cum_.empty() && start_cum_.size() == starts_.size()) {
+    double w = static_cast<double>(splitmix(dags_rng_[i]) >> 11) * (1.0 / 9007199254740992.0) * start_total_;
+    idx = static_cast<size_t>(std::upper_bound(start_cum_.begin(), start_cum_.end(), w) - start_cum_.begin());
+    if (idx >= starts_.size()) idx = starts_.size() - 1;
+  } else {
+    idx = splitmix(dags_rng_[i]) % starts_.size();
+  }
+  const DagsStart& s = starts_[idx];
   DuelConfig cfg;
   cfg.main0 = s.main0;
   cfg.extra0 = s.extra0;
@@ -133,6 +163,7 @@ bool VecEnv::try_dags(int i, Episode& ep) {
   dags[i] = 1;
   ga[i] = 0;
   deck0[i] = deck1[i] = -1;
+  start[i] = static_cast<int32_t>(idx);
   ++dags_used_;
   return true;
 }
@@ -147,6 +178,7 @@ void VecEnv::start_episode(int i) {
         game[i] = -1;
         ga[i] = 0;
         deck0[i] = deck1[i] = -1;
+        start[i] = -1;
         envs_[i].reset();
         obs[i].clear();
         return;
@@ -157,6 +189,7 @@ void VecEnv::start_episode(int i) {
     ga[i] = 0;
     deck0[i] = static_cast<int32_t>(ep.deck0);
     deck1[i] = static_cast<int32_t>(ep.deck1);
+    start[i] = -1;
   } else if (try_dags(i, ep)) {
     return;
   } else if (ga_p_ > 0.0 && ga_count_ > 0 &&
@@ -169,6 +202,7 @@ void VecEnv::start_episode(int i) {
     ga[i] = 1;
     deck0[i] = static_cast<int32_t>(ep.deck0);
     deck1[i] = static_cast<int32_t>(ep.deck1);
+    start[i] = -1;
   } else {
     // ga_p_ == 0 consumes no random numbers here: bit-identical to no gauntlet pool.
     int n = static_cast<int>(decks_.size());
@@ -179,6 +213,7 @@ void VecEnv::start_episode(int i) {
     ga[i] = 0;
     deck0[i] = static_cast<int32_t>(ep.deck0);
     deck1[i] = static_cast<int32_t>(ep.deck1);
+    start[i] = -1;
   }
   dags[i] = 0;
   const Deck &a = decks_[ep.deck0], &b = decks_[ep.deck1];

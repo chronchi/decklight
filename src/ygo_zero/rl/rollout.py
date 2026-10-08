@@ -98,6 +98,13 @@ class Collector:
         n = vec.num_envs
         self.buf = vec.buf
         self.traj: list[list[list[int]]] = [[[], []] for _ in range(n)]
+        # DAGS start index of the episode now on each env (-2 = not yet sighted; the C++
+        # VecEnv starts the next episode before Python processes the previous finish, so the
+        # index is captured at episode begin: on first sighting in play, and right after every
+        # redraw, when buf["start"] already shows the new episode). Absent on buffers predating
+        # the curriculum build: every episode then reports -1 (unknown, never recorded).
+        self._has_start = "start" in vec.buf
+        self.ep_start = np.full(n, -2, dtype=np.int64)
         if league is None:
             if self.ga_share > 0:
                 raise ValueError("ga_share > 0 needs a league (deck-aware draws condition on buf['ga'])")
@@ -141,6 +148,11 @@ class Collector:
             self.ygo_bad = 0  # finished YGO episodes whose decks missed the gauntlet slice
         vec.async_reset()
 
+    def _sync_start(self, i: int) -> None:
+        """Capture buf["start"][i] as this env's current episode start (no-op without the key)."""
+        if self._has_start:
+            self.ep_start[i] = int(self.buf["start"][i])
+
     def _draw_episode(self, i: int) -> None:
         """League path: record nothing here; draw the next episode type for env i."""
         if self.ga_share <= 0:
@@ -152,6 +164,7 @@ class Collector:
             name = str(self.opp[i])
             if name not in (SELF, BASE, YGO, GREEDY) and name not in self._net_cache:
                 self._net_cache[name] = self.league.get(name)
+            self._sync_start(i)  # buf already shows the episode just drawn for
             return
         self._draw_ga(i, first=False)
 
@@ -175,6 +188,7 @@ class Collector:
         self.ep_d0[i], self.ep_d1[i] = d0, d1
         if opp not in (SELF, BASE, YGO, GREEDY) and opp not in self._net_cache:
             self._net_cache[opp] = self.league.get(opp)
+        self._sync_start(i)  # buf already shows the episode just drawn for
 
     def _autocast(self):
         import contextlib
@@ -222,6 +236,7 @@ class Collector:
         decisions, lengths) plus `t_env` (time blocked in recv) and `t_fwd` (forward+sample).
         """
         finished: list[tuple[list[int], float]] = []
+        fin_starts: list[int] = []  # starts-list index per finished trajectory (-1: not a DAGS episode)
         n_fin = 0
         games = trunc = bc_games = 0
         bc_wins = 0.0
@@ -257,6 +272,7 @@ class Collector:
                 is_dags = bool(dags_last[i]) if dags_last is not None else False
                 lengths.append(len(self.traj[i][0]) + len(self.traj[i][1]))
                 n_ls = len(self.traj[i][int(self.lseat[i])]) if lg else 0
+                fst = int(self.ep_start[i]) if self.ep_start[i] >= -1 else -1
                 for seat in (0, 1):
                     sl = self.traj[i][seat]
                     if w == TRUNCATED:
@@ -267,6 +283,8 @@ class Collector:
                         rew = 1.0 if w == seat else -1.0
                     if sl:
                         finished.append((sl, rew))
+                        # pass-rate slot = (start, seat): the two sides of a position are different problems
+                        fin_starts.append(2 * fst + seat if fst >= 0 else -1)
                         n_fin += len(sl)
                     self.traj[i][seat] = []
                 if not lg:
@@ -278,6 +296,7 @@ class Collector:
                         dags_wins += 0.5 if w not in (0, 1) else float(w == int(self.lseat[i]))
                     self.vs_bc[i] = self.rng.random() < self.p_bc
                     self.lseat[i] = self.rng.integers(0, 2)
+                    self._sync_start(i)  # buf already shows the episode just drawn for
                 else:
                     res = 0.5 if w not in (0, 1) else float(w == int(self.lseat[i]))
                     if is_dags:
@@ -324,6 +343,11 @@ class Collector:
                 for i in ids:
                     if self.opp[int(i)] is None:
                         self._draw_ga(int(i), first=True)
+            # First sighting of any episode still in play: capture its start index
+            # (initial episodes were drawn before Python ever saw buf["start"]).
+            for i in ids:
+                if self.ep_start[int(i)] == -2:
+                    self._sync_start(int(i))
             actor = np.array([int(player[int(i)]) for i in ids], dtype=np.int64)
             if not lg:
                 is_learner = ~self.vs_bc[ids] | (actor == self.lseat[ids])
@@ -424,7 +448,8 @@ class Collector:
                  "decisions": decisions, "lengths": lengths, "t_env": t_env, "t_fwd": t_fwd,
                  "dags_games": dags_games,
                  "dags_wr": round(dags_wins / max(dags_games, 1), 3),
-                 "dags_bad": int(getattr(self.vec, "dags_bad", 0))}  # fmt: skip
+                 "dags_bad": int(getattr(self.vec, "dags_bad", 0)),
+                 "fin_starts": fin_starts}  # fmt: skip
         if self.priv_critic:
             stats["priv_rows"] = priv_rows
             stats["priv_nonzero"] = priv_nonzero

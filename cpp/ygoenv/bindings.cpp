@@ -225,6 +225,7 @@ PYBIND11_MODULE(_ygoenv, m) {
            },
            py::arg("starts"), py::arg("p"), py::arg("seed"))
       .def("set_max_decisions", &VecEnv::set_max_decisions)
+      .def("set_start_weights", [](VecEnv& v, std::vector<double> w) { v.set_start_weights(std::move(w)); })
       .def("set_ga_share", &VecEnv::set_ga_share, py::arg("p"), py::arg("start"), py::arg("count"))
       .def_readonly_static("TRUNCATED_WINNER", &VecEnv::TRUNCATED_WINNER)
       .def_property_readonly("remaining", &VecEnv::remaining)
@@ -258,6 +259,7 @@ PYBIND11_MODULE(_ygoenv, m) {
         d["deck1"] = py::array(py::dtype("int32"), {v.num_envs}, {4}, v.deck1.data(), self);
         d["dags"] = py::array(py::dtype("bool"), {v.num_envs}, {1}, v.dags.data(), self);
         d["dags_last"] = py::array(py::dtype("bool"), {v.num_envs}, {1}, v.dags_last.data(), self);
+        d["start"] = py::array(py::dtype("int32"), {v.num_envs}, {4}, v.start.data(), self);
         return d;
       });
 }

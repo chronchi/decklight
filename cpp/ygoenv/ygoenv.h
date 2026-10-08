@@ -347,6 +347,9 @@ class VecEnv {
   // bit-identical to no starts. Bad prefixes (duel ends / choice out of range during the replay)
   // fall back to a normal start and count as `dags_bad`. Call before reset().
   void set_starts(std::vector<DagsStart> starts, double p, uint64_t seed);
+  // Pass-rate curriculum: draw DAGS starts proportionally to `weights` (len == len(starts),
+  // each >= 0, sum > 0) instead of uniformly. No call = uniform = bit-identical to before.
+  void set_start_weights(std::vector<double> weights);
   int64_t dags_used() const { return dags_used_.load(); }
   int64_t dags_bad() const { return dags_bad_.load(); }
   // Cut an episode after n decisions (0 = never): it finishes with winner TRUNCATED_WINNER (RL rollouts).
@@ -370,6 +373,8 @@ class VecEnv {
   std::vector<uint8_t> ga;         // ga[i]: the episode now in env i is gauntlet-vs-gauntlet
   std::vector<int32_t> deck0;      // deck indices of the episode now in env i (-1: DAGS prefix or idle)
   std::vector<int32_t> deck1;
+  std::vector<int32_t> start;      // start[i]: index into the starts list of the DAGS episode
+                                   // now in env i (-1: not a DAGS episode)
 
  private:
   Engine& engine_;
@@ -385,6 +390,8 @@ class VecEnv {
   std::vector<uint64_t> dags_rng_;
   std::vector<DagsStart> starts_;
   double dags_p_ = 0.0;
+  std::vector<double> start_cum_;  // cumulative start weights (empty = uniform, bit-identical)
+  double start_total_ = 0.0;
   double ga_p_ = 0.0;
   int ga_start_ = 0, ga_count_ = 0;
   std::atomic<int64_t> dags_used_{0}, dags_bad_{0};

@@ -27,7 +27,7 @@ from __future__ import annotations
 
 import random
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 
 import numpy as np
@@ -95,6 +95,7 @@ def search_game_gen(
     honest: bool = False,
     det_tries: int = 8,
     det_fallback: str = "true",
+    prefix: Sequence[int] = (),
 ):
     """Play one live game; S (absolute seat `s_seat`) searches, R plays raw. Returns a GameResult.
 
@@ -103,6 +104,11 @@ def search_game_gen(
     With `det_fallback="true"` (default) a world that can't be sampled after `det_tries`
     proposals falls back to the true config; with `"skip"` only accepted worlds are used, and a
     decision with no accepted world is not searched (the policy's move is played, `det_skipped`).
+
+    With `prefix`, those option indices are replayed verbatim before the first live
+    decision (e.g. a DAGS prefix positioning a mid-game start); they are recorded in
+    `choices`/`actors`/`choice_keys` exactly like played decisions, and the loop guard
+    starts fresh at the first live decision. Empty (default) plays from the deal.
     """
     if det_fallback not in ("true", "skip"):
         raise ValueError(f"det_fallback must be 'true' or 'skip', got {det_fallback!r}")
@@ -115,6 +121,20 @@ def search_game_gen(
     guard = LoopGuard()  # one slot: both seats share it, as one VecEnv row does in playtest matches
     res = GameResult(winner=None, truncated=False, turns=1)
     capped0 = search.capped
+    for c in prefix:
+        if obs is None:
+            raise ValueError("search_game_gen: game ended inside the prefix")
+        n_legal = int(obs["action_mask"].sum())
+        if not 0 <= int(c) < n_legal:
+            raise ValueError(f"search_game_gen: prefix choice {c} illegal with {n_legal} options")
+        me = int(env.player)
+        res.choices.append(int(c))
+        res.actors.append(me)
+        if tracker is not None:
+            res.choice_keys.append(key_rank_of_choice(obs, int(c)))
+        obs = env.step(int(c))
+        if tracker is not None:
+            tracker.update(env)
     while obs is not None and len(res.choices) < max_decisions:
         me = int(env.player)
         turn = int(obs["global"][2])

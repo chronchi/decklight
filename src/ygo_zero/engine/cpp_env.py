@@ -161,6 +161,13 @@ class VecEnv:
         one of them (uniform pick). `p = 0` keeps behaviour bit-identical. Call before `reset`."""
         self._v.set_starts(list(starts), float(p), int(seed))
 
+    def set_start_weights(self, weights) -> None:
+        """Pass-rate curriculum: draw DAGS starts proportionally to `weights`
+        (len == len(starts), each >= 0, sum > 0) instead of uniformly.
+        `buf["start"][i]` is the starts-list index of the DAGS episode now on
+        env i (-1 when it is not a DAGS episode). No call = uniform."""
+        self._v.set_start_weights([float(w) for w in weights])
+
     @property
     def dags_used(self) -> int:
         return self._v.dags_used
