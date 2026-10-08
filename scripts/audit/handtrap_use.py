@@ -29,7 +29,18 @@ PAT = re.compile(r"(IDLECMD (MSET|SSET|ACTIVATE)|CHAIN ACTIVATE) (" + "|".join(r
 
 
 def misuses(r: dict, engine, nn) -> bool:
-    return any(PAT.search(line) for line in SL.render(r, engine, nn))
+    if "actor" not in r:  # old turn-1 rows, passive opponent: any use is a misuse
+        return any(PAT.search(line) for line in SL.render(r, engine, nn))
+    # whole-turn rows (show_turns.render, actor's own turn, opponent active): setting / activating a hand trap from
+    # the idle command is always a waste; chaining one is a misuse only when it answers our own action (previous
+    # decision was ours), not the opponent's.
+    import show_turns as ST
+    lines = [x for x in ST.render(r, engine, nn) if x.startswith("    ME ") or x.startswith("    OPP ")]
+    for i, x in enumerate(lines):
+        if x.startswith("    ME ") and PAT.search(x):
+            if "IDLECMD" in x or (i > 0 and lines[i - 1].startswith("    ME ")):
+                return True
+    return False
 
 
 def write_clean(src: Path, out: Path) -> int:

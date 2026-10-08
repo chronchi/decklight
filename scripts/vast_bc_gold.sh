@@ -46,7 +46,7 @@ BASE="${BASE:-data/cache/bc_base/best.pt}"  # M1 teacher job: BASE=data/cache/rl
 if [ "$MODE" = "smoke" ]; then
   ONLY=(--only gold); EP_FT=1; EP_MIX=1; SKIP_SCRATCH=1; PT=(--decks 2 --hands 1 --seeds 1 --narrate 1 --samples 2 --ygoagent --selfplay 2); PT_CAP=12m
 else
-  ONLY=(${SHARD_ONLY:+--only $SHARD_ONLY}); EP_FT=10; EP_MIX=3; SKIP_SCRATCH="${SKIP_SCRATCH:-0}"; PT=(--decks 8 --hands 3 --seeds 2 --narrate 2 --samples 4 --ygoagent --selfplay 10); PT_CAP=40m
+  ONLY=(${SHARD_ONLY:+--only $SHARD_ONLY}); EP_FT=10; EP_MIX=3; SKIP_SCRATCH="${SKIP_SCRATCH:-0}"; PT=(--decks 8 --hands 3 --seeds 2 --narrate 2 --samples 4 --ygoagent --selfplay 10); PT_CAP="${PT_CAP:-40m}"
 fi
 [ -n "${PT_ARGS:-}" ] && read -ra PT <<< "$PT_ARGS"
 uv run --no-sync python scripts/build_bc_shards.py "${ONLY[@]}" --out data/cache/bc_shards --jobs "$J" > "$OUT/shards.txt" 2>&1
