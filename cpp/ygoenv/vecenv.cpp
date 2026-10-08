@@ -88,7 +88,7 @@ void VecEnv::set_start_weights(std::vector<double> weights) {
   start_total_ = total;
 }
 
-void VecEnv::set_ga_share(double p, int start, int count) {
+void VecEnv::set_ga_share(double p, int start, int count, bool mixed) {
   if (!(p >= 0.0 && p <= 1.0)) throw std::invalid_argument("ga share must be in [0, 1]");
   if (start < 0 || count < 0 || start + count > static_cast<int>(decks_.size()))
     throw std::out_of_range("gauntlet slice out of deck range");
@@ -96,6 +96,13 @@ void VecEnv::set_ga_share(double p, int start, int count) {
   ga_p_ = p;
   ga_start_ = start;
   ga_count_ = count;
+  ga_mixed_ = mixed;
+}
+
+void VecEnv::set_pool_count(int n) {
+  if (n <= 0 || n > static_cast<int>(decks_.size()))
+    throw std::out_of_range("pool count out of deck range");
+  pool_count_ = n;
 }
 
 void VecEnv::set_starts(std::vector<DagsStart> starts, double p, uint64_t seed) {
@@ -194,20 +201,36 @@ void VecEnv::start_episode(int i) {
     return;
   } else if (ga_p_ > 0.0 && ga_count_ > 0 &&
              static_cast<double>(splitmix(rng_[i]) >> 11) * (1.0 / 9007199254740992.0) < ga_p_) {
-    // Gauntlet-vs-gauntlet episode (deck-aware league): both decks from the gauntlet slice.
-    ep.deck0 = ga_start_ + static_cast<int>(splitmix(rng_[i]) % ga_count_);
-    ep.deck1 = ga_start_ + static_cast<int>(splitmix(rng_[i]) % ga_count_);
-    ep.seed = splitmix(rng_[i]);
-    ep.dags = 0;
-    ga[i] = 1;
-    deck0[i] = static_cast<int32_t>(ep.deck0);
-    deck1[i] = static_cast<int32_t>(ep.deck1);
-    start[i] = -1;
+    int pool_n = pool_count_ > 0 ? pool_count_ : static_cast<int>(decks_.size());
+    if (!ga_mixed_) {
+      // Gauntlet-vs-gauntlet episode (deck-aware league): both decks from the gauntlet slice.
+      ep.deck0 = ga_start_ + static_cast<int>(splitmix(rng_[i]) % ga_count_);
+      ep.deck1 = ga_start_ + static_cast<int>(splitmix(rng_[i]) % ga_count_);
+      ep.seed = splitmix(rng_[i]);
+      ep.dags = 0;
+      ga[i] = 1;
+      deck0[i] = static_cast<int32_t>(ep.deck0);
+      deck1[i] = static_cast<int32_t>(ep.deck1);
+      start[i] = -1;
+    } else {
+      // Mixed episode (overfitting rule): one seat train-pool, one seat gauntlet.
+      int ga_deck = ga_start_ + static_cast<int>(splitmix(rng_[i]) % ga_count_);
+      int pool_deck = static_cast<int>(splitmix(rng_[i]) % pool_n);
+      bool ga_on_0 = (splitmix(rng_[i]) % 2) == 0;
+      ep.deck0 = ga_on_0 ? ga_deck : pool_deck;
+      ep.deck1 = ga_on_0 ? pool_deck : ga_deck;
+      ep.seed = splitmix(rng_[i]);
+      ep.dags = 0;
+      ga[i] = ga_on_0 ? 1 : 2;
+      deck0[i] = static_cast<int32_t>(ep.deck0);
+      deck1[i] = static_cast<int32_t>(ep.deck1);
+      start[i] = -1;
+    }
   } else {
     // ga_p_ == 0 consumes no random numbers here: bit-identical to no gauntlet pool.
-    int n = static_cast<int>(decks_.size());
-    ep.deck0 = static_cast<int>(splitmix(rng_[i]) % n);
-    ep.deck1 = static_cast<int>(splitmix(rng_[i]) % n);
+    int pool_n = pool_count_ > 0 ? pool_count_ : static_cast<int>(decks_.size());
+    ep.deck0 = static_cast<int>(splitmix(rng_[i]) % pool_n);
+    ep.deck1 = static_cast<int>(splitmix(rng_[i]) % pool_n);
     ep.seed = splitmix(rng_[i]);
     ep.dags = 0;
     ga[i] = 0;

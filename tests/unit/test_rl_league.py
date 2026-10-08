@@ -144,6 +144,59 @@ def test_reset_keys_drops_only_named_games():
     assert pol._states == {(6, 1): ("h6", "c6")}
 
 
+class RecStubYgo:
+    """YGO stand-in that records the ga flag of every row it plays."""
+
+    def __init__(self):
+        self.calls = 0
+        self.seen_ga: list[int] = []
+        self.resets: list[int] = []
+
+    def __call__(self, buf, rows, keys=None):
+        assert keys is not None and len(keys) == len(np.asarray(rows))
+        self.calls += 1
+        for i in np.asarray(rows).tolist():
+            self.seen_ga.append(int(buf["ga"][int(i)]))
+        return np.zeros(len(np.asarray(rows)), np.int32)
+
+    def reset_keys(self, game_ids):
+        self.resets.extend(int(g) for g in game_ids)
+
+
+def test_rule_mixed_never_trains_gauntlet(engine):
+    """Overfitting rule: lseat is the pool seat, the gauntlet seat is never stored,
+    YGO only plays gauntlet episodes on the gauntlet seat (tiny d=16 nets)."""
+    decks = [load_ydk(p) for p in sorted(FIXTURES.glob("*.ydk"))]
+    n = len(decks)
+    assert n >= 4
+    n_pool, ga_start, ga_count = n - 2, n - 2, 2
+    dev = torch.device("cpu")
+    model, ref = _tiny(decks, True), _tiny(decks, False)
+    league = League(0.3, 0.0, 0, np.random.default_rng(41), ga_ygo_share=0.5)
+    ygo = RecStubYgo()
+    vec = VecEnv(engine, decks, 8, 2, seed=7)
+    vec.set_max_decisions(60)
+    vec.set_pool_count(n_pool)
+    vec.set_ga_share(0.5, ga_start, ga_count, mixed=True)
+    store = SlotStore(8000, gather(vec.buf, np.arange(1), 0, False))
+    col = Collector(vec, model, ref, store, 0, False, dev, 0.3, -0.5, 2,
+                    np.random.default_rng(7), "fp32", league, ygo,
+                    ga_share=0.5, ga_range=(ga_start, ga_count), ga_mixed=True)
+    finished, st = col.collect(500)
+    assert st.get("ga_games", 0) > 0, st
+    assert ygo.calls > 0, "no YGO rows over 500 samples at ga_share 0.5"
+    assert all(g != 0 for g in ygo.seen_ga), "YGO played a non-gauntlet episode"
+    assert col.ygo_bad == 0
+    assert st.get("learner_ga", -1) == 0, st
+    # In-flight episodes: lseat is the non-gauntlet seat with exactly one gauntlet deck.
+    for i in range(vec.num_envs):
+        f = int(col.ep_ga[i])
+        if f in (1, 2):
+            assert int(col.lseat[i]) == 2 - f, (i, f, int(col.lseat[i]))
+            d0, d1 = int(col.ep_d0[i]), int(col.ep_d1[i])
+            assert (ga_start <= d0 < ga_start + ga_count) != (ga_start <= d1 < ga_start + ga_count), (d0, d1)
+
+
 def test_league_fail_checks():
     tr = _train_rl_mod()
     lg = League(0.4, 0.15, 6, np.random.default_rng(0))

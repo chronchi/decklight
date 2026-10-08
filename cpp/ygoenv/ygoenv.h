@@ -354,12 +354,21 @@ class VecEnv {
   int64_t dags_bad() const { return dags_bad_.load(); }
   // Cut an episode after n decisions (0 = never): it finishes with winner TRUNCATED_WINNER (RL rollouts).
   void set_max_decisions(int n);
+  // Train-pool restriction (overfitting rule): ordinary (non-scheduled, non-DAGS,
+  // non-ga) episodes draw deck0/deck1 from [0, n) only. No call = all decks =
+  // bit-identical to before. Gauntlet decks stay in the list only as the ga slice.
+  void set_pool_count(int n);
   // Gauntlet pool (deck-aware RL league): with probability `p` a non-scheduled,
   // non-DAGS episode draws both decks uniformly from decks[start, start+count)
   // (the gauntlet slice of the deck list) instead of the whole list, and flags
   // ga[i] = 1 for it. `p = 0` (the default) consumes no extra random numbers:
   // behaviour is bit-identical to no gauntlet pool. Call before reset().
-  void set_ga_share(double p, int start, int count);
+  // Mixed mode (`mixed=true`, overfitting rule): one seat gets a train deck from
+  // [0, pool_count) (or the whole list when no pool count was set) and the other
+  // a gauntlet deck from the slice; which seat holds the gauntlet deck is random
+  // (per-env RNG) and flagged ga[i] = 1 (seat 0) or 2 (seat 1). Old mode keeps
+  // ga = 1. `mixed=false` (default) is bit-identical to before.
+  void set_ga_share(double p, int start, int count, bool mixed = false);
   static constexpr int TRUNCATED_WINNER = 3;
 
   const int num_envs;
@@ -394,6 +403,8 @@ class VecEnv {
   double start_total_ = 0.0;
   double ga_p_ = 0.0;
   int ga_start_ = 0, ga_count_ = 0;
+  bool ga_mixed_ = false;
+  int pool_count_ = 0;  // 0 = unset = all decks (bit-identical to before)
   std::atomic<int64_t> dags_used_{0}, dags_bad_{0};
   std::vector<uint8_t> idle_;
   std::vector<std::exception_ptr> errors_;

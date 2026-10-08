@@ -23,6 +23,14 @@ draw goes through `draw_ga`, so ygo-agent only plays gauntlet-vs-gauntlet and
 pool-deck episodes never draw YGO. Finished YGO episodes whose decks miss the
 gauntlet slice fail loud at the end of `collect` (`fail` callback or RuntimeError).
 `ga_share = 0` keeps the league path bit-identical.
+
+Mixed mode (`ga_mixed=True`, overfitting rule): the VecEnv draws one train-pool
+deck and one gauntlet deck per gauntlet episode (`buf["ga"]` = 1/2 = seat holding
+the gauntlet deck). The learner seat is then the non-gauntlet seat (never random),
+and the gauntlet seat is never a learner seat: with SELF the gauntlet seat is
+played by the current actor but its samples are not stored. ygo-agent still only
+plays gauntlet episodes, on the gauntlet seat. `ga_mixed=False` (default) keeps
+today's behaviour bit-identical.
 """
 
 from __future__ import annotations
@@ -59,7 +67,7 @@ class Collector:
                  precision: str = "fp32", league: League | None = None, ygo=None,
                  critic=None, priv_critic: bool = False, adv: str = "gae",
                  greedy=None, ga_share: float = 0.0, ga_range: tuple[int, int] | None = None,
-                 fail=None) -> None:
+                 ga_mixed: bool = False, fail=None) -> None:
         self.vec = vec
         self.model = model
         self.ref = ref
@@ -77,6 +85,7 @@ class Collector:
         self.greedy = greedy
         self.ga_share = float(ga_share)
         self.ga_range = ga_range
+        self.ga_mixed = bool(ga_mixed)
         self._fail = fail
         if self.ga_share < 0.0 or self.ga_share > 1.0:
             raise ValueError(f"ga_share={ga_share} not in [0, 1]")
@@ -108,9 +117,13 @@ class Collector:
         if league is None:
             if self.ga_share > 0:
                 raise ValueError("ga_share > 0 needs a league (deck-aware draws condition on buf['ga'])")
+            if self.ga_mixed and ga_range is None:
+                raise ValueError("ga_mixed needs ga_range=(start, count) for the fail-loud check")
             self.vs_bc = rng.random(n) < self.p_bc
             self.lseat = rng.integers(0, 2, n)
         elif self.ga_share <= 0:
+            if self.ga_mixed and ga_range is None:
+                raise ValueError("ga_mixed needs ga_range=(start, count) for the fail-loud check")
             self.opp = np.array([league.sample() for _ in range(n)], dtype=object)
             self.lseat = rng.integers(0, 2, n)
             self.vs_bc = self.opp != SELF  # introspection only; episode draws go through league
@@ -122,6 +135,7 @@ class Collector:
                     self._net_cache[name] = league.get(name)
             if league.p_greedy > 0 and greedy is None:
                 raise ValueError("league p_greedy > 0 needs a greedy buf policy")
+            self.ep_ga = np.zeros(n, dtype=np.int64)  # ga flag of the episode now on each env (0 = not ga)
         else:
             # Gauntlet-aware mode: the C++ VecEnv draws each episode's decks (gauntlet
             # vs pool, flagged in buf["ga"]) before Python sees it, so the initial
@@ -145,6 +159,7 @@ class Collector:
             self._net_cache = {}
             self.ep_d0 = np.full(n, -1, dtype=np.int64)  # deck indices of the episode now on each env
             self.ep_d1 = np.full(n, -1, dtype=np.int64)
+            self.ep_ga = np.zeros(n, dtype=np.int64)  # ga flag (0/1 old, 0/1/2 mixed) of the episode now on each env
             self.ygo_bad = 0  # finished YGO episodes whose decks missed the gauntlet slice
         vec.async_reset()
 
@@ -164,6 +179,8 @@ class Collector:
             name = str(self.opp[i])
             if name not in (SELF, BASE, YGO, GREEDY) and name not in self._net_cache:
                 self._net_cache[name] = self.league.get(name)
+            if hasattr(self, "ep_ga"):
+                self.ep_ga[i] = 0
             self._sync_start(i)  # buf already shows the episode just drawn for
             return
         self._draw_ga(i, first=False)
@@ -174,18 +191,24 @@ class Collector:
         `buf["ga"][i]` / `deck0/1[i]` already show the episode being drawn for (the
         VecEnv starts it before Python processes the previous finish; for `first`
         draws, before the first decision). `first` keeps the init episode token.
+        Mixed mode (`ga_mixed`, overfitting rule): `buf["ga"]` is 1/2 = seat holding
+        the gauntlet deck, and the learner seat is the other one (never random).
         """
         assert self.league is not None
-        ga = bool(self.buf["ga"][i])
+        ga_flag = int(self.buf["ga"][i])  # 0/1 old (bool-backed), 0/1/2 mixed
         d0, d1 = int(self.buf["deck0"][i]), int(self.buf["deck1"][i])
-        opp = self.league.draw_ga(ga)
+        opp = self.league.draw_ga(bool(ga_flag))
         self.opp[i] = opp
-        self.lseat[i] = self.rng.integers(0, 2)
+        if self.ga_mixed and ga_flag in (1, 2):
+            self.lseat[i] = 2 - ga_flag  # flag 1 (gauntlet seat 0) -> lseat 1, flag 2 -> lseat 0
+        else:
+            self.lseat[i] = self.rng.integers(0, 2)
         self.vs_bc[i] = opp != SELF
         if not first:
             self.ep_id[i] = self._ep_next
             self._ep_next += 1
         self.ep_d0[i], self.ep_d1[i] = d0, d1
+        self.ep_ga[i] = ga_flag
         if opp not in (SELF, BASE, YGO, GREEDY) and opp not in self._net_cache:
             self._net_cache[opp] = self.league.get(opp)
         self._sync_start(i)  # buf already shows the episode just drawn for
@@ -250,6 +273,8 @@ class Collector:
         lg_wins: dict[str, float] = {}
         opp_games = opp_learner_samples = 0
         priv_rows = priv_nonzero = 0
+        ga_games = 0  # finished gauntlet episodes this collect (league + ga_share > 0)
+        learner_ga = 0  # stored learner samples whose learner-seat deck is in the gauntlet slice
         n = self.vec.num_envs
         buf = self.buf
         while n_fin < n_samples:
@@ -304,6 +329,8 @@ class Collector:
                         dags_wins += res
                     if self.opp[i] is None:
                         raise RuntimeError("episode finished before its first opponent draw")
+                    if self.ga_share > 0 and hasattr(self, "ep_ga") and int(self.ep_ga[i]) != 0:
+                        ga_games += 1
                     name = str(self.opp[i])
                     if name != SELF:
                         self.league.record(name, res)
@@ -320,7 +347,15 @@ class Collector:
                                 assert self.ga_range is not None
                                 lo, cnt = self.ga_range
                                 d0, d1 = int(self.ep_d0[i]), int(self.ep_d1[i])
-                                if not (lo <= d0 < lo + cnt and lo <= d1 < lo + cnt):
+                                if self.ga_mixed:
+                                    # Mixed layout: exactly one seat gauntlet, and it must be YGO's.
+                                    ygo_seat = 1 - int(self.lseat[i])
+                                    ygo_deck = d0 if ygo_seat == 0 else d1
+                                    learn_deck = d1 if ygo_seat == 0 else d0
+                                    if int(self.ep_ga[i]) == 0 or not (lo <= ygo_deck < lo + cnt) \
+                                            or (lo <= learn_deck < lo + cnt):
+                                        self.ygo_bad += 1
+                                elif not (lo <= d0 < lo + cnt and lo <= d1 < lo + cnt):
                                     self.ygo_bad += 1
                         elif name == GREEDY:
                             pass  # stateless buf policy: nothing to reset
@@ -351,6 +386,14 @@ class Collector:
             actor = np.array([int(player[int(i)]) for i in ids], dtype=np.int64)
             if not lg:
                 is_learner = ~self.vs_bc[ids] | (actor == self.lseat[ids])
+            elif self.ga_mixed and self.ga_share > 0:
+                # Overfitting rule: the gauntlet seat is never a learner seat, even
+                # with SELF (then it is played by the current actor but not stored).
+                ga_flags = np.asarray(buf["ga"][ids], dtype=np.int64)
+                is_ga_ep = ga_flags != 0
+                base = (self.opp[ids] == SELF) | (actor == self.lseat[ids])
+                on_lseat = actor == self.lseat[ids]
+                is_learner = np.where(is_ga_ep, on_lseat, base)
             else:
                 is_learner = (self.opp[ids] == SELF) | (actor == self.lseat[ids])
             l_ids = ids[is_learner]
@@ -375,7 +418,7 @@ class Collector:
                     for i, a in zip(bb_ids, act_b):
                         actions[pos[int(i)]] = int(a)
                 if lg and len(b_ids):
-                    o_ids = b_ids[self.opp[b_ids] != BASE]
+                    o_ids = b_ids[(self.opp[b_ids] != BASE) & (self.opp[b_ids] != SELF)]
                     snap_rows = o_ids[(self.opp[o_ids] != YGO) & (self.opp[o_ids] != GREEDY)]
                     for name in set(self.opp[snap_rows].tolist()) if len(snap_rows) else ():
                         s_rows = snap_rows[self.opp[snap_rows] == name]
@@ -389,9 +432,22 @@ class Collector:
                             actions[pos[int(i)]] = int(a)
                     ga_rows = o_ids[self.opp[o_ids] == YGO]
                     if len(ga_rows) and self.ga_share > 0:  # live check: the episode ygo-agent plays now
+                        assert self.ga_range is not None
                         lo, cnt = self.ga_range
-                        d = np.stack([buf["deck0"][ga_rows], buf["deck1"][ga_rows]])
-                        self.ygo_bad += int((((d < lo) | (d >= lo + cnt)).any(0)).sum())
+                        if self.ga_mixed:
+                            # Mixed layout: YGO's seat (1 - lseat) must hold the gauntlet deck.
+                            for _i in np.asarray(ga_rows):
+                                _ii = int(_i)
+                                _ygo_seat = 1 - int(self.lseat[_ii])
+                                _dd0, _dd1 = int(buf["deck0"][_ii]), int(buf["deck1"][_ii])
+                                _ygo_deck = _dd0 if _ygo_seat == 0 else _dd1
+                                _learn_deck = _dd1 if _ygo_seat == 0 else _dd0
+                                if int(buf["ga"][_ii]) == 0 or not (lo <= _ygo_deck < lo + cnt) \
+                                        or (lo <= _learn_deck < lo + cnt):
+                                    self.ygo_bad += 1
+                        else:
+                            d = np.stack([buf["deck0"][ga_rows], buf["deck1"][ga_rows]])
+                            self.ygo_bad += int((((d < lo) | (d >= lo + cnt)).any(0)).sum())
                     if len(ga_rows):
                         t2 = time.perf_counter()
                         ga_keys = np.array([int(self.ep_id[int(i)]) for i in ga_rows])
@@ -406,10 +462,19 @@ class Collector:
                         act_gr = self.greedy(buf, np.asarray(gr_rows))
                         for i, a in zip(gr_rows, act_gr):
                             actions[pos[int(i)]] = int(a)
-                if len(l_ids):
-                    l_idx = torch.from_numpy(np.array([pos[int(i)] for i in l_ids], np.int64)).to(self.device)
+                # Mixed SELF gauntlet seats: played by the current actor but never stored
+                # (old mode: SELF episodes have no non-learner rows, so this is empty).
+                if lg and len(b_ids):
+                    _self_b = b_ids[self.opp[b_ids] == SELF]
+                else:
+                    _self_b = np.zeros(0, dtype=np.int64)
+                if len(l_ids) or len(_self_b):
+                    _m_ids = np.concatenate([np.asarray(l_ids), np.asarray(_self_b)]) \
+                        if len(l_ids) and len(_self_b) else (np.asarray(l_ids) if len(l_ids)
+                                                             else np.asarray(_self_b))
+                    l_idx = torch.from_numpy(np.array([pos[int(i)] for i in _m_ids], np.int64)).to(self.device)
                     tob_l = {k: v[l_idx] for k, v in tob_all.items() if k != "priv_code"}
-                    ob_l = {k: v[np.array([pos[int(i)] for i in l_ids])] for k, v in ob_all.items()}
+                    ob_l = {k: v[np.array([pos[int(i)] for i in _m_ids])] for k, v in ob_all.items()}
                     if self.adv == "vrpo":
                         logits, v, pi_cpu, q_cpu = self._forward_learner_vrpo(tob_l, ob_l)
                     elif self.critic is None:
@@ -421,16 +486,34 @@ class Collector:
                         _, v = self.critic.forward_value(cobs_l)
                         pi_cpu = q_cpu = None
                     lp = masked_log_softmax(logits)
-                    act_l, lp_l = _sample_from_lp(lp, torch.isfinite(logits))
-                    slots = self.store.put(ob_l, act_l, lp_l, v.float().cpu().numpy(),
-                                           ref_lp_cpu[[pos[int(i)] for i in l_ids]],
-                                           pi=pi_cpu, q=q_cpu)
+                    act_m, lp_m = _sample_from_lp(lp, torch.isfinite(logits))
+                    _n_l = len(l_ids)
+                    act_l, lp_l = act_m[:_n_l], lp_m[:_n_l]
+                    act_self = act_m[_n_l:]
+                    if _n_l:
+                        slots = self.store.put(
+                            {k: v[:_n_l] for k, v in ob_l.items()}, act_l, lp_l,
+                            v.float().cpu().numpy()[:_n_l],
+                            ref_lp_cpu[[pos[int(i)] for i in l_ids]],
+                            pi=pi_cpu[:_n_l] if pi_cpu is not None else None,
+                            q=q_cpu[:_n_l] if q_cpu is not None else None)
                     if self.priv_critic:
                         priv_rows += len(l_ids)
-                        priv_nonzero += int((ob_l["priv_code"] > 0).sum())
-                    for i, s in zip(l_ids, slots):
-                        self.traj[int(i)][int(player[int(i)])].append(int(s))
-                    for i, a in zip(l_ids, act_l):
+                        priv_nonzero += int((ob_l["priv_code"][:_n_l] > 0).sum()) if _n_l else 0
+                    if self.ga_range is not None and _n_l:
+                        # Fail-loud input for the overfitting rule: learner rows on gauntlet decks.
+                        _lo, _cnt = self.ga_range
+                        _d0 = np.asarray(buf["deck0"][np.asarray(l_ids)], dtype=np.int64)
+                        _d1 = np.asarray(buf["deck1"][np.asarray(l_ids)], dtype=np.int64)
+                        _seats = np.asarray(player[np.asarray(l_ids)], dtype=np.int64)
+                        _decks = np.where(_seats == 0, _d0, _d1)
+                        learner_ga += int((((_decks >= _lo) & (_decks < _lo + _cnt))).sum())
+                    if _n_l:
+                        for i, s in zip(l_ids, slots):
+                            self.traj[int(i)][int(player[int(i)])].append(int(s))
+                        for i, a in zip(l_ids, act_l):
+                            actions[pos[int(i)]] = int(a)
+                    for i, a in zip(np.asarray(_self_b).tolist(), act_self.tolist()):
                         actions[pos[int(i)]] = int(a)
             t_fwd += time.perf_counter() - t1
             self.vec.send(np.asarray(ids, dtype=np.int32), np.asarray(actions, dtype=np.int32))
@@ -449,7 +532,8 @@ class Collector:
                  "dags_games": dags_games,
                  "dags_wr": round(dags_wins / max(dags_games, 1), 3),
                  "dags_bad": int(getattr(self.vec, "dags_bad", 0)),
-                 "fin_starts": fin_starts}  # fmt: skip
+                 "fin_starts": fin_starts,
+                 "ga_games": ga_games, "learner_ga": learner_ga}  # fmt: skip
         if self.priv_critic:
             stats["priv_rows"] = priv_rows
             stats["priv_nonzero"] = priv_nonzero

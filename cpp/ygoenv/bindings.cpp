@@ -226,7 +226,9 @@ PYBIND11_MODULE(_ygoenv, m) {
            py::arg("starts"), py::arg("p"), py::arg("seed"))
       .def("set_max_decisions", &VecEnv::set_max_decisions)
       .def("set_start_weights", [](VecEnv& v, std::vector<double> w) { v.set_start_weights(std::move(w)); })
-      .def("set_ga_share", &VecEnv::set_ga_share, py::arg("p"), py::arg("start"), py::arg("count"))
+      .def("set_ga_share", &VecEnv::set_ga_share, py::arg("p"), py::arg("start"), py::arg("count"),
+           py::arg("mixed") = false)
+      .def("set_pool_count", &VecEnv::set_pool_count, py::arg("n"))
       .def_readonly_static("TRUNCATED_WINNER", &VecEnv::TRUNCATED_WINNER)
       .def_property_readonly("remaining", &VecEnv::remaining)
       .def_property_readonly("dags_used", &VecEnv::dags_used)
@@ -254,7 +256,7 @@ PYBIND11_MODULE(_ygoenv, m) {
         d["winner"] = py::array(py::dtype("int32"), {v.num_envs}, {4}, v.winner.data(), self);
         d["done"] = py::array(py::dtype("bool"), {v.num_envs}, {1}, v.done.data(), self);
         d["game"] = py::array(py::dtype("int64"), {v.num_envs}, {8}, v.game.data(), self);
-        d["ga"] = py::array(py::dtype("bool"), {v.num_envs}, {1}, v.ga.data(), self);
+        d["ga"] = py::array(py::dtype("uint8"), {v.num_envs}, {1}, v.ga.data(), self);
         d["deck0"] = py::array(py::dtype("int32"), {v.num_envs}, {4}, v.deck0.data(), self);
         d["deck1"] = py::array(py::dtype("int32"), {v.num_envs}, {4}, v.deck1.data(), self);
         d["dags"] = py::array(py::dtype("bool"), {v.num_envs}, {1}, v.dags.data(), self);

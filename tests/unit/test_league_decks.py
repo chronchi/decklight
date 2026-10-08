@@ -165,8 +165,9 @@ def test_vecenv_ga_pool(engine):
     v.reset()
     ga = v.buf["ga"]
     assert abs(float(ga.mean()) - 0.5) < 0.1, float(ga.mean())
-    assert all(n - 2 <= int(d) < n for d in v.buf["deck0"][ga])
-    assert all(n - 2 <= int(d) < n for d in v.buf["deck1"][ga])
+    m = np.asarray(ga, dtype=bool)
+    assert all(n - 2 <= int(d) < n for d in v.buf["deck0"][m])
+    assert all(n - 2 <= int(d) < n for d in v.buf["deck1"][m])
     assert all(0 <= int(d) < n for d in v.buf["deck0"])
     # p = 0 draws bit-identical decks to no call at all
     a = VecEnv(engine, decks, 8, 2, seed=0)
@@ -176,4 +177,70 @@ def test_vecenv_ga_pool(engine):
     b.reset()
     assert (a.buf["deck0"] == b.buf["deck0"]).all()
     assert (a.buf["deck1"] == b.buf["deck1"]).all()
-    assert not b.buf["ga"].any()
+    assert not np.asarray(b.buf["ga"]).any()
+
+
+def test_vecenv_pool_count(engine):
+    """set_pool_count(n): ordinary draws stay in [0, n); no call = old draws."""
+    from ygo_zero.decks import load_ydk as _load
+
+    decks = [_load(p) for p in sorted((Path(__file__).resolve().parents[1] / "fixtures" / "decks").glob("*.ydk"))]
+    n = len(decks)
+    assert n >= 3
+    v = VecEnv(engine, decks, 8, 2, seed=0)
+    v.set_pool_count(n - 2)
+    v.reset()
+    for _ in range(ROUNDS):
+        v.reset()
+        assert (np.asarray(v.buf["deck0"]) < n - 2).all()
+        assert (np.asarray(v.buf["deck1"]) < n - 2).all()
+    # pool_count == all decks draws bit-identical decks to no call (same seed)
+    a = VecEnv(engine, decks, 8, 2, seed=0)
+    a.reset()
+    b = VecEnv(engine, decks, 8, 2, seed=0)
+    b.set_pool_count(n)
+    b.reset()
+    assert (a.buf["deck0"] == b.buf["deck0"]).all()
+    assert (a.buf["deck1"] == b.buf["deck1"]).all()
+
+
+def test_vecenv_ga_mixed(engine):
+    """Mixed ga episodes: exactly one seat gauntlet, buf['ga'] 1/2 matches it, ~half each."""
+    from ygo_zero.decks import load_ydk as _load
+
+    decks = [_load(p) for p in sorted((Path(__file__).resolve().parents[1] / "fixtures" / "decks").glob("*.ydk"))]
+    n = len(decks)
+    n_pool, ga_start, ga_count = n - 2, n - 2, 2
+    v = VecEnv(engine, decks, 8, 4, seed=5)
+    v.set_pool_count(n_pool)
+    v.set_ga_share(0.5, ga_start, ga_count, mixed=True)
+    v.reset()
+    flags: list[int] = []
+    for _ in range(ROUNDS):
+        v.reset()
+        ga = np.asarray(v.buf["ga"], dtype=np.int64)
+        d0 = np.asarray(v.buf["deck0"])
+        d1 = np.asarray(v.buf["deck1"])
+        for f, a, b in zip(ga.tolist(), d0.tolist(), d1.tolist()):
+            flags.append(int(f))
+            if f == 0:
+                assert 0 <= a < n_pool and 0 <= b < n_pool, (a, b)
+            elif f == 1:
+                assert ga_start <= a < ga_start + ga_count, (a, b)
+                assert 0 <= b < n_pool, (a, b)
+            elif f == 2:
+                assert 0 <= a < n_pool, (a, b)
+                assert ga_start <= b < ga_start + ga_count, (a, b)
+            else:
+                raise AssertionError(f"bad ga flag {f}")
+    arr = np.array(flags)
+    assert set(np.unique(arr).tolist()) <= {0, 1, 2}
+    assert abs((arr != 0).mean() - 0.5) < 0.05, (arr != 0).mean()
+    ones = (arr == 1).sum()
+    twos = (arr == 2).sum()
+    assert ones > 0 and twos > 0 and abs(ones - twos) / (ones + twos) < 0.15, (ones, twos)
+    # old mode untouched by the new flag: same seed without mixed gives ga in {0, 1} only
+    w = VecEnv(engine, decks, 8, 4, seed=5)
+    w.set_ga_share(0.5, ga_start, ga_count)
+    w.reset()
+    assert set(np.unique(np.asarray(w.buf["ga"])).tolist()) <= {0, 1}

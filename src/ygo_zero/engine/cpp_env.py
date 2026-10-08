@@ -147,12 +147,22 @@ class VecEnv:
         """Cut every episode after n decisions (0 = never); it finishes with winner `TRUNCATED` (RL rollouts)."""
         self._v.set_max_decisions(n)
 
-    def set_ga_share(self, p: float, start: int, count: int) -> None:
+    def set_ga_share(self, p: float, start: int, count: int, mixed: bool = False) -> None:
         """Gauntlet pool (deck-aware RL league): with probability `p` an episode draws both
         decks uniformly from `self.decks[start:start+count]` (the gauntlet slice) and flags
         `buf["ga"][i]`; `buf["deck0"][i]`/`buf["deck1"][i]` carry the episode's deck indices
-        (-1 for DAGS/idle). `p = 0` keeps behaviour bit-identical. Call before `reset`."""
-        self._v.set_ga_share(float(p), int(start), int(count))
+        (-1 for DAGS/idle). `p = 0` keeps behaviour bit-identical. Call before `reset`.
+
+        With `mixed=True` (overfitting rule) a gauntlet episode draws one train-pool
+        deck from `[0, pool_count)` and one gauntlet deck from the slice instead, flagged
+        `buf["ga"][i]` = 1 (gauntlet on seat 0) or 2 (seat 1); 0 = not gauntlet.
+        `buf["ga"]` is uint8 so old `bool(...)` checks keep working."""
+        self._v.set_ga_share(float(p), int(start), int(count), bool(mixed))
+
+    def set_pool_count(self, n: int) -> None:
+        """Train-pool restriction (overfitting rule): ordinary episodes draw from
+        `self.decks[:n]` only. No call = all decks = bit-identical to before."""
+        self._v.set_pool_count(int(n))
 
     def set_starts(self, starts, p: float, seed: int) -> None:
         """DAGS mid-game starts (RL v2): `starts` is a list of

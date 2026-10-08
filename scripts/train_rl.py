@@ -229,6 +229,17 @@ def dags_fail_checks(it: int, st: dict, dags_p: float, vec, fail) -> None:
         fail(f"iteration {it}: DAGS prefix failure rate {bad}/{used} > 0.2")
 
 
+def ga_fail_checks(it: int, st: dict, learner_gauntlet: int, ga_share: float, fail) -> None:
+    """Overfitting-rule fail-loud: the learner never pilots gauntlet decks."""
+    if int(learner_gauntlet) != 0:
+        return
+    if int(st.get("learner_ga", 0)) > 0:
+        fail(f"iteration {it}: {st['learner_ga']} learner samples on gauntlet-deck seats "
+             f"(overfitting rule: --learner-gauntlet 0)")
+    if ga_share > 0 and it >= 2 and int(st.get("ga_games", 0)) == 0:
+        fail(f"iteration {it}: --ga-episode-share {ga_share} but 0 gauntlet episodes finished")
+
+
 def gae_batch(store: SlotStore, finished: list, lam: float):
     """GAE per finished seat trajectory. Returns (slots, adv, ret, adv_n)."""
     slots = np.concatenate([np.array(s, np.int64) for s, _ in finished])
@@ -550,6 +561,11 @@ def main() -> None:
     ap.add_argument("--ga-ygo-share", type=float, default=0.5,
                     help="within gauntlet-vs-gauntlet episodes, share played vs ygo-agent "
                     "(the rest use the league draw without YGO)")
+    ap.add_argument("--learner-gauntlet", type=int, choices=(0, 1), default=0,
+                    help="0: overfitting rule (default) - the learner never pilots gauntlet decks: "
+                    "ordinary episodes draw from the train pool only and gauntlet episodes draw "
+                    "one pool + one gauntlet deck with the learner on the pool seat; "
+                    "1: today's behaviour (learner pilots gauntlet decks too), for reproducing old runs")
     ap.add_argument("--league-fixed", action="append", default=[], metavar="name=path",
                     help="extra fixed league opponent from a checkpoint (repeatable, e.g. ft-swv=path/best.pt)")
     ap.add_argument("--league-fixed-share", type=float, default=0.0,
@@ -702,11 +718,13 @@ def main() -> None:
     if args.hint_start_bonus > 0 and not args.curric:
         fail("--hint-start-bonus > 0 needs --curric 1")
 
-    # decks: training pool = pool - holdout + gauntlet; eval = fixed 4 train + 4 holdout sample
+    # decks: training pool = pool - holdout (+ gauntlet slice for ga episodes only
+    # with --learner-gauntlet 0, the overfitting rule); eval = fixed 4 train + 4 holdout sample
     hold = set((ROOT / "decks/pool/HOLDOUT").read_text().split()) | {"kewl-tune"}
     pool = sorted((ROOT / "decks/pool").glob("*.ydk"))
     gfiles = sorted(args.gauntlet_decks.glob("*.ydk"))
-    train_decks = [load_ydk(p) for p in pool if p.stem not in hold] + [load_ydk(p) for p in gfiles]
+    pool_train = [load_ydk(p) for p in pool if p.stem not in hold]
+    train_decks = pool_train + [load_ydk(p) for p in gfiles]
     r = random.Random(1234)
     ev_names = r.sample([p.stem for p in pool if p.stem not in hold], 4) + r.sample(sorted(hold & {p.stem for p in pool}), 4)
     ev_decks = [load_ydk(ROOT / "decks/pool" / f"{n}.ydk") for n in ev_names]
@@ -859,12 +877,14 @@ def main() -> None:
                 league_fail_checks(it, st, league, args.snap_every, args.league_size, fail)
             priv_fail_checks(it, st, bool(args.priv_critic), fail)
             dags_fail_checks(it, st, args.dags_p, vec, fail)
+            ga_fail_checks(it, st, args.learner_gauntlet, args.ga_episode_share, fail)
             return
         msgs: list[str] = []
         if league is not None:
             league_fail_checks(it, st, league, args.snap_every, args.league_size, msgs.append)
         priv_fail_checks(it, st, bool(args.priv_critic), msgs.append)
         dags_fail_checks(it, st, args.dags_p, vec, msgs.append)
+        ga_fail_checks(it, st, args.learner_gauntlet, args.ga_episode_share, msgs.append)
         for m in msgs:
             print(f"ALERT train_rl: {m} (rank {dist_rank})", flush=True)
         dfail_if_any(bool(msgs),
@@ -966,12 +986,22 @@ def main() -> None:
             assert critic is not None
             critic_actor = copy.deepcopy(critic).eval()
         col_rng = np.random.default_rng(seed_rank + 0x1234)
-    ga_start = len(train_decks) - len(g_decks)
+    ga_start = len(pool_train)
+    ga_mixed = int(args.learner_gauntlet) == 0
+    if ga_mixed:
+        try:
+            vec.set_pool_count(len(pool_train))
+        except Exception as e:  # noqa: BLE001 - C++ range errors must fail the job here
+            fail(f"bad train pool (pool {len(pool_train)} of {len(train_decks)} decks): {e}")
     try:
-        vec.set_ga_share(args.ga_episode_share, ga_start, len(g_decks))
+        vec.set_ga_share(args.ga_episode_share, ga_start, len(g_decks), ga_mixed)
     except Exception as e:  # noqa: BLE001 - C++ range/share errors must fail the job here
         fail(f"bad gauntlet pool (--ga-episode-share {args.ga_episode_share}, "
              f"ga slice [{ga_start}, {ga_start + len(g_decks)})): {e}")
+    if dist_rank == 0:
+        print(f"[decks] pool={len(pool_train)} gauntlet slice [{ga_start}, "
+              f"{ga_start + len(g_decks)}) learner_gauntlet={args.learner_gauntlet} "
+              f"ga_mixed={int(ga_mixed)}", flush=True)
     if args.ga_episode_share > 0:
         if not args.league:
             fail("--ga-episode-share > 0 needs --league 1 (deck-aware draws live in the league path)")
@@ -1040,7 +1070,7 @@ def main() -> None:
                         critic=(critic_actor if critic_actor is not None else critic),
                         priv_critic=bool(args.priv_critic), adv=args.adv,
                         greedy=greedy_pol, ga_share=args.ga_episode_share,
-                        ga_range=(ga_start, len(g_decks)), fail=fail)
+                        ga_range=(ga_start, len(g_decks)), ga_mixed=ga_mixed, fail=fail)
     except ValueError as e:
         fail2(str(e))
     curric_pushed = False
