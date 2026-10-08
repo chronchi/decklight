@@ -1045,7 +1045,7 @@ def main() -> None:
             if not spath.is_file():
                 fail(f"--league-fixed {name!r}: {spath} missing")
             try:
-                fnet = load_net(spath, emb, a, value=False).eval()
+                fnet = load_net(spath, emb, a, value=False).to(dev).eval()  # rollouts feed it cuda batches
             except Exception as e:  # noqa: BLE001 - architecture mismatch must fail the job here
                 fail(f"--league-fixed {name!r}: cannot load {spath} with the --init architecture: {e}")
             for p in fnet.parameters():
