@@ -344,9 +344,21 @@ def main() -> None:
         names = [p.stem for p in gfiles]
         decks = [load_ydk(f) for f in gfiles]
         if args.deal_mode == "train":
+            # User, 2026-10-08: gauntlet decks stay eval-only for OUR side ("Our side on pool decks"): S pilots a
+            # pool train deck, only ygo-agent plays its gauntlet lists (the 744-deal gate has S pilot those).
             if args.games <= 0:
                 fail("--deal-mode train needs --games N")
-            sched = train_schedule(names, args.games, args.seed_base, hold)
+            pool = sorted(p.stem for p in (ROOT / "decks" / "pool").glob("*.ydk") if p.stem not in hold)
+            g_main = {tuple(sorted(d.main)) for d in decks}
+            s_names = [n for n in pool if tuple(sorted(load_ydk(ROOT / "decks/pool" / f"{n}.ydk").main)) not in g_main]
+            if len(s_names) < 2:
+                fail(f"only {len(s_names)} pool train decks for S")
+            n_s = len(s_names)
+            names = s_names + names
+            decks = [load_ydk(ROOT / "decks/pool" / f"{n}.ydk") for n in s_names] + decks
+            rng = random.Random(args.seed_base)
+            sched = [(rng.randrange(n_s), n_s + rng.randrange(len(gfiles)), args.seed_base + i, i % 2, i)
+                     for i in range(args.games)]
         else:
             sched = ga_schedule(names, args.ga_opps, args.ga_seeds)
     elif args.deal_mode == "train":

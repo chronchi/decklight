@@ -77,7 +77,7 @@ def _run_kind(search_match, tmp_path: Path, emb: Path, ckpt: Path, kind: str, ex
     return recdir
 
 
-def _check_records(engine, recdir: Path, decks_dir: Path) -> None:
+def _check_records(engine, recdir: Path, decks_dir: Path | list[Path]) -> None:
     """Records replay from their own config, load as window/window_own soft-target samples."""
     from ygo_zero.demos.dataset import iter_samples, record_config, sample_kind, search_soft_targets
     from ygo_zero.decks import load_ydk
@@ -88,7 +88,8 @@ def _check_records(engine, recdir: Path, decks_dir: Path) -> None:
     assert len(recs) == 2
     for rec in recs:  # deck stems name the config's seat decks (catches seat-swap bugs)
         for seat in (0, 1):
-            d = load_ydk(decks_dir / f"{rec['decks'][seat]}.ydk")
+            dirs = decks_dir if isinstance(decks_dir, list) else [decks_dir]
+            d = load_ydk(next(x / f"{rec['decks'][seat]}.ydk" for x in dirs if (x / f"{rec['decks'][seat]}.ydk").is_file()))
             assert list(d.main) == rec["config"][f"deck{seat}_main"]
             assert list(d.extra) == rec["config"][f"deck{seat}_extra"]
     for rec in recs:
@@ -185,10 +186,16 @@ def test_teacher_gen_ygoagent(engine, tmp_path):
     emb = _pool_emb(tmp_path)
     ckpt = _tiny_ckpt(tmp_path, emb, "base", 0)
     recdir = _run_kind(search_match, tmp_path, emb, ckpt, "ygoagent", [])
-    _check_records(engine, recdir, ROOT / "decks" / "gauntlet")
+    _check_records(engine, recdir, [ROOT / "decks" / "pool", ROOT / "decks" / "gauntlet"])
     _check_attribution(tmp_path, "ygoagent", recdir)
     rows = [json.loads(x) for x in (tmp_path / "m-ygoagent" / "games-0.jsonl").read_text().splitlines()]
     assert len(rows) == 2
+    # user, 2026-10-08: our side pilots pool train decks; only ygo-agent plays gauntlet lists
+    hold = set((ROOT / "decks/pool/HOLDOUT").read_text().split()) | {"kewl-tune"}
+    gauntlet = {p.stem for p in (ROOT / "decks/gauntlet").glob("*.ydk")}
+    for r in rows:
+        assert (ROOT / "decks/pool" / f"{r['deck_s']}.ydk").is_file() and r["deck_s"] not in hold
+        assert r["deck_r"] in gauntlet
     assert all(r["ya_decisions"] > 0 for r in rows)
 
 
