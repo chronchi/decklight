@@ -135,6 +135,14 @@ want ft-kl03 && train ft-kl03 "${SK[@]}" --kl-init 0.3
 SI=(--init "$BASE" --epochs 4 --lr 1e-4 --batch 256 --select-on last --kinds selfimit --require-kinds selfimit)
 want ft-si-kl1 && train ft-si-kl1 "${SI[@]}" --kl-init 1.0
 want ft-si-kl03 && train ft-si-kl03 "${SI[@]}" --kl-init 0.3
+# search-teacher round (PLAN §0a step 2, NOTEBOOK 2026-10-08): live games of base_r3 + honest search (E2 settings) vs
+# mixed opponents, records in data/demos/sw-<ST>/ (kinds sw-<ST> / sw-<ST>_own), soft targets
+# softmax(prior + c*q) on searched decisions only (other decisions are "skip"); c = 5 (default) and 10
+ST="${ST:-t1}"
+STA=(--init "$BASE" --epochs 4 --lr 1e-4 --batch 256 --select-on last --kinds "sw-$ST" "sw-${ST}_own"
+     --require-kinds "sw-$ST" "sw-${ST}_own" --soft-targets gumbel)
+want ft-st-c5 && train ft-st-c5 "${STA[@]}" --soft-scale 5
+want ft-st-c10 && train ft-st-c10 "${STA[@]}" --soft-scale 10
 for V in mix-h32 mix-h128 mix-h256 mix-h512 mix-h32k mix-h128k mix-h256k mix-h512k mix-k; do
   want "$V" || continue
   H=${V#mix-h}; H=${H%k}; [ "$V" = mix-k ] && H=0
@@ -152,7 +160,7 @@ out = Path(sys.argv[1])
 best_v, best_s = "zero", -1.0
 best_hv, best_h = "zero", -1.0  # also playtest the best on unseen-deck gold (bcg-20261004-2223: mix won there)
 for v in ("zero", "ft-gold", "ft-mix", "ft-teach", "ft-teach-h", "ft-search", "ft-dw", "ft-all", "ft-t13", "ft-swv", "ft-swd", "ft-r2", "ft-r2t", "mix", "lines-gold", "mix-l", "mix-h32", "mix-h128", "mix-h256", "mix-h512",
-          "mix-h32k", "mix-h128k", "mix-h256k", "mix-h512k", "mix-k", "ft-r3", "ft-kl1", "ft-kl03", "ft-si-kl1", "ft-si-kl03"):
+          "mix-h32k", "mix-h128k", "mix-h256k", "mix-h512k", "mix-k", "ft-r3", "ft-kl1", "ft-kl03", "ft-si-kl1", "ft-si-kl03", "ft-st-c5", "ft-st-c10"):
     m = out / v / "metrics.jsonl"
     if not m.exists():
         continue
