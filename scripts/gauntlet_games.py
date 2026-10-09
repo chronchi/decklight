@@ -88,7 +88,7 @@ def play(engine, decks, names, a, b, seeds, tag, out: Path, threads: int, log, p
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--ckpt", type=Path, required=True)
+    ap.add_argument("--ckpt", type=Path, default=None, help="BC-vs-ga + reference matchups (or use --ckpts)")
     ap.add_argument("--emb", type=Path, default=ROOT / "data/cards/emb/qwen3-0.6b-d512.npz")
     ap.add_argument("--out", type=Path, required=True)
     ap.add_argument("--device", default="cpu")
@@ -106,6 +106,8 @@ def main() -> None:
     if args.ckpts:
         compare(args)
         return
+    if args.ckpt is None:
+        ap.error("--ckpt or --ckpts is required")
     files = sorted((ROOT / "tests/fixtures/decks").glob("*.ydk"))
     decks = [load_ydk(f) for f in files]
     names = [str(f.relative_to(ROOT)) for f in files]
