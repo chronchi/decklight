@@ -275,6 +275,10 @@ def main() -> None:
     ap.add_argument("--own-frac", type=float, default=1.0, help="share of S own-turn decisions searched")
     ap.add_argument("--guard-legacy", type=int, default=0, choices=(0, 1),
                     help="routed opponents: 1 = one loop guard shared by both seats (E2 and before); 0 = card-faithful")
+    ap.add_argument("--margin", type=float, default=0.0,
+                    help="override the policy's move only if the search's best beats it by >= this (selection score)")
+    ap.add_argument("--s-seat-only", type=int, default=-1, choices=(-1, 0, 1),
+                    help="play only games with S in this seat (0 = S goes first); -1 all")
     ap.add_argument("--own-turn1", type=int, default=0, choices=(0, 1), help="also search S turn-1 plays")
     ap.add_argument("--det-tries", type=int, default=8, help="rejection-sampling proposals per honest world")
     ap.add_argument("--det-fallback", default="true", choices=("true", "skip"),
@@ -410,6 +414,10 @@ def main() -> None:
         from ygo_zero.eval.policies import GreedyPolicy
 
         opp = GreedyPolicy(seed=3)
+    if args.s_seat_only in (0, 1):  # idx stays the full schedule's, so games pair by (decks, seed) with full arms
+        sched = [e for e in sched if e[3] == args.s_seat_only]
+        if not sched:
+            fail(f"--s-seat-only {args.s_seat_only}: empty schedule")
     if args.games_limit:
         sched = sched[: args.games_limit]
     claim = bool(args.save_records is not None if args.claim is None else args.claim)
@@ -521,6 +529,7 @@ def main() -> None:
                     engine, cfg, ws, s_seat, argmax_select, game_seed=idx,
                     own_turn1=bool(args.own_turn1), conf_skip=args.conf_skip, own_frac=args.own_frac,
                     honest=bool(args.honest), det_tries=args.det_tries, det_fallback=args.det_fallback,
+                    margin=args.margin,
                 )  # fmt: skip
             else:
                 ws = RouteWindowSearch(
@@ -537,7 +546,7 @@ def main() -> None:
                     own_turn1=bool(args.own_turn1), conf_skip=args.conf_skip, own_frac=args.own_frac,
                     honest=bool(args.honest), det_tries=args.det_tries, det_fallback=args.det_fallback,
                     guard_mode="shared" if legacy else "per_seat",
-                    unguarded_seat=None if legacy or args.opp == "ckpt" else 1 - s_seat,
+                    unguarded_seat=None if legacy or args.opp == "ckpt" else 1 - s_seat, margin=args.margin,
                 ), route)  # fmt: skip
             yield idx, gen
 

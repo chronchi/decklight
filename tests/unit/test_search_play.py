@@ -264,3 +264,13 @@ def test_priv_value_rejects_non_priv_ckpt(tmp_path):
     ckpt, emb = _tiny_critic(tmp_path, priv=False)
     with pytest.raises(ValueError):
         PrivValueNet(ckpt, emb)
+
+
+def test_margin_keeps_policy_move_unless_clear(engine):
+    """A margin above any score gap plays the policy's move at every searched decision (overrides 0, log keeps the
+    search's best); margin 0 logs chosen == best."""
+    res, _ = _play(engine, _tiny_forward(), conf_skip=1.01, own_frac=1.0, margin=1e9)
+    assert res.log and res.n_override == 0
+    assert all(e["chosen"] == e["played"] for e in res.log if e["played"] in e["cands"])
+    res0, _ = _play(engine, _tiny_forward(), conf_skip=1.01, own_frac=1.0)
+    assert all(e["chosen"] == e["best"] for e in res0.log)

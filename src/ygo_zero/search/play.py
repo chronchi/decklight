@@ -102,6 +102,7 @@ def search_game_gen(
     prefix: Sequence[int] = (),
     guard_mode: str = "shared",
     unguarded_seat: int | None = None,
+    margin: float = 0.0,
 ):
     """Play one live game; S (absolute seat `s_seat`) searches, R plays raw. Returns a GameResult.
 
@@ -122,6 +123,9 @@ def search_game_gen(
     have no loop guard in the card. Without this, the shared guard forbade ygo-agent's own pick (an option already
     taken in a same-key state this turn) and its one-hot logits fell back to option 0: all 596 E2-vs-card divergences
     on the 744 deals (NOTEBOOK 2026-10-09 08:40).
+
+    `margin` > 0: a searched decision plays the search's best only if its selection score beats the policy's own
+    move's by >= margin (when the policy's move is a candidate); the log keeps both ("best", "chosen").
     """
     if guard_mode not in ("shared", "per_seat"):
         raise ValueError(f"guard_mode must be 'shared' or 'per_seat', got {guard_mode!r}")
@@ -220,6 +224,11 @@ def search_game_gen(
                         )
                         best = max(range(len(cands)), key=lambda j: (sel_scores[j], -j))
                         a = cands[best]
+                        # margin: keep the policy's own move unless the search's best beats it by >= margin
+                        # (NOTEBOOK 2026-10-09: most overrides win by tiny, noisy score gaps)
+                        if (margin > 0 and a != a_pol and a_pol in cands
+                                and sel_scores[best] - sel_scores[cands.index(a_pol)] < margin):
+                            a = a_pol
                         res.n_searched += 1
                         res.n_branches += len(branches)
                         res.searched_idx.append(k)
@@ -228,7 +237,7 @@ def search_game_gen(
                             "cands": [int(x) for x in cands],
                             "scores": [float(x) for x in sel_scores],
                             "scores_all": {search._select_key(): [float(x) for x in sel_scores]},
-                            "chosen": int(a), "played": int(a_pol),
+                            "chosen": int(a), "played": int(a_pol), "best": int(cands[best]),
                             "samples": [[round(x, 4) for x in col] for col in getattr(search, "last_samples", [])],
                         })
                         if a != a_pol:
