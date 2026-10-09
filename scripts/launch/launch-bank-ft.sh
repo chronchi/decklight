@@ -11,7 +11,7 @@ for f in $INIT $BANK $OPP2; do [ -s "$f" ] || { echo "missing $f"; exit 3; }; do
 N=bankft-$(date +%Y%m%d-%H%M); echo $N
 taskset -c 0-3 uv run --no-sync python scripts/vast_job.py --name $N \
   --cmd "INIT=$INIT BANK=$BANK OPP=$INIT OPP2=$OPP2 EPOCHS=${EPOCHS:-12} LR=${LR:-1e-4} GAMES=${GAMES:-8} CARD=${CARD:-1} bash scripts/vast_bank_ft.sh $N" \
-  --hours "${HOURS:-1.5}" --max-dph "${MAX_DPH:-0.2}" --min-cpus 32 --min-gpu-ram 11 --extra-query "cpu_ram>=48" \
+  --hours "${HOURS:-1.5}" --max-dph "${MAX_DPH:-0.2}" --min-cpus "${MIN_CPUS:-24}" --min-gpu-ram 11 --extra-query "cpu_ram>=48" \
   --data decks data/demos data/cards/emb data/models data/cache/base_r3 data/cache/rl5_ckpts data/cache/hint_gated \
   > data/cache/briefs/$N.launcher.log 2>&1
 echo "exit $?"
