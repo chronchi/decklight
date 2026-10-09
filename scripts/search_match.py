@@ -277,6 +277,9 @@ def main() -> None:
                     help="routed opponents: 1 = one loop guard shared by both seats (E2 and before); 0 = card-faithful")
     ap.add_argument("--margin", type=float, default=0.0,
                     help="override the policy's move only if the search's best beats it by >= this (selection score)")
+    ap.add_argument("--max-search-turn", type=int, default=0, help="search only decisions on turns <= this (0 = all)")
+    ap.add_argument("--stop-turn", type=int, default=0,
+                    help="label generation: end each game after this turn (truncated, no winner; 0 = play out)")
     ap.add_argument("--s-seat-only", type=int, default=-1, choices=(-1, 0, 1),
                     help="play only games with S in this seat (0 = S goes first); -1 all")
     ap.add_argument("--own-turn1", type=int, default=0, choices=(0, 1), help="also search S turn-1 plays")
@@ -529,7 +532,7 @@ def main() -> None:
                     engine, cfg, ws, s_seat, argmax_select, game_seed=idx,
                     own_turn1=bool(args.own_turn1), conf_skip=args.conf_skip, own_frac=args.own_frac,
                     honest=bool(args.honest), det_tries=args.det_tries, det_fallback=args.det_fallback,
-                    margin=args.margin,
+                    margin=args.margin, max_search_turn=args.max_search_turn, stop_turn=args.stop_turn,
                 )  # fmt: skip
             else:
                 ws = RouteWindowSearch(
@@ -547,6 +550,7 @@ def main() -> None:
                     honest=bool(args.honest), det_tries=args.det_tries, det_fallback=args.det_fallback,
                     guard_mode="shared" if legacy else "per_seat",
                     unguarded_seat=None if legacy or args.opp == "ckpt" else 1 - s_seat, margin=args.margin,
+                    max_search_turn=args.max_search_turn, stop_turn=args.stop_turn,
                 ), route)  # fmt: skip
             yield idx, gen
 

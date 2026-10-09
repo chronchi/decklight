@@ -103,6 +103,8 @@ def search_game_gen(
     guard_mode: str = "shared",
     unguarded_seat: int | None = None,
     margin: float = 0.0,
+    max_search_turn: int = 0,
+    stop_turn: int = 0,
 ):
     """Play one live game; S (absolute seat `s_seat`) searches, R plays raw. Returns a GameResult.
 
@@ -126,6 +128,9 @@ def search_game_gen(
 
     `margin` > 0: a searched decision plays the search's best only if its selection score beats the policy's own
     move's by >= margin (when the policy's move is a candidate); the log keeps both ("best", "chosen").
+
+    Label generation (ExIt pilot): `max_search_turn` > 0 searches only decisions on turns <= it; `stop_turn` > 0 ends
+    the game at the first decision past that turn (GameResult.truncated, winner None).
     """
     if guard_mode not in ("shared", "per_seat"):
         raise ValueError(f"guard_mode must be 'shared' or 'per_seat', got {guard_mode!r}")
@@ -158,6 +163,8 @@ def search_game_gen(
     while obs is not None and len(res.choices) < max_decisions:
         me = int(env.player)
         turn = int(obs["global"][2])
+        if stop_turn and turn > stop_turn:
+            break
         res.turns = turn
         n_legal = int(obs["action_mask"].sum())
         z = _masked((yield [obs])[0], obs)
@@ -178,7 +185,7 @@ def search_game_gen(
                 and turn >= (1 if own_turn1 else 2)
                 and rng.random() < own_frac
             )
-            if (window or own) and softmax_conf(z_g) < conf_skip:
+            if (window or own) and softmax_conf(z_g) < conf_skip and not (max_search_turn and turn > max_search_turn):
                 cands = search._candidates(z_g, obs, window)
                 if len(cands) >= 2:
                     t0 = time.perf_counter()

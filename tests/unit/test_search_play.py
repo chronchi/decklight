@@ -274,3 +274,12 @@ def test_margin_keeps_policy_move_unless_clear(engine):
     assert all(e["chosen"] == e["played"] for e in res.log if e["played"] in e["cands"])
     res0, _ = _play(engine, _tiny_forward(), conf_skip=1.01, own_frac=1.0)
     assert all(e["chosen"] == e["best"] for e in res0.log)
+
+
+def test_turn_limits_for_label_generation(engine):
+    """max_search_turn bounds the searched turns; stop_turn ends the game after that turn (truncated, no winner)."""
+    res, _ = _play(engine, _tiny_forward(), conf_skip=1.01, own_frac=1.0, max_search_turn=2, stop_turn=3)
+    assert res.log and all(e["turn"] <= 2 for e in res.log)
+    assert max(res.decision_turns) <= 3
+    if res.truncated:
+        assert res.winner is None
