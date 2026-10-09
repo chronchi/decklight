@@ -155,3 +155,33 @@ def test_overlap_thread_exception_propagates():
     else:
         raise AssertionError("collect exception did not propagate")
     assert time.time() - t0 < 30
+
+
+def test_hint_step_stats_are_not_minibatch_averaged(engine):
+    """The hint step reports its own CE/accuracy (one step), and the PPO stats are identical with or without it."""
+    tr = _train_rl_mod()
+    decks = [load_ydk(p) for p in sorted(FIXTURES.glob("*.ydk"))]
+    dev = torch.device("cpu")
+    model, ref = _tiny(decks, True), _tiny(decks, False)
+    vec = VecEnv(engine, decks, 8, 2, seed=0)
+    vec.set_max_decisions(60)
+    store = SlotStore(8000, gather(vec.buf, np.arange(1), 0, False))
+    col = Collector(vec, copy.deepcopy(model).eval(), ref, store, 0, False, dev, 0.3, -0.5, 2,
+                    np.random.default_rng(1234), "fp32")
+    finished, _ = col.collect(200)
+    slots, _adv, ret, adv_n = tr.gae_batch(store, finished, 0.95)
+    hobs = {k: v[np.asarray(slots)[:32]] for k, v in store.obs.items()}
+    mask = hobs["action_mask"]
+    hint = {"obs": hobs, "act": np.argmax(mask, 1).astype(np.int32), "coef": 1.0, "batch": 32}
+    kw = dict(clip=0.2, vf_coef=0.5, kl_coef=0.1, ent_coef=0.003, epochs=1, minibatch=64, warm=False,
+              precision="fp32", max_upload_gb=6.0, compile=False)
+    m0 = copy.deepcopy(model)
+    opt0 = torch.optim.AdamW(m0.parameters(), lr=1e-3)
+    a0, _ = tr.ppo_update(m0, m0, opt0, torch.optim.AdamW(m0.value_head.parameters(), lr=1e-3), store, slots,
+                          adv_n, ret, np.random.default_rng(5), dev, **kw)
+    m1 = copy.deepcopy(model)
+    opt1 = torch.optim.AdamW(m1.parameters(), lr=1e-3)
+    a1, _ = tr.ppo_update(m1, m1, opt1, torch.optim.AdamW(m1.value_head.parameters(), lr=1e-3), store, slots,
+                          adv_n, ret, np.random.default_rng(5), dev, hint=hint, **kw)
+    assert {k: v for k, v in a1.items() if not k.startswith("hint_")} == a0
+    assert 0.0 <= a1["hint_acc"] <= 1.0 and a1["hint_ce"] > 0.05  # an untrained tiny net is not near-zero CE

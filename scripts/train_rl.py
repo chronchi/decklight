@@ -468,6 +468,7 @@ def ppo_update(model: PolicyNet, upd_model, opt, vopt, store: SlotStore, slots: 
             break
     if bad_loss:
         raise RuntimeError("non-finite loss")
+    hint_stats: dict[str, float] = {}
     if hint is not None and not warm and float(hint.get("coef", 0.0)) > 0.0:
         # One hint-distillation step per PPO update (not per minibatch, so the coef
         # means the same regardless of --epochs/--minibatch). Raises on non-finite.
@@ -491,14 +492,11 @@ def ppo_update(model: PolicyNet, upd_model, opt, vopt, store: SlotStore, slots: 
         distmod.average_grads_(model)
         torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
         opt.step()
-        for key, val in (("hint_ce", hce.detach()), ("hint_acc", hacc.detach())):
-            t = val.detach()
-            if key in agg_sum:
-                agg_sum[key] = agg_sum[key] + t
-            else:
-                agg_sum[key] = t.clone()
-        agg_n += 1
+        hint_stats = {"hint_ce": float(hce.item()), "hint_acc": float(hacc.item())}
     agg_mean = {k: float((v / agg_n).item()) for k, v in agg_sum.items()} if agg_n else {}
+    # the hint step is one step, not a PPO minibatch: its stats are not averaged over agg_n (which they were,
+    # dividing hint_ce/hint_acc by the minibatch count and deflating every PPO stat by one count; 2026-10-08)
+    agg_mean.update(hint_stats)
     t_update = time.time() - t_up
     model.eval()
     if priv_critic:
