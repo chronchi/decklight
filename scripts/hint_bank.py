@@ -97,8 +97,18 @@ def sample_train_starts(path: Path, n: int, seed: int) -> tuple[list[tuple[int, 
 
 
 def slot_candidates(slots: Path, starts: Path, n: int, seed: int, max_p: float, min_lp: int,
-                    max_behind: int) -> list[tuple[int, dict, int]]:
-    """Gated (file_idx, row, seat) candidates from `audit/dags_hopeless.py --out` slots.jsonl (see the docstring)."""
+                    max_behind: int, exclude: Path | None = None) -> list[tuple[int, dict, int]]:
+    """Gated (file_idx, row, seat) candidates from `audit/dags_hopeless.py --out` slots.jsonl (see the docstring).
+    `exclude`: a previous out dir; (start, seat) pairs in its games-*.jsonl are skipped (extend a bank, no repeats)."""
+    done = set()
+    if exclude is not None:
+        for f in sorted(exclude.glob("games-*.jsonl")):
+            for x in f.read_text().splitlines():
+                if x.strip():
+                    r = json.loads(x)
+                    done.add((int(r["start_id"]), int(r["actor"])))
+        if not done:
+            fail(f"--exclude-from {exclude}: no games-*.jsonl rows")
     rows = [json.loads(x) for x in starts.read_text().splitlines() if x.strip()]
     sl = [json.loads(x) for x in slots.read_text().splitlines() if x.strip()]
     if not sl:
@@ -122,6 +132,9 @@ def slot_candidates(slots: Path, starts: Path, n: int, seed: int, max_p: float, 
         res = sum(me.get(k, 0) for k in ("hand", "mzone", "szone")) - sum(op.get(k, 0) for k in ("hand", "mzone", "szone"))
         if res < -max_behind:
             tally["behind_cut"] += 1
+            continue
+        if (s, seat) in done:
+            tally["excluded"] = tally.get("excluded", 0) + 1
             continue
         out.append((s, rows[s], seat))
     print(f"hint_bank: slot gates {tally} -> {len(out)} candidates", flush=True)
@@ -271,6 +284,8 @@ def main(argv: list[str] | None = None) -> None:
     ap.add_argument("--max-p", type=float, default=0.25, help="--slots: trainable slots need pass rate < this")
     ap.add_argument("--min-lp", type=int, default=1001, help="--slots: learner LP must be >= this")
     ap.add_argument("--max-behind", type=int, default=3, help="--slots: hand+field deficit must be <= this")
+    ap.add_argument("--exclude-from", type=Path, default=None,
+                    help="--slots: skip (start, seat) pairs already in this out dir's games-*.jsonl")
     ap.add_argument("--min-wins", type=int, default=1, help="hinted wins of K (vs --opp-ckpt) to bank a start")
     ap.add_argument("--opp2-ckpt", type=Path, default=None, help="second opponent: hinted games vs it too")
     ap.add_argument("--opp2-min-wins", type=int, default=1, help="hinted wins of K vs --opp2-ckpt to bank a start")
@@ -296,7 +311,7 @@ def main(argv: list[str] | None = None) -> None:
     engine = Engine()
     if args.slots is not None:
         sampled = slot_candidates(args.slots, args.starts, args.n, args.seed, args.max_p, args.min_lp,
-                                  args.max_behind)
+                                  args.max_behind, args.exclude_from)
         skipped = 0
     else:
         sampled, skipped = sample_train_starts(args.starts, args.n, args.seed)

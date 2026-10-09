@@ -9,8 +9,9 @@
 cd "$(dirname "$0")/../.."
 CKPT=data/cache/base_r3/best.pt; OPP2=data/cache/rl5_ckpts/iter-0200.pt; SL=data/cache/hint_gated/slots.jsonl
 VAL=data/cache/value_ppo3/best.pt
+# EXCLUDE=<dir with a previous run's games-*.jsonl, under data/>: extend the bank with the slots not yet run.
 for f in $CKPT $OPP2 $SL $VAL data/cache/dags/starts-train-1k.jsonl; do [ -s "$f" ] || { echo "missing $f"; exit 3; }; done
-HINT_ARGS="--starts data/cache/dags/starts-train-1k.jsonl --slots $SL --n ${NSLOTS:-220} --games 4 --seed 0 --k 4 --samples 4 --min-wins 2 --opp2-min-wins 1"
+HINT_ARGS="--starts data/cache/dags/starts-train-1k.jsonl --slots $SL --n ${NSLOTS:-220} --games 4 --seed 0 --k 4 --samples 4 --min-wins 2 --opp2-min-wins 1${EXCLUDE:+ --exclude-from $EXCLUDE}"
 N=hintgated-$(date +%Y%m%d-%H%M); echo $N
 taskset -c 0-3 uv run --no-sync python scripts/vast_job.py --name $N \
   --cmd "CKPT=$CKPT OPP2_CKPT=$OPP2 VALUE_CKPT=$VAL VAR_CAP=${VAR_CAP:-150m} HINT_ARGS='$HINT_ARGS' bash scripts/vast_hint_bank.sh $N" \

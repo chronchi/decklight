@@ -179,6 +179,11 @@ def test_slot_candidates_gates(tmp_path):
     p.write_text("".join(json.dumps(r) + "\n" for r in rows))
     got = hint_bank.slot_candidates(p, starts, 10, 0, 0.25, 1001, 3)
     assert sorted((s, seat) for s, _, seat in got) == [(0, 0), (0, 1)]
+    done = tmp_path / "done"
+    done.mkdir()
+    (done / "games-0.jsonl").write_text(json.dumps({"start_id": 0, "actor": 1, "kind": "raw", "actor_win": False}) + "\n")
+    got = hint_bank.slot_candidates(p, starts, 10, 0, 0.25, 1001, 3, exclude=done)
+    assert [(s, seat) for s, _, seat in got] == [(0, 0)]
     p.write_text(json.dumps(slot(0, 0, "hopeless", 8, 0, 8000, even, even, game="other")) + "\n")
     with pytest.raises(SystemExit):
         hint_bank.slot_candidates(p, starts, 10, 0, 0.25, 1001, 3)  # slots from another starts file
