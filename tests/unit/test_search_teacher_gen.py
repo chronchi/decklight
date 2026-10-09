@@ -226,3 +226,16 @@ def test_teacher_gen_claim_queue(engine, tmp_path):
     idx = [r["game_idx"] for r in rows]
     assert sorted(idx) == [0, 1, 2], idx
     assert sorted(int(p.name) for p in (out / "claims").iterdir()) == [0, 1, 2]
+
+
+def test_s_seat_only_and_turn_limits(engine, tmp_path):
+    """--s-seat-only 1 keeps the full schedule's game idx (P2 crash 2026-10-09: sched[idx] IndexError); with
+    --max-search-turn/--stop-turn every game stops after turn 2 with S in seat 1."""
+    search_match = _load("search_match")
+    emb = _pool_emb(tmp_path)
+    ckpt = _tiny_ckpt(tmp_path, emb, "base", 0)
+    _run_kind(search_match, tmp_path, emb, ckpt, "greedy",
+              ["--s-seat-only", "1", "--max-search-turn", "2", "--stop-turn", "2", "--games", "4"])
+    rows = [json.loads(x) for x in (tmp_path / "m-greedy" / "games-0.jsonl").read_text().splitlines() if x.strip()]
+    assert len(rows) == 2 and all(r["s_seat"] == 1 for r in rows)
+    assert all(r["turns"] <= 2 for r in rows)

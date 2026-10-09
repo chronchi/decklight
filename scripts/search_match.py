@@ -423,6 +423,7 @@ def main() -> None:
             fail(f"--s-seat-only {args.s_seat_only}: empty schedule")
     if args.games_limit:
         sched = sched[: args.games_limit]
+    by_idx = {e[4]: e for e in sched}  # idx is the full schedule's (kept by --s-seat-only), not a position in sched
     claim = bool(args.save_records is not None if args.claim is None else args.claim)
     if claim and args.out is None:
         ap.error("--claim 1 needs --out (claims live in <out>/claims)")
@@ -619,7 +620,7 @@ def main() -> None:
     try:
         with path.open("w") as f:
             for idx, res in drive_many(jobs(), forward, args.width):
-                di, dj, s, s_seat, _ = sched[idx]
+                di, dj, s, s_seat, _ = by_idx[idx]
                 if res.winner is None and not res.truncated:
                     fail(f"game {idx} ended with neither winner nor truncation")
                 if args.opp == "ygoagent":
