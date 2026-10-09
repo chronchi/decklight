@@ -39,13 +39,20 @@ HOLD="kewl-tune $( [ -f decks/pool/HOLDOUT ] && tr '\n' ' ' < decks/pool/HOLDOUT
 uv run --no-sync python scripts/build_value_shards.py --records $RECORDS \
   --out data/cache/value_shards --stride "$STRIDE" --jobs "$J" > "$OUT/shards.txt" 2>&1
 tick shards
+# VARIANTS="tag:init:lr:epochs ..." trains several values on the same shards into $OUT/<tag>/ (default: one variant
+# "value" = $INIT, lr 1e-4, $EPOCHS: the old single-run layout). An init with a value head is scored first (epoch "init").
+VARIANTS="${VARIANTS:-value:$INIT:1e-4:$EPOCHS}"
+for V in $VARIANTS; do
+IFS=: read -r TAG VINIT VLR VEP <<< "$V"
+[ -s "$VINIT" ] || { echo "ALERT missing init $VINIT" | tee -a "$OUT/ALERT"; continue; }
 uv run --no-sync python scripts/train_value.py --shards data/cache/value_shards --emb "$EMB" \
-  --init "$INIT" --out "$OUT/value" --epochs "$EPOCHS" --batch 256 --lr 1e-4 \
-  --holdout $HOLD > "$OUT/train-value.txt" 2>&1
-tick train-value
-rm -f "$OUT/value/last.pt"
-# final calibration table (also printed at the end of train-value.txt)
-uv run --no-sync python - "$OUT/value/metrics.jsonl" >> "$OUT/train-value.txt" <<'PY'
+  --init "$VINIT" --out "$OUT/$TAG" --epochs "$VEP" --batch 256 --lr "$VLR" \
+  --holdout $HOLD > "$OUT/train-$TAG.txt" 2>&1 || echo "ALERT train_value $TAG failed: $(tail -1 "$OUT/train-$TAG.txt")" | tee -a "$OUT/ALERT"
+tick "train-$TAG"
+rm -f "$OUT/$TAG/last.pt"
+[ -s "$OUT/$TAG/metrics.jsonl" ] || continue
+# final calibration table (also printed at the end of train-<tag>.txt)
+uv run --no-sync python - "$OUT/$TAG/metrics.jsonl" >> "$OUT/train-$TAG.txt" <<'PY'
 import json, sys
 recs = [json.loads(x) for x in open(sys.argv[1]) if x.strip()]
 recs = [r for r in recs if "val" in r or "train" in r]
@@ -61,6 +68,7 @@ for split in ("train", "val", "holdout"):
         ws = f"{w:.3f}" if w is not None else "  - "
         print(f"  p{i / 10:.1f}-{(i + 1) / 10:.1f}: mean_p {ps} win_share {ws} n {c}")
 PY
+done
 tick calibration
 kill "$USAGE_PID" 2>/dev/null
 echo done > "$OUT/DONE"
