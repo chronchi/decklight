@@ -103,6 +103,10 @@ def _store(game: str, st: dict) -> None:
 
 
 def _config(st: dict) -> DuelConfig:
+    if "config" in st:  # a full config dict (eval.turn1.config_to_dict: DAGS starts, hint-bank rows)
+        from ygo_zero.eval.turn1 import config_from_dict
+
+        return config_from_dict(st["config"])
     # a pool deck name, or a repo path ending in .ydk (e.g. the gauntlet's tests/fixtures/decks/BlueEyes.ydk)
     d0, d1 = (load_ydk(ROOT / (d if d.endswith(".ydk") else f"decks/pool/{d}.ydk")) for d in st["decks"][:2])
     return DuelConfig(d0, d1, seed=st["seed"])
