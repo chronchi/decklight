@@ -125,9 +125,11 @@ def main() -> None:
 def compare(args) -> None:
     from ygo_zero.eval.match import ring_pairs
 
-    files = sorted((args.deck_dir or ROOT / "tests/fixtures/decks").glob("*.ydk"))
+    files = sorted((args.deck_dir or ROOT / "tests/fixtures/decks").resolve().glob("*.ydk"))
     decks = [load_ydk(f) for f in files]
     names = [str(f.relative_to(ROOT)) for f in files]
+    if not files:
+        raise SystemExit(f"no .ydk in {args.deck_dir}")
     pairs = ring_pairs(len(decks), args.ring) if args.ring > 0 else None
     engine = Engine()
     expect = {t: float(w) for t, w in (e.split("=", 1) for e in args.expect)}
