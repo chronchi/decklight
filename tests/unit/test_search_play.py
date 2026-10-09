@@ -6,6 +6,7 @@ import sys
 from pathlib import Path
 
 import numpy as np
+import pytest
 import torch
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -181,3 +182,85 @@ def test_summarize_win_rate(tmp_path):
     assert summ["override_rate"] == 0.5
     assert summ["capped_share"] == 0.0
     assert json.loads((tmp_path / "summary.json").read_text()) == summ
+
+
+def test_log_holds_per_sample_scores(engine):
+    """Every searched decision logs its per-sample selection scores; their mean per candidate is the logged score."""
+    res, _ = _play(engine, _tiny_forward(), conf_skip=1.01, own_frac=1.0)
+    assert res.log
+    for e in res.log:
+        assert len(e["samples"]) == len(e["cands"])
+        for col, sc in zip(e["samples"], e["scores"], strict=True):
+            assert len(col) == 1  # samples=1 in _play
+            assert abs(sum(col) / len(col) - sc) < 1e-3
+
+
+def test_guard_modes_validate_and_play(engine):
+    """per_seat + an unguarded seat plays to the end (a win, or the decision cap: the random tiny net may loop when
+    unguarded); an unknown guard_mode fails loud."""
+    res, _ = _play(engine, _tiny_forward(), conf_skip=1.01, own_frac=1.0, guard_mode="per_seat", unguarded_seat=1)
+    assert res.winner in (0, 1) or res.truncated
+    with pytest.raises(ValueError):
+        _play(engine, _tiny_forward(), guard_mode="nope")
+
+
+def _tiny_critic(tmp_path, priv=True):
+    """A tiny d=16 privileged critic checkpoint (known + value head) with train_rl-style metrics args."""
+    from ygo_zero.decks import load_ydk
+    from ygo_zero.model.policy import PolicyNet
+
+    decks = [load_ydk(p) for p in sorted((FIXTURES / "decks").glob("*.ydk"))]
+    codes = sorted({c for d in decks for c in list(d.main) + list(d.extra)} - {0})
+    rng = np.random.default_rng(0)
+    n = len(codes)
+    emb = {"codes": np.array(codes), "card": rng.normal(size=(n, 8)).astype(np.float32),
+           "effects": rng.normal(size=(n, 2, 8)).astype(np.float32), "n_effects": np.ones(n, np.int64)}  # fmt: skip
+    np.savez(tmp_path / "emb.npz", **emb)
+    torch.manual_seed(0)
+    net = PolicyNet(emb, d=16, layers=1, heads=2, dropout=0.0, known=True, value=True)
+    torch.nn.init.normal_(net.known_emb.weight)  # nonzero, so revealed cards move the value
+    torch.save({k: v.half() if v.is_floating_point() else v for k, v in net.state_dict().items()},
+               tmp_path / "critic.pt")
+    args = {"d": 16, "layers": 1, "heads": 2, "hist": 0, "known": False, "rl": {"priv_critic": "1" if priv else "0"}}
+    (tmp_path / "metrics.jsonl").write_text(json.dumps({"args": args}) + "\n")
+    return tmp_path / "critic.pt", tmp_path / "emb.npz"
+
+
+def test_priv_value_scores_sampled_worlds(engine, tmp_path):
+    """Honest search with the privileged critic as leaf value: leaf obs carry priv_code (sampled world's hidden
+    cards), the critic reads it (values move when it is zeroed), and the game ends."""
+    from ygo_zero.eval.value import PrivValueNet
+    from ygo_zero.search.play import argmax_select, search_game_gen
+    from ygo_zero.search.turn1 import drive_many
+    from ygo_zero.search.window import WindowSearch
+
+    ckpt, emb = _tiny_critic(tmp_path)
+    pv = PrivValueNet(ckpt, emb)
+    seen = []
+
+    def value(obs):
+        seen.append({k: v.copy() for k, v in obs.items()})
+        return pv.values(obs)
+
+    def never(buf):
+        raise AssertionError("unused")
+
+    ws = WindowSearch(engine, never, k=2, horizon=1, samples=2, seed=0, value=value)
+    gen = search_game_gen(engine, _cfg(), ws, 0, argmax_select, 0, own_turn1=True, conf_skip=1.01, own_frac=1.0,
+                          honest=True, det_tries=32, det_fallback="skip")
+    res = dict(drive_many([(0, gen)], _tiny_forward(), 2))[0]
+    assert res.winner in (0, 1) and not res.truncated
+    assert seen and any(e["scores"] for e in res.log)
+    hidden = [o for o in seen if (o["priv_code"] > 0).any()]
+    assert hidden, "no leaf obs carried a hidden card's code"
+    o = hidden[0]
+    z = {**o, "priv_code": np.zeros_like(o["priv_code"])}
+    assert not np.allclose(pv.values(o), pv.values(z))
+
+
+def test_priv_value_rejects_non_priv_ckpt(tmp_path):
+    from ygo_zero.eval.value import PrivValueNet
+
+    ckpt, emb = _tiny_critic(tmp_path, priv=False)
+    with pytest.raises(ValueError):
+        PrivValueNet(ckpt, emb)

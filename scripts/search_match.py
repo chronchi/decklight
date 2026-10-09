@@ -46,14 +46,14 @@ import numpy as np
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 
-from playtest import verified_end_boards  # noqa: E402  # same deck sample as the report card
+from playtest import verified_end_boards  # same deck sample as the report card
 
-from ygo_zero.decks import load_ydk  # noqa: E402
-from ygo_zero.engine.duel import DuelConfig, Engine  # noqa: E402
-from ygo_zero.eval.match import ring_pairs, wilson  # noqa: E402
-from ygo_zero.search.play import argmax_select, search_game_gen  # noqa: E402
-from ygo_zero.search.turn1 import _batch, drive_many  # noqa: E402
-from ygo_zero.search.window import WindowSearch  # noqa: E402
+from ygo_zero.decks import load_ydk
+from ygo_zero.engine.duel import DuelConfig, Engine
+from ygo_zero.eval.match import ring_pairs, wilson
+from ygo_zero.search.play import argmax_select, search_game_gen
+from ygo_zero.search.turn1 import _batch, drive_many
+from ygo_zero.search.window import WindowSearch
 
 
 def ga_schedule(names: list[str], ga_opps: int, ga_seeds: int) -> list[tuple[int, int, int, int, int]]:
@@ -257,6 +257,9 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--ckpt", type=Path, default=None, help="base BC checkpoint (both players' policy)")
     ap.add_argument("--value", type=Path, default=None, help="learned value checkpoint scoring branch ends")
+    ap.add_argument("--value-priv", type=int, default=0,
+                    help="1: --value is a privileged critic (train_rl --priv-critic critic.pt) reading each sampled "
+                         "world's hidden cards; needs --honest 1 (else it reads the real game's hidden cards)")
     ap.add_argument("--emb", type=Path, default=ROOT / "data/cards/emb/qwen3-0.6b-d512.npz")
     ap.add_argument("--device", default="cpu")
     ap.add_argument("--decks", type=int, default=8, help="sampled pool decks (half train, half holdout)")
@@ -270,6 +273,8 @@ def main() -> None:
                     help="1 = never search (conf-skip 0): S plays the raw policy, the paired no-search baseline")
     ap.add_argument("--conf-skip", type=float, default=0.9, help="skip search when softmax(z).max() >= this")
     ap.add_argument("--own-frac", type=float, default=1.0, help="share of S own-turn decisions searched")
+    ap.add_argument("--guard-legacy", type=int, default=0, choices=(0, 1),
+                    help="routed opponents: 1 = one loop guard shared by both seats (E2 and before); 0 = card-faithful")
     ap.add_argument("--own-turn1", type=int, default=0, choices=(0, 1), help="also search S turn-1 plays")
     ap.add_argument("--det-tries", type=int, default=8, help="rejection-sampling proposals per honest world")
     ap.add_argument("--det-fallback", default="true", choices=("true", "skip"),
@@ -317,10 +322,13 @@ def main() -> None:
     engine = Engine()
     pol = BCPolicy(args.ckpt, args.emb, threads=1, device=args.device, batch=args.batch)
     value = None
+    if args.value_priv and not (args.value and args.honest):
+        raise SystemExit("--value-priv 1 needs --value <critic.pt> and --honest 1 (it would see the real hidden cards)")
     if args.value:
-        from ygo_zero.eval.value import ValueNet
+        from ygo_zero.eval.value import PrivValueNet, ValueNet
 
-        value = ValueNet(args.value, args.emb, device=args.device, batch=args.batch).values
+        vcls = PrivValueNet if args.value_priv else ValueNet
+        value = vcls(args.value, args.emb, device=args.device, batch=args.batch).values
 
     def base_logits(obs_list: list[dict]) -> np.ndarray:
         out = [pol.logits(_batch(obs_list[i : i + args.batch])) for i in range(0, len(obs_list), args.batch)]
@@ -520,10 +528,16 @@ def main() -> None:
                     rollout_temp=args.rollout_temp, batch=args.batch, seed=args.seed, value=value,
                     route=route,
                 )  # fmt: skip
+                # Card-faithful loop guard (NOTEBOOK 2026-10-09 08:40): each policy guards its own decisions; ygo-agent
+                # and greedy have no guard. `--guard-legacy 1` restores the shared guard of E2 (forbade ygo-agent's
+                # own pick at repeated chain windows: 596/744 games differed from the card).
+                legacy = bool(args.guard_legacy)
                 gen = tag_game(idx, s_seat, search_game_gen(
                     engine, cfg, ws, s_seat, argmax_select, game_seed=idx,
                     own_turn1=bool(args.own_turn1), conf_skip=args.conf_skip, own_frac=args.own_frac,
                     honest=bool(args.honest), det_tries=args.det_tries, det_fallback=args.det_fallback,
+                    guard_mode="shared" if legacy else "per_seat",
+                    unguarded_seat=None if legacy or args.opp == "ckpt" else 1 - s_seat,
                 ), route)  # fmt: skip
             yield idx, gen
 
@@ -556,7 +570,7 @@ def main() -> None:
             sall = e.get("scores_all") or {sel_key: scores}
             slog.append({"k": k, "kind": e.get("kind"), "cands": cands, "scores": scores,
                          "scores_all": {kk: [float(x) for x in col] for kk, col in sall.items()},
-                         "chosen": int(e["chosen"]), "played": int(e["played"])})
+                         "chosen": int(e["chosen"]), "played": int(e["played"]), "samples": e.get("samples", [])})
         deck_s = seat_decks[s_seat]
         trec = {
             "decks": list(seat_decks), "config": config_dict(cfgs[idx]), "auto_single": True,
@@ -609,6 +623,11 @@ def main() -> None:
                     "det_proposals": res.det_proposals, "det_accepted": res.det_accepted,
                     "det_fallbacks": res.det_fallbacks, "det_skipped": res.det_skipped,
                     "det_fallback": args.det_fallback, "det_s": round(res.det_s, 3),
+                    # per searched decision: candidates, per-sample rollout scores, pick (offline budget curve and
+                    # noise SE; NOTEBOOK 2026-10-09 08:40)
+                    "search": [{"k": int(e["k"]), "kind": e.get("kind"), "turn": int(e.get("turn", 0)),
+                                "cands": [int(x) for x in e["cands"]], "samples": e.get("samples", []),
+                                "chosen": int(e["chosen"]), "played": int(e["played"])} for e in res.log],
                 }
                 if args.opp == "ygoagent":  # paired-gate fields (playtest per_game format + search stats)
                     w = res.winner

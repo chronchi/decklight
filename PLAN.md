@@ -55,6 +55,22 @@ both card at 39–40% vs ygo-agent (base_r3 44.0%), n.s. vs base_r3, with a late
 banked winning lines directly memorises them (trained hard starts 0.10 → 0.58) with zero transfer to held-out hard
 starts. Proposed (awaiting the user): the product is base_r3 + search; spend on the search, not on policy training.
 
+**Plan after step 3 (2026-10-09, user: "Ok I approve except the scale up, for now let's focus on everything else";
+review `docs/reviews/2026-10-09-search-plan-opus.md`, NOTEBOOK 08:10):** the product is base_r3 + honest search.
+- P0 ($X): `search_match --opp ygoagent` reproduces the card's ygo-agent games move for move (≥ 99% of the 744 deals;
+  the two harnesses disagree at ygo-agent chain windows today); per-sample rollout scores logged per searched decision.
+- P1 (~$X): E2 re-run (raw + search) on the old 744 deals vs the fixed ygo-agent = the new reference.
+- P2 (~$X), each paired with P1's search arm: own-turn-1 search on going-first deals; override only on a clear
+  margin; k2s2 (budget-curve calibration with the per-sample logs).
+- Value lever (~$X): a value trained on ≥ 50k raw-game outcomes; gate = beats value_ppo3 on held-out searched-game
+  states, then one paired search arm.
+- ExIt pilot (~$X): ~20k clean (margin ≥ 2 SE), decorrelated labels, own turn 2 going second + opponent-turn-1
+  windows, MPO-style loss + KL anchor, students on 25/50/100%; pass = held-out agreement rises with data, raw going-second
+  ≥ +2 pp, held-out CE not rising from epoch 1; else the policy route is closed. Scale-up: not approved for now.
+- P3–P4 (~$X): holdout/new-card guards, final card of the chosen config on fresh deals + single-game latency;
+  the config is picked by a pre-registered rule (largest paired gain over P1 with p < 0.1), accepted if ≥ +3 pp, guards
+  ≥ −3 pp.
+
 **Stop:** self-imitation rounds, long PPO from base_r3, distilling the search into the policy (argmax or soft), field/critic/val-agreement
 proxies for selection, head-to-head vs base_r3 as the gate, infra work before a signal.
 

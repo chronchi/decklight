@@ -100,6 +100,8 @@ def search_game_gen(
     det_tries: int = 8,
     det_fallback: str = "true",
     prefix: Sequence[int] = (),
+    guard_mode: str = "shared",
+    unguarded_seat: int | None = None,
 ):
     """Play one live game; S (absolute seat `s_seat`) searches, R plays raw. Returns a GameResult.
 
@@ -113,7 +115,16 @@ def search_game_gen(
     decision (e.g. a DAGS prefix positioning a mid-game start); they are recorded in
     `choices`/`actors`/`choice_keys` exactly like played decisions, and the loop guard
     starts fresh at the first live decision. Empty (default) plays from the deal.
+
+    Loop guard: `guard_mode="shared"` (default, the historical behaviour) runs both seats through one guard;
+    `"per_seat"` gives each seat its own, as the report card does when two different policy objects play (each
+    BCPolicy guards only its own decisions). `unguarded_seat` plays that seat's pick as given: ygo-agent and greedy
+    have no loop guard in the card. Without this, the shared guard forbade ygo-agent's own pick (an option already
+    taken in a same-key state this turn) and its one-hot logits fell back to option 0: all 596 E2-vs-card divergences
+    on the 744 deals (NOTEBOOK 2026-10-09 08:40).
     """
+    if guard_mode not in ("shared", "per_seat"):
+        raise ValueError(f"guard_mode must be 'shared' or 'per_seat', got {guard_mode!r}")
     if det_fallback not in ("true", "skip"):
         raise ValueError(f"det_fallback must be 'true' or 'skip', got {det_fallback!r}")
     rng = random.Random(search.seed * 1_000_003 + game_seed)
@@ -122,7 +133,7 @@ def search_game_gen(
     tracker = SeenTracker(s_seat) if honest else None
     if tracker is not None:
         tracker.update(env)
-    guard = LoopGuard()  # one slot: both seats share it, as one VecEnv row does in playtest matches
+    guard = LoopGuard()  # slot 0 (shared) or slot = seat (per_seat); see the docstring
     res = GameResult(winner=None, truncated=False, turns=1)
     capped0 = search.capped
     for c in prefix:
@@ -150,7 +161,9 @@ def search_game_gen(
             raise RuntimeError(
                 f"ALERT search_match: NaN logits at decision {len(res.choices)} (game_seed={game_seed})"
             )
-        z_g, key = guard.mask(0, obs, z)
+        gslot = me if guard_mode == "per_seat" else 0
+        guarded = me != unguarded_seat
+        z_g, key = guard.mask(gslot, obs, z) if guarded else (z, None)
         a_pol = select_fn(z_g)
         a = a_pol
         if me == s_seat:
@@ -216,10 +229,12 @@ def search_game_gen(
                             "scores": [float(x) for x in sel_scores],
                             "scores_all": {search._select_key(): [float(x) for x in sel_scores]},
                             "chosen": int(a), "played": int(a_pol),
+                            "samples": [[round(x, 4) for x in col] for col in getattr(search, "last_samples", [])],
                         })
                         if a != a_pol:
                             res.n_override += 1
-        guard.note(0, key, a)
+        if guarded:
+            guard.note(gslot, key, a)
         if tracker is not None:
             res.choice_keys.append(key_rank_of_choice(obs, a))
         res.choices.append(a)

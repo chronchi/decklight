@@ -309,6 +309,15 @@ class WindowSearch:
                 if self.value is not None:
                     assert snap_value[i][h_idx] is not None
                     out[f"value@h{h}"][j] += float(snap_value[i][h_idx])  # type: ignore[arg-type]
+        # Per-sample scores of the selection key, per candidate in branch order (play.py logs them as "samples": the
+        # offline budget curve and per-decision noise SE need them; NOTEBOOK 2026-10-09 08:40). Read right after the call.
+        sk = self._select_key()
+        self.last_samples = [[] for _ in range(n_cands)]
+        if sk in out and sk.startswith(("value@", "board@")):
+            sh = hs.index(int(sk.split("@h")[1]))
+            src = snap_value if sk.startswith("value@") else snap_board
+            for i, (_, j, _, _) in enumerate(branches):
+                self.last_samples[j].append(float(src[i][sh]))  # type: ignore[arg-type]
         for kk in keys:
             for j in range(n_cands):
                 if counts[j]:

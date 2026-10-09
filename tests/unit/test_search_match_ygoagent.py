@@ -138,8 +138,8 @@ def test_ygoagent_two_games(tmp_path):
 
 
 def test_ygoagent_drives_r_and_only_r(tmp_path):
-    """R's outer moves are ygo-agent's picks (replayed with a fresh YgoAgentPolicy under a
-    LoopGuard replica), and ygo-agent scored exactly the outer R decisions (no rollout leak)."""
+    """R's outer moves are ygo-agent's own picks (replayed with a fresh YgoAgentPolicy, no loop guard), and
+    ygo-agent scored exactly the outer R decisions (no rollout leak)."""
     from ygo_zero.eval import ygoagent as yg
 
     model = ROOT / "data/models/0546_26550M.tflite"
@@ -177,7 +177,6 @@ def test_ygoagent_drives_r_and_only_r(tmp_path):
     from ygo_zero.decks import load_ydk
     from ygo_zero.engine.cpp_env import CppEnv
     from ygo_zero.engine.duel import DuelConfig, Engine
-    from ygo_zero.eval.loopguard import LoopGuard
 
     engine = Engine()
     pol = yg.YgoAgentPolicy(seed=3)
@@ -188,23 +187,15 @@ def test_ygoagent_drives_r_and_only_r(tmp_path):
         cfg = DuelConfig(*(load_ydk(FIXTURES / "decks" / f"{d}.ydk") for d in r["decks"]), seed=r["seed"])
         env = CppEnv(engine, cfg)
         obs = env.reset()
-        guard = LoopGuard()  # same discipline as search_game_gen: one slot, both seats
+        # Card-faithful (NOTEBOOK 2026-10-09 08:40): ygo-agent's pick is played as given (no loop guard), exactly as in
+        # the report card's match; the old shared-guard replica encoded the bug that forbade its own pick.
         for a in r["choices"]:
             me = int(env.player)
-            n_opt = int(obs["action_mask"].shape[0])
-            z = np.zeros(n_opt)
-            z[~obs["action_mask"].astype(bool)] = -np.inf
-            _, key = guard.mask(0, obs, z)
             if me != r["s_seat"]:
                 n_r += 1
                 buf = {k: np.ascontiguousarray(v[None]) for k, v in obs.items()}
                 buf["player"] = np.array([me], np.int64)
                 want = int(pol(buf, np.array([0]), keys=np.array([r["game_idx"]]))[0])
-                zf = np.zeros(n_opt)
-                zf[~obs["action_mask"].astype(bool)] = -np.inf
-                zf[want] = 1.0
-                zg, _ = guard.mask(0, obs, zf)
-                assert int(np.argmax(zg)) == int(a), (r["game_idx"], n_r)
-            guard.note(0, key, int(a))
+                assert want == int(a), (r["game_idx"], n_r)
             obs = env.step(int(a))
     assert sum(scored) == n_r > 0  # ygo-agent saw exactly the outer R decisions: none from rollouts
