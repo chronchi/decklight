@@ -62,6 +62,8 @@ def diff_ci(diffs: list[float]) -> tuple[float, float, float]:
 
 def section(title: str, pairs: list[tuple[float, float]]) -> None:
     n = len(pairs)
+    if n == 0:  # a seat with no games (--subset of one seat)
+        return
     wl = sum(1 for a, b in pairs if a == 1.0 and b == 0.0)
     lw = sum(1 for a, b in pairs if a == 0.0 and b == 1.0)
     ties = sum(1 for a, b in pairs if a == b)
@@ -79,6 +81,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("report_a", type=Path)
     ap.add_argument("report_b", type=Path)
     ap.add_argument("--match", default="ygoagent")
+    ap.add_argument("--subset", action="store_true",
+                    help="B is a deliberate subset of A's deals (e.g. --s-seat-only): coverage is of B's rows only")
     args = ap.parse_args(argv)
 
     ra, rb = rows_of(args.report_a, args.match), rows_of(args.report_b, args.match)
@@ -89,7 +93,7 @@ def main(argv: list[str] | None = None) -> int:
     da = {key_of(r): float(r[4]) for r in ra}
     db = {key_of(r): float(r[4]) for r in rb}
     keys = sorted(set(da) & set(db))
-    cover = len(keys) / max(len(da), len(db))
+    cover = len(keys) / (len(db) if args.subset else max(len(da), len(db)))
     print(f"paired_gate: match={args.match} A={args.report_a} B={args.report_b}")
     print(f"pairs {len(keys)} / A {len(da)} / B {len(db)} (coverage {cover:.1%})")
     if cover < 0.9:

@@ -240,9 +240,9 @@ def summarize(out: Path) -> dict:
         print(f"honest skipped searches {skipped}/{attempted} ({skip_rate:.3f})", flush=True)
     for d in sorted(summ["per_deck"]):
         print(f"  {d}: {summ['per_deck'][d]} (n={summ['per_deck_n'][d]})", flush=True)
-    if "first" in summ:
-        print(f"S first {summ['first']['win_rate']} (n={summ['first']['n']}); "
-              f"S second {summ['second']['win_rate']} (n={summ['second']['n']})", flush=True)
+    seats = [f"S {lb} {summ[lb]['win_rate']} (n={summ[lb]['n']})" for lb in ("first", "second") if lb in summ]
+    if seats:  # one seat only under --s-seat-only
+        print("; ".join(seats), flush=True)
     # after writing the summary, so a high fallback rate is reported with its numbers (the match is part-oracle)
     if skip_mode:
         attempted = searched + skipped
