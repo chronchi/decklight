@@ -26,11 +26,12 @@ J=$(nproc); [ "$Q" != max ] && J=$(( Q / P ))
 USAGE_PID=$!
 export OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 D="$OUT/bank"; mkdir -p "$D"
-# measure one process (GPU memory, RSS) on a small probe, then size the pool
+# measure one process (GPU memory, RSS) on a small probe with the job's own args (so it reaches the searched games;
+# hintgated-20261008-2108: a 4-random-start probe won its raw game in 6 s and measured nothing), then size the pool
 # shellcheck disable=SC2086
 uv run --no-sync python scripts/hint_bank.py --ckpt "$CKPT" --opp-ckpt "$OPP_CKPT" ${VALUE_CKPT:+--value "$VALUE_CKPT"} \
-  ${OPP2_CKPT:+--opp2-ckpt "$OPP2_CKPT"} --device cuda --out "$OUT/probe" --nproc "${PROBE_NPROC:-1000}" --proc 0 --n 4 --games 1 \
-  --k 2 --samples 1 > "$OUT/probe.txt" 2>&1 &
+  ${OPP2_CKPT:+--opp2-ckpt "$OPP2_CKPT"} --device cuda --out "$OUT/probe" $HINT_ARGS --n 6 --games 1 --min-wins 1 \
+  --opp2-min-wins 1 > "$OUT/probe.txt" 2>&1 &
 PP=$!; GMB=0; RMB=0
 for i in $(seq 15); do
   sleep 10
