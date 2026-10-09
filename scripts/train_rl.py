@@ -856,7 +856,8 @@ def main() -> None:
         save_critic_pt()
         save_curriculum()
         res = run_eval(ck, args.init, args.emb, ev_names, hold, args.gauntlet_decks, args.eval_seeds,
-                       args.ga_seeds, args.ga_opps, args.no_ygoagent, args.device, args.threads, it=it)  # fmt: skip
+                       args.ga_seeds, args.ga_opps, args.no_ygoagent, args.device, args.threads, it=it,
+                       games_dir=args.out / "games" / f"iter-{it:04d}")  # fmt: skip
         print(format_eval_line(res), flush=True)
         log.write(json.dumps(res) + "\n")
         log.flush()
@@ -938,7 +939,8 @@ def main() -> None:
                    "--eval-names", ",".join(ev_names), "--gauntlet-decks", str(args.gauntlet_decks),
                    "--eval-seeds", str(args.eval_seeds), "--ga-seeds", str(args.ga_seeds),
                    "--ga-opps", str(args.ga_opps), "--device", str(args.device),
-                   "--threads", str(args.eval_threads), "--out", str(evals_path)]  # fmt: skip
+                   "--threads", str(args.eval_threads), "--out", str(evals_path),
+                   "--games-dir", str(args.out / "games" / f"iter-{it:04d}")]  # fmt: skip
             if args.no_ygoagent:
                 cmd.append("--no-ygoagent")
             return cmd

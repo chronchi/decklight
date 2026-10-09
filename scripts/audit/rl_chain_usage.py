@@ -16,10 +16,10 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "scripts"))
 
-from render_games import decisions_lines  # noqa: E402
+from render_games import decisions_lines
 
-from ygo_zero.demos.names import CardNames  # noqa: E402
-from ygo_zero.engine.duel import Engine  # noqa: E402
+from ygo_zero.demos.names import CardNames
+from ygo_zero.engine.duel import Engine
 
 LINE = re.compile(r"\[(\d+)\] T(\d+) P(\d) CHAIN (\S+) (.*?) '.*/(\d+)$")
 

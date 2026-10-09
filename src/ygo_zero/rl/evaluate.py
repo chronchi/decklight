@@ -28,6 +28,33 @@ def format_eval_line(res: dict) -> str:
     return f"[eval it {it}] {parts}  ({res['eval_seconds']} s)"
 
 
+def save_games(path: Path, games, deck_paths: list[str], matchup: str) -> int:
+    """Every eval game as one replayable jsonl row (~1 KB): seat-ordered deck paths (repo-relative), seed, the
+    full response list, A's seat and result. `scripts/audit/rl_ga_compare.py <dir>` pairs two such files by deal
+    (deck_a, deck_b, seed, a_first) and replays them (engine only). Returns the row count."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    n = 0
+    with path.open("w") as f:
+        for k, g in enumerate(games):
+            seat = 0 if g.a_first else 1
+            pa, pb = deck_paths[g.deck_a], deck_paths[g.deck_b]
+            row = {"game": f"{matchup}-{k:04d}", "matchup": matchup, "deck_a": Path(pa).name, "deck_b": Path(pb).name,
+                   "decks": [pa, pb] if g.a_first else [pb, pa], "seed": int(g.seed), "a_first": bool(g.a_first),
+                   "a_seat": seat, "a_win": float(g.winner_is_a), "turns": int(g.turns), "truncated": bool(g.truncated),
+                   "decisions": len(g.choices), "choices": list(g.choices)}  # fmt: skip
+            f.write(json.dumps(row) + "\n")
+            n += 1
+    return n
+
+
+def _rel(p) -> str:
+    p = Path(p).resolve()
+    try:
+        return str(p.relative_to(ROOT))
+    except ValueError:
+        return str(p)
+
+
 def run_eval(
     ckpt,
     init,
@@ -42,6 +69,7 @@ def run_eval(
     device,
     threads: int,
     it: int = 0,
+    games_dir: Path | None = None,
     **kwargs,
 ) -> dict:
     """Greedy ckpt vs greedy BC (train + holdout decks) and vs ygo-agent.
@@ -50,6 +78,8 @@ def run_eval(
     ``{"iter", "eval": {"vs_bc", "vs_bc_holdout", ["vs_ygoagent"]}, "eval_seconds"}``.
     ``iter`` is accepted as an alias for ``it``. Sections with no games get
     ``wr 0.0`` (callers that need a hard failure check ``n == 0`` themselves).
+    ``games_dir``: also save every game (`<games_dir>/vs_bc/games.jsonl`, `.../vs_ygoagent/games.jsonl`, see
+    :func:`save_games`) for paired post-hoc analysis.
     """
     from ygo_zero.decks import load_ydk
     from ygo_zero.engine.duel import Engine
@@ -77,6 +107,9 @@ def run_eval(
     pairs = [(i, j) for i in range(len(ev_decks)) for j in range(len(ev_decks)) if i != j]
     games = play_match(engine, ev_decks, pol, base_pol, pairs, range(eval_seeds),
                        num_envs=128, num_threads=threads)  # fmt: skip
+    if games_dir is not None:
+        save_games(Path(games_dir) / "vs_bc" / "games.jsonl", games,
+                   [_rel(ROOT / "decks/pool" / f"{n}.ydk") for n in ev_names], "vs_bc")
     for name, gs in (("vs_bc", games), ("vs_bc_holdout", [g for g in games if ev_names[g.deck_a] in hold])):
         if len(gs) == 0:
             res["eval"][name] = {"n": 0, "wr": 0.0, "ci": [0.0, 1.0], "cut": 0}
@@ -89,6 +122,9 @@ def run_eval(
         ga._states.clear()  # LSTM states are keyed by schedule index, which restarts at 0 every match
         gp = ring_pairs(len(g_decks), ga_opps)
         games = play_match(engine, g_decks, pol, ga, gp, range(ga_seeds), num_envs=64, num_threads=threads)
+        if games_dir is not None:
+            save_games(Path(games_dir) / "vs_ygoagent" / "games.jsonl", games,
+                       [_rel(p) for p in sorted(Path(gauntlet_dir).glob("*.ydk"))], "vs_ygoagent")
         if len(games) == 0:
             res["eval"]["vs_ygoagent"] = {"n": 0, "wr": 0.0, "ci": [0.0, 1.0], "cut": 0}
         else:

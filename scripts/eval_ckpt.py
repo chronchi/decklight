@@ -41,6 +41,7 @@ def main() -> None:
     ap.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     ap.add_argument("--threads", type=int, default=max(1, _effective_cores() // 2))
     ap.add_argument("--out", type=Path, required=True, help="jsonl file the record is appended to")
+    ap.add_argument("--games-dir", type=Path, default=None, help="save every game here (rl.evaluate.save_games)")
     args = ap.parse_args()
 
     from ygo_zero.rl.evaluate import format_eval_line, run_eval
@@ -52,7 +53,7 @@ def main() -> None:
         raise SystemExit(1)
     res = run_eval(args.ckpt, args.init, args.emb, ev_names, hold, args.gauntlet_decks,
                    args.eval_seeds, args.ga_seeds, args.ga_opps, args.no_ygoagent,
-                   args.device, args.threads, it=args.iter)  # fmt: skip
+                   args.device, args.threads, it=args.iter, games_dir=args.games_dir)  # fmt: skip
     args.out.parent.mkdir(parents=True, exist_ok=True)
     with open(args.out, "a") as f:
         f.write(json.dumps(res) + "\n")

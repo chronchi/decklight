@@ -2,6 +2,11 @@
 
     uv run python scripts/audit/rl_ga_compare.py runs/<rl5ga run> --base it0 [--vs it200 ...] [--render 6]
 
+RL runs save every eval game (train_rl, since 2026-10-08): compare two iterations of one run with
+    uv run python scripts/audit/rl_ga_compare.py runs/<run>/rl/games --base iter-0000/vs_ygoagent \
+        --vs iter-0200/vs_ygoagent [--render 6]        # or .../vs_bc for the games vs the base
+then `rl_ga_divergence.py` (same args, --tag) and `rl_chain_usage.py` for the decision-level view.
+
 Input: `<run>/<tag>/games.jsonl` + `games/*/state.json` from `scripts/vast_ga_compare.sh` (each checkpoint vs
 ygo-agent on the same schedule; ygo-agent and our policy are greedy, so the same deal gives the same game until our
 policy's choices differ). Games pair by (deck_a, deck_b, seed, a_first). Per compared tag it prints:
@@ -46,7 +51,12 @@ def load(run: Path, tag: str) -> dict:
         key = (g["deck_a"], g["deck_b"], g["seed"], g["a_first"])
         if key in out:
             raise SystemExit(f"{tag}: duplicate game {key}")
-        g["path"] = run / tag / "games" / g["game"] / "state.json"
+        if "choices" in g:  # train_rl eval format (rl.evaluate.save_games): the replay is inline
+            g["state"] = {"decks": g["decks"], "seed": g["seed"], "choices": g["choices"], "a_seat": g["a_seat"],
+                          "winner": None}
+            g["path"] = None
+        else:  # gauntlet_games format: one state.json per game
+            g["path"] = run / tag / "games" / g["game"] / "state.json"
         out[key] = g
     if not out:
         raise SystemExit(f"{tag}: 0 games")
@@ -54,20 +64,26 @@ def load(run: Path, tag: str) -> dict:
 
 
 def fields(engine: Engine, st: dict) -> dict:
-    """Replay: our field at the end of each of our turns (by our turn index), the opponent's at the end of theirs."""
+    """Replay: our field at the end of each of our turns (by our turn index), the opponent's at the end of theirs.
+    Fills st["actors"] / st["turns"] when the record lacks them (train_rl eval format)."""
     seat = int(st["a_seat"])
     env = CppEnv(engine, _config(st))
     obs = env.reset()
     mine: dict[int, int] = {}
     theirs: dict[int, int] = {}
+    actors, turns = [], []
     for c in st["choices"]:
         p, turn = env.player, int(obs["global"][2])
+        actors.append(int(p))
+        turns.append(turn)
         cm, mm = obs["cards"], obs["card_mask"]
         n_own = int(sum(1 for j in np.flatnonzero(mm) if int(cm[j, 1]) in FIELD_LOCS and int(cm[j, 3]) == 0))
         (mine if p == seat else theirs)[turn] = n_own  # last value seen in that turn = end-of-turn proxy
         obs = env.step(c)
         if obs is None:
             break
+    st.setdefault("actors", actors)
+    st.setdefault("turns", turns)
     return {"mine": mine, "theirs": theirs}
 
 
@@ -119,14 +135,15 @@ def main() -> None:
     tags = args.vs or sorted(p.name for p in args.run.iterdir() if (p / "games.jsonl").is_file() and p.name != args.base)
     engine = Engine()
     base = load(args.run, args.base)
-    cache: dict[Path, dict] = {}
+    cache: dict = {}
 
     def st_of(g):
-        if g["path"] not in cache:
-            st = json.loads(g["path"].read_text())
+        key = g["path"] or id(g)
+        if key not in cache:
+            st = dict(g["state"]) if g["path"] is None else json.loads(g["path"].read_text())
             st["fields"] = fields(engine, st)
-            cache[g["path"]] = st
-        return cache[g["path"]]
+            cache[key] = st
+        return cache[key]
 
     def summary(tag: str, games: dict) -> None:
         f1 = [first_turn_field(st_of(g)["fields"], g["a_first"]) for g in games.values()]
@@ -158,7 +175,7 @@ def main() -> None:
             t[code] += 1
             if code in flips:
                 flips[code].append(k)
-            if json.loads(base[k]["path"].read_text())["choices"] == json.loads(other[k]["path"].read_text())["choices"]:
+            if st_of(base[k])["choices"] == st_of(other[k])["choices"]:
                 same += 1
         print(f"\n== {args.base} -> {tag}: {len(keys)} paired deals; identical games {same} ({same / len(keys):.2f})")
         print("   " + "  ".join(f"{c} {t[c]}" for c in sorted(t)) + f"   McNemar p = {mcnemar(t['WL'], t['LW']):.3f}")
@@ -196,16 +213,22 @@ def main() -> None:
         print("   largest gains: " + "; ".join(f"{d.split('.')[0]} {int(a)}->{int(b)}/{n}" for d, (a, b, n) in rows[-5:]))
         if args.render and flips["WL"]:
             names = CardNames()
-            od = args.run / "flips" / tag
+            od = args.run / "flips" / tag.replace("/", "_")
             od.mkdir(parents=True, exist_ok=True)
             for i, k in enumerate(flips["WL"][: args.render]):
                 d = divergence(st_of(base[k]), st_of(other[k]))
                 head = (f"deal {k}: we pilot {k[0]} vs ygo-agent {k[1]}, seed {k[2]}, we go "
                         f"{'first' if k[3] else 'second'}; first divergence {d}")
                 for tg, g in ((args.base, base[k]), (tag, other[k])):
-                    txt = render(engine, names, g["path"],
+                    path = g["path"]
+                    if path is None:  # inline record: write a state.json for render_games
+                        path = od / "states" / f"{i:02d}-{tg.replace('/', '_')}" / "state.json"
+                        path.parent.mkdir(parents=True, exist_ok=True)
+                        path.write_text(json.dumps(dict(g["state"], labels=["gold"] * len(g["state"]["choices"]),
+                                                        notes=[])))
+                    txt = render(engine, names, path,
                                  f"{head}\n{tg}: {'WIN' if g['a_win'] == 1 else 'LOSS'}, {g['turns']} turns")
-                    (od / f"{i:02d}-{tg}.txt").write_text(txt)
+                    (od / f"{i:02d}-{tg.replace('/', '_')}.txt").write_text(txt)
             print(f"   rendered {min(args.render, len(flips['WL']))} WL pairs to {od}")
 
 

@@ -17,11 +17,11 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "scripts"))
 sys.path.insert(0, str(ROOT / "scripts/audit"))
 
-from rl_ga_compare import divergence, load  # noqa: E402
-from render_games import decisions_lines  # noqa: E402
+from render_games import decisions_lines
+from rl_ga_compare import divergence, fields, load
 
-from ygo_zero.demos.names import CardNames  # noqa: E402
-from ygo_zero.engine.duel import Engine  # noqa: E402
+from ygo_zero.demos.names import CardNames
+from ygo_zero.engine.duel import Engine
 
 
 def line_at(lines: list[str], idx: int) -> str:
@@ -52,8 +52,11 @@ def main() -> None:
         print(f"\n===== {code} ({len(ks)}): {args.base} {'won' if code == 'WL' else 'lost'}, {args.tag} "
               f"{'lost' if code == 'WL' else 'won'}")
         for n, k in enumerate(ks):
-            sa = json.loads(base[k]["path"].read_text())
-            sb = json.loads(other[k]["path"].read_text())
+            sa, sb = (dict(g["state"]) if g["path"] is None else json.loads(g["path"].read_text())
+                      for g in (base[k], other[k]))
+            for st in (sa, sb):
+                if "actors" not in st:
+                    fields(engine, st)  # fills actors/turns (train_rl eval format)
             d = divergence(sa, sb)
             if d is None:
                 continue
