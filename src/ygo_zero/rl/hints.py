@@ -39,7 +39,9 @@ def replay_rows(engine, rows: list[dict], hist: int, known: bool,
     from ygo_zero.eval.turn1 import replay_prefix
     from ygo_zero.rl.ppo import model_keys
 
-    want = tuple(keys if keys is not None else model_keys(hist, known)) + ("action_mask",)
+    # model_keys already holds action_mask: dedupe (a duplicate key appended each mask twice, so the masks came out
+    # 2N long and misaligned with every other input; found 2026-10-08 before the bank's first training use)
+    want = tuple(dict.fromkeys(tuple(keys if keys is not None else model_keys(hist, known)) + ("action_mask",)))
     acc: dict[str, list] = {k: [] for k in want}
     acts: list[int] = []
     for ri, row in enumerate(rows):
@@ -53,20 +55,27 @@ def replay_rows(engine, rows: list[dict], hist: int, known: bool,
         skip = len(row.get("prefix") or [])
         if skip > len(choices):
             raise ValueError(f"bank row {ri}: prefix ({skip}) longer than the game ({len(choices)} choices)")
-        for k in [k for k, a in enumerate(actors) if a == actor and k >= skip]:
-            env, obs = replay_prefix(engine, cfg, choices[:k])
-            n_opts = int(obs["action_mask"].sum())
-            a = choices[k]
-            if not 0 <= a < n_opts or not bool(obs["action_mask"][a]):
-                raise ValueError(f"bank row {ri} decision {k}: banked action {a} illegal "
-                                 f"at replay ({n_opts} options)")
-            for key in want:
-                v = obs[key]
-                acc[key].append(np.array(v, copy=True))
-            acts.append(a)
+        # One pass per row (same env progression as replay_prefix(choices[:k]) for every k, without the
+        # quadratic re-replays: 190 rows took minutes that way).
+        env, obs = replay_prefix(engine, cfg, [])
+        for k, a in enumerate(choices):
+            if obs is None:
+                raise ValueError(f"bank row {ri}: game ended at decision {k} of {len(choices)}")
+            if actors[k] == actor and k >= skip:
+                n_opts = int(obs["action_mask"].sum())
+                if not 0 <= a < n_opts or not bool(obs["action_mask"][a]):
+                    raise ValueError(f"bank row {ri} decision {k}: banked action {a} illegal "
+                                     f"at replay ({n_opts} options)")
+                for key in want:
+                    acc[key].append(np.array(obs[key], copy=True))
+                acts.append(a)
+            obs = env.step(a)
     if not acts:
         raise ValueError("bank holds 0 actor decisions")
     out = {k: np.stack(v) for k, v in acc.items()}
+    bad = {k: len(v) for k, v in out.items() if len(v) != len(acts)}
+    if bad:
+        raise ValueError(f"replayed inputs misaligned with {len(acts)} actions: {bad}")
     return out, np.array(acts, dtype=np.int32)
 
 

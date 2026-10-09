@@ -210,3 +210,11 @@ def test_replay_rows_skips_prefix_decisions(engine, tmp_path):
     _, cut = replay_rows(engine, [dict(row, prefix=choices[:3])], hist=0, known=False)
     assert len(full) == sum(a == actor for a in actors)
     assert len(cut) == sum(a == actor for a in actors[3:])
+    obs, act = replay_rows(engine, [row], hist=0, known=False)
+    assert all(len(v) == len(act) for v in obs.values()), {k: len(v) for k, v in obs.items()}
+    # every replayed input equals a fresh replay of the prefix up to that decision
+    ks = [k for k, a in enumerate(actors) if a == actor]
+    for i, k in enumerate(ks):
+        _, o = replay_prefix(engine, cfg, choices[:k])
+        for key, v in obs.items():
+            assert np.array_equal(v[i], o[key]), (key, k)
