@@ -179,6 +179,9 @@ def main() -> None:
     ap.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     ap.add_argument("--threads", type=int, default=None, help="torch CPU threads (laptop: <= 2)")
     ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--eval-init", type=int, default=1,
+                    help="1: score the --init value (when it has a value head) on every split first (epoch 'init'), "
+                         "the baseline a new value must beat on the same games")
     args = ap.parse_args()
     if args.threads:
         torch.set_num_threads(args.threads)
@@ -223,6 +226,14 @@ def main() -> None:
     log.write(json.dumps({"epoch": -1, "init": str(args.init), "value": True, "args": args_rec}) + "\n")
     log.flush()
     best = float("inf")
+    if args.eval_init and not missing:  # --init carries a trained value head (e.g. value_ppo3): its baseline
+        rec0: dict = {"epoch": "init", "init": str(args.init)}
+        for split in ("train", "val", "holdout"):
+            if len(idx[split]):
+                rec0[split] = evaluate(model, data, idx[split], args.batch * 2, device)
+        print(json.dumps(rec0), flush=True)
+        log.write(json.dumps(rec0) + "\n")
+        log.flush()
     for ep in range(args.epochs):
         run_loss, run_n = 0.0, 0
         model.train()
