@@ -25,7 +25,9 @@ import argparse
 import json
 import math
 import re
+import sys
 import time
+import zlib
 from pathlib import Path
 
 import numpy as np
@@ -277,6 +279,17 @@ def limit_gold_games(data, train_idx: np.ndarray, n: int) -> tuple[np.ndarray, i
     return train_idx[keep], len(kept_games)
 
 
+def limit_train_frac(data, train_idx: np.ndarray, frac: float) -> tuple[np.ndarray, int, int]:
+    """Keep the train samples of a fixed share of games (line ids): crc32(line) % 10000 < frac * 10000, so a smaller
+    share is a subset of a larger one and val/holdout are untouched (learning curves share one evaluation set).
+    Returns (indices, games kept, games in train)."""
+    lines = data["line"][train_idx]
+    uniq = np.unique(lines)
+    keep_lines = {str(x) for x in uniq if zlib.crc32(str(x).encode()) % 10000 < frac * 10000}
+    keep = np.array([str(x) in keep_lines for x in lines], bool)
+    return train_idx[keep], len(keep_lines), len(uniq)
+
+
 def select_score(rec: dict, select_on: str, default: float) -> float:
     """--select-on value of a metrics record: "<split>" -> its acc, "<split>:<kind>" -> that kind's acc in the split,
     "last" -> the epoch number (best.pt = the final epoch; never the --init weights)."""
@@ -345,6 +358,8 @@ def main() -> None:
     ap.add_argument("--gold-games", type=int, default=None, help="train on the first N gold games only (by number)")
     ap.add_argument("--val-frac-kind", nargs="*", default=None, metavar="KIND=FRAC",
                     help="val share for these kinds' lines (default 0.1 for every kind)")
+    ap.add_argument("--train-frac", type=float, default=1.0,
+                    help="train on a fixed share of the train games (crc32 of line id; nested across shares)")
     ap.add_argument("--limit", type=int, default=None, help="use only the first N samples (smoke)")
     ap.add_argument("--hist", type=int, default=0, help="long salient history window H (0 = v1 stored history)")
     ap.add_argument("--hist-all", action="store_true", help="with --hist: use all entries, not just salient ones")
@@ -377,6 +392,12 @@ def main() -> None:
     if args.gold_games is not None:
         idx["train"], kept = limit_gold_games(data, idx["train"], args.gold_games)
         print(f"--gold-games {args.gold_games}: training on {kept} gold games (their train split)", flush=True)
+    if args.train_frac < 1.0:
+        idx["train"], kg, ng = limit_train_frac(data, idx["train"], args.train_frac)
+        print(f"--train-frac {args.train_frac}: training on {kg}/{ng} games ({len(idx['train'])} samples)", flush=True)
+        if len(idx["train"]) == 0:
+            print("ALERT train_bc: --train-frac left 0 train samples", flush=True)
+            sys.exit(3)
     print({k: len(v) for k, v in idx.items()}, "decks:", sorted(set(map(str, data["deck"]))), flush=True)
 
     if args.init:  # the starting checkpoint fixes the architecture

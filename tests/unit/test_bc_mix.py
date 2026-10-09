@@ -134,3 +134,16 @@ def test_limit_gold_games_keeps_first_n_by_number():
     # the cut counts games in every split: g2 in val still uses up one of the n slots
     idx, kept = train_bc.limit_gold_games(data, np.array([0, 2, 3, 5]), 2)
     assert list(idx) == [0, 5] and kept == 1
+
+
+def test_train_frac_is_fixed_and_nested():
+    """--train-frac keeps whole games (line ids), the same ones every call, and a smaller share is a subset."""
+    tb = _load("train_bc")
+    lines = np.array([f"d/st-{i}" for i in range(200) for _ in range(3)])
+    data = {"line": lines}
+    idx = np.arange(len(lines))
+    a, ka, n = tb.limit_train_frac(data, idx, 0.25)
+    b, kb, _ = tb.limit_train_frac(data, idx, 0.5)
+    assert n == 200 and 25 <= ka <= 75 and ka < kb
+    assert set(a) <= set(b) and np.array_equal(a, tb.limit_train_frac(data, idx, 0.25)[0])
+    assert len(a) == 3 * ka  # whole games
