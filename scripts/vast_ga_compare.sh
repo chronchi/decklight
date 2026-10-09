@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # RL checkpoints vs ygo-agent on the in-run eval schedule, every game saved (why did rl5 lose to ygo-agent? 2026-10-08).
 # Usage: bash scripts/vast_ga_compare.sh <name> "<tag=path[:expected seed-0 wr]> ...". One process per checkpoint in
-# parallel (each --threads/--ga-workers = cores / n). Results: runs/<name>/<tag>/games.jsonl + games/*/state.json.
+# parallel (each --threads/--ga-workers = cores / n). VS_BASE=<ckpt>: opponent is that checkpoint instead of ygo-agent. Results: runs/<name>/<tag>/games.jsonl + games/*/state.json.
 set -uo pipefail
 export PATH="$HOME/.local/bin:$PATH"
 NAME="$1"; SPECS="$2"; SEEDS="${SEEDS:-3}"; OUT="runs/$NAME"; mkdir -p "$OUT"
@@ -23,7 +23,7 @@ for spec in $SPECS; do
   tag=${spec%%=*}; rest=${spec#*=}; path=${rest%%:*}; exp=""; [ "$rest" != "$path" ] && exp="--expect $tag=${rest#*:}"
   # shellcheck disable=SC2086
   uv run --no-sync python scripts/gauntlet_games.py --ckpts "$tag=$path" $exp --deck-dir decks/gauntlet --ring 4 \
-    --seeds "$SEEDS" --out "$OUT/$tag" --device "$DEV" --threads "$T" --ga-workers "$T" > "$OUT/$tag.txt" 2>&1 &
+    --seeds "$SEEDS" ${VS_BASE:+--vs-base "$VS_BASE"} --out "$OUT/$tag" --device "$DEV" --threads "$T" --ga-workers "$T" > "$OUT/$tag.txt" 2>&1 &
   pids+=($!)
 done
 for p in "${pids[@]}"; do wait "$p" || alert "a gauntlet_games process exited $?"; done

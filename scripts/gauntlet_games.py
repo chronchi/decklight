@@ -100,6 +100,8 @@ def main() -> None:
     ap.add_argument("--deck-dir", type=Path, default=None, help="decks (default tests/fixtures/decks)")
     ap.add_argument("--ring", type=int, default=0, help="each deck vs its next k decks (0 = all ordered pairs)")
     ap.add_argument("--ga-workers", type=int, default=8)
+    ap.add_argument("--vs-base", type=Path, default=None,
+                    help="--ckpts opponent: this BC checkpoint (greedy) instead of ygo-agent; matchup <tag>-vb")
     ap.add_argument("--expect", nargs="*", default=[], metavar="TAG=WR",
                     help="fail (exit 2) if a checkpoint's seed-0 win rate differs from its in-run eval")
     args = ap.parse_args()
@@ -139,6 +141,10 @@ def compare(args) -> None:
         for spec in args.ckpts:
             tag, path = spec.split("=", 1)
             pol = BCPolicy(Path(path), args.emb, device=args.device)
+            if args.vs_base is not None:  # same schedule and seeds, base_r3 (greedy) as the opponent
+                opp = BCPolicy(args.vs_base, args.emb, device=args.device)
+                play(engine, decks, names, pol, opp, range(args.seeds), f"{tag}-vb", args.out, args.threads, log, pairs)
+                continue
             if tag in expect:  # seed 0 alone = the in-run eval (same schedule, greedy policy, ygo-agent seed 3)
                 ga = YgoAgentPolicy(seed=3, workers=args.ga_workers)
                 wr0 = play(engine, decks, names, pol, ga, range(1), f"{tag}-s0", args.out, args.threads, log, pairs)
