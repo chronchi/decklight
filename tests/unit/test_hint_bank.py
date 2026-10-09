@@ -123,3 +123,85 @@ def test_summarize_fails_loud_on_no_hard_or_no_bank(tmp_path):
     (out / "bank-0.jsonl").write_text("")
     with pytest.raises(SystemExit):
         hint_bank.summarize(out)  # 0 banked decisions
+
+
+def test_summarize_applies_gates(tmp_path):
+    """--min-wins and the second-opponent gate: only starts passing both are banked (both opponents' wins)."""
+    hint_bank = _load("hint_bank")
+    out = tmp_path / "g"
+    out.mkdir()
+    (out / "gates.json").write_text(json.dumps({"min_wins": 2, "opp2_min_wins": 1, "n_opps": 2}))
+    games, bank = [], []
+
+    def add(start, actor, wins0, wins1):
+        games.extend({"start_id": start, "actor": actor, "kind": "raw", "actor_win": False} for _ in range(4))
+        for opp, w in ((0, wins0), (1, wins1)):
+            for g in range(4):
+                games.append({"start_id": start, "actor": actor, "kind": "hinted", "opp": opp,
+                              "actor_win": g < w})
+                if g < w:
+                    bank.append({"start_id": start, "actor_seat": actor, "opp": opp, "actor_win": True,
+                                 "config": {}, "prefix": [0], "choices": [0, 1, 2], "actors": [actor] * 3})
+
+    add(0, 0, 2, 1)  # passes
+    add(0, 1, 2, 0)  # same start, other seat: fails the opp2 gate
+    add(1, 0, 1, 4)  # one lucky win vs opp 0: fails min_wins
+    (out / "games-0.jsonl").write_text("".join(json.dumps(r) + "\n" for r in games))
+    (out / "bank-0.jsonl").write_text("".join(json.dumps(r) + "\n" for r in bank))
+    summ = hint_bank.summarize(out)
+    rows = [json.loads(x) for x in (out / "bank.jsonl").read_text().splitlines() if x.strip()]
+    assert {(r["start_id"], r["actor_seat"]) for r in rows} == {(0, 0)}
+    assert len(rows) == 3 and summ["pass_all_gates"] == 1 and summ["pass_min_wins"] == 2
+    assert summ["hard"] == 3 and summ["hard_with_hinted_win"] == 3
+    assert summ["decisions_banked"] == 3 * 2  # the prefix decision is not counted
+    (out / "gates.json").write_text(json.dumps({"min_wins": 4, "opp2_min_wins": 1, "n_opps": 2}))
+    with pytest.raises(SystemExit):
+        hint_bank.summarize(out)  # nothing reaches 4/4
+
+
+def test_slot_candidates_gates(tmp_path):
+    hint_bank = _load("hint_bank")
+    starts = _starts_file(tmp_path)
+    ids = ["test-abc-dragon", "test-adamancipator"]
+
+    def slot(s, seat, cls, n, w, lp, me, opp, game=None):
+        return {"slot": 2 * s + seat, "start": s, "seat": seat, "cls": cls, "n": n, "w": w, "lp_me": lp,
+                "cnt": {"me": me, "opp": opp}, "game": game or ids[s]}
+
+    even = {"hand": 3, "mzone": 1}
+    rows = [slot(0, 0, "hopeless", 8, 0, 8000, even, even),             # in
+            slot(0, 1, "trainable", 8, 1, 8000, even, even),            # in (p 0.125)
+            slot(1, 0, "trainable", 8, 4, 8000, even, even),            # out: p 0.5
+            slot(1, 1, "hopeless", 8, 0, 1000, even, even),             # out: LP
+            slot(1, 1, "hopeless", 8, 0, 8000, {"hand": 1}, {"hand": 2, "mzone": 2, "szone": 1}),  # out: 4 behind
+            slot(1, 0, "solved", 8, 8, 8000, even, even)]               # out: solved
+    p = tmp_path / "slots.jsonl"
+    p.write_text("".join(json.dumps(r) + "\n" for r in rows))
+    got = hint_bank.slot_candidates(p, starts, 10, 0, 0.25, 1001, 3)
+    assert sorted((s, seat) for s, _, seat in got) == [(0, 0), (0, 1)]
+    p.write_text(json.dumps(slot(0, 0, "hopeless", 8, 0, 8000, even, even, game="other")) + "\n")
+    with pytest.raises(SystemExit):
+        hint_bank.slot_candidates(p, starts, 10, 0, 0.25, 1001, 3)  # slots from another starts file
+
+
+def test_replay_rows_skips_prefix_decisions(engine, tmp_path):
+    """Bank rows carry the DAGS prefix; its decisions are the source game's and are never distilled."""
+    from ygo_zero.eval.turn1 import config_to_dict, dags_config, replay_prefix
+    from ygo_zero.rl.hints import replay_rows
+
+    starts = [json.loads(x) for x in _starts_file(tmp_path).read_text().splitlines()]
+
+    cfg = dags_config(starts[0])
+    choices, actors = [], []
+    env, obs = replay_prefix(engine, cfg, [])
+    for _ in range(6):
+        actors.append(int(env.player))
+        choices.append(0)
+        obs = env.step(0)
+        assert obs is not None
+    actor = actors[0]
+    row = {"config": config_to_dict(cfg), "choices": choices, "actors": actors, "actor_seat": actor}
+    _, full = replay_rows(engine, [row], hist=0, known=False)
+    _, cut = replay_rows(engine, [dict(row, prefix=choices[:3])], hist=0, known=False)
+    assert len(full) == sum(a == actor for a in actors)
+    assert len(cut) == sum(a == actor for a in actors[3:])

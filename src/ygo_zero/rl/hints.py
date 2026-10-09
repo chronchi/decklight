@@ -49,7 +49,11 @@ def replay_rows(engine, rows: list[dict], hist: int, known: bool,
         actor = int(row["actor_seat"])
         if not (len(choices) == len(actors)):
             raise ValueError(f"bank row {ri}: {len(choices)} choices but {len(actors)} actors")
-        for k in [k for k, a in enumerate(actors) if a == actor]:
+        # Decisions inside the DAGS prefix come from the source game, not from the search: never distil them.
+        skip = len(row.get("prefix") or [])
+        if skip > len(choices):
+            raise ValueError(f"bank row {ri}: prefix ({skip}) longer than the game ({len(choices)} choices)")
+        for k in [k for k, a in enumerate(actors) if a == actor and k >= skip]:
             env, obs = replay_prefix(engine, cfg, choices[:k])
             n_opts = int(obs["action_mask"].sum())
             a = choices[k]

@@ -2,7 +2,7 @@
 # Hint bank (PLAN section 0a step 3): bank search-assisted successes on hard DAGS starts.
 # Processes are sized by measurement: one probe proc runs 150 s, its GPU memory sets how many fit.
 # Env: CKPT (policy best.pt), HINT_ARGS (common hint_bank.py args: --n/--games/--seed/--k/...),
-# OPP_CKPT (default: CKPT), VALUE_CKPT (default: unset), VAR_CAP (default 120m).
+# OPP_CKPT (default: CKPT), OPP2_CKPT (second opponent, default: unset), VALUE_CKPT (default: unset), VAR_CAP (default 120m).
 # Usage: CKPT=... HINT_ARGS='--n 200 --games 4 ...' bash scripts/vast_hint_bank.sh <name>.
 # Results: runs/<name>/bank/{bank.jsonl,summary.json}, PROGRESS, ALERT.
 set -uo pipefail
@@ -29,7 +29,7 @@ D="$OUT/bank"; mkdir -p "$D"
 # measure one process (GPU memory, RSS) on a small probe, then size the pool
 # shellcheck disable=SC2086
 uv run --no-sync python scripts/hint_bank.py --ckpt "$CKPT" --opp-ckpt "$OPP_CKPT" ${VALUE_CKPT:+--value "$VALUE_CKPT"} \
-  --device cuda --out "$OUT/probe" --nproc "${PROBE_NPROC:-1000}" --proc 0 --n 4 --games 1 \
+  ${OPP2_CKPT:+--opp2-ckpt "$OPP2_CKPT"} --device cuda --out "$OUT/probe" --nproc "${PROBE_NPROC:-1000}" --proc 0 --n 4 --games 1 \
   --k 2 --samples 1 > "$OUT/probe.txt" 2>&1 &
 PP=$!; GMB=0; RMB=0
 for i in $(seq 15); do
@@ -52,7 +52,7 @@ PIDS=()
 for ((p = 0; p < NP; p++)); do
   # shellcheck disable=SC2086
   timeout "${VAR_CAP:-120m}" uv run --no-sync python scripts/hint_bank.py --ckpt "$CKPT" --opp-ckpt "$OPP_CKPT" \
-    ${VALUE_CKPT:+--value "$VALUE_CKPT"} --device cuda --out "$D" --nproc "$NP" --proc "$p" \
+    ${VALUE_CKPT:+--value "$VALUE_CKPT"} ${OPP2_CKPT:+--opp2-ckpt "$OPP2_CKPT"} --device cuda --out "$D" --nproc "$NP" --proc "$p" \
     $HINT_ARGS > "$D/proc-$p.txt" 2>&1 &
   PIDS+=($!)
 done
