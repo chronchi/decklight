@@ -62,8 +62,10 @@ review `docs/reviews/2026-10-09-search-plan-opus.md`, NOTEBOOK 08:10):** the pro
 - P1 (~$X): E2 re-run (raw + search) on the old 744 deals vs the fixed ygo-agent = the new reference.
 - P2 (~$X), each paired with P1's search arm: own-turn-1 search on going-first deals; override only on a clear
   margin; k2s2 (budget-curve calibration with the per-sample logs).
-- Value lever (~$X): a value trained on ≥ 50k raw-game outcomes; gate = beats value_ppo3 on held-out searched-game
-  states, then one paired search arm.
+- Value lever (~$X): ~~a value trained on ≥ 50k raw-game outcomes~~ → first rl6's privileged critic as the honest
+  search's leaf value (it reads the sampled world's hidden cards; init value_ppo3), as arm `hpriv` in P1, paired vs hppo
+  (NOTEBOOK 09:15: value_ppo3 already came from far more games than 50k; an offline MSE gate on real games would hand the
+  privileged critic the true hidden cards). The 50k-raw-games value stays a fallback if hpriv ties.
 - ExIt pilot (~$X): ~20k clean (margin ≥ 2 SE), decorrelated labels, own turn 2 going second + opponent-turn-1
   windows, MPO-style loss + KL anchor, students on 25/50/100%; pass = held-out agreement rises with data, raw going-second
   ≥ +2 pp, held-out CE not rising from epoch 1; else the policy route is closed. Scale-up: not approved for now.
