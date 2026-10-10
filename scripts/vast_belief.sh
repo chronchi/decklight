@@ -39,12 +39,14 @@ run() {
   tick "train-$TAG"
 }
 IFS=';' read -ra VS <<< "$VARIANTS"
-i=0
+# wait on the training pids only: a bare `wait` also waits for the usage logger, which never exits (belief-20261009-2113
+# hung after its first pair)
+PIDS=()
 for V in "${VS[@]}"; do
   run "${V%%|*}" "${V#*|}" &
-  i=$((i + 1))
-  if [ $((i % PAR)) -eq 0 ]; then wait; fi
+  PIDS+=($!)
+  if [ "${#PIDS[@]}" -ge "$PAR" ]; then wait "${PIDS[@]}"; PIDS=(); fi
 done
-wait
+[ "${#PIDS[@]}" -gt 0 ] && wait "${PIDS[@]}"
 kill "$USAGE_PID" 2>/dev/null
 echo done > "$OUT/DONE"

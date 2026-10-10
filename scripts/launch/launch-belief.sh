@@ -5,6 +5,8 @@
 # determinizer uses. Variants: h128 (128 salient history entries), v1 (today's 32-entry window), nohist (no history
 # tokens: isolates history's share), frozen128 (only new parameters train: what base_r3's features already hold).
 # Gate: BCE ratio <= 0.9 on held-out games (val), <= 0.95 on held-out decks.
+# Rerun of the second pair after belief-20261009-2113 hung (bare `wait`):
+#   VARIANTS='nohist|--hist 0 --nohist;frozen128|--hist 128 --freeze-trunk' HOURS=1.6 bash scripts/launch/launch-belief.sh
 # Shards are built on the laptop first (engine only):
 #   taskset -c 0-3 uv run python scripts/build_belief_shards.py --records data/demos/{teacher,sw-t1,search,window,\
 #     dagger,sw-v,sw-d3,sw-v2}/'*.jsonl' --out data/cache/belief_shards --stride 4 --hist 128 --jobs 4
@@ -15,7 +17,7 @@ done
 [ -n "$(ls data/cache/belief_shards/*.npz 2>/dev/null | head -1)" ] || { echo "no belief shards"; exit 3; }
 N=belief-$(date +%Y%m%d-%H%M); echo $N
 taskset -c 0-3 uv run --no-sync python scripts/vast_job.py --name $N \
-  --cmd "INIT=data/cache/base_r3/best.pt EPOCHS=${EPOCHS:-3} PAR=${PAR:-2} bash scripts/vast_belief.sh $N" \
+  --cmd "INIT=data/cache/base_r3/best.pt EPOCHS=${EPOCHS:-3} PAR=${PAR:-2} ${VARIANTS:+VARIANTS='$VARIANTS'} bash scripts/vast_belief.sh $N" \
   --hours "${HOURS:-2}" --max-dph "${MAX_DPH:-0.30}" --min-cpus 8 --min-gpu-ram 20 \
   --extra-query "compute_cap>=800 cpu_ram>=${MIN_RAM:-64}" \
   --data data/cards/emb data/cache/base_r3 data/cache/belief_shards > data/cache/briefs/$N.launcher.log 2>&1
