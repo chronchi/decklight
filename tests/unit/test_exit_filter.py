@@ -49,3 +49,21 @@ def test_per_game_cap(tmp_path, monkeypatch):
     m.main()
     r = json.loads((tmp_path / "o/r.jsonl").read_text())
     assert len(r["search"]) == 1 and sum(lab != "skip" for lab in r["labels"]) == 1
+
+
+def test_min_gap_drops_tiny_but_clean_gaps(tmp_path):
+    import json
+    import subprocess
+    import sys
+
+    rec = {"turns": [1, 1], "labels": ["a", "b"], "targets": [0, 0],
+           "search": [{"k": 0, "chosen": 0, "played": 1, "samples": [[0.977, 0.978, 0.976, 0.977], [0.969, 0.968, 0.970, 0.969]]},
+                      {"k": 1, "chosen": 0, "played": 0, "samples": [[0.5, 0.6, 0.55, 0.5], [0.1, 0.0, 0.05, 0.1]]}]}  # fmt: skip
+    src = tmp_path / "r.jsonl"
+    src.write_text(json.dumps(rec) + "\n")
+    out = tmp_path / "o"
+    r = subprocess.run([sys.executable, "scripts/exit_filter.py", "--records", str(src), "--out", str(out),
+                        "--min-gap", "0.05"], capture_output=True, text=True, check=True)  # fmt: skip
+    assert "small_gap 1" in r.stdout and "kept 1" in r.stdout
+    kept = json.loads((out / "r.jsonl").read_text())
+    assert [e["k"] for e in kept["search"]] == [1] and kept["labels"] == ["skip", "b"]

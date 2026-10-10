@@ -1,11 +1,13 @@
 """ExIt pilot label filter (PLAN §0a "Plan after step 3"): keep only clean, decorrelated search labels.
 
     python scripts/exit_filter.py --records 'runs/<job>/records/*.jsonl' --out data/demos/exit-p/r0 \
-        [--z 2.0] [--per-game 3] [--max-turn 2] [--seed 0]
+        [--z 2.0] [--min-gap 0.0] [--per-game 3] [--max-turn 2] [--seed 0]
 
 Teacher records (search_match --save-records, with per-sample scores) are rewritten with every searched decision
 that fails the filter turned into "skip" (target None, search entry dropped), so the shard builder never sees it:
 - clean: (best - runner-up mean score) / SE >= --z, SE from the per-sample scores (sqrt((var_b + var_r) / n));
+- material: best - runner-up mean score >= --min-gap (near-deterministic rollouts give a tiny SE, so z alone passes
+  meaningless gaps such as zone placement 0.977 vs 0.969: NOTEBOOK 2026-10-10 07:00);
 - turns: only decisions on turns <= --max-turn (0 = any);
 - decorrelated: at most --per-game labels per game, drawn at random (seeded) from the clean ones.
 Prints kept/dropped counts by reason and the override share among kept labels. Exits 1 if nothing is kept, 2 if no
@@ -42,6 +44,7 @@ def main() -> None:
     ap.add_argument("--records", required=True, help="glob of teacher record jsonl files")
     ap.add_argument("--out", type=Path, required=True)
     ap.add_argument("--z", type=float, default=2.0)
+    ap.add_argument("--min-gap", type=float, default=0.0)
     ap.add_argument("--per-game", type=int, default=3)
     ap.add_argument("--max-turn", type=int, default=2)
     ap.add_argument("--seed", type=int, default=0)
@@ -51,7 +54,7 @@ def main() -> None:
         sys.exit(f"no files match {a.records}")
     a.out.mkdir(parents=True, exist_ok=True)
     rng = random.Random(a.seed)
-    cnt = {"searched": 0, "no_samples": 0, "turn": 0, "unclean": 0, "decorrelate": 0, "kept": 0, "kept_override": 0}
+    cnt = {"searched": 0, "no_samples": 0, "turn": 0, "unclean": 0, "small_gap": 0, "decorrelate": 0, "kept": 0, "kept_override": 0}
     games = kept_games = 0
     for f in files:
         with open(f) as fh:
@@ -71,6 +74,10 @@ def main() -> None:
                     continue
                 if clean_z(sm) < a.z:
                     cnt["unclean"] += 1
+                    continue
+                means = sorted((sum(x) / len(x) for x in sm), reverse=True)
+                if means[0] - means[1] < a.min_gap:
+                    cnt["small_gap"] += 1
                     continue
                 ok.append(e)
             rng.shuffle(ok)
