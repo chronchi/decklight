@@ -271,12 +271,9 @@ class PolicyNet(nn.Module):
         logits, _, enc, _, _ = self._run_features(obs, want_q=False)
         return logits, enc
 
-    def _run_features(self, obs: dict[str, torch.Tensor], want_q: bool = False
-                      ) -> tuple[torch.Tensor, torch.Tensor | None, torch.Tensor, int, torch.Tensor]:
-        """Shared encoder + per-option features. Returns (logits, resid_or_None, enc, n_opt, legal_mask).
-
-        `resid` is the raw q_head output (before adding V) when want_q, else None. `legal_mask` is
-        [B, n_opt_full] (True = legal). Bit-identical to the old `_run` when want_q=False."""
+    def encode(self, obs: dict[str, torch.Tensor]) -> tuple[dict[str, torch.Tensor], torch.Tensor, torch.Tensor, int]:
+        """Encoder pass shared by every head: (trimmed obs, enc [B, T, d] with enc[:, 0] the global token, keep
+        [B, T] (True = real token), full option count before trimming (0 when trim is off))."""
         n_opt = 0
         if self.trim:
             obs, n_opt = trim_obs(obs)
@@ -317,6 +314,16 @@ class PolicyNet(nn.Module):
             1,
         )
         enc = self.encoder(tokens, src_key_padding_mask=~keep)
+        return obs, enc, keep, n_opt
+
+    def _run_features(self, obs: dict[str, torch.Tensor], want_q: bool = False
+                      ) -> tuple[torch.Tensor, torch.Tensor | None, torch.Tensor, int, torch.Tensor]:
+        """Shared encoder + per-option features. Returns (logits, resid_or_None, enc, n_opt, legal_mask).
+
+        `resid` is the raw q_head output (before adding V) when want_q, else None. `legal_mask` is
+        [B, n_opt_full] (True = legal). Bit-identical to the old `_run` when want_q=False."""
+        obs, enc, keep, n_opt = self.encode(obs)
+        cards = obs["cards"]
         a = obs["actions"].long()
         act = self.action(a)
         # the option's own card, as encoded in context (row index into the card tokens; -1 = none)
