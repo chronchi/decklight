@@ -16,7 +16,7 @@ V="$V;hppo|--opp ygoagent --ga-seeds ${GA_SEEDS:-6} $H"
 V="$V;hold|--opp self --deck-set holdout --seeds ${HOLD_SEEDS:-2} $H"
 V="$V;new|--opp self --deck-set newcards --seeds ${NEW_SEEDS:-18} $H"
 CKPT=data/cache/base_r3/best.pt SM_ARGS="--k 4 --samples 4 --conf-skip 0.9 --deal-seed0 1000" VARIANTS="$V" \
-  PROBE_ARGS="--opp ygoagent --ga-seeds ${GA_SEEDS:-6} $H" PROBE_NPROC=40 VAR_CAP="${VAR_CAP:-180m}" \
+  PROBE_ARGS="--opp ygoagent --ga-seeds ${GA_SEEDS:-6} $H" PROBE_NPROC=40 VAR_CAP="${VAR_CAP:-240m}" \
   bash scripts/vast_search_match.sh "$NAME"
 # single-game latency: one process alone on the box, one game at a time, the first 6 fresh ygo-agent deals
 L="$OUT/latency"; mkdir -p "$L"
