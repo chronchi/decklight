@@ -73,6 +73,19 @@ review `docs/reviews/2026-10-09-search-plan-opus.md`, NOTEBOOK 08:10):** the pro
   the config is picked by a pre-registered rule (largest paired gain over P1 with p < 0.1), accepted if ≥ +3 pp, guards
   ≥ −3 pp.
 
+**Hidden-information bound (2026-10-09/10, user: "Can you write step 2 into a plan and implement it and start now?";
+review `docs/reviews/2026-10-09-history-arch-opus.md` Stage 1, NOTEBOOK 2026-10-10 00:55).** Question: is hidden-card
+knowledge a real lever against ygo-agent, and does history predict hidden cards? Before any LSTM / history-aware model.
+- (a) Oracle arm (~$X): hppo's search with the true hidden state (`--honest 0`), 744 deals vs ygo-agent, paired with
+  P1 hppo. Gate: oracle − honest ≥ +3 pp (p < 0.1) → hidden information is worth working on for the search.
+- (b) Belief head (~$X): predict "card c is in the opponent's hidden hand" for each distinct code of the opponent's
+  list, from base_r3's trunk + remembered cards (`known`) + long history, trained on replays (labels = `priv_code`).
+  Baseline = hypergeometric over the unseen part of the list (what the determinizer samples from today). Gate: belief
+  NLL ≤ 0.9 × baseline on held-out games (≤ 0.95 on held-out decks) → history is informative about hidden cards.
+  A no-history variant isolates history's share.
+- Both fail → history/belief is dead for the search; no LSTM. Both pass → belief-weighted determinization (~$X).
+  Oracle passes, belief fails → the lever is real but needs a different inference route (e.g. more worlds).
+
 **Stop:** self-imitation rounds, long PPO from base_r3, distilling the search into the policy (argmax or soft), field/critic/val-agreement
 proxies for selection, head-to-head vs base_r3 as the gate, infra work before a signal.
 
