@@ -82,6 +82,7 @@ class GameResult:
     choice_keys: list = field(default_factory=list)  # (key, rank) of every choice (semantic replay)
     log: list[dict] = field(default_factory=list)  # one entry per searched S decision (teacher records)
     decision_turns: list[int] = field(default_factory=list)  # turn number of every decision
+    search_cut: bool = False  # max_searches reached: the rest of the game was played raw
 
 
 def search_game_gen(
@@ -105,6 +106,7 @@ def search_game_gen(
     margin: float = 0.0,
     max_search_turn: int = 0,
     stop_turn: int = 0,
+    max_searches: int = 0,
 ):
     """Play one live game; S (absolute seat `s_seat`) searches, R plays raw. Returns a GameResult.
 
@@ -131,6 +133,10 @@ def search_game_gen(
 
     Label generation (ExIt pilot): `max_search_turn` > 0 searches only decisions on turns <= it; `stop_turn` > 0 ends
     the game at the first decision past that turn (GameResult.truncated, winner None).
+
+    `max_searches` > 0: after that many search attempts (searched + skipped) the game is played raw
+    (`search_cut`). Honest worlds replay the whole prefix up to tries x samples times per search, so a long looping game
+    gets slower with every search; one such game held 8 games in flight for 45+ min (NOTEBOOK 2026-10-11 00:10).
     """
     if guard_mode not in ("shared", "per_seat"):
         raise ValueError(f"guard_mode must be 'shared' or 'per_seat', got {guard_mode!r}")
@@ -185,7 +191,9 @@ def search_game_gen(
                 and turn >= (1 if own_turn1 else 2)
                 and rng.random() < own_frac
             )
-            if (window or own) and softmax_conf(z_g) < conf_skip and not (max_search_turn and turn > max_search_turn):
+            if max_searches and res.n_searched + res.det_skipped >= max_searches:
+                res.search_cut = True
+            elif (window or own) and softmax_conf(z_g) < conf_skip and not (max_search_turn and turn > max_search_turn):
                 cands = search._candidates(z_g, obs, window)
                 if len(cands) >= 2:
                     t0 = time.perf_counter()

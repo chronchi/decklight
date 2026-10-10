@@ -283,3 +283,15 @@ def test_turn_limits_for_label_generation(engine):
     assert max(res.decision_turns) <= 3
     if res.truncated:
         assert res.winner is None
+
+
+def test_max_searches_caps_then_plays_raw(engine):
+    """max_searches=2: at most 2 search attempts, the game still ends, and search_cut marks the raw remainder
+    (a looping game slowed a proc for 45+ min; NOTEBOOK 2026-10-11 00:10)."""
+    fw = _tiny_forward()
+    full, _ = _play(engine, fw, conf_skip=1.01, own_frac=1.0)
+    assert full.n_searched > 2 and not full.search_cut
+    res, _ = _play(engine, fw, conf_skip=1.01, own_frac=1.0, max_searches=2)
+    assert res.n_searched + res.det_skipped == 2
+    assert res.search_cut
+    assert res.winner in (0, 1) and not res.truncated

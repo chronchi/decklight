@@ -295,6 +295,9 @@ def main() -> None:
                     help="--opp ygoagent: ygo-agent's own lists (as in playtest --ygoagent)")
     ap.add_argument("--ga-opps", type=int, default=4, help="--opp ygoagent: each deck vs its next k decks")
     ap.add_argument("--ga-seeds", type=int, default=1, help="--opp ygoagent: seeds per pair (playtest uses 1)")
+    ap.add_argument("--max-searches", type=int, default=0,
+                    help="per game: after this many search attempts play raw (0 = no cap; a looping game slowed a proc "
+                         "for 45+ min, NOTEBOOK 2026-10-11 00:10; normal games search ~32 times)")
     ap.add_argument("--deal-seed0", type=int, default=0,
                     help="eval deals: first duel seed (0 = the card's deals; e.g. 1000 = fresh deals for a final card)")
     ap.add_argument("--deck-set", default="sample", choices=("sample", "holdout", "newcards"),
@@ -550,6 +553,7 @@ def main() -> None:
                     own_turn1=bool(args.own_turn1), conf_skip=args.conf_skip, own_frac=args.own_frac,
                     honest=bool(args.honest), det_tries=args.det_tries, det_fallback=args.det_fallback,
                     margin=args.margin, max_search_turn=args.max_search_turn, stop_turn=args.stop_turn,
+                    max_searches=args.max_searches,
                 )  # fmt: skip
             else:
                 ws = RouteWindowSearch(
@@ -567,7 +571,7 @@ def main() -> None:
                     honest=bool(args.honest), det_tries=args.det_tries, det_fallback=args.det_fallback,
                     guard_mode="shared" if legacy else "per_seat",
                     unguarded_seat=None if legacy or args.opp == "ckpt" else 1 - s_seat, margin=args.margin,
-                    max_search_turn=args.max_search_turn, stop_turn=args.stop_turn,
+                    max_search_turn=args.max_search_turn, stop_turn=args.stop_turn, max_searches=args.max_searches,
                 ), route)  # fmt: skip
             yield idx, gen
 
@@ -649,7 +653,7 @@ def main() -> None:
                     "choices": res.choices, "actors": res.actors,
                     "raw": bool(args.raw), "n_searched": res.n_searched, "n_override": res.n_override,
                     "search_s": round(res.search_s, 3),
-                    "n_branches": res.n_branches, "n_capped": res.n_capped,
+                    "n_branches": res.n_branches, "n_capped": res.n_capped, "search_cut": res.search_cut,
                     "det_proposals": res.det_proposals, "det_accepted": res.det_accepted,
                     "det_fallbacks": res.det_fallbacks, "det_skipped": res.det_skipped,
                     "det_fallback": args.det_fallback, "det_s": round(res.det_s, 3),
