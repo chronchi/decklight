@@ -56,12 +56,12 @@ from ygo_zero.search.turn1 import _batch, drive_many
 from ygo_zero.search.window import WindowSearch
 
 
-def ga_schedule(names: list[str], ga_opps: int, ga_seeds: int) -> list[tuple[int, int, int, int, int]]:
+def ga_schedule(names: list[str], ga_opps: int, ga_seeds: int, seed0: int = 0) -> list[tuple[int, int, int, int, int]]:
     """The playtest --ygoagent deal schedule: each deck vs its next k decks (ring_pairs),
     ga_seeds seeds, both seats. Entry: (di, dj, seed, s_seat, idx); S plays deck di."""
     sched = []
     for di, dj in ring_pairs(len(names), ga_opps):
-        for s in range(ga_seeds):
+        for s in range(seed0, seed0 + ga_seeds):
             for s_seat in (0, 1):
                 sched.append((di, dj, s, s_seat, len(sched)))
     return sched
@@ -295,6 +295,12 @@ def main() -> None:
                     help="--opp ygoagent: ygo-agent's own lists (as in playtest --ygoagent)")
     ap.add_argument("--ga-opps", type=int, default=4, help="--opp ygoagent: each deck vs its next k decks")
     ap.add_argument("--ga-seeds", type=int, default=1, help="--opp ygoagent: seeds per pair (playtest uses 1)")
+    ap.add_argument("--deal-seed0", type=int, default=0,
+                    help="eval deals: first duel seed (0 = the card's deals; e.g. 1000 = fresh deals for a final card)")
+    ap.add_argument("--deck-set", default="sample", choices=("sample", "holdout", "newcards"),
+                    help="eval deals without ygoagent: sample = --decks pool sample (the card's); holdout = every "
+                         "HOLDOUT pool deck + kewl-tune; newcards = decks/newcards (unseen archetypes, ADR 0007). "
+                         "Every ordered pair, --seeds seeds, both seats")
     ap.add_argument("--deal-mode", default="eval", choices=("eval", "train"),
                     help="eval: the report-card / gauntlet schedules; train: fresh --games deals from "
                          "pool - HOLDOUT - kewl-tune (gauntlet lists for ygoagent), seeds from --seed-base")
@@ -351,6 +357,9 @@ def main() -> None:
     r_n: dict[int, int] = {}  # game idx -> R outer decisions (0 in a finished game = routing broke)
     routed = args.opp != "self"  # R leaves the base policy: every obs is tagged, R's go to R's policy
     hold: set[str] = set()
+    deck_dir = ROOT / "decks" / "pool"  # --deck-set newcards switches it
+    if args.deck_set != "sample" and (args.opp == "ygoagent" or args.deal_mode == "train"):
+        ap.error("--deck-set is for eval deals without --opp ygoagent")
     if args.deal_mode == "train" or routed:
         hold = set((ROOT / "decks/pool/HOLDOUT").read_text().split()) | {"kewl-tune"}
     opp = None
@@ -380,7 +389,7 @@ def main() -> None:
             sched = [(rng.randrange(n_s), n_s + rng.randrange(len(gfiles)), args.seed_base + i, i % 2, i)
                      for i in range(args.games)]
         else:
-            sched = ga_schedule(names, args.ga_opps, args.ga_seeds)
+            sched = ga_schedule(names, args.ga_opps, args.ga_seeds, args.deal_seed0)
     elif args.deal_mode == "train":
         if args.games <= 0:
             fail("--deal-mode train needs --games N")
@@ -391,14 +400,21 @@ def main() -> None:
         decks = None
         sched = train_schedule(names, args.games, args.seed_base, hold)
     else:
-        names = sample_decks(args.decks, args.seed)
+        if args.deck_set == "sample":
+            names = sample_decks(args.decks, args.seed)
+        elif args.deck_set == "holdout":
+            hset = set((ROOT / "decks/pool/HOLDOUT").read_text().split()) | {"kewl-tune"}
+            names = sorted(p.stem for p in (ROOT / "decks" / "pool").glob("*.ydk") if p.stem in hset)
+        else:
+            deck_dir = ROOT / "decks" / "newcards"
+            names = sorted(p.stem for p in deck_dir.glob("*.ydk"))
         if len(names) < 2:
-            fail(f"only {len(names)} decks sampled")
+            fail(f"only {len(names)} decks in deck set {args.deck_set}")
         decks = None
         pair_names = [(a, b) for a in range(len(names)) for b in range(len(names)) if a != b]
         sched = []
         for di, dj in pair_names:
-            for s in range(args.seeds):
+            for s in range(args.deal_seed0, args.deal_seed0 + args.seeds):
                 for s_seat in (0, 1):
                     sched.append((di, dj, s, s_seat, len(sched)))
     if args.opp == "ckpt":
@@ -519,8 +535,8 @@ def main() -> None:
                 if args.deal_mode == "train" and (names[di] in hold or names[dj] in hold):
                     fail(f"train game drew a holdout deck: {names[di]} vs {names[dj]}")
                 cfg = DuelConfig(
-                    load_ydk(ROOT / "decks" / "pool" / f"{names[di]}.ydk"),
-                    load_ydk(ROOT / "decks" / "pool" / f"{names[dj]}.ydk"),
+                    load_ydk(deck_dir / f"{names[di]}.ydk"),
+                    load_ydk(deck_dir / f"{names[dj]}.ydk"),
                     seed=s,
                 )
             cfgs[idx] = cfg

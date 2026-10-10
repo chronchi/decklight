@@ -27,10 +27,10 @@ def _load(name: str):
 
 
 def _pool_emb(tmp_path: Path) -> Path:
-    """Random embeddings covering every pool + gauntlet card code (train deals draw real decks)."""
+    """Random embeddings covering every pool + gauntlet + newcards card code (train deals draw real decks)."""
     from ygo_zero.decks import load_ydk
 
-    files = sorted((ROOT / "decks" / "pool").glob("*.ydk")) + sorted((ROOT / "decks" / "gauntlet").glob("*.ydk"))
+    files = [f for d in ("pool", "gauntlet", "newcards") for f in sorted((ROOT / "decks" / d).glob("*.ydk"))]
     codes = sorted({c for f in files for c in list(load_ydk(f).main) + list(load_ydk(f).extra)} - {0})
     assert codes
     rng = np.random.default_rng(0)
@@ -79,8 +79,8 @@ def _run_kind(search_match, tmp_path: Path, emb: Path, ckpt: Path, kind: str, ex
 
 def _check_records(engine, recdir: Path, decks_dir: Path | list[Path]) -> None:
     """Records replay from their own config, load as window/window_own soft-target samples."""
-    from ygo_zero.demos.dataset import iter_samples, record_config, sample_kind, search_soft_targets
     from ygo_zero.decks import load_ydk
+    from ygo_zero.demos.dataset import iter_samples, record_config, sample_kind, search_soft_targets
     from ygo_zero.engine.cpp_env import CppEnv
 
     recs = [json.loads(x) for f in sorted(recdir.glob("*.jsonl"))
@@ -239,3 +239,31 @@ def test_s_seat_only_and_turn_limits(engine, tmp_path):
     rows = [json.loads(x) for x in (tmp_path / "m-greedy" / "games-0.jsonl").read_text().splitlines() if x.strip()]
     assert len(rows) == 2 and all(r["s_seat"] == 1 for r in rows)
     assert all(r["turns"] <= 2 for r in rows)
+
+
+def test_deck_sets_and_fresh_deal_seeds(tmp_path):
+    """Final-card guards (PLAN P3-P4): --deck-set holdout/newcards play only those decks, and --deal-seed0 moves every
+    eval schedule (pool pairs and ygo-agent ring) to fresh duel seeds; the default keeps the card's seeds."""
+    search_match = _load("search_match")
+    sched = search_match.ga_schedule(["a", "b", "c"], 2, 2, 1000)
+    assert sorted({s for _, _, s, _, _ in sched}) == [1000, 1001]
+    assert search_match.ga_schedule(["a", "b", "c"], 2, 2) == search_match.ga_schedule(["a", "b", "c"], 2, 2, 0)
+    emb = _pool_emb(tmp_path)
+    ckpt = _tiny_ckpt(tmp_path, emb, "base", 0)
+    sets = {"holdout": _holdout(), "newcards": {p.stem for p in (ROOT / "decks/newcards").glob("*.ydk")}}
+    for name, decks in sets.items():
+        out = tmp_path / f"m-{name}"
+        argv = ["search_match", "--ckpt", str(ckpt), "--emb", str(emb), "--opp", "self", "--deck-set", name,
+                "--seeds", "1", "--deal-seed0", "1000", "--games-limit", "2", "--stop-turn", "2", "--conf-skip", "1.01", "--own-turn1", "1",
+                "--k", "2", "--samples", "1", "--horizon", "1", "--width", "2", "--batch", "16", "--out", str(out)]
+        old = sys.argv
+        sys.argv = argv
+        try:
+            search_match.main()
+        finally:
+            sys.argv = old
+        rows = [json.loads(x) for x in (out / "games-0.jsonl").read_text().splitlines() if x.strip()]
+        assert len(rows) == 2, name
+        for r in rows:
+            assert set(r["decks"]) <= decks, (name, r["decks"])
+            assert r["seed"] == 1000

@@ -77,6 +77,8 @@ review `docs/reviews/2026-10-09-search-plan-opus.md`, NOTEBOOK 08:10):** the pro
 - P3–P4 (~$X): holdout/new-card guards, final card of the chosen config on fresh deals + single-game latency;
   the config is picked by a pre-registered rule (largest paired gain over P1 with p < 0.1), accepted if ≥ +3 pp, guards
   ≥ −3 pp.
+  **2026-10-10 (user: "Let's go with 1 for now"; NOTEBOOK 15:40):** hppo vs raw on 1,488 fresh deals (seeds ≥ 1000),
+  guards vs raw base_r3 on holdout (1,088) and new-card decks (1,080), S ≥ 0.47; ~$X (sized for precision, was $X).
 
 **Hidden-information bound (2026-10-09/10, user: "Can you write step 2 into a plan and implement it and start now?";
 review `docs/reviews/2026-10-09-history-arch-opus.md` Stage 1, NOTEBOOK 2026-10-10 00:55).** Question: is hidden-card
