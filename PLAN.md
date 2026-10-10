@@ -69,6 +69,9 @@ review `docs/reviews/2026-10-09-search-plan-opus.md`, NOTEBOOK 08:10):** the pro
 - ExIt pilot (~$X): ~20k clean (margin ≥ 2 SE), decorrelated labels, own turn 2 going second + opponent-turn-1
   windows, MPO-style loss + KL anchor, students on 25/50/100%; pass = held-out agreement rises with data, raw going-second
   ≥ +2 pp, held-out CE not rising from epoch 1; else the policy route is closed. Scale-up: not approved for now.
+  **2026-10-10 (user: "we should aim for precision"; NOTEBOOK 08:30):** 6,321 labels after `--min-gap 0.05`; both seats on
+  5,952 paired raw deals (going second ≥ +2 pp at p < 0.1, going first ≥ −2 pp), plus a read of the rendered decisions
+  where students and base_r3 diverge. Win-rate gates are sized for SE ≤ ~½ the effect from now on.
 - P3–P4 (~$X): holdout/new-card guards, final card of the chosen config on fresh deals + single-game latency;
   the config is picked by a pre-registered rule (largest paired gain over P1 with p < 0.1), accepted if ≥ +3 pp, guards
   ≥ −3 pp.
