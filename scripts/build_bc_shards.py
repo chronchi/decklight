@@ -28,11 +28,14 @@ ap = argparse.ArgumentParser()
 ap.add_argument("--out", type=Path, default=Path("data/cache/bc_shards"))
 ap.add_argument("--jobs", type=int, default=2)
 ap.add_argument("--only", nargs="*", default=None, choices=sorted(SOURCES), help="build only these sources")
+ap.add_argument("--glob", nargs="*", default=None,
+                help="build only these record globs (one source 'custom'); kinds still come from the file paths")
 args = ap.parse_args()
+sources = {"custom": args.glob} if args.glob else SOURCES
 src = {
     tag: sorted(f for g in globs for f in Path(".").glob(g) if f.stat().st_size)
-    for tag, globs in SOURCES.items()
-    if args.only is None or tag in args.only
+    for tag, globs in sources.items()
+    if args.glob or args.only is None or tag in args.only
 }
 print({k: len(v) for k, v in src.items()}, "files")
 print("samples:", build_shards(src, args.out, args.jobs))
