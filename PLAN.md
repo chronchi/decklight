@@ -72,6 +72,8 @@ review `docs/reviews/2026-10-09-search-plan-opus.md`, NOTEBOOK 08:10):** the pro
   **2026-10-10 (user: "we should aim for precision"; NOTEBOOK 08:30):** 6,321 labels after `--min-gap 0.05`; both seats on
   5,952 paired raw deals (going second ≥ +2 pp at p < 0.1, going first ≥ −2 pp), plus a read of the rendered decisions
   where students and base_r3 diverge. Win-rate gates are sized for SE ≤ ~½ the effect from now on.
+  **Outcome 2026-10-10 (NOTEBOOK 15:00): fails every gate** (s100 going second −0.1 pp, agreement flat, CE rises after
+  epoch 1) → the policy route for search labels is closed at this label quality; search stays at play time only.
 - P3–P4 (~$X): holdout/new-card guards, final card of the chosen config on fresh deals + single-game latency;
   the config is picked by a pre-registered rule (largest paired gain over P1 with p < 0.1), accepted if ≥ +3 pp, guards
   ≥ −3 pp.
