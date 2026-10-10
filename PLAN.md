@@ -79,6 +79,8 @@ review `docs/reviews/2026-10-09-search-plan-opus.md`, NOTEBOOK 08:10):** the pro
   ≥ −3 pp.
   **2026-10-10 (user: "Let's go with 1 for now"; NOTEBOOK 15:40):** hppo vs raw on 1,488 fresh deals (seeds ≥ 1000),
   guards vs raw base_r3 on holdout (1,088) and new-card decks (1,080), S ≥ 0.47; ~$X (sized for precision, was $X).
+  **Outcome (NOTEBOOK 2026-10-11 00:10): accepted.** hppo 0.512 vs raw 0.410 (+10.2 pp, p = 9e-14; first +8.6, second
+  +11.8); guards holdout 0.676, new-card 0.656; 55 s/game single-process, 1.3 s/search. $X.
 
 **Hidden-information bound (2026-10-09/10, user: "Can you write step 2 into a plan and implement it and start now?";
 review `docs/reviews/2026-10-09-history-arch-opus.md` Stage 1, NOTEBOOK 2026-10-10 00:55).** Question: is hidden-card
