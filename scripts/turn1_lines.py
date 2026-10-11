@@ -168,7 +168,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--ckpt", type=Path, required=True, help="policy checkpoint (its metrics.jsonl gives the arch)")
     ap.add_argument("--critic", type=Path, required=True, help="privileged critic checkpoint")
     ap.add_argument("--emb", type=Path, default=ROOT / "data/cards/emb/qwen3-0.6b-d512.npz")
-    ap.add_argument("--decks", required=True, help="train | holdout | gauntlet | comma-separated ydk paths")
+    ap.add_argument("--decks", required=True, help="train | holdout | gauntlet | newcards | comma-separated ydk paths")
     ap.add_argument("--hands", type=int, required=True)
     ap.add_argument("--k", type=int, required=True, help="sampled lines per hand")
     ap.add_argument("--seed", type=int, required=True)
@@ -198,7 +198,7 @@ def main(argv: list[str] | None = None) -> int:
         for name, _ in decks:
             tasks.append({"deck": name, "split": split, "train_ok": train_ok, "table": table, "source": "random",
                           "hand": h})
-    if split in ("train", "holdout"):
+    if split in ("train", "holdout", "newcards"):
         for name, _ in decks:
             for i, rec in enumerate(verified_records(name, args.hands)):
                 tasks.append({"deck": name, "split": split, "train_ok": train_ok, "source": "verified", "hand": i,

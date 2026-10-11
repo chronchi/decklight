@@ -30,7 +30,7 @@ ROOT = Path(__file__).resolve().parents[3]
 FIELD_LOCS = (3, 4)  # obs card column 1: 3 mzone, 4 szone (same measure as playtest.my_field)
 CAP = 400  # decision cap per turn-1 run (same as playtest: hitting it = "stuck")
 
-TRAIN_OK = {"train": True, "holdout": False, "gauntlet": False, "custom": False}
+TRAIN_OK = {"train": True, "holdout": False, "gauntlet": False, "newcards": False, "custom": False}
 
 
 def my_field(obs) -> int:
@@ -53,13 +53,14 @@ def resolve_decks(spec: str, seed: int = 0, max_decks: int = 0) -> tuple[str, li
     """Resolve `--decks` to (split label, [(name, ydk path)], train_ok).
 
     Split names: train (pool minus HOLDOUT minus kewl-tune), holdout (HOLDOUT names present in the
-    pool, plus kewl-tune if present), gauntlet (ygo-agent's decks: EVAL ONLY, never training data).
+    pool, plus kewl-tune if present), gauntlet (ygo-agent's decks: EVAL ONLY, never training data), newcards (unseen
+    archetypes, ADR 0007: EVAL ONLY).
     Anything else is a comma-separated list of ydk paths (split "custom", never training data).
     `--max_decks N` takes a deterministic sample (sorted, random.Random(seed)).
     """
-    if spec in ("train", "holdout", "gauntlet"):
-        if spec == "gauntlet":
-            paths = sorted((ROOT / "decks" / "gauntlet").glob("*.ydk"))
+    if spec in ("train", "holdout", "gauntlet", "newcards"):
+        if spec in ("gauntlet", "newcards"):
+            paths = sorted((ROOT / "decks" / spec).glob("*.ydk"))
         else:
             hold = set((ROOT / "decks/pool/HOLDOUT").read_text().split()) | {"kewl-tune"}
             pool = sorted((ROOT / "decks" / "pool").glob("*.ydk"))
@@ -90,7 +91,7 @@ def verified_records(deck: str, limit: int) -> list[dict]:
     recs = []
     for f in list(ROOT.glob(f"data/demos/*/verified/{deck}.jsonl")) + list(
         ROOT.glob(f"data/demos/planned*/improved/verified/{deck}.jsonl")
-    ):
+    ) + list(ROOT.glob(f"data/eval_lines/*/verified/{deck}.jsonl")):  # eval-only lines (never under data/demos)
         for raw in f.read_text().splitlines():
             if raw.strip():
                 r = json.loads(raw)

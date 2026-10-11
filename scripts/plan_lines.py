@@ -109,7 +109,9 @@ def load_examples(deck_name: str, k: int) -> list[ComboLine]:
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--deck", required=True, help="pool deck (decks/pool/<NAME>.ydk)")
+    ap.add_argument("--deck", required=True, help="deck name (<deck-dir>/<NAME>.ydk)")
+    ap.add_argument("--deck-dir", default="decks/pool",
+                    help="decks/newcards etc.: eval-only decks; then write --out-dir outside data/demos (BC globs it)")
     ap.add_argument("--hands", type=int, default=20)
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--repairs", type=int, default=2)
@@ -150,7 +152,9 @@ def main() -> None:
     t0 = time.time()
     engine = Engine()
     names = CardNames()
-    deck = load_ydk(ROOT / "decks" / "pool" / f"{args.deck}.ydk")
+    if args.deck_dir != "decks/pool" and args.out_dir.startswith("data/demos"):
+        ap.error("eval-only decks must not write lines under data/demos (build_bc_shards trains on them)")
+    deck = load_ydk(ROOT / args.deck_dir / f"{args.deck}.ydk")
     hands = sample_hands(deck, args.hands, args.seed)
     examples = load_examples(args.deck, args.examples)
     print(f"examples: {len(examples)} ({[e.id for e in examples]})")
