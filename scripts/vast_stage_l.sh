@@ -7,7 +7,8 @@
 #    4 -> 12 in steps of 4; a target only where the best candidate beats the runner-up at 2 SE and >= 0.05.
 # Sizing: one gen_window probe (150 s peak GPU memory / RSS), procs = min(cores, GPU, RAM).
 # First milestone: when the first proc has written 10 games, the decisive-label rate and the window fire rate are read
-# (scripts/audit/stage_l_milestone.py); 0 labels or a window fire rate > 0.5 (sw-v's 0.60, ygo-agent 0.24) kills the job.
+# (scripts/audit/stage_l_milestone.py), again at 12 games per proc; 0 labels or a window fire rate whose lower 90% bound is
+# > 0.5 over >= 80 window labels (sw-v's 0.60, ygo-agent 0.24) kills the job.
 # Env: BASE, VALUE, SP_GAMES (3000), WG (window games, 1500), OWN_FRAC (0.3), WCAP (150m).
 # Usage: bash scripts/vast_stage_l.sh <name>. Vast GPU only.
 set -uo pipefail
@@ -87,16 +88,18 @@ for p in $(seq 0 $((NP - 1))); do
     --games "$WG" --proc "$p" --nproc "$NP" --out "$OUT/hw/p$p" > "$OUT/hw-$p.txt" 2>&1 &
   W_PIDS+=($!)
 done
-( while sleep 60; do
-    n=$(cat "$OUT"/hw/p*/*.jsonl 2>/dev/null | wc -l)
-    if [ "$n" -ge $(( NP * 3 )) ]; then
-      if uv run --no-sync python scripts/audit/stage_l_milestone.py "$OUT/hw" > "$OUT/milestone.txt" 2>&1; then
-        echo "$(date +%T) $(tail -1 "$OUT/milestone.txt")" >> "$OUT/PROGRESS"
-      else
-        alert "$(tail -1 "$OUT/milestone.txt"); killing the search"
-        touch "$OUT/KILLED"
-        for pid in "${W_PIDS[@]}"; do kill "$pid" 2>/dev/null; done  # timeout forwards the TERM to gen_window
-      fi
+# milestones at 3 and 12 games per proc (the fire gate needs >= 80 window labels, ~150 games at z=3)
+( for m in 3 12; do
+    while sleep 60; do
+      n=$(cat "$OUT"/hw/p*/*.jsonl 2>/dev/null | wc -l)
+      [ "$n" -ge $(( NP * m )) ] && break
+    done
+    if uv run --no-sync python scripts/audit/stage_l_milestone.py "$OUT/hw" > "$OUT/milestone.txt" 2>&1; then
+      echo "$(date +%T) $(tail -1 "$OUT/milestone.txt")" >> "$OUT/PROGRESS"
+    else
+      alert "$(tail -1 "$OUT/milestone.txt"); killing the search"
+      touch "$OUT/KILLED"
+      for pid in "${W_PIDS[@]}"; do kill "$pid" 2>/dev/null; done  # timeout forwards the TERM to gen_window
       break
     fi
   done ) &
