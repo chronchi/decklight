@@ -24,7 +24,7 @@ gen_search = _load("gen_search")
 gen_window = _load("gen_window")
 
 
-def _random_games(engine, tmp_path: Path, n: int = 3) -> Path:
+def _random_games(engine, tmp_path: Path, n: int = 3, max_len: int = 400) -> Path:
     """Full random-policy games in gold record format (config, choices, actors, turns)."""
     from ygo_zero.decks import load_ydk
     from ygo_zero.engine.cpp_env import CppEnv
@@ -40,7 +40,7 @@ def _random_games(engine, tmp_path: Path, n: int = 3) -> Path:
             cfg = DuelConfig(d0, d1, seed=50 + i)
             env = CppEnv(engine, cfg)
             obs, ch, act, tu = env.reset(), [], [], []
-            while obs is not None and len(ch) < 400:
+            while obs is not None and len(ch) < max_len:
                 legal = np.flatnonzero(obs["action_mask"])
                 a = int(rng.choice(legal))
                 ch.append(a)
@@ -331,3 +331,45 @@ def test_game_gen_honest_skip_never_uses_true_config(engine, tmp_path):
             assert isinstance(w, tuple), f"skip mode must not use the true config, got {type(w)}"
             wcfg, _wprefix = w
             assert wcfg is not cfg, "rollout used the true config (None-substitute) in skip mode"
+
+
+def test_decisive_label_mode(engine, tmp_path):
+    """Stage L: --ho 1 --windows all labels only decisive decisions; targets are legal, logged as status "label",
+    and every labelled best candidate has the highest mean; undecided decisions carry no target."""
+    from ygo_zero.demos.dataset import record_config
+    from ygo_zero.engine.cpp_env import CppEnv
+
+    src = _random_games(engine, tmp_path, n=1, max_len=120)  # one 400-decision game takes ~280 s in this mode
+    for honest in ("0", "1"):
+        out = tmp_path / f"hw{honest}"
+        old = sys.argv
+        sys.argv = ["gen_window", "--policy", "greedy", "--records", str(src), "--own-frac", "0.3", "--out", str(out),
+                    "--ho", "1", "--windows", "all", "--samples", "2", "--ho-s-max", "6", "--ho-step", "2",
+                    "--rollout-temp", "2.0", "--honest", honest, "--det-fallback", "true"]  # fmt: skip
+        try:
+            gen_window.main()
+        finally:
+            sys.argv = old
+        recs = [json.loads(x) for f in out.glob("*.jsonl") for x in f.read_text().splitlines() if x.strip()]
+        n_label = 0
+        for rec in recs:
+            log = {e["k"]: e for e in rec["search"]}
+            env = CppEnv(engine, record_config(rec), True)
+            obs = env.reset()
+            for k, c in enumerate(rec["choices"]):
+                t = rec["targets"][k]
+                if k in log:
+                    e = log[k]
+                    assert e["ho"]["status"] in ("label", "undecided")
+                    assert (t is not None) == (e["ho"]["status"] == "label")
+                    assert e["ho"]["n"] <= 6 and e["ho"]["rounds"] >= 1
+                    if t is not None:
+                        n_label += 1
+                        assert obs["action_mask"][t] and t == e["ho"]["best"]
+                        j = e["cands"].index(t)
+                        assert e["scores"][j] == max(e["scores"])
+                        assert e["ho"]["gap"] >= max(2 * (e["ho"]["se"] or 0), 0.05)
+                else:
+                    assert t is None
+                obs = env.step(c)
+        assert n_label > 0

@@ -29,6 +29,7 @@ from gen_search import greedy_logits
 
 from ygo_zero.demos.dataset import record_config
 from ygo_zero.engine.duel import Engine
+from ygo_zero.search.honest import HonestRule
 from ygo_zero.search.window import WindowSearch
 
 KEEP = ("decks", "config", "auto_single", "choices", "actors", "turns", "winner", "end_turn", "level")
@@ -76,6 +77,15 @@ def main() -> None:
     ap.add_argument("--det-tries", type=int, default=32, help="rejection-sampling proposals per honest world")
     ap.add_argument("--det-fallback", default="skip", choices=("true", "skip"),
                     help="failed world: fall back to the true config, or skip the decision")
+    ap.add_argument("--ho", type=int, default=0, choices=(0, 1),
+                    help="stage L decisive labels (search/honest.py decisive_label): merged candidates, --samples up "
+                         "to --ho-s-max, a target only where the best beats the runner-up significantly")
+    ap.add_argument("--ho-z", type=float, default=2.0)
+    ap.add_argument("--ho-min-gap", type=float, default=0.05)
+    ap.add_argument("--ho-s-max", type=int, default=12)
+    ap.add_argument("--ho-step", type=int, default=4)
+    ap.add_argument("--windows", default="opp", choices=("opp", "all"),
+                    help="all = chain windows on either turn + own Main-phase activation decisions (stage L)")
     ap.add_argument("--width", type=int, default=32)
     ap.add_argument("--batch", type=int, default=512)
     ap.add_argument("--seed", type=int, default=0)
@@ -103,7 +113,9 @@ def main() -> None:
                       seed=args.seed, value=value,
                       horizons=tuple(args.horizons) if args.horizons else None,
                       samples=args.samples, rollout_temp=args.rollout_temp,
-                      select=args.select, tie_eps=args.tie_eps, conf_skip=args.conf_skip)  # fmt: skip
+                      select=args.select, tie_eps=args.tie_eps, conf_skip=args.conf_skip, windows=args.windows,
+                      ho=HonestRule(z=args.ho_z, min_gap=args.ho_min_gap, s_max=args.ho_s_max, step=args.ho_step)
+                      if args.ho else None)  # fmt: skip
     games = load_games(args.records, args.games, args.seed, args.proc, args.nproc)
     args.out.mkdir(parents=True, exist_ok=True)
     eff_hs = tuple(args.horizons) if args.horizons else (args.horizon,)
@@ -114,6 +126,7 @@ def main() -> None:
     tot = {"games": 0, "window": 0, "own": 0, "fired": 0, "agree_window": 0, "agree_own": 0, "bad_replay": 0,
            "det_proposals": 0, "det_accepted": 0, "det_fallbacks": 0, "det_skipped": 0, "det_s": 0.0}
     agree: dict[str, int] = {}
+    ho_status: dict[str, int] = {}
     agree_n = 0
     conf_sum, set_sum, conf_n = 0.0, 0, 0
     for i, res in ws.run_many(jobs, args.width):
@@ -144,6 +157,9 @@ def main() -> None:
             conf_sum += float(e.get("conf", 1.0))
             set_sum += len(e.get("set", [e["chosen"]]))
             conf_n += 1
+            if "ho" in e:
+                st = f"{e['kind']}:{e['ho']['status']}"
+                ho_status[st] = ho_status.get(st, 0) + 1
             cands, chosen = e["cands"], e["chosen"]
             for kk, col in (e.get("scores_all") or {}).items():
                 amax = max(range(len(cands)), key=lambda j: (col[j], -j))
@@ -157,7 +173,9 @@ def main() -> None:
             "source": f"window search k={args.k} h={args.horizon} hs=[{hs_str}] samples={args.samples} "
                       f"temp={args.rollout_temp} select={args.select} tie_eps={args.tie_eps} over {args.policy}"
                       + (f", value {args.value}" if args.value else "")
-                      + f" honest={int(args.honest)} det_fallback={args.det_fallback}",
+                      + f" honest={int(args.honest)} det_fallback={args.det_fallback}"
+                      + (f" ho z={args.ho_z} min_gap={args.ho_min_gap} s_max={args.ho_s_max} windows={args.windows}"
+                         if args.ho else ""),
         }  # fmt: skip
         with (args.out / src).open("a") as f:
             f.write(json.dumps(out) + "\n")
@@ -183,9 +201,13 @@ def main() -> None:
           f"{tot['agree_window'] / w:.3f}, own {tot['agree_own'] / max(tot['own'], 1):.3f}; "
           f"per-key agreement with target {per_key}, mean conf {mean_conf:.3f}, mean set {mean_set:.2f}; "
           f"{det_extra}"
+          f"{f'decisive labels {ho_status}; ' if args.ho else ''}"
           f"capped rollouts {ws.capped} (scored as losses); "
           f"wall {time.time() - t0:.0f} s",
           flush=True)  # fmt: skip
+    if args.ho and not any(s.endswith(":label") for s in ho_status):
+        print(f"ALERT gen_window: 0 decisive labels ({ho_status})", flush=True)
+        raise SystemExit(2)
     if args.honest and skip_rate > 0.5:
         print(f"ALERT gen_window: honest skip rate {skip_rate:.3f} > 50% "
               f"({tot['det_skipped']}/{conf_n + tot['det_skipped']})", flush=True)

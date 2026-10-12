@@ -133,6 +133,7 @@ class Audit:
             out["labels"] = dict(self.labels)
             out["inferred_share"] = round(self.labels["inferred"] / lab, 4)
         out["lines_with_own_turn_ht"] = len(self.drops)
+        out["card_counts"] = {m: {str(c): v for c, v in cs.items()} for m, cs in self.cards.items()}  # full, by code
         return out
 
 

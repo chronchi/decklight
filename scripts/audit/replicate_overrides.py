@@ -21,6 +21,7 @@ import json
 import math
 import random
 import sys
+import zlib
 from pathlib import Path
 
 import numpy as np
@@ -53,13 +54,35 @@ def overrides(games_dir: Path) -> list[tuple[dict, dict]]:
     return out
 
 
+def hw_labels(hw_dir: Path) -> list[tuple[dict, dict]]:
+    """Stage L decisive labels (gen_window --ho 1 records): (record, entry) with pick = the runner-up."""
+    out = []
+    for f in sorted(hw_dir.glob("p*/*.jsonl")) + sorted(hw_dir.glob("*.jsonl")):
+        for i, line in enumerate(f.read_text().splitlines()):
+            if not line.strip():
+                continue
+            r = json.loads(line)
+            r.setdefault("game_idx", f"{f.parent.name}/{f.name}:{i}")
+            for e in r.get("search", []):
+                h = e.get("ho") or {}
+                if h.get("status") == "label" and h.get("runner_up") is not None:
+                    out.append((r, {**e, "played": int(h["runner_up"]), "chosen": int(e["chosen"])}))
+    return out
+
+
 def item_gen(engine, ws: WindowSearch, rec: dict, e: dict, deck_dir: Path, samples: int, tries: int, seed: int):
-    names = rec["decks"]
-    cfg = DuelConfig(load_ydk(deck_dir / f"{names[0]}.ydk"), load_ydk(deck_dir / f"{names[1]}.ydk"),
-                     seed=int(rec["seed"]))
-    k, me = int(e["k"]), int(rec["s_seat"])
+    k = int(e["k"])
     choices = [int(c) for c in rec["choices"]]
-    env = CppEnv(engine, cfg, True)
+    if "s_seat" in rec:  # search_match game: decks by name, the searching seat
+        names = rec["decks"]
+        cfg = DuelConfig(load_ydk(deck_dir / f"{names[0]}.ydk"), load_ydk(deck_dir / f"{names[1]}.ydk"),
+                         seed=int(rec["seed"]))
+        me = int(rec["s_seat"])
+    else:  # gen_window record (stage L): stored config, the acting player at k
+        from ygo_zero.demos.dataset import record_config
+
+        cfg, me = record_config(rec), int(rec["actors"][k])
+    env = CppEnv(engine, cfg, rec.get("auto_single", True))
     obs = env.reset()
     tr = SeenTracker(me)
     tr.update(env)
@@ -73,15 +96,18 @@ def item_gen(engine, ws: WindowSearch, rec: dict, e: dict, deck_dir: Path, sampl
     if obs is None or int(env.player) != me:
         return {"error": "replay mismatch at k"}
     pick, ch = int(e["played"]), int(e["chosen"])
-    if choices[k] != ch:
+    if "s_seat" in rec and choices[k] != ch:
         return {"error": f"recorded choice {choices[k]} != chosen {ch}"}
-    det = Determinizer(engine, cfg, True, me, choices[:k], tr.seen, obs, random.Random(f"{seed}:{rec['game_idx']}:{k}"),
+    det = Determinizer(engine, cfg, rec.get("auto_single", True), me, choices[:k], tr.seen, obs,
+                       random.Random(f"{seed}:{rec['game_idx']}:{k}"),
                        prefix_keys=keys, tries=tries)
     worlds = [w for w in (det.sample() for _ in range(samples)) if w is not None]
     if len(worlds) < samples // 2:
         return {"error": f"only {len(worlds)} worlds"}
     branches = [(choices[:k] + [x], j, x, s) for j, x in enumerate((pick, ch)) for s in range(len(worlds))]
-    yield from ws.rollouts_gen(cfg, True, branches, me, turn_start=int(e["turn"]), game_seed=10_000 + int(rec["game_idx"]),
+    yield from ws.rollouts_gen(cfg, rec.get("auto_single", True), branches, me, turn_start=int(e["turn"]),
+                               game_seed=10_000 + (int(rec["game_idx"]) if str(rec["game_idx"]).isdigit()
+                                                   else zlib.crc32(str(rec["game_idx"]).encode())),
                                decision_k=k, worlds=worlds)
     sp, sc = ws.last_samples[0], ws.last_samples[1]
     m, se, n = paired_gap(sc, sp)
@@ -93,7 +119,8 @@ def item_gen(engine, ws: WindowSearch, rec: dict, e: dict, deck_dir: Path, sampl
 
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--games", type=Path, required=True)
+    ap.add_argument("--games", type=Path, required=True, help="search_match games dir, or a stage L hw dir with --hw")
+    ap.add_argument("--hw", action="store_true", help="stage L decisive labels: best vs runner-up (gen_window --ho 1)")
     ap.add_argument("--n", type=int, default=300)
     ap.add_argument("--samples", type=int, default=32)
     ap.add_argument("--det-tries", type=int, default=32)
@@ -129,7 +156,7 @@ def main() -> None:
         print(json.dumps(summ))
         return
 
-    items = overrides(args.games)
+    items = hw_labels(args.games) if args.hw else overrides(args.games)
     if not items:
         fail(f"no overrides in {args.games}")
     random.Random(args.seed).shuffle(items)

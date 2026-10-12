@@ -147,3 +147,59 @@ def test_replicate_overrides_item(engine):
     out = dict(drive_many([(0, mod.item_gen(engine, ws2, rec, ov[0], FIXTURES / "decks", 4, 8, 0))], fw, 2))[0]
     assert "error" not in out, out
     assert out["n"] >= 2 and out["holds"] == (out["gap"] > 0)
+
+
+def test_replicate_hw_label_item(engine, tmp_path):
+    """replicate_overrides --hw: a stage L record (stored config + actors, no s_seat) replays and re-searches a
+    decisive label (best vs runner-up) at the acting player's seat; hw_labels reads gen_window --ho records."""
+    import importlib.util
+    import json
+    import sys
+    from pathlib import Path
+
+    from test_search_play import FIXTURES, _tiny_forward
+
+    from ygo_zero.decks import load_ydk
+    from ygo_zero.engine.cpp_env import CppEnv
+    from ygo_zero.engine.duel import DuelConfig
+    from ygo_zero.search.turn1 import drive_many
+    from ygo_zero.search.window import WindowSearch
+
+    root = Path(__file__).resolve().parents[2]
+    spec = importlib.util.spec_from_file_location("replicate_overrides", root / "scripts/audit/replicate_overrides.py")
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules["replicate_overrides"] = mod
+    spec.loader.exec_module(mod)
+
+    paths = sorted((FIXTURES / "decks").glob("*.ydk"))
+    d0, d1 = load_ydk(paths[2]), load_ydk(paths[3])
+    cfg = DuelConfig(d0, d1, seed=8)
+    env = CppEnv(engine, cfg, True)
+    obs, choices, actors, k_at = env.reset(), [], [], None
+    while obs is not None and len(choices) < 200:
+        legal = [int(i) for i in obs["action_mask"].nonzero()[0]]
+        if k_at is None and len(legal) >= 2 and int(obs["global"][2]) >= 2:
+            k_at, pair, turn = len(choices), legal[:2], int(obs["global"][2])
+        actors.append(int(env.player))
+        choices.append(legal[0])
+        obs = env.step(legal[0])
+    assert k_at is not None
+    conf = {"deck0_main": list(d0.main), "deck0_extra": list(d0.extra), "deck1_main": list(d1.main),
+            "deck1_extra": list(d1.extra), "seed": 8, "hand": cfg.hand, "draw": cfg.draw, "lp": cfg.lp, "setup": [],
+            "shuffle": cfg.shuffle}  # fmt: skip
+    entry = {"k": k_at, "kind": "own", "turn": turn, "cands": pair, "chosen": pair[1], "played": pair[0],
+             "fired": False, "ho": {"status": "label", "best": pair[1], "runner_up": pair[0]}}  # fmt: skip
+    rec = {"config": conf, "auto_single": True, "choices": choices, "actors": actors, "search": [entry]}
+    (tmp_path / "p0").mkdir()
+    (tmp_path / "p0" / "x.jsonl").write_text(json.dumps(rec) + "\n")
+    items = mod.hw_labels(tmp_path)
+    assert len(items) == 1 and items[0][1]["played"] == pair[0] and items[0][1]["chosen"] == pair[1]
+
+    def never(buf):
+        raise AssertionError("unused")
+
+    ws = WindowSearch(engine, never, k=2, horizon=1, samples=4, seed=1)
+    r, e = items[0]
+    out = dict(drive_many([(0, mod.item_gen(engine, ws, r, e, FIXTURES / "decks", 4, 8, 0))], _tiny_forward(), 2))[0]
+    assert "error" not in out, out
+    assert out["n"] >= 2 and out["pick"] == pair[0] and out["chosen"] == pair[1]

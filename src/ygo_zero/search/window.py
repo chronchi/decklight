@@ -20,6 +20,7 @@ Written as generators (see turn1.py) so many games share one batched forward (`r
 
 from __future__ import annotations
 
+import math
 import random
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -55,6 +56,21 @@ def is_window(obs, actor: int) -> bool:
         return False
     acts, mask = obs["actions"], obs["action_mask"].astype(bool)
     return bool(np.any(acts[mask, 0] == Kind.ACTIVATE))
+
+
+def decision_kind_all(obs, rng: random.Random, own_frac: float) -> str | None:
+    """Stage L decision selection: "window" = a chain window (either turn) where an activation is legal; "own" =
+    own-turn Main-phase idle decision with an activation legal, sampled with probability own_frac."""
+    g = obs["global"]
+    acts, mask = obs["actions"], obs["action_mask"].astype(bool)
+    can_act = bool(np.any(acts[mask, 0] == Kind.ACTIVATE))
+    if not can_act:
+        return None
+    if int(g[21]) == C.MSG_SELECT_CHAIN:
+        return "window"
+    if int(g[21]) == C.MSG_SELECT_IDLECMD and int(g[5]) == 1 and rng.random() < own_frac:
+        return "own"
+    return None
 
 
 @dataclass
@@ -93,7 +109,7 @@ class WindowSearch:
                  max_rollout: int = 300, batch: int = 512, seed: int = 0, value: ValueFn | None = None,
                  horizons: tuple[int, ...] | list[int] | None = None, samples: int = 1,
                  rollout_temp: float = 1.0, select: str | None = None, tie_eps: float = 0.0,
-                 conf_skip: float = 1.01) -> None:  # fmt: skip
+                 conf_skip: float = 1.01, ho=None, windows: str = "opp") -> None:  # fmt: skip
         self.engine, self.logits, self.k, self.horizon = engine, logits, k, horizon
         self.value, self.win = value, (1.0 if value is not None else WIN)
         self.own_frac, self.max_rollout, self.batch = own_frac, max_rollout, batch
@@ -105,6 +121,13 @@ class WindowSearch:
         self.tie_eps = tie_eps
         self.conf_skip = conf_skip  # game_gen skips decisions whose policy top probability is >= this (1.01 = never)
         self.capped = 0  # rollout branches that hit max_rollout (scored as a loss); gen_window prints it
+        # Stage L (retrain plan v2): `ho` = search.honest.HonestRule -> decisive-label mode (merged candidates,
+        # samples from `samples` up to ho.s_max in ho.step rounds, a target only where the best candidate beats the
+        # runner-up significantly). `windows`: "opp" = opponent-turn chain windows + own_frac of own decisions (as
+        # before); "all" = chain windows on either turn + own_frac of own Main-phase idle decisions with an activation.
+        if windows not in ("opp", "all"):
+            raise ValueError(f"windows must be 'opp' or 'all', got {windows!r}")
+        self.ho, self.windows = ho, windows
 
     def _hs(self) -> tuple[int, ...]:
         return self.horizons if self.horizons is not None else (self.horizon,)
@@ -362,11 +385,19 @@ class WindowSearch:
             me, turn = int(env.player), int(obs["global"][2])
             n_legal = int(obs["action_mask"].sum())
             kind = None
-            if is_window(obs, me):
+            if self.windows == "all":
+                kind = decision_kind_all(obs, rng, self.own_frac)
+            elif is_window(obs, me):
                 kind = "window"
             elif int(obs["global"][5]) == 1 and turn >= 2 and n_legal >= 2 and rng.random() < self.own_frac:
                 kind = "own"
-            if kind is not None:
+            if kind is not None and self.ho is not None:
+                z = _masked((yield [obs])[0], obs)
+                ez = np.exp(z - z.max())
+                if float(ez.max() / ez.sum()) < self.conf_skip:
+                    yield from self._decisive_gen(res, z, obs, kind, k, int(c), me, turn, choices, config, auto_single,
+                                                  game_seed, trackers, choice_keys, det_tries, det_fallback)
+            elif kind is not None:
                 z = _masked((yield [obs])[0], obs)
                 cands = self._candidates(z, obs, kind == "window")
                 ez = np.exp(z - z.max())
@@ -439,6 +470,71 @@ class WindowSearch:
                 trackers[0].update(env)
                 trackers[1].update(env)
         return res
+
+    def _decisive_gen(self, res: WindowResult, z: np.ndarray, obs, kind: str, k: int, played: int, me: int, turn: int,
+                      choices, config: DuelConfig, auto_single: bool, game_seed: int, trackers, choice_keys,
+                      det_tries: int, det_fallback: str):  # fmt: skip
+        """Stage L decisive label for decision k (see __init__ `ho`); fills res.targets only on status "label"."""
+        from ygo_zero.search.honest import decisive_label
+
+        rule = self.ho
+        cands = self._candidates(z, obs, kind == "window", merge=rule.merge)
+        if len(cands) < 2:
+            return
+        acc: list[list[float]] = [[] for _ in cands]
+        worlds_all: list | None = [] if trackers is not None else None
+        det = None
+        s_off, rounds, n_round = 0, 0, self.samples
+        d = None
+        while n_round > 0:
+            if trackers is not None:
+                if det is None:
+                    det = Determinizer(self.engine, config, auto_single, me, choices[:k], trackers[me].seen, obs,
+                                       random.Random(f"{self.seed}:{game_seed}:{k}:det"),
+                                       prefix_keys=choice_keys[:k], tries=det_tries)  # fmt: skip
+                new = []
+                for _ in range(n_round):
+                    got = det.sample()
+                    if got is not None:
+                        new.append(got)
+                    elif det_fallback == "true":
+                        new.append((config, list(choices[:k])))
+                if not new:
+                    break
+                worlds_all.extend(new)
+                n_new = len(new)
+            else:
+                n_new = n_round
+            branches = [(choices[:k] + [x], j, x, s) for j, x in enumerate(cands) for s in range(s_off, s_off + n_new)]
+            yield from self.rollouts_gen(config, auto_single, branches, me, turn_start=turn, game_seed=game_seed,
+                                         decision_k=k, worlds=worlds_all)  # fmt: skip
+            for j in range(len(cands)):
+                acc[j].extend(self.last_samples[j])
+            s_off += n_new
+            rounds += 1
+            d = decisive_label(acc, rule)
+            if d.status == "label":
+                break
+            n_round = min(rule.step, rule.s_max - s_off)
+        if det is not None:
+            res.det_proposals += det.proposals
+            res.det_accepted += det.accepted
+            res.det_fallbacks += det.fallbacks
+            res.det_s += det.seconds
+        if d is None:
+            res.det_skipped += 1
+            return
+        means = [float(np.mean(a)) if a else float("nan") for a in acc]
+        target = cands[d.chosen_j] if d.status == "label" else None
+        if target is not None:
+            res.targets[k], res.kinds[k], res.sets[k], res.conf[k] = target, kind, [target], 1.0
+        res.log.append({"k": k, "kind": kind, "turn": turn, "cands": cands, "scores": [round(m, 3) for m in means],
+                        "chosen": target, "played": played,
+                        "fired": target is not None and int(obs["actions"][target, 0]) == Kind.ACTIVATE,
+                        "ho": {"status": d.status, "best": cands[d.chosen_j],
+                               "runner_up": None if d.challenger_j is None else cands[d.challenger_j],
+                               "gap": round(d.gap, 4), "se": round(d.se, 4) if math.isfinite(d.se) else None,
+                               "n": d.n, "rounds": rounds}})  # fmt: skip
 
     def run_many(self, jobs, width: int = 32):
         """Drive (key, generator) jobs concurrently with one batched forward per step."""

@@ -40,6 +40,8 @@ CACHE_DIR = ROOT / "data" / "cache" / "llm"
 ENDPOINT = "https://opencode.ai/zen/go/v1/chat/completions"
 AUTH_FILE = Path.home() / ".local" / "share" / "opencode" / "auth.json"
 MIN_INTERVAL_S = 2.0
+# The endpoint routes by session since 2026-10-11 (http 400 MissingSessionID without it); one id per process.
+_SESSION = f"ygo-zero-{os.getpid()}-{int(time.time())}"
 REQ_HEADERS = {
     "Content-Type": "application/json",
     "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
@@ -169,7 +171,7 @@ def _post_http(model: str, system: str | None, prompt: str, key: str, timeout: i
     req = urllib.request.Request(
         ENDPOINT,
         data=json.dumps({"model": model, "messages": messages}).encode(),
-        headers={"Authorization": f"Bearer {key}", **REQ_HEADERS},
+        headers={"Authorization": f"Bearer {key}", "x-opencode-session": _SESSION, **REQ_HEADERS},
         method="POST",
     )
     try:
