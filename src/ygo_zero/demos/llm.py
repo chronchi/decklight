@@ -122,15 +122,20 @@ def limit_hit(since: float, model_id: str | None = None, patterns: tuple[str, ..
 
 
 def model_limited(model: str, window_s: float = 300) -> bool:
-    """A hard limit for `model` in the last `window_s` s; a transient rate limit is waited out first (RATE_WAITS_S)."""
-    mid = model.split("/", 1)[-1]
+    return limit_hit(time.time() - window_s, model.split("/", 1)[-1])
+
+
+def _usable(models: list[str]) -> list[str]:
+    """The models without a recent limit error. When none is usable and no limit is hard, wait (RATE_WAITS_S) for a
+    transient rate limit to pass instead of failing as quota; checking each model without waiting keeps the paid
+    fallback taking over at once while the free tier rate-limits (2026-10-12 12:50: a per-model wait stalled stage M)."""
+    usable = [m for m in models if not model_limited(m)]
     for wait in RATE_WAITS_S:
-        if limit_hit(time.time() - window_s, mid, HARD_LIMIT_PATTERNS):
-            return True
-        if not limit_hit(time.time() - 60, mid):
-            return False
+        if usable or any(limit_hit(time.time() - 300, m.split("/", 1)[-1], HARD_LIMIT_PATTERNS) for m in models):
+            break
         time.sleep(wait)
-    return limit_hit(time.time() - 60, mid)
+        usable = [m for m in models if not model_limited(m, 60)]
+    return usable
 
 
 def quota_exceeded(window_s: float = 600) -> bool:
@@ -334,7 +339,7 @@ def complete(
 
     errors: list[str] = []
     models = [model] + ([FALLBACK_MODEL] if FALLBACK_MODEL and model.endswith("-free") else [])
-    usable = [m for m in models if not model_limited(m)]
+    usable = _usable(models)
     if not usable:
         _flag_quota()
     if SERVER_URL:
@@ -352,7 +357,7 @@ def complete(
                 except Exception as e:  # noqa: BLE001 - retry once, then the next backend
                     errors.append(f"server {m} try{attempt}: {e}"[:300])
                     time.sleep(2 ** (attempt + 1))
-        usable = [m for m in models if not model_limited(m)]
+        usable = _usable(models)
         if not usable:
             _flag_quota()
         model = usable[-1]
@@ -380,7 +385,7 @@ def complete(
                 if m and int(m.group(1)) not in (429, 500, 502, 503, 504):
                     break
                 time.sleep(2 ** (attempt + 1))
-    if model_limited(model):
+    if not _usable([model]):
         _flag_quota()
     # Fallback: CLI subprocess (same cache entry), at most CLI_SLOTS at once machine-wide.
     if errors:
