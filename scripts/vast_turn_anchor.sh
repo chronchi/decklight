@@ -57,6 +57,11 @@ for k, (n, kept, d) in sorted(b.items()):
     print(f"bucket {k}: kept {kept}/{n} ({kept / n:.2f}), mean diff {d / n:+.3f}")
     bad |= kept / n < 0.3
 print(f"total kept {sum(r['keep'] for r in rows)}/{len(rows)}")
+# the lines the anchor dropped, as a build_bc_shards --exclude file ('data/demos/turns/*@<this file>', exact ids)
+with open(f"{sys.argv[1]}/anchor_drops.jsonl", "w") as fo:
+    for r in rows:
+        if not r["keep"]:
+            fo.write(json.dumps({"line": r["line_id"]}) + "\n")
 sys.exit(2 if bad else 0)
 PY
 echo "$(date +%T) $(tr '\n' ' ' < "$OUT/summary.txt")" >> "$OUT/PROGRESS"
