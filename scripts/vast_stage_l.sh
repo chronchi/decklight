@@ -57,7 +57,7 @@ print("eval-only decks in selfplay:", sorted(bad)); sys.exit(1 if bad else 0)
 EOF
 
 WARGS="--ckpt $BASE --value $VALUE --device cuda --width 32 --k 4 --horizon 1 --samples 4 --rollout-temp 1.0
-  --honest 1 --det-tries 32 --det-fallback skip --conf-skip 0.9 --ho 1 --ho-z 2 --ho-min-gap 0.05 --ho-s-max 12
+  --honest 1 --det-tries 32 --det-fallback skip --conf-skip 0.9 --ho 1 --ho-z ${HO_Z:-3} --ho-min-gap 0.05 --ho-s-max 12
   --ho-step 4 --windows all --own-frac $OWN_FRAC --seed 13"
 # 2a. probe one gen_window proc for 150 s
 # shellcheck disable=SC2086
