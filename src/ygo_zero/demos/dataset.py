@@ -262,14 +262,15 @@ def strict_inferred_weight(obs: dict, action: int) -> float:
     return 1.0 if int(eq.sum()) == n_legal and n_legal >= 1 else 0.0
 
 
-def iter_samples(engine: Engine, path: Path, strict: bool = False) -> Iterator[tuple[dict, int, float, dict]]:
+def iter_samples(engine: Engine, path: Path, strict: bool = False, skip=None) -> Iterator[tuple[dict, int, float, dict]]:
     """Yield (obs, action, weight, meta) for every agent decision of every verified record.
 
     Only the record's own seed is replayed: `choices` come from that seed's search, and other seeds in
     `seeds_ok` were verified with their own (unstored) choices. The replay always steps `choices`; when the
     record carries `targets` (DAgger: the labeler's option index at student decisions, null elsewhere) the
     yielded action is the target, and the sample is skipped when the target is not a legal option there.
-    Records without `targets` yield their choices unchanged."""
+    Records without `targets` yield their choices unchanged. `skip(rec) -> bool` drops whole records before replay
+    (retrain stage D exclusions)."""
     files = sorted(path.glob("*.jsonl")) if path.is_dir() else [path]
     for f in files:
         judges = load_judgements(f)
@@ -278,7 +279,7 @@ def iter_samples(engine: Engine, path: Path, strict: bool = False) -> Iterator[t
         weights = SELFIMIT_LABEL_WEIGHT if "selfimit" in f.parts else weights
         weights = WINDOW_LABEL_WEIGHT if ("window" in f.parts or any(q.startswith("sw-") for q in f.parts[:-1])) else weights
         for rec in load_records(f):
-            if starved_opening(rec):
+            if starved_opening(rec) or (skip is not None and skip(rec)):
                 continue
             out: list = []  # buffered: a record that fails to replay is skipped whole (never half-yielded)
             try:

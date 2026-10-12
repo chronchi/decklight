@@ -138,11 +138,51 @@ def base_line(line_id: str) -> str:
     return line_id.split("#")[0].split("+")[0]
 
 
+def load_exclusions(specs: list[str]) -> list[tuple[str, set[str], set[str]]]:
+    """Retrain stage D exclusions. Each spec is `<globs>@<file>`: records in files matching the globs are dropped
+    when their line_id is listed in the file. `<globs>` is comma-separated; a `!` glob excludes (e.g.
+    `data/demos/*,!*/strict-d/*`: every record file except the strict re-verified ones). A `.jsonl` file lists exact record ids (`{"line": id}` rows, the
+    hand-trap drops of scripts/audit/handtrap_class.py); a `.json` file maps source -> {"lines": [base line ids]}
+    (scripts/audit/strict_junk.py: lines replaced by their strict re-verification), matched on the base id."""
+    import json
+
+    out = []
+    for spec in specs:
+        glob_, _, f = spec.rpartition("@")
+        if not glob_ or not f:
+            raise ValueError(f"bad exclusion spec {spec!r} (want <glob>@<file>)")
+        text = Path(f).read_text()
+        if f.endswith(".jsonl"):
+            ids = {json.loads(x)["line"] for x in text.splitlines() if x.strip()}
+            out.append((glob_, ids, set()))
+        else:
+            out.append((glob_, set(), {b for v in json.loads(text).values() for b in v["lines"]}))
+        if not out[-1][1] and not out[-1][2]:
+            raise ValueError(f"exclusion file {f} lists no lines")
+    return out
+
+
+def _skip_for(src_file: str, excl: list[tuple[str, set[str], set[str]]]):
+    import fnmatch
+
+    def hit(globs: str) -> bool:
+        pos = [g for g in globs.split(",") if not g.startswith("!")]
+        neg = [g[1:] for g in globs.split(",") if g.startswith("!")]
+        return any(fnmatch.fnmatch(src_file, g) for g in pos) and not any(fnmatch.fnmatch(src_file, g) for g in neg)
+
+    rules = [(ids, bases) for g, ids, bases in excl if hit(g)]
+    if not rules:
+        return None
+    return lambda rec: any(rec.get("line_id") in ids or base_line(rec.get("line_id") or "") in bases
+                           for ids, bases in rules)  # fmt: skip
+
+
 def _shard_one(job: tuple[str, str, str]) -> tuple[str, int]:
     from ygo_zero.demos.dataset import iter_samples
 
     src_file, out_file, src_tag, *rest = job
     strict = bool(rest[0]) if rest else False
+    excl = rest[1] if len(rest) > 1 else []
     cols: dict[str, list] = {k: [] for k in OBS_KEYS}
     known_cols: dict[str, list] = {k: [] for k in KNOWN_KEYS}
     has_known: bool | None = None  # all samples of one file either carry the keys or not
@@ -155,7 +195,7 @@ def _shard_one(job: tuple[str, str, str]) -> tuple[str, int]:
     alive: list = []  # keeps every keyed log referenced: id() of a freed array can be reused by a later record's log
     running = 0
     has_log = True
-    for obs, a, w, meta in iter_samples(_ENGINE, Path(src_file), strict=strict):
+    for obs, a, w, meta in iter_samples(_ENGINE, Path(src_file), strict=strict, skip=_skip_for(src_file, excl)):
         for k in OBS_KEYS:
             cols[k].append(obs[k])
         hk = all(k in obs for k in KNOWN_KEYS)
@@ -236,9 +276,12 @@ def _shard_one(job: tuple[str, str, str]) -> tuple[str, int]:
     return out_file, len(action)
 
 
-def build_shards(sources: dict[str, list[Path]], out_dir: Path, jobs: int, strict: bool = False) -> int:
+def build_shards(sources: dict[str, list[Path]], out_dir: Path, jobs: int, strict: bool = False,
+                 exclude: list[str] | None = None) -> int:
     """sources: tag -> record files. Writes one shard per file into out_dir; returns the sample count.
-    `strict`: inferred labels weigh 0 except choices among equals (demos/dataset.py strict_inferred_weight)."""
+    `strict`: inferred labels weigh 0 except choices among equals (demos/dataset.py strict_inferred_weight).
+    `exclude`: `<path glob>@<file>` specs (load_exclusions); globs match the record file path as given."""
+    excl = load_exclusions(exclude or [])
     out_dir.mkdir(parents=True, exist_ok=True)
     work = []
     for tag, files in sources.items():
@@ -251,7 +294,7 @@ def build_shards(sources: dict[str, list[Path]], out_dir: Path, jobs: int, stric
             except ValueError:
                 pass
             flat = "~".join(rel.with_suffix("").parts[-6:])
-            work.append((str(f), str(out_dir / f"{tag}__{flat}.npz"), tag, strict))
+            work.append((str(f), str(out_dir / f"{tag}__{flat}.npz"), tag, strict, excl))
     total = 0
     per_tag: dict[str, list[int]] = {}  # tag -> [files, samples, files with 0 samples]
     with mp.get_context("fork").Pool(max(1, jobs), initializer=_init) as pool:

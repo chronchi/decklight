@@ -11,10 +11,14 @@ import numpy as np
 from ygo_zero.model.bc_data import build_shards, eval_only_decks
 
 SOURCES = {  # tag -> globs of record files (verified lines and their hand-variant expansions)
-    "guides": ["data/demos/verified/*.jsonl", "data/demos/expanded/*.jsonl"],
-    "claude": ["data/demos/claude/verified/*.jsonl", "data/demos/claude/expanded*/*.jsonl"],
+    # strict-d: retrain stage D strict re-verification of the lines strict_junk.py flagged (scripts/vast_stage_d.sh);
+    # exclude the old records of those lines with --exclude '<glob>@data/cache/audit/strict_junk.json'
+    "guides": ["data/demos/verified/*.jsonl", "data/demos/expanded/*.jsonl", "data/demos/guides-strict-d/*/*.jsonl"],
+    "claude": ["data/demos/claude/verified/*.jsonl", "data/demos/claude/expanded*/*.jsonl",
+               "data/demos/claude/strict-d/*/*.jsonl"],
     "muse": ["data/demos/planned*/verified/*.jsonl", "data/demos/planned*/expanded*/*.jsonl",
-             "data/demos/planned*/improved/verified/*.jsonl", "data/demos/planned*/improved/expanded*/*.jsonl"],
+             "data/demos/planned*/improved/verified/*.jsonl", "data/demos/planned*/improved/expanded*/*.jsonl",
+             "data/demos/planned*/strict-d/*/*.jsonl"],
     "games": ["data/demos/games/*.jsonl"],  # ADR 0004 L2-L4 (deck label = actor's deck)
     "gold": ["data/demos/gold/*.jsonl"],  # hand-played full games (scripts/hand_play.py; kinds gold / gold_pass)
     "search": ["data/demos/search/*.jsonl"],  # turn-1 search teacher (scripts/gen_search.py; kind search)
@@ -35,6 +39,9 @@ ap.add_argument("--glob", nargs="*", default=None,
                 help="build only these record globs (one source 'custom'); kinds still come from the file paths")
 ap.add_argument("--strict-labels", action="store_true",
                 help="inferred labels weigh 0 except zone picks / identical copies (retrain plan v2)")
+ap.add_argument("--exclude", nargs="*", default=[], metavar="GLOB@FILE",
+                help="drop records listed in FILE from record files matching GLOB (retrain stage D: strict_junk.json "
+                     "for lines replaced by strict re-verification, drops-*.final.jsonl for hand-trap drops)")
 args = ap.parse_args()
 sources = {"custom": args.glob} if args.glob else SOURCES
 src = {
@@ -43,7 +50,7 @@ src = {
     if args.glob or args.only is None or tag in args.only
 }
 print({k: len(v) for k, v in src.items()}, "files")
-print("samples:", build_shards(src, args.out, args.jobs, strict=args.strict_labels))
+print("samples:", build_shards(src, args.out, args.jobs, strict=args.strict_labels, exclude=args.exclude))
 # newcards decks never enter training data (retrain plan v2): stop loud if any shard carries one
 _new = eval_only_decks()[1]
 _bad = sorted({str(d) for f in args.out.glob("*.npz") for d in np.unique(np.load(f)["deck"]) if str(d) in _new})
