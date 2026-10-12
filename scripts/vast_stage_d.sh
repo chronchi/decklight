@@ -23,8 +23,8 @@ ldir() { [ "$1" = guides ] && echo data/demos/lines || echo "data/demos/$1/lines
 vdir() { [ "$1" = guides ] && echo data/demos/verified || echo "data/demos/$1/verified"; }
 JUNK=${JUNK:-data/cache/audit/strict_junk.json}; BUDGET=${BUDGET:-2000}; BUDGET_LONG=${BUDGET_LONG:-10000}; VARIANTS=${VARIANTS:-8}
 [ "${SKIP_SYNC:-0}" = 1 ] || uv sync --group dev -q
-read -r Q P < /sys/fs/cgroup/cpu.max 2>/dev/null || Q=max
-J=$(nproc); [ "$Q" != max ] && J=$(( Q / P )); [ "$J" -lt 2 ] && J=2; J=${JOBS:-$J}
+. scripts/cores.sh
+J=$(box_cores); [ "$J" -lt 2 ] && J=2; J=${JOBS:-$J}
 ( while true; do echo "$(date +%T) $(cut -d' ' -f1 /proc/loadavg) $(free -g | awk '/Mem/{print $3}')G"; sleep 30; done ) \
   > "$OUT/usage.txt" 2>&1 &
 USAGE_PID=$!

@@ -15,8 +15,8 @@ for try in 1 2 3; do
   echo "torch install attempt $try failed" >> "$OUT/torch.txt"; sleep 10
 done
 uv run --no-sync python -c "import torch; assert torch.cuda.is_available()" || { alert "no CUDA torch"; exit 3; }
-read -r Q P < /sys/fs/cgroup/cpu.max 2>/dev/null || Q=max
-J=$(nproc); [ "$Q" != max ] && J=$(( Q / P ))
+. scripts/cores.sh
+J=$(box_cores)
 set -- $CKPTS; N=$#; TH=$(( J / N )); [ "$TH" -lt 2 ] && TH=2
 echo "cores $J, $N checkpoints, $TH threads each" > "$OUT/card.txt"
 ( while true; do echo "$(date +%T) $(nvidia-smi --query-gpu=utilization.gpu,memory.used --format=csv,noheader,nounits 2>/dev/null | tr -d ' ') $(cut -d' ' -f1 /proc/loadavg)"; sleep 30; done ) > "$OUT/usage.txt" 2>&1 &

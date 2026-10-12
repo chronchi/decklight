@@ -14,8 +14,8 @@ for try in 1 2 3; do
   echo "torch install attempt $try failed" >> "$OUT/torch.txt"; sleep 10
 done
 uv run --no-sync python -c "import torch; assert torch.cuda.is_available()" || { alert "no CUDA torch"; exit 3; }
-read -r Q P < /sys/fs/cgroup/cpu.max 2>/dev/null || Q=max
-J=$(nproc); [ "$Q" != max ] && J=$(( Q / P ))
+. scripts/cores.sh
+J=$(box_cores)
 GMB=$(nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits | head -1)
 RGB=$(free -g | awk '/Mem/{print $7}')
 PR=$J; [ $(( GMB / 800 )) -lt $PR ] && PR=$(( GMB / 800 )); [ $(( RGB * 2 / 3 )) -lt $PR ] && PR=$(( RGB * 2 / 3 ))

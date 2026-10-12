@@ -15,8 +15,8 @@ for try in 1 2 3; do
 done
 uv run --no-sync python -c "import torch; assert torch.cuda.is_available()" || { alert "no CUDA torch"; exit 3; }
 uv run --no-sync python -c "import sklearn" || { alert "no sklearn"; exit 3; }
-read -r Q P < /sys/fs/cgroup/cpu.max 2>/dev/null || Q=max
-J=$(nproc); [ "$Q" != max ] && J=$(( Q / P ))
+. scripts/cores.sh
+J=$(box_cores)
 echo "cores $J" > "$OUT/sizing.txt"
 ( while true; do echo "$(date +%T) $(nvidia-smi --query-gpu=utilization.gpu,memory.used --format=csv,noheader,nounits 2>/dev/null | tr -d ' ') $(cut -d' ' -f1 /proc/loadavg) $(free -g | awk '/Mem/{print $3}')G"; sleep 30; done ) > "$OUT/usage.txt" 2>&1 &
 USAGE_PID=$!

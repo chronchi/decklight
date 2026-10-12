@@ -16,8 +16,8 @@ for try in 1 2 3; do
   uv pip install -q torch --index-url https://download.pytorch.org/whl/cu128 >> "$OUT/torch.txt" 2>&1 && break; sleep 10
 done
 uv run --no-sync python -c "import torch; assert torch.cuda.is_available()" || { alert "no CUDA torch"; exit 3; }
-read -r Q P < /sys/fs/cgroup/cpu.max 2>/dev/null || Q=max
-J=$(nproc); [ "$Q" != max ] && J=$(( Q / P ))
+. scripts/cores.sh
+J=$(box_cores); [ "$(env -u OMP_NUM_THREADS nproc)" -ge 8 ] && [ "$J" -lt 4 ] && alert "only $J usable cores detected"
 ( while true; do echo "$(date +%T) $(nvidia-smi --query-gpu=utilization.gpu,memory.used --format=csv,noheader,nounits | tr -d ' ') $(cut -d' ' -f1 /proc/loadavg) $(free -g | awk '/Mem/{print $3}')G"; sleep 30; done ) > "$OUT/usage.txt" 2>&1 &
 USAGE_PID=$!
 A=(--turns 'data/demos/turns/*/*.jsonl' --ckpt "$BASE" --value "$VALUE" --device cuda --samples "${SAMPLES:-8}"
