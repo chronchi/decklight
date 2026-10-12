@@ -77,7 +77,9 @@ EOF
 # window, sw-v and the other old sw-* labellings are dropped by plan-v1 §3.2).
 HOLD="kewl-tune $( [ -f decks/pool/HOLDOUT ] && tr '\n' ' ' < decks/pool/HOLDOUT )"
 CLEAN=(teacher teacher_pass dagger dagger_pass line line_improved line_expanded gold turn_mid turn_second turn_end)
-FRAC=(teacher_pass=0.5 dagger_pass=0.5 line_expanded=0.3 gold=3)
+# pass kinds already carry weight 0.5 in the shards (smoke 2026-10-12: dagger_pass 46,608 samples, weighted 23,304),
+# so plan-v1 §3.4 teacher_pass / dagger_pass 0.5 needs no extra fraction
+FRAC=(line_expanded=0.3 gold=3)
 EXTRA=(); [ "${SMOKE:-0}" = 1 ] && EXTRA=(--limit 20000)
 V="ftswv|--opp ygoagent --raw 1 --ckpt data/cache/base_r2/best.pt"
 V="$V;teachh|--opp ygoagent --raw 1 --ckpt data/cache/base_teach_h/best.pt"
@@ -103,7 +105,7 @@ for v in clean hw; do
   tick "train-$v"
   V="$V;b$v|--opp ygoagent --raw 1 --ckpt $OUT/$v/best.pt"
   V="$V;b$v-hold|--opp ckpt --opp-ckpt data/cache/base_r2/best.pt --raw 1 --deck-set holdout --seeds ${HOLD_SEEDS:-2} --ckpt $OUT/$v/best.pt"
-  V="$V;b$v-new|--opp ckpt --opp-ckpt data/cache/base_r2/best.pt --raw 1 --deck-set newcards --seeds ${NEW_SEEDS:-6} --ckpt $OUT/$v/best.pt"
+  V="$V;b$v-new|--opp ckpt --opp-ckpt data/cache/base_r2/best.pt --raw 1 --deck-set newcards --seeds ${NEW_SEEDS:-3} --ckpt $OUT/$v/best.pt"
 done
 ls "$OUT"/*/best.pt > /dev/null 2>&1 || { alert "no B-v1 trained"; exit 3; }
 

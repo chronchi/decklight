@@ -22,6 +22,6 @@ D=(data/demos/teacher data/demos/dagger data/demos/gold data/demos/verified data
 taskset -c 0-3 uv run --no-sync python scripts/vast_job.py --name $N \
   --cmd "ANCHOR_DROPS=${ANCHOR_DROPS:-} NO_TURNS=${NO_TURNS:-0} HW_FRAC=${HW_FRAC:-1} EPOCHS=${EPOCHS:-6} SMOKE=${SMOKE:-0} GA_SEEDS=${GA_SEEDS:-24} bash scripts/vast_stage_b1.sh $N" \
   --hours "${HOURS:-5}" --max-dph "${MAX_DPH:-0.32}" --min-cpus "${MIN_CPUS:-32}" --min-gpu-ram "${MIN_GPU_RAM:-20}" \
-  --extra-query "compute_cap>=800 cpu_ram>=96" \
+  --extra-query "compute_cap>=800 cpu_ram>=${MIN_RAM:-64}" \
   --data "${D[@]}" > data/cache/briefs/$N.launcher.log 2>&1
 echo "exit $?"
