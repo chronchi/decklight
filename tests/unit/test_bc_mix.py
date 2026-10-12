@@ -147,3 +147,16 @@ def test_train_frac_is_fixed_and_nested():
     assert n == 200 and 25 <= ka <= 75 and ka < kb
     assert set(a) <= set(b) and np.array_equal(a, tb.limit_train_frac(data, idx, 0.25)[0])
     assert len(a) == 3 * ka  # whole games
+
+
+def test_check_eval_decks_flags_newcards_and_unlisted_holdout():
+    import numpy as np
+
+    from ygo_zero.model.bc_data import check_eval_decks, eval_only_decks
+
+    hold, new = eval_only_decks()
+    assert "labrynth" in hold and "kewl-tune" in hold and "infernity" in new
+    decks = np.array(["BlueEyes", "labrynth", "infernity"])
+    probs = check_eval_decks(decks, ["kewl-tune"])
+    assert any("infernity" in p for p in probs) and any("labrynth" in p for p in probs)
+    assert check_eval_decks(np.array(["BlueEyes", "labrynth"]), sorted(hold)) == []

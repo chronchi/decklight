@@ -6,7 +6,9 @@ uv run python scripts/build_bc_shards.py --out data/cache/bc_shards --jobs 2
 import argparse
 from pathlib import Path
 
-from ygo_zero.model.bc_data import build_shards
+import numpy as np
+
+from ygo_zero.model.bc_data import build_shards, eval_only_decks
 
 SOURCES = {  # tag -> globs of record files (verified lines and their hand-variant expansions)
     "guides": ["data/demos/verified/*.jsonl", "data/demos/expanded/*.jsonl"],
@@ -39,3 +41,9 @@ src = {
 }
 print({k: len(v) for k, v in src.items()}, "files")
 print("samples:", build_shards(src, args.out, args.jobs))
+# newcards decks never enter training data (retrain plan v2): stop loud if any shard carries one
+_new = eval_only_decks()[1]
+_bad = sorted({str(d) for f in args.out.glob("*.npz") for d in np.unique(np.load(f)["deck"]) if str(d) in _new})
+if _bad:
+    print(f"ALERT build_bc_shards: newcards decks in shards: {_bad}", flush=True)
+    raise SystemExit(3)

@@ -34,7 +34,15 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 
-from ygo_zero.model.bc_data import KNOWN_KEYS, OBS_KEYS, history_window, load_shards, split_masks
+from ygo_zero.model.bc_data import (
+    KNOWN_KEYS,
+    OBS_KEYS,
+    check_eval_decks,
+    eval_only_decks,
+    history_window,
+    load_shards,
+    split_masks,
+)
 from ygo_zero.model.policy import PolicyNet
 
 
@@ -337,7 +345,9 @@ def main() -> None:
     ap.add_argument("--select-on", default="val", help="val | holdout | <split>:<kind> (e.g. val:gold)")
     ap.add_argument("--patience", type=int, default=0)
     ap.add_argument("--card-dropout", type=float, default=0.0)
-    ap.add_argument("--holdout", nargs="*", default=["kewl-tune"], help="decks never trained on")
+    ap.add_argument("--holdout", nargs="*", default=None,
+                    help="decks never trained on (default: decks/pool/HOLDOUT + kewl-tune; any holdout deck present in "
+                    "the data but not listed stops the run)")
     ap.add_argument("--kinds", nargs="*", default=None, help="train only on these sample kinds (default: all)")
     ap.add_argument("--require-kinds", nargs="*", default=None,
                     help="exit 4 with an ALERT when any of these kinds has 0 train samples (the variant's new data)")
@@ -387,6 +397,13 @@ def main() -> None:
     data = load_shards(args.shards)
     if args.limit:
         data = {k: v[: args.limit] for k, v in data.items()}
+    if args.holdout is None:
+        args.holdout = sorted(eval_only_decks()[0])
+    problems = check_eval_decks(data["deck"], args.holdout)
+    if problems:
+        for msg in problems:
+            print(f"ALERT train_bc: {msg}", flush=True)
+        sys.exit(3)
     masks = split_masks(data, holdout_decks=tuple(args.holdout), kind_val_frac=parse_kind_frac(args.val_frac_kind))
     idx = select_train_idx(data, masks, args.kinds)
     if args.gold_games is not None:

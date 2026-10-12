@@ -334,6 +334,27 @@ def load_shards(shard_dir: Path) -> dict[str, np.ndarray]:
     return {k: np.concatenate([p[k] for p in parts]) for k in parts[0]}
 
 
+_ROOT = Path(__file__).resolve().parents[3]
+
+
+def eval_only_decks(root: Path = _ROOT) -> tuple[set[str], set[str]]:
+    """(holdout, newcards): pool decks never trained on (`decks/pool/HOLDOUT` + kewl-tune) and the unseen-card decks
+    (`decks/newcards`, never in any generator). Retrain plan v2: training must exclude both, enforced, not by flag."""
+    hold = set((root / "decks/pool/HOLDOUT").read_text().split()) | {"kewl-tune"}
+    new = {p.stem for p in (root / "decks/newcards").glob("*.ydk")}
+    return hold, new
+
+
+def check_eval_decks(decks: np.ndarray, holdout_arg: tuple[str, ...] | list[str], root: Path = _ROOT) -> list[str]:
+    """Problems that must stop a training run: a newcards deck anywhere in the data, or a holdout deck present in the
+    data but missing from `holdout_arg` (it would land in train). Empty list = OK."""
+    hold, new = eval_only_decks(root)
+    present = set(np.unique(decks).tolist())
+    out = [f"newcards deck in training data: {d}" for d in sorted(present & new)]
+    out += [f"holdout deck not excluded (--holdout): {d}" for d in sorted((present & hold) - set(holdout_arg))]
+    return out
+
+
 def split_masks(
     data: dict[str, np.ndarray], val_frac: float = 0.1, holdout_decks: tuple[str, ...] = (),
     kind_val_frac: dict[str, float] | None = None,
