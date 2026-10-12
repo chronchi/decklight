@@ -46,22 +46,31 @@ from pathlib import Path
 
 import numpy as np
 import torch
+from torch.nn.parallel import DistributedDataParallel as DDP
 
 from ygo_zero.decks import load_ydk
 from ygo_zero.engine.cpp_env import VecEnv
 from ygo_zero.engine.duel import Engine
 from ygo_zero.eval.bc_policy import _run_args
 from ygo_zero.model.policy import PolicyNet
-from torch.nn.parallel import DistributedDataParallel as DDP
-
-from ygo_zero.rl.evaluate import AsyncEvaluator, format_eval_line, run_eval
-from ygo_zero.rl.league import League
+from ygo_zero.model.policy_v3 import ARCH_KEYS, make_policy
 from ygo_zero.rl import dist as distmod
 from ygo_zero.rl.critic import critic_obs
-from ygo_zero.rl.ppo import SlotStore, explained_variance, gae, gather, masked_log_softmax, ppo_loss, \
-    ppo_loss_priv, to_torch
+from ygo_zero.rl.evaluate import AsyncEvaluator, format_eval_line, run_eval
+from ygo_zero.rl.league import League
+from ygo_zero.rl.ppo import (
+    SlotStore,
+    explained_variance,
+    gae,
+    gather,
+    masked_log_softmax,
+    ppo_loss,
+    ppo_loss_priv,
+    to_torch,
+)
 from ygo_zero.rl.rollout import Collector
-from ygo_zero.rl.vrpo import ppo_loss_vrpo, ppo_loss_vrpo_priv, vrpo_batch as _vrpo_batch
+from ygo_zero.rl.vrpo import ppo_loss_vrpo, ppo_loss_vrpo_priv
+from ygo_zero.rl.vrpo import vrpo_batch as _vrpo_batch
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -90,9 +99,7 @@ def _autocast(dev: torch.device, prec: str):
 
 
 def load_net(ckpt: Path, emb: dict, a: dict, value: bool, q: bool = False) -> PolicyNet:
-    net = PolicyNet(emb, d=a.get("d", 256), layers=a.get("layers", 4), heads=a.get("heads", 4), dropout=0.0,
-                    hist=int(a.get("hist", 0) or 0), known=bool(a.get("known", False)), value=value,
-                    q=q)  # fmt: skip
+    net = make_policy(emb, a, dropout=0.0, value=value, q=q)
     state = torch.load(ckpt, map_location="cpu")
     state = state.get("model", state)
     missing, unexpected = net.load_state_dict({k: v.float() if v.is_floating_point() else v for k, v in state.items()},
@@ -110,8 +117,7 @@ def load_critic(ckpt: Path, emb: dict, a: dict, q: bool = False) -> PolicyNet:
     With `q=True` the critic also carries the VRPO Q head, which may additionally be missing
     (a BC/GAE checkpoint); it stays at its zero init then, so Q(s,.) == V(s) at start.
     """
-    net = PolicyNet(emb, d=a.get("d", 256), layers=a.get("layers", 4), heads=a.get("heads", 4), dropout=0.0,
-                    hist=int(a.get("hist", 0) or 0), known=True, value=True, q=q)  # fmt: skip
+    net = make_policy(emb, a, dropout=0.0, known=True, value=True, q=q)
     state = torch.load(ckpt, map_location="cpu")
     state = state.get("model", state)
     missing, unexpected = net.load_state_dict({k: v.float() if v.is_floating_point() else v for k, v in state.items()},
@@ -820,7 +826,7 @@ def main() -> None:
     log = (args.out / "metrics.jsonl").open("a") if dist_rank == 0 else None
     if dist_rank == 0:
         assert log is not None
-        arch = {k: a.get(k) for k in ("d", "layers", "heads", "hist", "known")}
+        arch = {k: a.get(k) for k in ARCH_KEYS}
         log.write(json.dumps({"args": {**arch, "rl": {k: str(v) for k, v in vars(args).items()}}, "eval_decks": ev_names,
                               "train_decks": len(train_decks)}) + "\n")  # fmt: skip
         log.flush()

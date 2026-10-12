@@ -24,6 +24,7 @@ from ygo_zero.engine.cpp_env import CppEnv
 from ygo_zero.engine.duel import DuelConfig, Engine, Placement
 from ygo_zero.model.bc_data import KNOWN_KEYS, OBS_KEYS
 from ygo_zero.model.policy import PolicyNet
+from ygo_zero.model.policy_v3 import make_policy
 from ygo_zero.rl.critic import critic_obs
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -247,8 +248,7 @@ def load_critic_local(ckpt: Path, emb: dict, a: dict) -> PolicyNet:
     Non-strict load: the checkpoint may lack the known inputs and/or the value head (a BC checkpoint);
     only those may be missing. Local copy so this module never imports the training script.
     """
-    net = PolicyNet(emb, d=a.get("d", 256), layers=a.get("layers", 4), heads=a.get("heads", 4), dropout=0.0,
-                    hist=int(a.get("hist", 0) or 0), known=True, value=True)  # fmt: skip
+    net = make_policy(emb, a, dropout=0.0, known=True, value=True)
     state = torch.load(ckpt, map_location="cpu")
     state = state.get("model", state)
     missing, unexpected = net.load_state_dict({k: v.float() if v.is_floating_point() else v for k, v in state.items()},

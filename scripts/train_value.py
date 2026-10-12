@@ -27,7 +27,7 @@ import numpy as np
 import torch
 
 from ygo_zero.model.bc_data import OBS_KEYS
-from ygo_zero.model.policy import PolicyNet
+from ygo_zero.model.policy_v3 import make_policy
 
 TURN_BUCKETS = ("1", "2", "3-4", "5-8", "9+")
 
@@ -206,8 +206,9 @@ def main() -> None:
     known = src_args.get("known", False) or False
     if hist or known:
         raise ValueError("value shards carry the stored history window only: --init must have hist=0, known=False")
-    emb = dict(np.load(args.emb))
-    model = PolicyNet(emb, d=d, layers=layers, heads=heads, dropout=args.dropout, value=True).to(device)
+    v3 = {k: src_args[k] for k in ("v3", "desc_strings", "desc_lua") if k in src_args}
+    model = make_policy(args.emb, {"d": d, "layers": layers, "heads": heads, **v3}, dropout=args.dropout,
+                        value=True).to(device)  # fmt: skip
     state = torch.load(args.init, map_location="cpu")
     state = state.get("model", state)
     missing, unexpected = model.load_state_dict(
@@ -222,7 +223,7 @@ def main() -> None:
     log = (args.out / "metrics.jsonl").open("a")
     t0 = time.time()
     args_rec = {k: str(v) if isinstance(v, Path) else v for k, v in vars(args).items()}
-    args_rec.update({"d": d, "layers": layers, "heads": heads, "value": True})
+    args_rec.update({"d": d, "layers": layers, "heads": heads, "value": True, **v3})
     log.write(json.dumps({"epoch": -1, "init": str(args.init), "value": True, "args": args_rec}) + "\n")
     log.flush()
     best = float("inf")

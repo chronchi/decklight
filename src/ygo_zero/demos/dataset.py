@@ -82,6 +82,7 @@ def sample_kind(source: str | Path, label: str) -> str:
     - files under `search/` -> search
     - files under `selfimit/` -> selfimit
     - files under `window/` -> window_own if label == "own" else window
+    - files under `turns/<bucket>/` (scripts/plan_turns.py, stage M) -> turn_<bucket>
     - files under `sw-<name>/` (relabelled self-play window search, ADR 0007) -> sw-<name>_own if label == "own"
       else sw-<name>, so each labelling is its own kind in --kind-frac
     - everything else -> line
@@ -104,6 +105,10 @@ def sample_kind(source: str | Path, label: str) -> str:
         return "selfimit"
     if "window" in parts:
         return "window_own" if label == "own" else "window"
+    if "turns" in parts[:-1]:
+        i = parts.index("turns")
+        bucket = parts[i + 1] if i + 1 < len(parts) - 1 else "unknown"
+        return f"turn_{bucket}"
     if any(p.startswith("expanded") for p in parts):
         return "line_expanded"
     if "improved" in parts:

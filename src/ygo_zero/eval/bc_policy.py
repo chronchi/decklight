@@ -14,7 +14,7 @@ import torch
 
 from ygo_zero.eval.loopguard import LoopGuard
 from ygo_zero.model.bc_data import KNOWN_KEYS, OBS_KEYS
-from ygo_zero.model.policy import PolicyNet
+from ygo_zero.model.policy_v3 import make_policy
 
 
 def _run_args(ckpt: Path) -> dict:
@@ -35,8 +35,7 @@ class BCPolicy:
         torch.set_num_threads(threads)
         self.hist = int(a.get("hist", 0) or 0)
         self.known = bool(a.get("known", False))
-        self.model = PolicyNet(dict(np.load(emb)), d=a.get("d", 256), layers=a.get("layers", 4),
-                               heads=a.get("heads", 4), hist=self.hist, known=self.known)  # fmt: skip
+        self.model = make_policy(emb, a)
         state = torch.load(ckpt, map_location="cpu")
         state = state.get("model", state)
         self.model.load_state_dict({k: v.float() if v.is_floating_point() else v for k, v in state.items()})

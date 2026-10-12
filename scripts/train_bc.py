@@ -43,7 +43,7 @@ from ygo_zero.model.bc_data import (
     load_shards,
     split_masks,
 )
-from ygo_zero.model.policy import PolicyNet
+from ygo_zero.model.policy_v3 import make_policy
 
 
 def batches(data, idx, bs, device, shuffle, rng, hist=0, hist_salient=True, known=False):
@@ -373,6 +373,9 @@ def main() -> None:
     ap.add_argument("--limit", type=int, default=None, help="use only the first N samples (smoke)")
     ap.add_argument("--hist", type=int, default=0, help="long salient history window H (0 = v1 stored history)")
     ap.add_argument("--hist-all", action="store_true", help="with --hist: use all entries, not just salient ones")
+    ap.add_argument("--v3", action="store_true", help="PolicyNetV3 (model/policy_v3.py: effect keys, sentences, counts)")
+    ap.add_argument("--desc-strings", default=None, help="v3 effect-string table (default data/cards/emb/strings-*.npz)")
+    ap.add_argument("--desc-lua", default=None, help="v3 Lua per-description table (default data/cards/lua_desc.npz)")
     ap.add_argument("--known", action="store_true", help="card-knowledge memory: feed card_known/known_code (model + shards need them)")
     ap.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     ap.add_argument("--threads", type=int, default=None, help="torch CPU threads (laptop: <= 2)")
@@ -422,11 +425,10 @@ def main() -> None:
         args.d, args.layers, args.heads = src_args.get("d", args.d), src_args.get("layers", args.layers), src_args.get("heads", args.heads)
         args.hist = src_args.get("hist", args.hist or 0)
         args.known = src_args.get("known", args.known or False)
-    emb = dict(np.load(args.emb))
-    model = PolicyNet(
-        emb, d=args.d, layers=args.layers, heads=args.heads, dropout=args.dropout,
-        card_dropout=args.card_dropout, hist=args.hist, known=args.known,
-    ).to(device)
+        args.v3 = src_args.get("v3", args.v3 or False)
+        args.desc_strings = src_args.get("desc_strings", args.desc_strings)
+        args.desc_lua = src_args.get("desc_lua", args.desc_lua)
+    model = make_policy(args.emb, vars(args), dropout=args.dropout, card_dropout=args.card_dropout).to(device)
     if args.init:
         state = torch.load(args.init, map_location="cpu")
         state = state.get("model", state)

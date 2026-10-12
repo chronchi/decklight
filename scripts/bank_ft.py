@@ -66,7 +66,7 @@ def cmd_train(args) -> None:
 
     from ygo_zero.engine.duel import Engine
     from ygo_zero.eval.bc_policy import _run_args
-    from ygo_zero.model.policy import PolicyNet
+    from ygo_zero.model.policy_v3 import make_policy
     from ygo_zero.rl.hints import replay_rows
     from ygo_zero.rl.ppo import masked_log_softmax, model_keys, to_torch
 
@@ -91,8 +91,7 @@ def cmd_train(args) -> None:
                                                      "bank": str(args.bank), "init": str(args.init)}))
     dev = torch.device(args.device)
     torch.manual_seed(args.seed)
-    net = PolicyNet(dict(np.load(args.emb)), d=a.get("d", 256), layers=a.get("layers", 4), heads=a.get("heads", 4),
-                    dropout=0.0, hist=hist, known=known)
+    net = make_policy(args.emb, a, dropout=0.0, hist=hist, known=known)
     state = torch.load(args.init, map_location="cpu")
     state = state.get("model", state)
     net.load_state_dict({k: v.float() if v.is_floating_point() else v for k, v in state.items()})

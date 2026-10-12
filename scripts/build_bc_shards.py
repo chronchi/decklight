@@ -24,6 +24,7 @@ SOURCES = {  # tag -> globs of record files (verified lines and their hand-varia
     "window": ["data/demos/window/*.jsonl"],  # mid-game search teacher (scripts/gen_window.py; kinds window / window_own)
     # self-play window search, one dir per labelling (scripts/relabel_window.py; kinds sw-<name> / sw-<name>_own)
     "sw": ["data/demos/sw-*/*.jsonl"],
+    "turns": ["data/demos/turns/*/*.jsonl"],  # LLM-planned mid-game turns (scripts/plan_turns.py; kind turn_<bucket>)
 }
 
 ap = argparse.ArgumentParser()
