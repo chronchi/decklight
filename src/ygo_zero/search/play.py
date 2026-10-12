@@ -38,6 +38,7 @@ from ygo_zero.engine.cpp_env import CppEnv
 from ygo_zero.engine.duel import DuelConfig, Engine
 from ygo_zero.eval.loopguard import LoopGuard
 from ygo_zero.search.determinize import Determinizer, SeenTracker, key_rank_of_choice
+from ygo_zero.search.honest import HonestRule, decide, decide_pair, semantic_key
 from ygo_zero.search.turn1 import _masked
 from ygo_zero.search.window import WindowSearch, is_window
 
@@ -107,6 +108,7 @@ def search_game_gen(
     max_search_turn: int = 0,
     stop_turn: int = 0,
     max_searches: int = 0,
+    ho: HonestRule | None = None,
 ):
     """Play one live game; S (absolute seat `s_seat`) searches, R plays raw. Returns a GameResult.
 
@@ -137,6 +139,10 @@ def search_game_gen(
     `max_searches` > 0: after that many search attempts (searched + skipped) the game is played raw
     (`search_cut`). Honest worlds replay the whole prefix up to tries x samples times per search, so a long looping game
     gets slower with every search; one such game held 8 games in flight for 45+ min (NOTEBOOK 2026-10-11 00:10).
+
+    `ho` (honest override, search/honest.py): candidates are merged by meaning, and the search leaves the policy's
+    pick only when the best challenger's paired gap is significant; undecided gaps get `ho.step` more samples for the
+    two candidates, up to `ho.s_max`. `margin` is ignored with `ho`. The log entry gets an "ho" dict.
     """
     if guard_mode not in ("shared", "per_seat"):
         raise ValueError(f"guard_mode must be 'shared' or 'per_seat', got {guard_mode!r}")
@@ -194,7 +200,7 @@ def search_game_gen(
             if max_searches and res.n_searched + res.det_skipped >= max_searches:
                 res.search_cut = True
             elif (window or own) and softmax_conf(z_g) < conf_skip and not (max_search_turn and turn > max_search_turn):
-                cands = search._candidates(z_g, obs, window)
+                cands = search._candidates(z_g, obs, window, merge=ho is not None and ho.merge)
                 if len(cands) >= 2:
                     t0 = time.perf_counter()
                     k = len(res.choices)
@@ -204,6 +210,7 @@ def search_game_gen(
                         for s in range(search.samples)
                     ]
                     worlds = None
+                    det = None
                     skip_search = False
                     if tracker is not None:
                         det = Determinizer(
@@ -239,9 +246,54 @@ def search_game_gen(
                         )
                         best = max(range(len(cands)), key=lambda j: (sel_scores[j], -j))
                         a = cands[best]
+                        ho_log = None
+                        if ho is not None:
+                            samples = [list(x) for x in getattr(search, "last_samples", [])]
+                            kp = semantic_key(obs, a_pol)
+                            pick_j = next((j for j, x in enumerate(cands) if semantic_key(obs, x) == kp), None)
+                            if pick_j is None or len(samples) != len(cands):
+                                raise RuntimeError(f"ALERT search_match: ho pick not among candidates (game_seed="
+                                                   f"{game_seed}, k={k})")
+                            t_ho = time.perf_counter()
+                            dec = decide(samples, pick_j, ho)
+                            rounds = 0
+                            while dec.status == "undecided" and dec.n < ho.s_max:
+                                n0, extra = dec.n, min(ho.step, ho.s_max - dec.n)
+                                pair = (pick_j, dec.challenger_j)
+                                if worlds is not None and det is not None:
+                                    p0, a0, f0, t0d = det.proposals, det.accepted, det.fallbacks, det.seconds
+                                    for _ in range(extra):
+                                        got = det.sample()
+                                        if got is not None:
+                                            worlds.append(got)
+                                        elif det_fallback == "true":
+                                            worlds.append((config, list(res.choices)))
+                                    res.det_proposals += det.proposals - p0
+                                    res.det_accepted += det.accepted - a0
+                                    res.det_fallbacks += det.fallbacks - f0
+                                    res.det_s += det.seconds - t0d
+                                xb = [(res.choices + [cands[j]], j, cands[j], s)
+                                      for j in pair for s in range(n0, n0 + extra)]
+                                yield from search.rollouts_gen(
+                                    config, auto_single, xb, me, turn_start=turn,
+                                    game_seed=game_seed, decision_k=k, worlds=worlds,
+                                )  # fmt: skip
+                                got_s = getattr(search, "last_samples", [])
+                                for j in pair:
+                                    samples[j].extend(got_s[j])
+                                res.n_branches += len(xb)
+                                rounds += 1
+                                dec = decide_pair(samples, pick_j, pair[1], ho)
+                            a = cands[dec.chosen_j] if dec.chosen_j != pick_j else a_pol
+                            ho_log = {"status": dec.status, "gap": round(dec.gap, 4),
+                                      "se": round(dec.se, 4) if dec.se != float("inf") else None, "n": dec.n,
+                                      "challenger": None if dec.challenger_j is None else int(cands[dec.challenger_j]),
+                                      "rounds": rounds}
+                            search.last_samples = samples
+                            res.search_s += time.perf_counter() - t_ho
                         # margin: keep the policy's own move unless the search's best beats it by >= margin
                         # (NOTEBOOK 2026-10-09: most overrides win by tiny, noisy score gaps)
-                        if (margin > 0 and a != a_pol and a_pol in cands
+                        elif (margin > 0 and a != a_pol and a_pol in cands
                                 and sel_scores[best] - sel_scores[cands.index(a_pol)] < margin):
                             a = a_pol
                         res.n_searched += 1
@@ -254,6 +306,7 @@ def search_game_gen(
                             "scores_all": {search._select_key(): [float(x) for x in sel_scores]},
                             "chosen": int(a), "played": int(a_pol), "best": int(cands[best]),
                             "samples": [[round(x, 4) for x in col] for col in getattr(search, "last_samples", [])],
+                            **({"ho": ho_log} if ho_log is not None else {}),
                         })
                         if a != a_pol:
                             res.n_override += 1

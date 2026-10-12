@@ -119,9 +119,13 @@ class WindowSearch:
         out = [self.logits(_batch(obs_list[i : i + self.batch])) for i in range(0, len(obs_list), self.batch)]
         return np.concatenate(out)
 
-    def _candidates(self, z: np.ndarray, obs, window: bool) -> list[int]:
+    def _candidates(self, z: np.ndarray, obs, window: bool, merge: bool = False) -> list[int]:
         legal = np.flatnonzero(np.isfinite(z))
         order = [int(i) for i in legal[np.argsort(-z[legal], kind="stable")]]
+        if merge:  # semantically identical options are one candidate (search/honest.py)
+            from ygo_zero.search.honest import merge_candidates
+
+            order = merge_candidates(order, obs)
         if not window:
             return order[: self.k]
         kinds = obs["actions"][:, 0]

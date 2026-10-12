@@ -3,6 +3,7 @@
 # every core. Processes are sized by measurement: one probe process runs 90 s, its GPU memory sets how many fit.
 # Env: CKPT (base best.pt), VARIANTS ("tag|search_match args;tag2|args2"), SM_ARGS (common args), VAR_CAP (default 60m),
 # PROBE_ARGS (sizing-probe variant args; default the first variant's: raw games end too fast for the 150 s probe),
+# GPU_MARGIN (per-proc GPU memory multiple for sizing, default 1.5; the final card used 19 of 33 GB at 1.5),
 # EXPECT ("tag:reference.jsonl": after variant tag, scripts/audit/harness_check.py must pass or the job stops).
 # Usage: bash scripts/vast_search_match.sh <name>. Results: runs/<name>/<tag>/{games-*.jsonl,summary.json}, PROGRESS, ALERT.
 set -uo pipefail
@@ -43,7 +44,7 @@ GTOT=$(nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits | head 
 RTOT=$(free -m | awk '/Mem/{print $2}')
 [ "$GMB" -gt 0 ] || { alert "probe: no GPU memory reading (see probe.txt)"; exit 3; }
 [ "$RMB" -gt 0 ] || RMB=2000
-NP=$(python3 -c "print(max(1, min($J, int($GTOT*0.85/($GMB*1.5)), int($RTOT*0.8/($RMB*1.3)))))")
+NP=$(python3 -c "print(max(1, min($J, int($GTOT*0.85/($GMB*${GPU_MARGIN:-1.5})), int($RTOT*0.8/($RMB*1.3)))))")
 echo "cores $J, gpu ${GTOT}MB, ram ${RTOT}MB; probe gpu ${GMB}MB rss ${RMB}MB per proc -> $NP procs" | tee "$OUT/sizing.txt"
 IFS=';' read -ra VS <<< "$VARIANTS"
 for v in "${VS[@]}"; do

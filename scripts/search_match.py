@@ -51,6 +51,7 @@ from playtest import verified_end_boards  # same deck sample as the report card
 from ygo_zero.decks import load_ydk
 from ygo_zero.engine.duel import DuelConfig, Engine
 from ygo_zero.eval.match import ring_pairs, wilson
+from ygo_zero.search.honest import HonestRule
 from ygo_zero.search.play import argmax_select, search_game_gen
 from ygo_zero.search.turn1 import _batch, drive_many
 from ygo_zero.search.window import WindowSearch
@@ -211,6 +212,7 @@ def summarize(out: Path) -> dict:
         "override_rate": round(sum(r["n_override"] for r in recs) / max(searched, 1), 3),
         "sec_per_search": round(sum(r["search_s"] for r in recs) / max(searched, 1), 3),
         "capped_share": round(capped_share, 4),
+        "branches_per_search": round(branches / max(searched, 1), 2),
         "mean_turns": round(statistics.mean(r["turns"] for r in recs), 1),
         "cut": sum(1 for r in recs if r.get("truncated")),
     }
@@ -218,6 +220,11 @@ def summarize(out: Path) -> dict:
         sub = [s_score(r) for r in recs if r["s_seat"] == seat]
         if sub:
             summ[label] = {"win_rate": round(sum(sub) / len(sub), 3), "n": len(sub)}
+    ho_dec = [e["ho"] for r in recs for e in r.get("search", []) if "ho" in e]
+    if ho_dec:
+        st = [d["status"] for d in ho_dec]
+        summ["ho"] = {kk: st.count(kk) for kk in ("keep", "override", "undecided")}
+        summ["ho"]["escalated"] = sum(1 for d in ho_dec if d.get("rounds", 0) > 0)
     if worlds:
         summ["det_accept_rate"] = round(worlds_acc / props, 3) if props else 0.0
         summ["det_fallback_rate"] = round(worlds_fb / worlds, 3)
@@ -295,6 +302,12 @@ def main() -> None:
                     help="--opp ygoagent: ygo-agent's own lists (as in playtest --ygoagent)")
     ap.add_argument("--ga-opps", type=int, default=4, help="--opp ygoagent: each deck vs its next k decks")
     ap.add_argument("--ga-seeds", type=int, default=1, help="--opp ygoagent: seeds per pair (playtest uses 1)")
+    ap.add_argument("--ho", type=int, default=0, choices=(0, 1),
+                    help="honest override (search/honest.py): merged candidates, paired-significant overrides only")
+    ap.add_argument("--ho-z", type=float, default=2.0, help="--ho: SE multiple an override gap must reach")
+    ap.add_argument("--ho-min-gap", type=float, default=0.05, help="--ho: absolute gap floor (value units)")
+    ap.add_argument("--ho-s-max", type=int, default=8, help="--ho: max samples per candidate (adaptive)")
+    ap.add_argument("--ho-step", type=int, default=4, help="--ho: samples added per escalation round")
     ap.add_argument("--max-searches", type=int, default=0,
                     help="per game: after this many search attempts play raw (0 = no cap; a looping game slowed a proc "
                          "for 45+ min, NOTEBOOK 2026-10-11 00:10; normal games search ~32 times)")
@@ -527,6 +540,11 @@ def main() -> None:
 
     cfgs: dict[int, DuelConfig] = {}  # game idx -> DuelConfig (teacher records + replay check)
 
+    ho_rule = (HonestRule(z=args.ho_z, min_gap=args.ho_min_gap, s_max=args.ho_s_max, step=args.ho_step)
+               if args.ho else None)
+    if ho_rule is not None and ho_rule.s_max < args.samples:
+        fail(f"--ho-s-max {ho_rule.s_max} < --samples {args.samples}")
+
     def jobs():
         for di, dj, s, s_seat, idx in mine:
             if not claimed(idx):
@@ -553,7 +571,7 @@ def main() -> None:
                     own_turn1=bool(args.own_turn1), conf_skip=args.conf_skip, own_frac=args.own_frac,
                     honest=bool(args.honest), det_tries=args.det_tries, det_fallback=args.det_fallback,
                     margin=args.margin, max_search_turn=args.max_search_turn, stop_turn=args.stop_turn,
-                    max_searches=args.max_searches,
+                    max_searches=args.max_searches, ho=ho_rule,
                 )  # fmt: skip
             else:
                 ws = RouteWindowSearch(
@@ -572,6 +590,7 @@ def main() -> None:
                     guard_mode="shared" if legacy else "per_seat",
                     unguarded_seat=None if legacy or args.opp == "ckpt" else 1 - s_seat, margin=args.margin,
                     max_search_turn=args.max_search_turn, stop_turn=args.stop_turn, max_searches=args.max_searches,
+                    ho=ho_rule,
                 ), route)  # fmt: skip
             yield idx, gen
 
@@ -661,7 +680,8 @@ def main() -> None:
                     # noise SE; NOTEBOOK 2026-10-09 08:40)
                     "search": [{"k": int(e["k"]), "kind": e.get("kind"), "turn": int(e.get("turn", 0)),
                                 "cands": [int(x) for x in e["cands"]], "samples": e.get("samples", []),
-                                "chosen": int(e["chosen"]), "played": int(e["played"])} for e in res.log],
+                                "chosen": int(e["chosen"]), "played": int(e["played"]),
+                                **({"ho": e["ho"]} if "ho" in e else {})} for e in res.log],
                 }
                 if args.opp == "ygoagent":  # paired-gate fields (playtest per_game format + search stats)
                     w = res.winner
