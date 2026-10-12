@@ -32,6 +32,8 @@ ap.add_argument("--jobs", type=int, default=2)
 ap.add_argument("--only", nargs="*", default=None, choices=sorted(SOURCES), help="build only these sources")
 ap.add_argument("--glob", nargs="*", default=None,
                 help="build only these record globs (one source 'custom'); kinds still come from the file paths")
+ap.add_argument("--strict-labels", action="store_true",
+                help="inferred labels weigh 0 except zone picks / identical copies (retrain plan v2)")
 args = ap.parse_args()
 sources = {"custom": args.glob} if args.glob else SOURCES
 src = {
@@ -40,7 +42,7 @@ src = {
     if args.glob or args.only is None or tag in args.only
 }
 print({k: len(v) for k, v in src.items()}, "files")
-print("samples:", build_shards(src, args.out, args.jobs))
+print("samples:", build_shards(src, args.out, args.jobs, strict=args.strict_labels))
 # newcards decks never enter training data (retrain plan v2): stop loud if any shard carries one
 _new = eval_only_decks()[1]
 _bad = sorted({str(d) for f in args.out.glob("*.npz") for d in np.unique(np.load(f)["deck"]) if str(d) in _new})

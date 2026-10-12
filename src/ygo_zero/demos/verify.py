@@ -9,6 +9,8 @@ internet text and training data.
 
 from __future__ import annotations
 
+import os
+
 import copy
 import json
 from collections import Counter
@@ -39,6 +41,11 @@ _ON_FIELD = frozenset({
 })  # fmt: skip
 
 POST_CAP = 300  # extra decisions after the last step before giving up
+# Strict mode (retrain plan v2 stage D; NOTEBOOK 2026-10-11 04:15): at an optional chain window an activation of a card
+# the line never names is never tried (it used to be tried last, so the search filled lines with hand traps the plan never
+# chose: planned-s1/s2 fired Maxx "C" at the own-turn-1 Draw window 86%/92%). Set by YGO_STRICT_VERIFY=1 so forked
+# verify/expand workers inherit it.
+STRICT = os.environ.get("YGO_STRICT_VERIFY", "0") == "1"
 
 
 @dataclass
@@ -671,7 +678,7 @@ def _search(
             named = later[si] if si < n else set()
             kind_of = {i: (k, c) for i, k, c in opts}
             junk = [x for x in plain if kind_of[x[0]][0] == Kind.ACTIVATE and kind_of[x[0]][1] not in named]
-            plain = [x for x in plain if x not in junk] + junk
+            plain = [x for x in plain if x not in junk] + ([] if STRICT else junk)
         movers = [(i, "inferred") for i, k, c in opts if k in _MOVERS]
         cancel = [
             (i, "inferred")

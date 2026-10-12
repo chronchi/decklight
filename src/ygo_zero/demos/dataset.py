@@ -243,7 +243,21 @@ def starved_opening(rec: dict) -> bool:
     return c.get("hand", 5) == 0 and not any(int(p[0]) == 1 and int(p[2]) == C.LOCATION_HAND for p in c.get("setup", []))
 
 
-def iter_samples(engine: Engine, path: Path) -> Iterator[tuple[dict, int, float, dict]]:
+def strict_inferred_weight(obs: dict, action: int) -> float:
+    """Strict labels (retrain plan v2): an `inferred` label is a guess the plan never made, so it trains nothing, except
+    a choice among equals: a zone pick (PLACE: the set-target loss spreads over the zones) or a pick where every legal
+    option is the same card (identical copies). Those get full weight."""
+    from ygo_zero.model.bc_data import equivalent_mask
+
+    acts, mask = obs["actions"], obs.get("action_mask")
+    if int(acts[action, 0]) == Kind.PLACE:
+        return 1.0
+    eq = equivalent_mask(acts, action, mask)
+    n_legal = int(mask.sum()) if mask is not None else len(eq)
+    return 1.0 if int(eq.sum()) == n_legal and n_legal >= 1 else 0.0
+
+
+def iter_samples(engine: Engine, path: Path, strict: bool = False) -> Iterator[tuple[dict, int, float, dict]]:
     """Yield (obs, action, weight, meta) for every agent decision of every verified record.
 
     Only the record's own seed is replayed: `choices` come from that seed's search, and other seeds in
@@ -284,6 +298,8 @@ def iter_samples(engine: Engine, path: Path) -> Iterator[tuple[dict, int, float,
                                 obs = env.step(choice)
                                 continue
                         weight, score = weights.get(label, 0.0), None
+                        if strict and label == "inferred":
+                            weight = strict_inferred_weight(obs, action)
                         if weight and judge is not None and "turns" in rec and "actors" in rec:
                             turn, actor = rec["turns"][k], rec["actors"][k]
                             if label == "interrupt":

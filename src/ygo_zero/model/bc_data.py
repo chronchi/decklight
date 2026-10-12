@@ -141,7 +141,8 @@ def base_line(line_id: str) -> str:
 def _shard_one(job: tuple[str, str, str]) -> tuple[str, int]:
     from ygo_zero.demos.dataset import iter_samples
 
-    src_file, out_file, src_tag = job
+    src_file, out_file, src_tag, *rest = job
+    strict = bool(rest[0]) if rest else False
     cols: dict[str, list] = {k: [] for k in OBS_KEYS}
     known_cols: dict[str, list] = {k: [] for k in KNOWN_KEYS}
     has_known: bool | None = None  # all samples of one file either carry the keys or not
@@ -154,7 +155,7 @@ def _shard_one(job: tuple[str, str, str]) -> tuple[str, int]:
     alive: list = []  # keeps every keyed log referenced: id() of a freed array can be reused by a later record's log
     running = 0
     has_log = True
-    for obs, a, w, meta in iter_samples(_ENGINE, Path(src_file)):
+    for obs, a, w, meta in iter_samples(_ENGINE, Path(src_file), strict=strict):
         for k in OBS_KEYS:
             cols[k].append(obs[k])
         hk = all(k in obs for k in KNOWN_KEYS)
@@ -235,8 +236,9 @@ def _shard_one(job: tuple[str, str, str]) -> tuple[str, int]:
     return out_file, len(action)
 
 
-def build_shards(sources: dict[str, list[Path]], out_dir: Path, jobs: int) -> int:
-    """sources: tag -> record files. Writes one shard per file into out_dir; returns the sample count."""
+def build_shards(sources: dict[str, list[Path]], out_dir: Path, jobs: int, strict: bool = False) -> int:
+    """sources: tag -> record files. Writes one shard per file into out_dir; returns the sample count.
+    `strict`: inferred labels weigh 0 except choices among equals (demos/dataset.py strict_inferred_weight)."""
     out_dir.mkdir(parents=True, exist_ok=True)
     work = []
     for tag, files in sources.items():
@@ -249,7 +251,7 @@ def build_shards(sources: dict[str, list[Path]], out_dir: Path, jobs: int) -> in
             except ValueError:
                 pass
             flat = "~".join(rel.with_suffix("").parts[-6:])
-            work.append((str(f), str(out_dir / f"{tag}__{flat}.npz"), tag))
+            work.append((str(f), str(out_dir / f"{tag}__{flat}.npz"), tag, strict))
     total = 0
     per_tag: dict[str, list[int]] = {}  # tag -> [files, samples, files with 0 samples]
     with mp.get_context("fork").Pool(max(1, jobs), initializer=_init) as pool:
