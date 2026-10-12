@@ -80,6 +80,11 @@ class QuotaExceeded(RuntimeError):
 
 
 LIMIT_PATTERNS = ("usage limit exceeded", "rate limit exceeded", "insufficient account funds")
+# Hard limits end the run (QuotaExceeded); "rate limit exceeded" (incl. "Output token rate limit exceeded. Please retry
+# after a brief wait.") is per-minute and transient: wait and retry instead (2026-10-12: 12 concurrent stage-M workers
+# tripped the output-token limit and every pending state failed as "usage limit exceeded").
+HARD_LIMIT_PATTERNS = ("usage limit exceeded", "insufficient account funds")
+RATE_WAITS_S = (30, 60, 120, 240, 300)
 # the free Zen model rate-limits at our volume (2026-10-03 21:50); the paid Go plan model takes over while it does
 FALLBACK_MODEL = os.environ.get("YGO_LLM_FALLBACK", "opencode-go/muse-spark-1.3-contributor") or None
 
@@ -98,8 +103,8 @@ def _log_tail(n_bytes: int = 300_000) -> list[str]:
         return []
 
 
-def limit_hit(since: float, model_id: str | None = None) -> bool:
-    """Whether opencode logged a limit error (LIMIT_PATTERNS) at or after `since` (epoch s), for `model_id` if given."""
+def limit_hit(since: float, model_id: str | None = None, patterns: tuple[str, ...] = LIMIT_PATTERNS) -> bool:
+    """Whether opencode logged a limit error (`patterns`) at or after `since` (epoch s), for `model_id` if given."""
     for line in reversed(_log_tail()):
         m = re.match(r"timestamp=(\S+?)(?:\.\d+)?Z", line)
         if not m:
@@ -108,7 +113,7 @@ def limit_hit(since: float, model_id: str | None = None) -> bool:
         if t < since:
             return False
         low = line.lower()
-        if "level=error" not in low or not any(p in low for p in LIMIT_PATTERNS):
+        if "level=error" not in low or not any(p in low for p in patterns):
             continue
         mid = re.search(r"modelID=(\S+)", line)
         if model_id is None or (mid and mid.group(1) == model_id):
@@ -117,7 +122,15 @@ def limit_hit(since: float, model_id: str | None = None) -> bool:
 
 
 def model_limited(model: str, window_s: float = 300) -> bool:
-    return limit_hit(time.time() - window_s, model.split("/", 1)[-1])
+    """A hard limit for `model` in the last `window_s` s; a transient rate limit is waited out first (RATE_WAITS_S)."""
+    mid = model.split("/", 1)[-1]
+    for wait in RATE_WAITS_S:
+        if limit_hit(time.time() - window_s, mid, HARD_LIMIT_PATTERNS):
+            return True
+        if not limit_hit(time.time() - 60, mid):
+            return False
+        time.sleep(wait)
+    return limit_hit(time.time() - 60, mid)
 
 
 def quota_exceeded(window_s: float = 600) -> bool:
