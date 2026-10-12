@@ -8,6 +8,10 @@
 # plan_turns makes all LLM calls of a chunk, then verifies on one core, so one stream leaves cores idle (2026-10-12: a
 # chunk took ~2 h). STREAM/NSTREAMS split the chunks round-robin over parallel streams (all on cores 0-3); FROM_CHUNK
 # skips chunks already handled by an earlier sweep.
+# LLM path: the HTTP endpoint answers "Model is unavailable" for muse (2026-10-12), so calls fall back to the CLI, which
+# holds 2 machine-wide slots: ~2 calls/min and "no free slot in 900 s" errors (30 of 115 chunk-0 states). Start
+# `sh scripts/llm_server.sh start` and set YGO_OPENCODE_SERVER=http://127.0.0.1:4097 (no slot cap, ~7 s per call).
+# A final pass over all decks (FROM_CHUNK=0, NSTREAMS=1) retries the states that failed on llm errors.
 # Usage: nohup setsid bash scripts/launch/run-stage-m.sh > data/cache/stage_m/sweep.log 2>&1 &
 #        for i in 0 1 2; do STREAM=$i NSTREAMS=3 FROM_CHUNK=1 nohup setsid bash scripts/launch/run-stage-m.sh \
 #          > data/cache/stage_m/sweep-$i.log 2>&1 & done
