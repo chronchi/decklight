@@ -26,6 +26,7 @@ T0=$SECONDS
 tick() { echo "$(date +%T) $1 $((SECONDS - T0)) s" | tee -a "$OUT/PROGRESS"; }
 [ -s "${NEW_GROUPS:-}" ] || [ -s "${IDS:-}" ] || { alert "nothing to do: NEW_GROUPS and IDS unset or empty"; exit 3; }
 [ "$(ls data/cache/llm | head -1)" ] || { alert "no LLM cache shipped"; exit 3; }
+[ "$(ls data/strategy 2>/dev/null | head -1)" ] || { alert "no data/strategy shipped (prompts would not match the cache)"; exit 3; }
 # RAM: a process holds the 1,445 sw-v games plus one engine (360 MB RSS measured on the laptop); 600 MB each + 20%
 RTOT=$(free -m | awk '/Mem/{print $2}'); NP=$(( J < RTOT * 8 / 10 / 600 ? J : RTOT * 8 / 10 / 600 )); [ "$NP" -lt 1 ] && NP=1
 echo "cores $J, ram ${RTOT}MB -> $NP procs" | tee "$OUT/sizing.txt"
@@ -45,15 +46,19 @@ run_proc() {  # one process slot: its NEW_GROUPS share, then its IDS share; each
 mkdir -p "$OUT/pending"
 PIDS=()
 for p in $(seq 0 $((NP - 1))); do run_proc "$p" & PIDS+=($!); done
-# first milestone: the first finished log must show states and > 0 verified
+# fail fast: a process whose first answers are not in the cache (prompts differ from the laptop's: 2026-10-12 stage-m
+# 2250, $X lost) stops the whole job at once. First milestone: the first finished log must show > 0 verified.
+stop_all() { for pid in "${PIDS[@]}"; do pkill -TERM -P "$pid" 2>/dev/null; kill "$pid" 2>/dev/null; done; }
 ( while :; do
+    bad=$(grep -l "ALERT plan_turns" "$OUT"/logs/*.txt 2>/dev/null | head -1)
+    if [ -n "$bad" ]; then alert "$(grep -h "ALERT plan_turns" "$bad" | head -1) ($bad); stopping"; stop_all; break; fi
     f=$(grep -l "plan_turns: verified=" "$OUT"/logs/new-*.txt "$OUT"/logs/old-*.txt 2>/dev/null | head -1)
     if [ -n "$f" ]; then
       v=$(grep -h "plan_turns: verified=" "$f" | tail -1); tick "first proc: $v ($f)"
       n=${v#*verified=}; [ "${n%%/*}" = 0 ] && [ "${n#*/}" -gt 10 ] && alert "first proc verified 0 of ${n#*/}: $(grep -h cache-only "$f")"
       break
     fi
-    sleep 30
+    sleep 15
   done ) &
 for pid in "${PIDS[@]}"; do wait "$pid"; done
 cat "$OUT"/logs/fail-*.txt > "$OUT/logs/fail.txt" 2>/dev/null

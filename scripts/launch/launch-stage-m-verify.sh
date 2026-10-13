@@ -12,7 +12,8 @@ cd "$(dirname "$0")/../.."
 NEW_GROUPS=${NEW_GROUPS-data/cache/stage_m/groups-new.txt}
 for f in $NEW_GROUPS ${OLD_GROUPS:-} ${IDS:-}; do [ -s "$f" ] || { echo "missing $f"; exit 3; }; done
 N=stage-m-$(date +%Y%m%d-%H%M); echo $N
-D=(decks data/demos/sw-v data/demos/turns data/cache/llm data/cache/stage_m)
+# data/strategy: the per-deck notes are part of every prompt (without them no prompt matches the cache: stage-m-20261012-2250)
+D=(decks data/demos/sw-v data/demos/turns data/cache/llm data/cache/stage_m data/strategy)
 taskset -c 0-3 uv run --no-sync python scripts/vast_job.py --name $N \
   --cmd "NEW_GROUPS='$NEW_GROUPS' OLD_GROUPS='${OLD_GROUPS:-}' IDS='${IDS:-}' BUDGET=${BUDGET:-8000} CAP=${CAP:-150m} bash scripts/vast_stage_m.sh $N" \
   --hours "${HOURS:-3}" --max-dph "${MAX_DPH:-0.30}" --min-cpus "${MIN_CPUS:-64}" --min-gpu-ram 4 \
