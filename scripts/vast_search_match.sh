@@ -54,12 +54,18 @@ for v in "${VS[@]}"; do
   PIDS=()
   for ((p = 0; p < NP; p++)); do
     # shellcheck disable=SC2086
-    timeout "${VAR_CAP:-60m}" uv run --no-sync python scripts/search_match.py --ckpt "$CKPT" --device cuda --out "$d" \
+    YGO_FLIGHT_DIR="$d/flight" timeout "${VAR_CAP:-60m}" uv run --no-sync python scripts/search_match.py --ckpt "$CKPT" --device cuda --out "$d" \
       --nproc "$NP" --proc "$p" ${SM_ARGS:-} $vargs > "$d/proc-$p.txt" 2>&1 &
     PIDS+=($!)
   done
   for pid in "${PIDS[@]}"; do wait "$pid" || alert "$tag: proc pid $pid exit $?"; done
   grep -h "^ALERT\|Traceback" "$d"/proc-*.txt >> "$OUT/ALERT" 2>/dev/null || true
+  # games still in flight when a proc died (segfault or cap): replay each in a child to find the crashing deal
+  if compgen -G "$d/flight/*.jsonl" > /dev/null; then
+    timeout 20m uv run --no-sync python scripts/audit/flight_replay.py --bisect "$d"/flight/*.jsonl > "$d/flight.txt" 2>&1 \
+      && alert "$tag: flight replay reproduced a crash: $(grep -m1 CRASH "$d/flight.txt")" \
+      || echo "$(date +%T) $tag flight replay: no crash reproduced ($(wc -l < "$d/flight.txt") lines, flight.txt)" >> "$OUT/PROGRESS"
+  fi
   if uv run --no-sync python scripts/search_match.py --summarize "$d" > "$d/summary.txt" 2>&1; then
     echo "$tag $(head -1 "$d/summary.txt")" >> "$OUT/PROGRESS"
   else

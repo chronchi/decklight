@@ -34,7 +34,7 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
-from ygo_zero.engine.cpp_env import CppEnv
+from ygo_zero.engine.cpp_env import CppEnv, FlightRecorder
 from ygo_zero.engine.duel import DuelConfig, Engine
 from ygo_zero.eval.loopguard import LoopGuard
 from ygo_zero.search.determinize import Determinizer, SeenTracker, key_rank_of_choice
@@ -150,6 +150,7 @@ def search_game_gen(
         raise ValueError(f"det_fallback must be 'true' or 'skip', got {det_fallback!r}")
     rng = random.Random(search.seed * 1_000_003 + game_seed)
     env = CppEnv(engine, config, auto_single)
+    flight = FlightRecorder(config)
     obs = env.reset()
     tracker = SeenTracker(s_seat) if honest else None
     if tracker is not None:
@@ -317,9 +318,11 @@ def search_game_gen(
         res.choices.append(a)
         res.actors.append(me)
         res.decision_turns.append(turn)
+        flight.choice(a)
         obs = env.step(a)
         if tracker is not None:
             tracker.update(env)
+    flight.close()
     res.truncated = obs is not None
     res.winner = None if res.truncated else int(env.winner)
     res.n_capped = search.capped - capped0

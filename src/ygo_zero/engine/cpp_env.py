@@ -1,5 +1,8 @@
 """The C++ env (`ygo_zero._ygoenv`, built by scripts/build_ext.sh) behind the same interface as `PyEnv`."""
 
+import itertools
+import json
+import os
 from collections.abc import Sequence
 
 from ygo_zero import _ygoenv
@@ -31,6 +34,40 @@ def cpp_config(config: DuelConfig) -> "_ygoenv.DuelConfig":
         seed=config.seed, flags=config.flags, lp=config.lp, hand=config.hand, draw=config.draw,
         setup=[tuple(p) for p in config.setup],
     )  # fmt: skip
+
+
+class FlightRecorder:
+    """Crash forensics for engine segfaults (NOTEBOOK 2026-10-13 14:20): when `$YGO_FLIGHT_DIR` is set, each
+    recorded game writes `<dir>/<pid>-<n>.jsonl`: its config as line 1, then one line per choice, flushed before
+    the engine step. The file is removed when the game ends, so a segfaulted process leaves its in-flight
+    games behind; `scripts/audit/flight_replay.py` replays them to find the crashing deal."""
+
+    _ids = itertools.count()
+
+    def __init__(self, config: DuelConfig) -> None:
+        d = os.environ.get("YGO_FLIGHT_DIR")
+        self._f = None
+        if not d:
+            return
+        os.makedirs(d, exist_ok=True)
+        self.path = os.path.join(d, f"{os.getpid()}-{next(self._ids)}.jsonl")
+        self._f = open(self.path, "w", buffering=1)
+        self._f.write(json.dumps({
+            "deck0_main": list(config.main_of(0)), "deck0_extra": list(config.deck0.extra),
+            "deck1_main": list(config.main_of(1)), "deck1_extra": list(config.deck1.extra),
+            "seed": int(config.seed), "flags": int(config.flags), "lp": int(config.lp), "hand": int(config.hand),
+            "draw": int(config.draw), "setup": [list(p) for p in config.setup],
+        }) + "\n")  # fmt: skip
+
+    def choice(self, index: int) -> None:
+        if self._f is not None:
+            self._f.write(f"{int(index)}\n")
+
+    def close(self) -> None:
+        if self._f is not None:
+            self._f.close()
+            os.remove(self.path)
+            self._f = None
 
 
 class CppEnv:
