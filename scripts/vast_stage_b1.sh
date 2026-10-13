@@ -95,7 +95,7 @@ for v in clean hw; do
   TP=$!
   # relay each epoch's metrics line to PROGRESS (first-milestone read: does val move the intended way after epoch 0)
   ( seen=0; while kill -0 $TP 2>/dev/null; do
-      sleep 60; n=$(grep -c '"epoch"' "$OUT/$v/metrics.jsonl" 2>/dev/null || echo 0)
+      sleep 60; n=$(grep -c '"epoch"' "$OUT/$v/metrics.jsonl" 2>/dev/null); n=${n:-0}
       if [ "$n" -gt "$seen" ]; then echo "$(date +%T) train-$v $(tail -1 "$OUT/$v/metrics.jsonl" | cut -c1-300)" >> "$OUT/PROGRESS"; seen=$n; fi
     done ) &
   wait $TP; rc=$?
@@ -115,5 +115,6 @@ CKPT=data/cache/base_r3/best.pt SM_ARGS="--ga-seeds $GS --deal-seed0 2000" VARIA
   VAR_CAP="${VAR_CAP:-60m}" bash scripts/vast_search_match.sh "$NAME"
 tick card
 for t in ftswv teachh base bclean bhw; do
-  [ -f "$OUT/$t/summary.json" ] && echo "card $t $(cut -c1-200 "$OUT/$t/summary.json")" >> "$OUT/PROGRESS"
+  [ -f "$OUT/$t/summary.json" ] && echo "card $t $(tr -d '\n ' < "$OUT/$t/summary.json" | cut -c1-200)" >> "$OUT/PROGRESS"
 done
+true  # the last arm may be absent (B1 ran clean only, user 2026-10-12): not a job failure
