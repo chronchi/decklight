@@ -13,6 +13,23 @@ done
 if [ "${NO_TURNS:-0}" != 1 ]; then
   [ -s "${ANCHOR_DROPS:-}" ] || { echo "set ANCHOR_DROPS (turn-anchor drops jsonl) or NO_TURNS=1"; exit 3; }
   ls data/demos/turns/*/*.jsonl > /dev/null 2>&1 || { echo "no stage M turns in data/demos/turns"; exit 3; }
+  # only anchored turn lines train: lines verified after the anchor ran (stage M split mode keeps adding them,
+  # NOTEBOOK 2026-10-12 21:00) are excluded with the anchor's drops
+  EX="$(dirname "$ANCHOR_DROPS")/b1_excl.jsonl"
+  uv run --no-sync python - "$ANCHOR_DROPS" "$EX" <<'PY' || exit 3
+import glob, json, sys
+from pathlib import Path
+drops, out = Path(sys.argv[1]), Path(sys.argv[2])
+seen = {json.loads(x)["line_id"] for f in glob.glob(str(drops.parent / "anchor" / "p*.jsonl")) for x in open(f) if x.strip()}
+if not seen:
+    sys.exit(f"no anchor records next to {drops}")
+ids = [json.loads(x)["line"] for x in drops.read_text().splitlines() if x.strip()]
+turns = [json.loads(x)["line_id"] for f in glob.glob("data/demos/turns/*/*.jsonl") for x in open(f) if x.strip()]
+late = [t for t in turns if t not in seen]
+out.write_text("".join(json.dumps({"line": i}) + "\n" for i in sorted(set(ids) | set(late))))
+print(f"turn lines: {len(turns)}; anchored {len(seen)}, anchor drops {len(ids)}, not anchored {len(late)} -> {out}")
+PY
+  ANCHOR_DROPS=$EX
 fi
 N=stage-b1-$(date +%Y%m%d-%H%M)${SMOKE:+-smoke}; echo $N
 D=(data/demos/teacher data/demos/dagger data/demos/gold data/demos/verified data/demos/expanded data/demos/claude
