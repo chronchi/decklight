@@ -24,6 +24,7 @@ J=$(box_cores)
 ( while true; do echo "$(date +%T) $(nvidia-smi --query-gpu=utilization.gpu,memory.used --format=csv,noheader,nounits 2>/dev/null | tr -d ' ') $(cut -d' ' -f1 /proc/loadavg) $(free -g | awk '/Mem/{print $3}')G"; sleep 30; done ) > "$OUT/usage.txt" 2>&1 &
 USAGE_PID=$!
 export OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+export PYTHONFAULTHANDLER=1  # a segfaulting proc (exit 139, B1 card 2026-10-13) leaves its Python stack in proc-*.txt
 # measure one process (GPU memory, RSS) on the first variant's args, then size the pool
 FIRST_ARGS="${VARIANTS%%;*}"; FIRST_ARGS="${PROBE_ARGS:-${FIRST_ARGS#*|}}"
 # shellcheck disable=SC2086

@@ -74,6 +74,7 @@ class Audit:
         self.cards = defaultdict(Counter)  # metric -> code -> fires
         self.labels = Counter()
         self.drops: dict[str, Counter] = defaultdict(Counter)  # line id -> hand-trap codes fired on own turn
+        self.t1_lines: set[str] = set()  # lines/games with an own-T1 hand-trap fire (gate B: <= 33 of 744 going first)
 
     def decision(self, obs: dict, a: int, line: str | None = None, label: str | None = None) -> None:
         g = obs["global"]
@@ -103,6 +104,8 @@ class Audit:
                 self.cards[m][code(a)] += 1
                 if m in ("ht_own_t1", "ht_own_t2p") and line is not None:
                     self.drops[line][code(a)] += 1
+                    if m == "ht_own_t1":
+                        self.t1_lines.add(line)
         acts_legal = [i for i in legal if kind(i) == Kind.ACTIVATE]
         if msg == C.MSG_SELECT_CHAIN and acts_legal:
             if phase in DRAW_STANDBY and int(g[20]) == 0:
@@ -133,6 +136,7 @@ class Audit:
             out["labels"] = dict(self.labels)
             out["inferred_share"] = round(self.labels["inferred"] / lab, 4)
         out["lines_with_own_turn_ht"] = len(self.drops)
+        out["lines_with_own_t1_ht"] = len(self.t1_lines)
         out["card_counts"] = {m: {str(c): v for c, v in cs.items()} for m, cs in self.cards.items()}  # full, by code
         return out
 
