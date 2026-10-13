@@ -147,21 +147,26 @@ def iter_games(dirs: list[Path], engine: Engine, seat: str):
     from ygo_zero.engine.duel import DuelConfig
 
     for d in dirs:
-        for f in sorted(d.glob("games-*.jsonl")):
+        # search_match games-*.jsonl (s_seat, deck names) or rl.evaluate games.jsonl (a_seat, repo-relative deck paths)
+        for f in sorted(d.glob("games-*.jsonl")) + sorted(d.glob("games.jsonl")):
             for line in f.read_text().splitlines():
                 r = json.loads(line)
-                me = int(r["s_seat"]) if seat == "s" else 1 - int(r["s_seat"])
-                ddir = ROOT / ("decks/gauntlet" if (ROOT / "decks/gauntlet" / f"{r['decks'][0]}.ydk").exists()
-                               else "decks/pool")
-                cfg = DuelConfig(load_ydk(ddir / f"{r['decks'][0]}.ydk"), load_ydk(ddir / f"{r['decks'][1]}.ydk"),
-                                 seed=int(r["seed"]))
+                own = int(r["s_seat"]) if "s_seat" in r else int(r["a_seat"])
+                me = own if seat == "s" else 1 - own
+                if "a_seat" in r:
+                    paths = [ROOT / r["decks"][0], ROOT / r["decks"][1]]
+                else:
+                    ddir = ROOT / ("decks/gauntlet" if (ROOT / "decks/gauntlet" / f"{r['decks'][0]}.ydk").exists()
+                                   else "decks/pool")
+                    paths = [ddir / f"{r['decks'][0]}.ydk", ddir / f"{r['decks'][1]}.ydk"]
+                cfg = DuelConfig(load_ydk(paths[0]), load_ydk(paths[1]), seed=int(r["seed"]))
                 env = CppEnv(engine, cfg, True)
                 obs = env.reset()
                 for c in r["choices"]:
                     if obs is None:
                         break
                     if int(env.player) == me:
-                        yield obs, int(c), f"{f.name}:{r.get('game_idx')}", None
+                        yield obs, int(c), f"{f.name}:{r.get('game_idx', r.get('game'))}", None
                     obs = env.step(int(c))
 
 
