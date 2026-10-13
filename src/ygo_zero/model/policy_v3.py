@@ -132,6 +132,8 @@ class EffectKeys(nn.Module):
 class SentenceAttn(nn.Module):
     """x [.., d] attends to its card's sentence keys; pre-norm residual."""
 
+    CHUNK = 32768
+
     def __init__(self, d: int, heads: int, dropout: float):
         super().__init__()
         self.norm = nn.LayerNorm(d)
@@ -140,8 +142,13 @@ class SentenceAttn(nn.Module):
     def forward(self, x: torch.Tensor, keys: torch.Tensor, pad: torch.Tensor) -> torch.Tensor:
         shp = x.shape
         q = self.norm(x).reshape(-1, 1, shp[-1])
-        out, _ = self.attn(q, keys.reshape(q.shape[0], -1, shp[-1]), keys.reshape(q.shape[0], -1, shp[-1]),
-                           key_padding_mask=pad.reshape(q.shape[0], -1), need_weights=False)  # fmt: skip
+        k = keys.reshape(q.shape[0], -1, shp[-1])
+        m = pad.reshape(q.shape[0], -1)
+        # one attention row per token: batch 512 x ~160 cards exceeds the CUDA efficient-attention batch limit (65,535;
+        # stage-b-20261013-0544 crashed at step 1), so long batches go in chunks
+        out = torch.cat([self.attn(q[i : i + self.CHUNK], k[i : i + self.CHUNK], k[i : i + self.CHUNK],
+                                   key_padding_mask=m[i : i + self.CHUNK], need_weights=False)[0]
+                         for i in range(0, q.shape[0], self.CHUNK)])  # fmt: skip
         return x + out.reshape(shp)
 
 

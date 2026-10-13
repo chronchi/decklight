@@ -125,3 +125,17 @@ def test_make_policy_v1_is_plain_policynet_and_v3_heads(tmp_path):
     lg, v = v3.forward_value(_batch())
     lg2, q = v3.forward_q(_batch())
     assert v.shape == (3,) and torch.allclose(lg, lg2) and torch.isfinite(q).all()
+
+
+def test_sentence_attn_chunking_is_exact():
+    """Chunked sentence attention (CUDA batch limit, stage-b-20261013-0544) equals one call."""
+    from ygo_zero.model.policy_v3 import SentenceAttn
+
+    torch.manual_seed(0)
+    sa = SentenceAttn(16, 2, 0.0).eval()
+    x, keys = torch.randn(3, 7, 16), torch.randn(3, 7, 5, 16)
+    pad = torch.zeros(3, 7, 5, dtype=torch.bool)
+    pad[..., 3:] = True
+    full = sa(x, keys, pad)
+    sa.CHUNK = 4
+    assert torch.allclose(full, sa(x, keys, pad), atol=1e-6)
