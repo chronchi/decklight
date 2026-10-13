@@ -401,6 +401,13 @@ def complete(
     raise RuntimeError(f"llm.complete failed ({'; '.join(errors)})")
 
 
+def cached(prompt: str, model: str = "opencode/muse-spark-1.3-contributor-free", system: str | None = None,
+           variant: str | None = None) -> str | None:
+    """The cached response for a prompt, or None. Never calls a model (safe without a key, e.g. on vast)."""
+    path = CACHE_DIR / f"{_cache_key(model, system, prompt, variant or DEFAULT_VARIANT)}.json"
+    return json.loads(path.read_text())["response"] if path.exists() else None
+
+
 def complete_many(
     prompts: Sequence[str],
     model: str = "opencode/muse-spark-1.3-contributor-free",

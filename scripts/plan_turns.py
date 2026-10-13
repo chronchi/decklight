@@ -6,6 +6,11 @@ engine from that exact state (strict verifier), and writes BC records.
 
 Usage:
     uv run python scripts/plan_turns.py --games 'data/demos/sw-v/p0-a*.jsonl' --per-bucket 1 --dry-run
+
+Split mode (2026-10-12: verification is ~4 min of one core per state, so the laptop's 4 cores took ~7 h per 10 decks):
+the laptop makes the LLM calls (`--llm-only`, fills data/cache/llm), a vast box verifies from that cache with no key
+(`--cache-only --proc i --nproc n`) and writes the repair prompts it could not answer to `--pending-out`; the laptop
+answers them (`--llm-only --prompts <pending>`) and a second vast round finishes the repairs.
 """
 
 from __future__ import annotations
@@ -19,6 +24,7 @@ import glob
 import json
 import random
 import sys
+import zlib
 from collections import Counter
 from pathlib import Path
 
@@ -337,13 +343,52 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--llm-timeout", type=int, default=900)
     ap.add_argument("--out-dir", default="data/demos/turns")
     ap.add_argument("--dry-run", action="store_true")
+    ap.add_argument("--llm-only", action="store_true",
+                    help="make the first-round LLM calls (fills the cache) and stop; with --prompts, answer those")
+    ap.add_argument("--prompts", type=Path, default=None, help="jsonl of {'prompt'} (a --pending-out) for --llm-only")
+    ap.add_argument("--cache-only", action="store_true",
+                    help="never call the LLM: states with an uncached first prompt are skipped, uncached repair "
+                         "prompts go to --pending-out")
+    ap.add_argument("--pending-out", type=Path, default=None)
+    ap.add_argument("--deck-groups", type=Path, default=None, help="file: one --decks chunk per line")
+    ap.add_argument("--ids", type=Path, default=None, help="only the states whose line id is listed (one per line)")
+    ap.add_argument("--ids-out", type=Path, default=None,
+                    help="--llm-only: append the line ids of states whose first prompt was not cached before this run")
+    ap.add_argument("--proc", type=int, default=0)
+    ap.add_argument("--nproc", type=int, default=1)
     args = ap.parse_args(argv)
+    if args.prompts and not args.llm_only:
+        ap.error("--prompts needs --llm-only")
+    if args.llm_only and args.cache_only:
+        ap.error("--llm-only and --cache-only exclude each other")
+    sfx = f".p{args.proc}" if args.nproc > 1 else ""
+
+    def llm_many(prompts: list[str]) -> list:
+        return _llm.complete_many(prompts, model=args.model, system=TURN_SYSTEM,
+                                  max_workers=args.workers, return_exceptions=True,
+                                  timeout=args.llm_timeout, variant=args.variant)
+
+    def cached(prompt: str) -> str | None:
+        return _llm.cached(prompt, model=args.model, system=TURN_SYSTEM, variant=args.variant)
+
+    if args.prompts:  # answer the pending repair prompts of a --cache-only round
+        prompts = sorted({json.loads(x)["prompt"] for x in args.prompts.read_text().splitlines() if x.strip()})
+        todo = [p for p in prompts if cached(p) is None]
+        print(f"plan_turns: {len(prompts)} pending prompts, {len(todo)} not cached", flush=True)
+        res = llm_many(todo)
+        bad = sum(isinstance(r, BaseException) for r in res)
+        print(f"plan_turns: answered {len(todo) - bad}/{len(todo)} ({bad} llm errors)", flush=True)
+        return 2 if todo and bad == len(todo) else 0
 
     engine, names = Engine(), CardNames()
     recs = load_game_records(args.games)
     print(f"plan_turns: {len(recs)} games", flush=True)
-    states = sample_states(engine, recs, args.seed, args.per_bucket, tuple(args.buckets),
-                           set(args.decks) if args.decks else None)
+    # the sampled states depend on the deck allow-list (one state per game per bucket), so a split run samples each
+    # original chunk (--deck-groups, one space-separated chunk per line) exactly as the laptop sweep did
+    groups = ([ln.split() for ln in args.deck_groups.read_text().splitlines() if ln.strip()] if args.deck_groups
+              else [args.decks])
+    states = [s for g in groups for s in sample_states(engine, recs, args.seed, args.per_bucket, tuple(args.buckets),
+                                                       set(g) if g else None)]
     print(f"plan_turns: {len(states)} states "
           f"({dict(Counter((s['bucket'], s['deck']) for s in states))})", flush=True)
     if not states:
@@ -370,15 +415,49 @@ def main(argv: list[str] | None = None) -> int:
             print(prompt)
         return 0
 
-    def complete_many_fn(prompts: list[str]) -> list:
-        return _llm.complete_many(prompts, model=args.model, system=TURN_SYSTEM,
-                                  max_workers=args.workers, return_exceptions=True,
-                                  timeout=args.llm_timeout, variant=args.variant)
+    pending: list[str] = []
+
+    def cache_many(prompts: list[str]) -> list:
+        out: list = []
+        for p in prompts:
+            r = cached(p)
+            if r is None:
+                pending.append(p)
+                out.append(RuntimeError("not cached"))
+            else:
+                out.append(r)
+        return out
+
+    complete_many_fn = cache_many if args.cache_only else llm_many
 
     out_dir = Path(args.out_dir)
     done = {json.loads(x)["line_id"] for f in out_dir.glob("*/*.jsonl") for x in f.read_text().splitlines() if x.strip()}
     states = [s for s in states if f"{s['deck']}/turn-{s['bucket']}-{s['game_id']}-{s['k']}" not in done]
+    if args.ids:
+        allow = {x.strip() for x in args.ids.read_text().splitlines() if x.strip()}
+        states = [s for s in states if f"{s['deck']}/turn-{s['bucket']}-{s['game_id']}-{s['k']}" in allow]
+    states = [s for s in states
+              if zlib.crc32(f"{s['deck']}/turn-{s['bucket']}-{s['game_id']}-{s['k']}".encode()) % args.nproc == args.proc]
     print(f"plan_turns: {len(states)} states to plan ({len(done)} lines already in {out_dir})", flush=True)
+    if args.llm_only:
+        prompts = [build_prompt(engine, names, sheets, s)[0] for s in states]
+        if args.ids_out:
+            args.ids_out.parent.mkdir(parents=True, exist_ok=True)
+            with args.ids_out.open("a") as f:
+                for s, p in zip(states, prompts):
+                    if cached(p) is None:
+                        f.write(f"{s['deck']}/turn-{s['bucket']}-{s['game_id']}-{s['k']}\n")
+        res = llm_many(prompts)
+        bad = sum(isinstance(r, BaseException) for r in res)
+        print(f"plan_turns: llm-only: {len(res) - bad}/{len(res)} answered ({bad} llm errors)", flush=True)
+        return 2 if res and bad == len(res) else 0
+    if args.cache_only:
+        n0 = len(states)
+        states = [s for s in states if cached(build_prompt(engine, names, sheets, s)[0]) is not None]
+        print(f"plan_turns: cache-only: {len(states)}/{n0} states have a cached first answer", flush=True)
+        if n0 and not states:
+            print(f"ALERT plan_turns: 0 of {n0} states have a cached first answer (cache not shipped?)", flush=True)
+            return 2
     results = plan_states(engine, names, sheets, pool_decks, states, complete_many_fn,
                           args.budget, args.repairs, args.model)
     report: dict = {"per": {}, "states": len(states), "verified": 0, "attempts": 0}
@@ -392,7 +471,7 @@ def main(argv: list[str] | None = None) -> int:
             e["parsed"] += 1
             e["verified"] += 1
             report["verified"] += 1
-            p = out_dir / s["bucket"] / f"{s['deck']}.jsonl"
+            p = out_dir / s["bucket"] / f"{s['deck']}{sfx}.jsonl"
             p.parent.mkdir(parents=True, exist_ok=True)
             with p.open("a") as f:
                 f.write(json.dumps(rec) + "\n")
@@ -402,7 +481,13 @@ def main(argv: list[str] | None = None) -> int:
             e["reasons"][status] += 1
     serial = {k: {**v, "reasons": dict(v["reasons"])} for k, v in report["per"].items()}
     out_dir.mkdir(parents=True, exist_ok=True)
-    (out_dir / "report.json").write_text(json.dumps({**report, "per": serial}, indent=1))
+    (out_dir / f"report{sfx}.json").write_text(json.dumps({**report, "per": serial}, indent=1))
+    if args.pending_out:
+        args.pending_out.parent.mkdir(parents=True, exist_ok=True)
+        with args.pending_out.open("a") as f:
+            for p in pending:
+                f.write(json.dumps({"prompt": p}) + "\n")
+        print(f"plan_turns: {len(pending)} uncached prompts -> {args.pending_out}", flush=True)
     print(f"plan_turns: verified={report['verified']}/{report['states']}", flush=True)
     for k in sorted(serial):
         print(f"  {k}: {serial[k]}", flush=True)
