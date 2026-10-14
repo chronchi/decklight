@@ -11,6 +11,9 @@
 # Env: EPOCHS (6), ANCHOR_DROPS (jsonl of stage-M turn line ids the play-out anchor dropped; required unless
 # NO_TURNS=1), VARIANTS ("clean hw"), HW_FRAC (per-epoch repeat of the hw labels, default 1 = plan-v2 weight 1; 1,483
 # labels are ~0.07% of the mix, NOTEBOOK 2026-10-12 06:20), GA_SEEDS (24), VAR_CAP (60m), SMOKE=1 (tiny everything).
+# Pass-weight test (NOTEBOOK 2026-10-13 19:00): EXTRA_FRAC (more --kind-frac entries, e.g. "teacher_pass=2 dagger_pass=2"),
+# CARD=0 (skip the 5,952-deal card), MS_EVAL=1 (instead: P's milestone eval of clean/best.pt vs B-v1 at
+# data/cache/bv1 on the same 1,488 ygo-agent deals + principles on both seats, comparable with runs/stage-p-*/ms/init).
 # Usage: bash scripts/vast_stage_b1.sh <name>. Do NOT run on the laptop (vast GPU only; ~45 GB RAM per training).
 set -uo pipefail
 export PATH="$HOME/.local/bin:$PATH"
@@ -79,7 +82,8 @@ HOLD="kewl-tune $( [ -f decks/pool/HOLDOUT ] && tr '\n' ' ' < decks/pool/HOLDOUT
 CLEAN=(teacher teacher_pass dagger dagger_pass line line_improved line_expanded gold turn_mid turn_second turn_end)
 # pass kinds already carry weight 0.5 in the shards (smoke 2026-10-12: dagger_pass 46,608 samples, weighted 23,304),
 # so plan-v1 §3.4 teacher_pass / dagger_pass 0.5 needs no extra fraction
-FRAC=(line_expanded=0.3 gold=3)
+# shellcheck disable=SC2206
+FRAC=(line_expanded=0.3 gold=3 ${EXTRA_FRAC:-})
 EXTRA=(); [ "${SMOKE:-0}" = 1 ] && EXTRA=(--limit 20000)
 V="ftswv|--opp ygoagent --raw 1 --ckpt data/cache/base_r2/best.pt"
 V="$V;teachh|--opp ygoagent --raw 1 --ckpt data/cache/base_teach_h/best.pt"
@@ -108,6 +112,39 @@ for v in clean hw; do
   V="$V;b$v-new|--opp ckpt --opp-ckpt data/cache/base_r2/best.pt --raw 1 --deck-set newcards --seeds ${NEW_SEEDS:-3} --ckpt $OUT/$v/best.pt"
 done
 ls "$OUT"/*/best.pt > /dev/null 2>&1 || { alert "no B-v1 trained"; exit 3; }
+
+if [ "${MS_EVAL:-0}" = 1 ]; then  # P's milestone eval (vast_stage_p.sh evalck/waste), same decks, seeds and deals
+  EVN=$(uv run --no-sync python - <<'PY'
+import random
+from pathlib import Path
+hold = set(Path("decks/pool/HOLDOUT").read_text().split()) | {"kewl-tune"}
+pool = sorted(Path("decks/pool").glob("*.ydk"))
+r = random.Random(1234)
+names = r.sample([p.stem for p in pool if p.stem not in hold], 4) + r.sample(sorted(hold & {p.stem for p in pool}), 4)
+print(",".join(names))
+PY
+)
+  MSE=(--eval-seeds 18 --ga-seeds 6); [ "${SMOKE:-0}" = 1 ] && MSE=(--eval-seeds 1 --ga-seeds 1)
+  mkdir -p "$OUT/ms"
+  uv run --no-sync python scripts/eval_ckpt.py --ckpt "$OUT/clean/best.pt" --init data/cache/bv1/best.pt --iter 0 \
+    --eval-names "$EVN" "${MSE[@]}" --threads 6 --out "$OUT/ms/pw.jsonl" --games-dir "$OUT/ms/pw" > "$OUT/ms/pw.txt" 2>&1 \
+    || { alert "eval failed: $(tail -1 "$OUT/ms/pw.txt")"; exit 4; }
+  echo "$(date +%T) eval $(grep '\[eval' "$OUT/ms/pw.txt" | tail -1)" >> "$OUT/PROGRESS"
+  for s in s ya; do
+    uv run --no-sync python scripts/audit/principles.py --name "pw-$s" --games "$OUT/ms/pw/vs_ygoagent" --seat $s \
+      --out "$OUT/ms/principles-pw-$s.json" > "$OUT/ms/principles-pw-$s.txt" 2>&1 || { alert "principles $s failed"; exit 4; }
+  done
+  uv run --no-sync python - "$OUT" <<'PY' >> "$OUT/PROGRESS"
+import json, sys
+o = sys.argv[1]
+s, ya = (json.load(open(f"{o}/ms/principles-pw-{x}.json")) for x in ("s", "ya"))
+e = s["empty_draw_own"]
+maxx = s["card_counts"]["ht_own_t1"].get("23434538", 0)
+print(f"pass-weight: empty_draw_own {e['fires']}/{e['opps']} = {e['rate']} (B-v1 0.568, gate <= 0.40); own-T1 HT games "
+      f"{s['lines_with_own_t1_ht']} (B-v1 115, gate <= 1.5 x ygo-agent {ya['lines_with_own_t1_ht']}); own-T1 Maxx {maxx} (B-v1 59)")
+PY
+fi
+[ "${CARD:-1}" = 0 ] && exit 0
 
 # 3. the card: every arm raw on the same fresh deals (paired later with scripts/audit/paired_gate.py)
 GS=${GA_SEEDS:-24}; [ "${SMOKE:-0}" = 1 ] && GS=1

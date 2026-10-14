@@ -32,7 +32,7 @@ MAXX = 23434538
 
 def iter_records(pattern: str, engine: Engine, max_games: int):
     """Teacher records (`choices` + `config`, already-shuffled mains): every decision, tagged by the record's source."""
-    from types import SimpleNamespace
+    from ygo_zero.demos.dataset import record_config
 
     files = sorted(glob.glob(pattern, recursive=True))
     random.Random(0).shuffle(files)
@@ -40,17 +40,17 @@ def iter_records(pattern: str, engine: Engine, max_games: int):
     for f in files:
         for raw in open(f):
             r = json.loads(raw)
-            c = r["config"]
-            cfg = DuelConfig(SimpleNamespace(main=c["deck0_main"], extra=c["deck0_extra"]),
-                             SimpleNamespace(main=c["deck1_main"], extra=c["deck1_extra"]), int(c["seed"]),
-                             lp=c.get("lp", 8000), hand=c.get("hand", 5), draw=c.get("draw", 1), shuffle=bool(c.get("shuffle", False)))
+            if "config" not in r:
+                continue
+            cfg = record_config(r, r["config"]["seed"])
             env = CppEnv(engine, cfg, bool(r.get("auto_single", True)))
             obs = env.reset()
             tag = "sampled" if "sampled" in r.get("source", "") else "argmax"
-            for ch in r["choices"]:
+            labels = r.get("labels") or [None] * len(r["choices"])
+            for ch, lab in zip(r["choices"], labels):
                 if obs is None:
                     break
-                yield obs, int(ch), f"{tag}|{r['line_id']}", None
+                yield obs, int(ch), f"{tag}|{r['line_id']}", lab
                 obs = env.step(int(ch))
             n += 1
             if max_games and n >= max_games:
@@ -70,7 +70,7 @@ def main() -> None:
     name = lambda c: texts.get(int(c), (str(c), ""))[0] or str(c)  # noqa: E731
     stats, shown, games, last_line, k_turn = Counter(), 0, set(), None, 0
     src = iter_records(a.records, engine, a.max_games) if a.records else iter_games(a.dirs, engine, a.seat)
-    for obs, ch, line, _ in src:
+    for obs, ch, line, label in src:
         if a.max_games and len(games) >= a.max_games and line not in games:
             break
         games.add(line)
@@ -88,6 +88,8 @@ def main() -> None:
             continue
         t = ("T1" if turn == 1 else "T2+") + (f" {line.split('|')[0]}" if a.records else "")
         stats[f"{t} offered"] += 1
+        if label is not None:  # record label of the move made at the window (dataset.py weights it)
+            stats[f"{t} {'Maxx' if is_maxx(ch) else 'other'} label {label}"] += 1
         if not is_maxx(ch):
             continue
         stats[f"{t} fired"] += 1
