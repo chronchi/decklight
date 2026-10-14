@@ -6,7 +6,7 @@
 #      exit 4 when any policy weight moved.
 #   2. leaf choice, offline (plan-v2): scripts/audit/leaf_compare.py on held-out Pc games (P raw vs ygo-agent, seeds
 #      3000+): value_p vs value_ppo3 on turn-start states. The lower MSE wins unless its ECE is worse by > 0.02;
-#      inconclusive (|dMSE| <= 1 SE) -> both values get a search arm.
+#      inconclusive (|dMSE| <= 1 SE) -> the lower point-estimate MSE (user 2026-10-14, budget), one search arm.
 #   3. P raw and P + hppo (honest k4 s4 h1, det-tries 32, skip, conf-skip 0.9: the accepted product's search) with the
 #      chosen value(s) vs ygo-agent on 1,488 FRESH deals (deal seeds 5000+; F keeps 4000+), paired; principles on hppo.
 # Env: VITERS (150), GA_SEEDS (6), VAR_CAP (240m), SMOKE=1 (4 value iterations, 40 leaf games, 1 seed).
@@ -78,7 +78,13 @@ uv run --no-sync python scripts/audit/leaf_compare.py --games data/cache/pc_game
   || { alert "leaf_compare failed: $(tail -1 "$OUT/leaf.txt")"; exit 4; }
 sed "s/^/$(date +%T) /" "$OUT/leaf.txt" | tail -4 >> "$OUT/PROGRESS"
 LEAF=$(grep '^leaf:' "$OUT/leaf.txt" | awk '{print $2}')
-case "$LEAF" in new) ARMS="new";; ppo3) ARMS="ppo3";; inconclusive) ARMS="new ppo3";; *) alert "no leaf verdict"; exit 4;; esac
+# a tie takes the lower point-estimate MSE, one arm (user 2026-10-14: "Tie -> lower MSE, one arm (Recommended)";
+# credit $X does not cover two 1,488-deal arms)
+if [ "$LEAF" = inconclusive ]; then
+  LEAF=$(uv run --no-sync python -c "import json; d=json.load(open('$OUT/leaf.json'))['turn_start_dmse']['dmse']; print('new' if d < 0 else 'ppo3')")
+  echo "$(date +%T) leaf tie -> lower MSE: $LEAF" >> "$OUT/PROGRESS"
+fi
+case "$LEAF" in new) ARMS="new";; ppo3) ARMS="ppo3";; *) alert "no leaf verdict"; exit 4;; esac
 
 # 3. P raw + P with search on fresh deals
 H="--honest 1 --det-tries 32 --det-fallback skip --horizon 1 --claim 1"
