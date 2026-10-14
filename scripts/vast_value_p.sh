@@ -9,7 +9,7 @@
 #      inconclusive (|dMSE| <= 1 SE) -> the lower point-estimate MSE (user 2026-10-14, budget), one search arm.
 #   3. P raw and P + hppo (honest k4 s4 h1, det-tries 32, skip, conf-skip 0.9: the accepted product's search) with the
 #      chosen value(s) vs ygo-agent on 1,488 FRESH deals (deal seeds 5000+; F keeps 4000+), paired; principles on hppo.
-# Env: VITERS (150), GA_SEEDS (6), VAR_CAP (240m), SMOKE=1 (4 value iterations, 40 leaf games, 1 seed).
+# Env: VITERS (150), GA_SEEDS (6), VAR_CAP (240m), BOTH=1 (both values get a search arm), SMOKE=1 (4 value iterations, 40 leaf games, 1 seed).
 # Usage: bash scripts/vast_value_p.sh <name>. Do NOT run on the laptop (vast GPU only).
 set -uo pipefail
 export PATH="$HOME/.local/bin:$PATH"
@@ -85,6 +85,9 @@ if [ "$LEAF" = inconclusive ]; then
   echo "$(date +%T) leaf tie -> lower MSE: $LEAF" >> "$OUT/PROGRESS"
 fi
 case "$LEAF" in new) ARMS="new";; ppo3) ARMS="ppo3";; *) alert "no leaf verdict"; exit 4;; esac
+# BOTH=1: a search arm for each value whatever the verdict, chosen first (user 2026-10-14: "I'll want both comparisons
+# actually to make an informed decision if the new value net is trained well"; 992 deals each)
+[ "${BOTH:-0}" = 1 ] && { [ "$ARMS" = new ] && ARMS="new ppo3" || ARMS="ppo3 new"; }
 
 # 3. P raw + P with search on fresh deals
 H="--honest 1 --det-tries 32 --det-fallback skip --horizon 1 --claim 1"
@@ -114,3 +117,8 @@ print(f"hppo-{a} behaviour: own-T1 HT games {s['lines_with_own_t1_ht']} (gate <=
       f"{ya['lines_with_own_t1_ht']}); interrupts {s['interrupt_opp']['rate']} vs ygo-agent {ya['interrupt_opp']['rate']}")
 PY
 done
+if [ "${BOTH:-0}" = 1 ] && [ -d "$OUT/hppo-new" ] && [ -d "$OUT/hppo-ppo3" ]; then  # the two values head to head, same deals
+  uv run --no-sync python scripts/audit/paired_sm.py "$OUT/hppo-ppo3" "$OUT/hppo-new" > "$OUT/paired-new-vs-ppo3.txt" 2>&1 \
+    || alert "paired_sm new vs ppo3: $(tail -1 "$OUT/paired-new-vs-ppo3.txt")"
+  echo "$(date +%T) paired hppo-new - hppo-ppo3: $(sed -n 1,4p "$OUT/paired-new-vs-ppo3.txt" | tr '\n' ' ')" >> "$OUT/PROGRESS"
+fi
