@@ -116,7 +116,13 @@ WP=$!
 wait $TP; rc=$?
 wait $WP
 grep -h "^ALERT\|Traceback" "$OUT/train.txt" | head -5 >> "$OUT/ALERT"
-rm -f "$OUT/rl/last.pt"
+# keep the critic (fp16 weights incl. value_head) before dropping last.pt's optimizer state: stage P 2026-10-13 deleted
+# P's only critic this way (NOTEBOOK 23:30)
+[ -s "$OUT/rl/last.pt" ] && uv run --no-sync python -c "
+import torch, sys
+ck = torch.load(sys.argv[1], map_location='cpu', weights_only=False)['model']
+torch.save({k: v.half() if v.is_floating_point() else v for k, v in ck.items()}, sys.argv[2])" \
+  "$OUT/rl/last.pt" "$OUT/rl/last_with_value.pt" && rm -f "$OUT/rl/last.pt" || alert "critic export failed; last.pt kept"
 [ -f "$OUT/MILESTONE_FAILED" ] && exit 4
 [ -f "$OUT/milestone.txt" ] || alert "milestone never ran (no iter-$MS_IT checkpoint)"
 LAST=$(ls "$OUT"/rl/iter-*.pt 2>/dev/null | sort | tail -1)
