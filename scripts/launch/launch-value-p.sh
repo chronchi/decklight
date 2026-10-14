@@ -14,7 +14,7 @@ cp "$PRUN/P/best.pt" "$PRUN/P/metrics.jsonl" data/cache/P/
 cp "$PRUN"/p/games-*.jsonl data/cache/pc_games/p/
 N=value-p-$(date +%Y%m%d-%H%M)${SMOKE:+-smoke}; echo $N
 taskset -c 0-3 uv run --no-sync python scripts/vast_job.py --name $N \
-  --cmd "SMOKE=${SMOKE:-0} VITERS=${VITERS:-150} GA_SEEDS=${GA_SEEDS:-6} bash scripts/vast_value_p.sh $N" \
+  --cmd "SMOKE=${SMOKE:-0} VITERS=${VITERS:-150} GA_SEEDS=${GA_SEEDS:-6} VAR_CAP=${VAR_CAP:-170m} bash scripts/vast_value_p.sh $N" \
   --hours "${HOURS:-5}" --max-dph "${MAX_DPH:-0.40}" --min-cpus "${MIN_CPUS:-32}" --min-gpu-ram "${MIN_GPU_RAM:-20}" \
   --extra-query "compute_cap>=800 cpu_ram>=${MIN_RAM:-64}" \
   --data decks data/cards/emb data/models data/cache/P data/cache/value_ppo3 data/cache/pc_games \
