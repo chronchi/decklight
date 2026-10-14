@@ -9,13 +9,20 @@ LoopGuard remembers, per slot (one env), which options were taken in each exact 
 when a state recurs, those options are masked, so the policy must try something else (an UNSELECT loop then FINISHes,
 a cancel loop picks another command). The state key is the observation without the history (board, chain, options,
 globals); a slot's memory is cleared when its turn number changes. If every legal option was already taken there,
-nothing is masked. Exact repeats within a turn do not happen in normal play, so the guard changes nothing else.
+nothing is masked.
+
+PASS at MSG_SELECT_CHAIN is never masked (NOTEBOOK 2026-10-14 21:30 UTC). Chain priority does repeat exactly in normal
+play: in the Draw Phase the engine offers the turn player the same SELECT_CHAIN again after it passes. Masking PASS
+there forced the only other option (Maxx "C" in 93% of P's own-turn Maxx fires). Passing priority cannot loop; the cancel
+loops this guard exists for go through ACTIVATE, which stays masked.
 """
 
 from __future__ import annotations
 
 import numpy as np
 
+MSG_SELECT_CHAIN = 0x10  # engine/constants.py; obs["global"][21] is the message
+KIND_PASS = 11  # engine/actions.py Kind.PASS (obs["actions"][:, 0])
 STATE_KEYS = ("cards", "card_mask", "global", "chain", "chain_mask", "actions", "action_mask")
 
 
@@ -42,6 +49,8 @@ class LoopGuard:
             self.seen[slot] = {}
         key = state_key(obs)
         taken = self.seen[slot].get(key)
+        if taken and int(obs["global"][21]) == MSG_SELECT_CHAIN:
+            taken = {a for a in taken if a >= len(obs["actions"]) or int(obs["actions"][a, 0]) != KIND_PASS}
         if taken:
             z2 = z.copy()
             z2[[a for a in taken if a < len(z2)]] = -np.inf

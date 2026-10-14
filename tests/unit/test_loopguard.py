@@ -48,3 +48,20 @@ def test_illegal_options_never_unmasked():
     g = LoopGuard()
     z = np.array([3.0, -np.inf, -np.inf, -np.inf])
     assert [_pick(g, 0, _obs(1, 0), z) for _ in range(3)] == [0, 0, 0]
+
+
+def test_chain_pass_is_never_masked():
+    # Draw Phase: the engine offers the same SELECT_CHAIN again after a pass (NOTEBOOK 2026-10-14 21:30 UTC);
+    # masking PASS there forced the activation
+    obs = _obs(1, 0)
+    obs["global"][21] = 0x10
+    obs["actions"][0, 0] = 6  # ACTIVATE
+    obs["actions"][1, 0] = 11  # PASS
+    obs["action_mask"] = np.array([True, True, False, False])
+    g = LoopGuard()
+    z = np.array([1.0, 3.0, -np.inf, -np.inf])
+    assert [_pick(g, 0, obs, z) for _ in range(3)] == [1, 1, 1]
+    # an activation cancelled back to the same window is still masked
+    g = LoopGuard()
+    z = np.array([3.0, 1.0, -np.inf, -np.inf])
+    assert [_pick(g, 0, obs, z) for _ in range(2)] == [0, 1]
