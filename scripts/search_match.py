@@ -335,6 +335,10 @@ def main() -> None:
     ap.add_argument("--proc", type=int, default=0)
     ap.add_argument("--out", type=Path, default=None)
     ap.add_argument("--games-limit", type=int, default=0, help="debug: cap the total games")
+    ap.add_argument("--pairs", default="",
+                    help="explicit pool deck pairs 'a:b,c:d' (seat 0 deck first) instead of --deck-set; showcase games")
+    ap.add_argument("--both-search", type=int, choices=(0, 1), default=0,
+                    help="--opp self: both seats search (the product vs itself); log entries carry the seat")
     ap.add_argument("--summarize", type=Path, default=None, help="merge <dir>/games-*.jsonl to summary.json")
     args = ap.parse_args()
     if args.summarize is not None:
@@ -416,7 +420,13 @@ def main() -> None:
         decks = None
         sched = train_schedule(names, args.games, args.seed_base, hold)
     else:
-        if args.deck_set == "sample":
+        if args.pairs:
+            want = [tuple(x.split(":")) for x in args.pairs.split(",")]
+            names = sorted({d for pr in want for d in pr})
+            missing = [d for d in names if not (ROOT / "decks/pool" / f"{d}.ydk").is_file()]
+            if missing or any(len(pr) != 2 for pr in want):
+                fail(f"--pairs: bad pairs or decks not in decks/pool: {missing or want}")
+        elif args.deck_set == "sample":
             names = sample_decks(args.decks, args.seed)
         elif args.deck_set == "holdout":
             hset = set((ROOT / "decks/pool/HOLDOUT").read_text().split()) | {"kewl-tune"}
@@ -428,11 +438,15 @@ def main() -> None:
             fail(f"only {len(names)} decks in deck set {args.deck_set}")
         decks = None
         pair_names = [(a, b) for a in range(len(names)) for b in range(len(names)) if a != b]
+        if args.pairs:
+            pair_names = [(names.index(a), names.index(b)) for a, b in want]
         sched = []
         for di, dj in pair_names:
             for s in range(args.deal_seed0, args.deal_seed0 + args.seeds):
                 for s_seat in (0, 1):
                     sched.append((di, dj, s, s_seat, len(sched)))
+    if args.both_search and (args.opp != "self" or args.raw):
+        ap.error("--both-search needs --opp self and search (not --raw 1)")
     if args.opp == "ckpt":
         if args.opp_ckpt is None:
             ap.error("--opp ckpt needs --opp-ckpt PATH")
@@ -571,7 +585,7 @@ def main() -> None:
                     own_turn1=bool(args.own_turn1), conf_skip=args.conf_skip, own_frac=args.own_frac,
                     honest=bool(args.honest), det_tries=args.det_tries, det_fallback=args.det_fallback,
                     margin=args.margin, max_search_turn=args.max_search_turn, stop_turn=args.stop_turn,
-                    max_searches=args.max_searches, ho=ho_rule,
+                    max_searches=args.max_searches, ho=ho_rule, both_search=bool(args.both_search),
                 )  # fmt: skip
             else:
                 ws = RouteWindowSearch(
@@ -678,7 +692,8 @@ def main() -> None:
                     "det_fallback": args.det_fallback, "det_s": round(res.det_s, 3),
                     # per searched decision: candidates, per-sample rollout scores, pick (offline budget curve and
                     # noise SE; NOTEBOOK 2026-10-09 08:40)
-                    "search": [{"k": int(e["k"]), "kind": e.get("kind"), "turn": int(e.get("turn", 0)),
+                    "search": [{"k": int(e["k"]), "seat": int(e.get("seat", s_seat)), "kind": e.get("kind"),
+                                "turn": int(e.get("turn", 0)),
                                 "cands": [int(x) for x in e["cands"]], "samples": e.get("samples", []),
                                 "chosen": int(e["chosen"]), "played": int(e["played"]),
                                 **({"ho": e["ho"]} if "ho" in e else {})} for e in res.log],

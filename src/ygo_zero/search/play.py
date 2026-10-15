@@ -109,6 +109,7 @@ def search_game_gen(
     stop_turn: int = 0,
     max_searches: int = 0,
     ho: HonestRule | None = None,
+    both_search: bool = False,
 ):
     """Play one live game; S (absolute seat `s_seat`) searches, R plays raw. Returns a GameResult.
 
@@ -140,6 +141,9 @@ def search_game_gen(
     (`search_cut`). Honest worlds replay the whole prefix up to tries x samples times per search, so a long looping game
     gets slower with every search; one such game held 8 games in flight for 45+ min (NOTEBOOK 2026-10-11 00:10).
 
+    `both_search`: both seats search (product vs product showcase games); each seat determinizes from its own
+    SeenTracker. Log entries carry the searching "seat".
+
     `ho` (honest override, search/honest.py): candidates are merged by meaning, and the search leaves the policy's
     pick only when the best challenger's paired gap is significant; undecided gaps get `ho.step` more samples for the
     two candidates, up to `ho.s_max`. `margin` is ignored with `ho`. The log entry gets an "ho" dict.
@@ -152,9 +156,11 @@ def search_game_gen(
     env = CppEnv(engine, config, auto_single)
     flight = FlightRecorder(config)
     obs = env.reset()
-    tracker = SeenTracker(s_seat) if honest else None
-    if tracker is not None:
-        tracker.update(env)
+    searchers = (0, 1) if both_search else (s_seat,)
+    trackers = {s: SeenTracker(s) for s in searchers} if honest else {}
+    tracker = trackers.get(s_seat)  # s_seat's tracker (choice keys and the prefix loop below)
+    for t in trackers.values():
+        t.update(env)
     guard = LoopGuard()  # slot 0 (shared) or slot = seat (per_seat); see the docstring
     res = GameResult(winner=None, truncated=False, turns=1)
     capped0 = search.capped
@@ -171,8 +177,8 @@ def search_game_gen(
         if tracker is not None:
             res.choice_keys.append(key_rank_of_choice(obs, int(c)))
         obs = env.step(int(c))
-        if tracker is not None:
-            tracker.update(env)
+        for t in trackers.values():
+            t.update(env)
     while obs is not None and len(res.choices) < max_decisions:
         me = int(env.player)
         turn = int(obs["global"][2])
@@ -190,7 +196,7 @@ def search_game_gen(
         z_g, key = guard.mask(gslot, obs, z) if guarded else (z, None)
         a_pol = select_fn(z_g)
         a = a_pol
-        if me == s_seat:
+        if me in searchers:
             window = is_window(obs, me)
             own = (
                 int(obs["global"][5]) == 1
@@ -213,9 +219,9 @@ def search_game_gen(
                     worlds = None
                     det = None
                     skip_search = False
-                    if tracker is not None:
+                    if trackers:
                         det = Determinizer(
-                            engine, config, auto_single, me, res.choices, tracker.seen,
+                            engine, config, auto_single, me, res.choices, trackers[me].seen,
                             obs, random.Random(f"{search.seed}:{game_seed}:{k}:det"),
                             prefix_keys=res.choice_keys, tries=det_tries,
                         )
@@ -301,7 +307,7 @@ def search_game_gen(
                         res.n_branches += len(branches)
                         res.searched_idx.append(k)
                         res.log.append({
-                            "k": k, "kind": "window" if window else "own", "turn": turn,
+                            "k": k, "seat": me, "kind": "window" if window else "own", "turn": turn,
                             "cands": [int(x) for x in cands],
                             "scores": [float(x) for x in sel_scores],
                             "scores_all": {search._select_key(): [float(x) for x in sel_scores]},
@@ -320,8 +326,8 @@ def search_game_gen(
         res.decision_turns.append(turn)
         flight.choice(a)
         obs = env.step(a)
-        if tracker is not None:
-            tracker.update(env)
+        for t in trackers.values():
+            t.update(env)
     flight.close()
     res.truncated = obs is not None
     res.winner = None if res.truncated else int(env.winner)
