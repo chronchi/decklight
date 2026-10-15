@@ -3,7 +3,7 @@
 # credits"): can a fresh BC student distilled from P (P's sampled games on all train decks, CE on P's move + KL to P's
 # full distribution) play at P's level?
 #   1. G: GAMES P games (temp 1.0) with gen_selfplay, our side on train pool decks only; league self (P argmax) 0.5,
-#      ygo-agent 0.3, B-v1 0.1, base_r3 0.1; duel seeds 500000+ (one block of 1000 per process).
+#      ygo-agent 0.3, B-v1 0.1, base_r3 0.1; duel seeds 500000+ (one block of 10000 per process).
 #      Asserts: every train deck >= 30 student games; no holdout / new-card / gauntlet deck on the student seat;
 #      >= 95% of the games written; cut share < 2%.
 #   2. shards (kind pgame) and the student: train_bc from scratch, P's architecture, --kl-ref P (coef 1), EPOCHS,
@@ -42,13 +42,13 @@ GAMES=${GAMES:-20000}; EPOCHS=${EPOCHS:-4}; GS=${GA_SEEDS:-24}; LIM=()
 # processes: min(cores, GPU memory / ~1.5 GB (CUDA context + 4 small policies), RAM / ~3 GB); measured in gen-0.txt usage
 GMB=$(nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits | head -1); RMB=$(free -m | awk '/Mem/{print $2}')
 NP=$(python3 -c "print(max(1, min($J, $GMB // 1500, $RMB // 3000)))"); echo "G: $NP procs (cores $J, gpu ${GMB}MB, ram ${RMB}MB)" | tee -a "$OUT/PROGRESS"
-PER=$(( (GAMES + NP - 1) / NP )); [ "$PER" -le 1000 ] || { alert "$PER games per process > 1000 (seed blocks overlap)"; exit 3; }
+PER=$(( (GAMES + NP - 1) / NP )); [ "$PER" -le 10000 ] || { alert "$PER games per process > 10000 (seed blocks overlap)"; exit 3; }
 LEAGUE="self:0.5,ygoagent:0.3,bv1=data/cache/bv1/best.pt:0.1,base=data/cache/base_r3/best.pt:0.1"
 mkdir -p "$OUT/pgames"
 PIDS=()
 for ((p = 0; p < NP; p++)); do
   uv run --no-sync python scripts/gen_selfplay.py --ckpt "$P" --out "$OUT/pgames/p$p" --games "$PER" --temp 1.0 \
-    --league "$LEAGUE" --seed $((500000 + 1000 * p)) --threads 1 --device cuda > "$OUT/pgames/gen-$p.txt" 2>&1 &
+    --league "$LEAGUE" --seed $((500000 + 10000 * p)) --threads 1 --device cuda > "$OUT/pgames/gen-$p.txt" 2>&1 &
   PIDS+=($!)
 done
 for pid in "${PIDS[@]}"; do wait "$pid" || alert "gen proc $pid exit $?"; done
