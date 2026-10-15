@@ -594,6 +594,8 @@ def main() -> None:
     ap.add_argument("--value-warmup", type=int, default=2, help="first iterations train the value head only")
     ap.add_argument("--priv-critic", type=int, choices=(0, 1), default=0,
                     help="1: separate privileged critic (sees hidden cards); the policy stays honest")
+    ap.add_argument("--value-init", type=Path, default=None,
+                    help="copy value_head from this checkpoint (e.g. value_p: same trunk as --init, trained head)")
     ap.add_argument("--critic-init", type=Path, default=None,
                     help="critic init checkpoint (default: --init)")
     ap.add_argument("--ga-workers", type=int, default=8,
@@ -746,6 +748,12 @@ def main() -> None:
     use_q_critic = args.adv == "vrpo" and bool(args.priv_critic)
     model = load_net(args.init, emb, a, value=True, q=use_q_policy).to(dev).eval()
     ref = load_net(args.init, emb, a, value=False).to(dev).eval()
+    if args.value_init is not None:
+        vs = torch.load(args.value_init, map_location="cpu")
+        vs = {k[len("value_head."):]: v.float() for k, v in vs.get("model", vs).items() if k.startswith("value_head.")}
+        if not vs:
+            fail2(f"--value-init {args.value_init}: no value_head weights")
+        model.value_head.load_state_dict(vs)
     for p in ref.parameters():
         p.requires_grad_(False)
     vparams = list(model.value_head.parameters())
