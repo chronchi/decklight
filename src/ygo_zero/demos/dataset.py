@@ -33,6 +33,8 @@ SEARCH_LABEL_WEIGHT = {"search": 1.0}
 # turn-1 self-imitation records (scripts/select_turn1_lines.py): self = player 0's own improved line, opp = the
 # passive opponent (not trained)
 SELFIMIT_LABEL_WEIGHT = {"self": 1.0}
+# plan-v4 pilot: P's own sampled games (scripts/gen_selfplay.py, label "self" at P's decisions; "opp" never trained)
+PGAME_LABEL_WEIGHT = {"self": 1.0}
 # mid-game search teacher (scripts/gen_window.py, M3): searched response windows and own-turn plays; skip = not trained
 WINDOW_LABEL_WEIGHT = {"window": 1.0, "own": 1.0}
 _PASSIVE_KINDS = (Kind.PASS, Kind.NO, Kind.FINISH, Kind.CANCEL)
@@ -81,6 +83,7 @@ def sample_kind(source: str | Path, label: str) -> str:
     - files under `dagger/` -> dagger_pass if label == "pass" else dagger
     - files under `search/` -> search
     - files under `selfimit/` -> selfimit
+    - files under `pgames/` (plan-v4 pilot: P's sampled games) -> pgame
     - files under `window/` -> window_own if label == "own" else window
     - files under `turns/<bucket>/` (scripts/plan_turns.py, stage M) -> turn_<bucket>
     - files under `sw-<name>/` (relabelled self-play window search, ADR 0007) -> sw-<name>_own if label == "own"
@@ -103,6 +106,8 @@ def sample_kind(source: str | Path, label: str) -> str:
         return "search"
     if "selfimit" in parts:
         return "selfimit"
+    if "pgames" in parts:
+        return "pgame"
     if "window" in parts:
         return "window_own" if label == "own" else "window"
     if "turns" in parts[:-1]:
@@ -277,6 +282,7 @@ def iter_samples(engine: Engine, path: Path, strict: bool = False, skip=None) ->
         weights = GOLD_LABEL_WEIGHT if ("gold" in f.parts or "teacher" in f.parts or "dagger" in f.parts) else LABEL_WEIGHT
         weights = SEARCH_LABEL_WEIGHT if "search" in f.parts else weights
         weights = SELFIMIT_LABEL_WEIGHT if "selfimit" in f.parts else weights
+        weights = PGAME_LABEL_WEIGHT if "pgames" in f.parts else weights
         weights = WINDOW_LABEL_WEIGHT if ("window" in f.parts or any(q.startswith("sw-") for q in f.parts[:-1])) else weights
         for rec in load_records(f):
             if starved_opening(rec) or (skip is not None and skip(rec)):

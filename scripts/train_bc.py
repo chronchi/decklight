@@ -357,6 +357,11 @@ def main() -> None:
     ap.add_argument("--init", type=Path, default=None, help="start from this checkpoint (fine-tune)")
     ap.add_argument("--kl-init", type=float, default=0.0,
                     help="KL(pi_init || pi) anchor coef to the --init weights (0 = off)")
+    ap.add_argument("--kl-ref", type=Path, default=None,
+                    help="distillation teacher: + --kl-ref-coef * KL(pi_ref || pi) to this checkpoint's policy, "
+                    "computed on the fly (plan-v4 pilot: the student of P). Without --init the student takes the "
+                    "ref's architecture with fresh weights")
+    ap.add_argument("--kl-ref-coef", type=float, default=1.0)
     ap.add_argument("--soft-targets", choices=["off", "gumbel"], default="off",
                     help="off = hard targets (default, unchanged); gumbel = distill the search improved "
                     "policy softmax(prior + c*q_hat) on samples with search info (requires --init)")
@@ -385,6 +390,9 @@ def main() -> None:
         ap.error("--set-target and --label-smoothing are mutually exclusive")
     if args.kl_init and not args.init:
         print("error: --kl-init requires --init", flush=True)
+        raise SystemExit(2)
+    if args.kl_ref and (args.kl_init or args.soft_targets != "off"):
+        print("error: --kl-ref excludes --kl-init and --soft-targets", flush=True)
         raise SystemExit(2)
     if args.soft_targets == "gumbel" and not args.init:
         print("error: --soft-targets gumbel requires --init (the search prior)", flush=True)
@@ -420,8 +428,9 @@ def main() -> None:
             sys.exit(3)
     print({k: len(v) for k, v in idx.items()}, "decks:", sorted(set(map(str, data["deck"]))), flush=True)
 
-    if args.init:  # the starting checkpoint fixes the architecture
-        src_args = _run_args(args.init)
+    arch_src = args.init or args.kl_ref
+    if arch_src:  # the starting checkpoint (or the distillation teacher) fixes the architecture
+        src_args = _run_args(arch_src)
         args.d, args.layers, args.heads = src_args.get("d", args.d), src_args.get("layers", args.layers), src_args.get("heads", args.heads)
         args.hist = src_args.get("hist", args.hist or 0)
         args.known = src_args.get("known", args.known or False)
@@ -438,6 +447,15 @@ def main() -> None:
         import copy
 
         ref = copy.deepcopy(model).eval().requires_grad_(False)
+    kl_coef = args.kl_init
+    if args.kl_ref:
+        ref = make_policy(args.emb, vars(args), dropout=0.0, card_dropout=0.0).to(device)
+        rstate = torch.load(args.kl_ref, map_location="cpu")
+        rstate = rstate.get("model", rstate)
+        ref.load_state_dict({k: v.float() if v.is_floating_point() else v for k, v in rstate.items()})
+        ref.eval().requires_grad_(False)
+        kl_coef = args.kl_ref_coef
+        print(f"distillation teacher {args.kl_ref} (KL coef {kl_coef})", flush=True)
     soft = args.soft_targets == "gumbel"
     n_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     print(f"params {n_params / 1e6:.2f}M device {device} amp {amp}", flush=True)
@@ -511,7 +529,7 @@ def main() -> None:
                         run["soft_ent"] += ent[has_soft].sum().item()
                         run["soft_agree"] += (pi_prime.argmax(-1) == act)[has_soft].sum().item()
                 kl = kl_to_init(logits.float(), ref_logits.float(), obs["action_mask"])
-                loss = (per * w).sum() / w.sum() + args.kl_init * kl.mean()
+                loss = (per * w).sum() / w.sum() + kl_coef * kl.mean()
             else:
                 loss = (per * w).sum() / w.sum()
             opt.zero_grad(set_to_none=True)
