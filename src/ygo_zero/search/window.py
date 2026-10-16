@@ -110,7 +110,8 @@ class WindowSearch:
                  max_rollout: int = 300, batch: int = 512, seed: int = 0, value: ValueFn | None = None,
                  horizons: tuple[int, ...] | list[int] | None = None, samples: int = 1,
                   rollout_temp: float = 1.0, select: str | None = None, tie_eps: float = 0.0,
-                  conf_skip: float = 1.01, ho=None, windows: str = "opp", prof: bool = False) -> None:  # fmt: skip
+                  conf_skip: float = 1.01, ho=None, windows: str = "opp", prof: bool = False,
+                  pool=None) -> None:  # fmt: skip
         self.engine, self.logits, self.k, self.horizon = engine, logits, k, horizon
         self.value, self.win = value, (1.0 if value is not None else WIN)
         self.own_frac, self.max_rollout, self.batch = own_frac, max_rollout, batch
@@ -131,6 +132,9 @@ class WindowSearch:
         self.ho, self.windows = ho, windows
         self.prof = prof  # --prof 1: rollouts_gen times each phase into self.last_prof (play is bit-identical)
         self.last_prof: dict = {}
+        # Speed plan E6: a ThreadPoolExecutor for the branch-setup replays (None = today's
+        # sequential loop, bit-identical). Set by scripts/search_match.py --replay-threads.
+        self.pool = pool
 
     def _hs(self) -> tuple[int, ...]:
         return self.horizons if self.horizons is not None else (self.horizon,)
@@ -140,6 +144,40 @@ class WindowSearch:
             return self.select
         h0 = self._hs()[0]
         return f"value@h{h0}" if self.value is not None else f"board@h{h0}"
+
+    def _branch_envs(self, config: DuelConfig, auto_single: bool, branches,
+                     worlds: list[DuelConfig | tuple[DuelConfig, list[int]]] | None):
+        """Branch envs + root obs, in branch order (E6: with `self.pool`, the prefix
+        replays run in parallel via `pool.map`, which keeps order, so the result is
+        identical to the sequential loop)."""
+        specs = []
+        for p, _, _, s in branches:
+            if worlds is None:
+                cfg, pp = config, p
+            else:
+                w = worlds[s % len(worlds)]
+                if isinstance(w, tuple):
+                    cfg, wprefix = w
+                    pp = list(wprefix) + [p[-1]]
+                else:  # plain DuelConfig (tests): today's replay of p
+                    cfg, pp = w, p
+            specs.append((cfg, list(pp)))
+        if self.pool is None:
+            envs, obs = [], []
+            for cfg, pp in specs:
+                e = CppEnv(self.engine, cfg, auto_single)
+                o = e.replay_from_reset(pp)
+                envs.append(e)
+                obs.append(o)
+            return envs, obs
+
+        def _one(spec):
+            cfg, pp = spec
+            e = CppEnv(self.engine, cfg, auto_single)
+            return e, e.replay_from_reset(pp)
+
+        pairs = list(self.pool.map(_one, specs))
+        return [e for e, _ in pairs], [o for _, o in pairs]
 
     def _forward(self, obs_list: list[dict]) -> np.ndarray:
         out = [self.logits(_batch(obs_list[i : i + self.batch])) for i in range(0, len(obs_list), self.batch)]
@@ -193,24 +231,10 @@ class WindowSearch:
         turn_start = turn_start_eff
         n_cands = max((j for _, j, _, _ in branches), default=-1) + 1
         B = len(branches)
-        envs, obs = [], []
         _prof = self.prof
         if _prof:
             _t0 = time.perf_counter()
-        for p, _, _, s in branches:
-            if worlds is None:
-                cfg, pp = config, p
-            else:
-                w = worlds[s % len(worlds)]
-                if isinstance(w, tuple):
-                    cfg, wprefix = w
-                    pp = list(wprefix) + [p[-1]]
-                else:  # plain DuelConfig (tests): today's replay of p
-                    cfg, pp = w, p
-            e = CppEnv(self.engine, cfg, auto_single)
-            o = e.replay_from_reset(pp)
-            envs.append(e)
-            obs.append(o)
+        envs, obs = self._branch_envs(config, auto_single, branches, worlds)
         if _prof:
             _t_setup = time.perf_counter() - _t0
             _t_env = 0.0

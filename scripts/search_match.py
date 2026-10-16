@@ -39,6 +39,7 @@ import signal
 import statistics
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import NoReturn
 
@@ -292,6 +293,9 @@ def main() -> None:
                     help="play only games with S in this seat (0 = S goes first); -1 all")
     ap.add_argument("--own-turn1", type=int, default=0, choices=(0, 1), help="also search S turn-1 plays")
     ap.add_argument("--det-tries", type=int, default=8, help="rejection-sampling proposals per honest world")
+    ap.add_argument("--replay-threads", type=int, default=1,
+                    help="thread-parallel world checks and branch replays (speed plan E6, bit-identical); "
+                         "1 = today's sequential path (no pool)")
     ap.add_argument("--det-fallback", default="true", choices=("true", "skip"),
                     help="failed world: fall back to the true config, or skip the decision")
     ap.add_argument("--honest", type=int, default=0, choices=(0, 1), help="search determinized worlds (honest search)")
@@ -641,7 +645,12 @@ def main() -> None:
                if args.ho else None)
     if ho_rule is not None and ho_rule.s_max < args.samples:
         fail(f"--ho-s-max {ho_rule.s_max} < --samples {args.samples}")
-
+    if args.replay_threads < 1:
+        fail(f"--replay-threads must be >= 1, got {args.replay_threads}")
+    # Speed plan E6: one thread pool per process for world checks + branch replays (bit-identical
+    # to replay_threads=1, which keeps today's sequential path with pool None). Named replay_pool:
+    # `pool` is already the train deck-name list in the ygoagent branch below.
+    replay_pool = None if args.replay_threads == 1 else ThreadPoolExecutor(max_workers=args.replay_threads)
     def jobs():
         for di, dj, s, s_seat, idx in mine:
             if not claimed(idx):
@@ -664,7 +673,7 @@ def main() -> None:
                 ws = WindowSearch(
                     engine, never, k=args.k, horizon=args.horizon, samples=args.samples,
                     rollout_temp=args.rollout_temp, batch=args.batch, seed=args.seed, value=value,
-                    prof=PROF,
+                    prof=PROF, pool=replay_pool,
                 )  # fmt: skip
                 gen = search_game_gen(
                     engine, cfg, ws, s_seat, argmax_select, game_seed=idx,
@@ -678,7 +687,7 @@ def main() -> None:
                 ws = RouteWindowSearch(
                     engine, never, k=args.k, horizon=args.horizon, samples=args.samples,
                     rollout_temp=args.rollout_temp, batch=args.batch, seed=args.seed, value=value,
-                    route=route, prof=PROF,
+                    route=route, prof=PROF, pool=replay_pool,
                 )  # fmt: skip
                 # Card-faithful loop guard (NOTEBOOK 2026-10-09 08:40): each policy guards its own decisions; ygo-agent
                 # and greedy have no guard. `--guard-legacy 1` restores the shared guard of E2 (forbade ygo-agent's
@@ -847,6 +856,7 @@ def main() -> None:
                     "det_proposals": res.det_proposals, "det_accepted": res.det_accepted,
                     "det_fallbacks": res.det_fallbacks, "det_skipped": res.det_skipped,
                     "det_fallback": args.det_fallback, "det_s": round(res.det_s, 3),
+                    "replay_threads": args.replay_threads,
                     # latency mode: per-move and per-own-turn walls (scripts/audit/latency_report.py)
                     **({"lat_raw": res.lat_raw, "lat_search": res.lat_search, "lat_turn": res.lat_turn}
                        if LAT else {}),
@@ -883,6 +893,8 @@ def main() -> None:
             raise SystemExit(1) from None
         raise
     write_prof()  # --prof 1: per-proc forward counters next to the games file (also written on SIGTERM)
+    if replay_pool is not None:
+        replay_pool.shutdown()  # E6 pool: all games are written by now
     branches = 0  # capped share needs branch totals: re-read this proc's file (cheap, local)
     capped = 0
     for raw in path.read_text().splitlines():

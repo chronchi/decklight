@@ -267,8 +267,11 @@ def search_game_gen(
                             t_det_init = time.perf_counter() - t_di
                             t_ds = time.perf_counter()
                         worlds = []
-                        for _ in range(search.samples):
-                            got = det.sample()
+                        # E6: thread-parallel world checks (bit-identical to the loop below it
+                        # replaces: proposals generated sequentially, in-order scan, rng rewound
+                        # to the accepted proposal). pool=None is today's code path.
+                        pool = getattr(search, "pool", None)
+                        for got in det.sample_many(search.samples, pool):
                             if got is None:
                                 if det_fallback == "true":
                                     worlds.append((config, list(res.choices)))
@@ -319,8 +322,7 @@ def search_game_gen(
                                     p0, a0, f0, t0d = det.proposals, det.accepted, det.fallbacks, det.seconds
                                     if prof:
                                         t_ds = time.perf_counter()
-                                    for _ in range(extra):
-                                        got = det.sample()
+                                    for got in det.sample_many(extra, getattr(search, "pool", None)):
                                         if got is not None:
                                             worlds.append(got)
                                         elif det_fallback == "true":

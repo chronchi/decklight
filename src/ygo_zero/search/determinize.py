@@ -417,3 +417,94 @@ class Determinizer:
             return None
         finally:
             self.seconds += time.perf_counter() - t0
+
+    def _check_proposal(self, mains: dict[int, list[int]]):
+        """Replay + root-obs check for one proposed main-deck order (thread-safe: a fresh
+        `CppEnv` per call, read-only shared state). Returns (ok, reason, world, resolved)
+        with the same semantics as one `sample()` try (`reason` is None when accepted)."""
+        world = self._build_config(mains)
+        try:
+            env = CppEnv(self.engine, world, self.auto_single)
+            if self.prefix_keys is not None:
+                if USE_CPP_REPLAY:
+                    obs, resolved, failed = env.replay_keys(self.prefix_keys)
+                else:
+                    obs, resolved, failed = _replay_semantic(env, self.prefix_keys)
+                if failed is not None:
+                    return False, failed, None, None
+            else:
+                resolved = list(self.prefix)
+                if USE_CPP_REPLAY:
+                    obs = env.replay_from_reset(self.prefix)
+                else:
+                    obs = env.reset()
+                    for c in self.prefix:
+                        obs = env.step(c)
+        except Exception:  # noqa: BLE001 -- any replay failure is a rejection (as in sample())
+            return False, "replay_error", None, None
+        ok = (root_obs_equal(obs, self.root_obs) if self.prefix_keys is not None
+              else obs_equal(obs, self.root_obs))
+        if ok:
+            return True, None, world, resolved
+        return False, "obs_mismatch", None, None
+
+    def sample_many(self, n: int, pool=None):
+        """`n` results of `sample()`, bit-identical to `[self.sample() for _ in range(n)]`.
+
+        With `pool` (a `ThreadPoolExecutor`): proposals are still generated sequentially
+        with `self.rng` (recording `getstate()` after each), in chunks of the pool size,
+        and only the replay+check runs in parallel (one `CppEnv` per proposal; the C++
+        replay releases the GIL). Results are scanned in proposal order: at the first
+        accepted proposal i only proposals 0..i are counted (as the sequential loop
+        would), the rng is rewound with `setstate(state_after_i)`, and sampling moves
+        to the next world. A chunk with no acceptance counts all its proposals and the
+        next chunk is generated, until `tries` is used up (then `fallbacks += 1` and the
+        result is None with the rng after the last proposal). `self.seconds` is wall
+        time. With `pool=None` this is exactly the sequential loop. `sample()` is
+        unchanged.
+        """
+        if pool is None:
+            return [self.sample() for _ in range(n)]
+        chunk_size = max(1, int(getattr(pool, "_max_workers", 2) or 2))
+        t0 = time.perf_counter()
+        try:
+            out = []
+            for _ in range(n):
+                result = None
+                remaining = self.tries
+                done = False
+                while remaining > 0 and not done:
+                    size = min(chunk_size, remaining)
+                    generated = []  # (mains, rng state after the proposal)
+                    for _c in range(size):
+                        mains = self._propose_mains()
+                        if mains is None:
+                            mains = {0: list(self.true_main[0]), 1: list(self.true_main[1])}
+                        generated.append((mains, self.rng.getstate()))
+                    remaining -= size
+                    checked = list(pool.map(self._check_proposal, [m for m, _ in generated]))
+                    for i, (ok, reason, world, resolved) in enumerate(checked):
+                        if not ok:
+                            continue
+                        # First acceptance: count proposals 0..i exactly as `sample()` would.
+                        for k in range(i):
+                            self.proposals += 1
+                            self.reasons[checked[k][1]] += 1
+                        self.proposals += 1
+                        self.accepted += 1
+                        self.rng.setstate(generated[i][1])
+                        result = (world, resolved)
+                        done = True
+                        break
+                    if not done:
+                        for ok, reason, _, _ in checked:
+                            assert not ok
+                            self.proposals += 1
+                            self.reasons[reason] += 1
+                        if remaining == 0:
+                            self.fallbacks += 1
+                            done = True
+                out.append(result)
+            return out
+        finally:
+            self.seconds += time.perf_counter() - t0
