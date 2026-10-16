@@ -357,15 +357,19 @@ def main() -> None:
         ap.error("--ckpt and --out are required (or --summarize <dir>)")
     if os.environ.get("YGO_BLOCKING_SYNC") == "1":
         # M0 phase C: blocking CUDA sync instead of spin-wait (must run before torch creates its CUDA context).
+        # cudaSetDeviceFlags is a runtime-API symbol: it lives in torch's libcudart, not the driver's libcuda
+        # (speed-profile-20261016-1048 phase C). Importing torch loads libcudart.so.12, so the CDLL below reuses it.
         import ctypes
 
+        import torch
+
         try:
-            rc = ctypes.CDLL("libcuda.so.1").cudaSetDeviceFlags(4)  # cudaDeviceScheduleBlockingSync
+            rc = ctypes.CDLL("libcudart.so.12").cudaSetDeviceFlags(4)  # cudaDeviceScheduleBlockingSync
             if rc != 0:
                 fail(f"YGO_BLOCKING_SYNC=1: cudaSetDeviceFlags returned {rc}")
             print("YGO_BLOCKING_SYNC=1: blocking CUDA sync set", flush=True)
-        except OSError as e:
-            fail(f"YGO_BLOCKING_SYNC=1 but libcuda is missing: {e}")
+        except (OSError, AttributeError) as e:
+            fail(f"YGO_BLOCKING_SYNC=1 but libcudart.so.12 / cudaSetDeviceFlags is missing: {e}")
     PROF = bool(args.prof)
     LAT = bool(args.latency)
 

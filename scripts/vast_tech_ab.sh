@@ -35,12 +35,16 @@ export OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 PYTORCH_CUDA_ALLOC_CONF=expandable_se
 USAGE_PID=$!
 . scripts/cores.sh
 J=$(box_cores)
-# probe: one small unit to completion -> per-proc games/s, GPU mem, RSS; size the pool by measurement
+# Layout (measured on an RTX 3060 / 30 cores, NOTEBOOK 2026-10-16 17:45): many 32-env procs time-slice the GPU
+# (26 x 32 envs: 0 units in 36 min); few procs with big batches win (3 x 320 envs x 8 threads: 13.5 games/s).
+# THREADS (8) VecEnv threads per proc, ENVS (320); NP overrides the measured sizing. Re-running resumes: done units
+# and a finished A/A are kept.
+THREADS="${THREADS:-8}"; ENVS="${ENVS:-320}"
 Q0=$(uv run --no-sync python -c "import json; print(json.load(open('$Q'))[0]['id'])")
 T0=$SECONDS
 uv run --no-sync python scripts/tech_ab.py --questions "$Q" --only "$Q0" --skip-aa \
   --pilot "$PILOT" --opp "$OPP" --opp-decks decks/gauntlet --n-opp-decks "$NOPP" --seed "$SEED" \
-  --seed0 0 --seeds "${PROBE_SEEDS:-5}" --threads 1 --num-envs 32 --device cuda \
+  --seed0 0 --seeds "${PROBE_SEEDS:-5}" --threads "$THREADS" --num-envs "$ENVS" --device cuda \
   --out "$OUT/probe" > "$OUT/probe.txt" 2>&1 &
 PP=$!; GMB=0; RMB=0
 # sample GPU memory / RSS while the probe runs (reading after it exits gave nothing: tech-ab-20261016-1015)
@@ -58,10 +62,9 @@ GTOT=$(nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits | head 
 RTOT=$(free -m | awk '/Mem/{print $2}')
 [ "$GMB" -gt 0 ] || { alert "probe: no GPU memory reading"; exit 3; }
 [ "$RMB" -gt 0 ] || RMB=1500
-# one core per process (VecEnv --threads 1); GPU memory measured with a 1.2x margin
-NP=$(python3 -c "print(max(1, min($J, int($GTOT*0.9/($GMB*1.2)), int($RTOT*0.8/($RMB*1.3)))))")
-ENVS=32
-echo "cores $J, gpu ${GTOT}MB, ram ${RTOT}MB; probe ${GPS} games/s gpu ${GMB}MB rss ${RMB}MB -> $NP procs x $ENVS envs" \
+# THREADS cores per process; GPU memory measured with a 1.2x margin
+NP=${NP:-$(python3 -c "print(max(1, min($J // $THREADS, int($GTOT*0.9/($GMB*1.2)), int($RTOT*0.8/($RMB*1.3)))))")}
+echo "cores $J, gpu ${GTOT}MB, ram ${RTOT}MB; probe ${GPS} games/s gpu ${GMB}MB rss ${RMB}MB -> $NP procs x $ENVS envs x $THREADS threads" \
   | tee "$OUT/sizing.txt"
 TOTAL=$((25 * NOPP * SEEDS * 2 * 2 + NOPP * SEEDS * 2 * 2))
 ETA=$(python3 -c "print($TOTAL/($GPS*$NP)/3600)")
@@ -73,10 +76,11 @@ fi
 # milestone 1: full-scale A/A must be exactly 0, else stop before spending on questions
 AADECK=$(uv run --no-sync python -c "import json; print(json.load(open('$Q'))[0]['deck'])")
 T0=$SECONDS
-uv run --no-sync python scripts/tech_ab.py --aa-only "$AADECK" \
+[ -f "$OUT/aa/AA_DONE" ] || uv run --no-sync python scripts/tech_ab.py --aa-only "$AADECK" \
   --pilot "$PILOT" --opp "$OPP" --opp-decks decks/gauntlet --n-opp-decks "$NOPP" --seed "$SEED" \
-  --seed0 0 --seeds "$SEEDS" --threads 1 --num-envs "$ENVS" --device cuda \
+  --seed0 0 --seeds "$SEEDS" --threads "$THREADS" --num-envs "$ENVS" --device cuda \
   --out "$OUT/aa" > "$OUT/aa.txt" 2>&1 || { alert "A/A failed: $(tail -1 "$OUT/aa.txt")"; exit 4; }
+echo done > "$OUT/aa/AA_DONE"
 echo "$(date +%T) milestone: A/A exactly 0 at full scale ($((NOPP * SEEDS * 2)) pairs, $((SECONDS - T0)) s)" >> "$OUT/PROGRESS"
 # waves of (question x seed block) units; each unit self-contains its rows for --collect
 IDS=$(uv run --no-sync python -c "import json; print('\n'.join(q['id'] for q in json.load(open('$Q'))))")
@@ -95,7 +99,7 @@ run_unit() {
   mkdir -p "$u"
   if timeout "${VAR_CAP:-50m}" uv run --no-sync python scripts/tech_ab.py --questions "$Q" --only "$id" --skip-aa \
       --pilot "$PILOT" --opp "$OPP" --opp-decks decks/gauntlet --n-opp-decks "$NOPP" --seed "$SEED" \
-      --seed0 "$s" --seeds "$b" --threads 1 --num-envs "$ENVS" --device cuda \
+      --seed0 "$s" --seeds "$b" --threads "$THREADS" --num-envs "$ENVS" --device cuda \
       --out "$u" > "$u/proc.txt" 2>&1; then
     echo "$(date +%T) unit $id seed0 $s: $(grep -h . "$u/$id/summary.md" 2>/dev/null | sed -n 4p)" >> "$OUT/PROGRESS"
     echo done > "$u/DONE"
@@ -105,7 +109,7 @@ run_unit() {
   fi
 }
 export -f run_unit alert
-export OUT Q PILOT OPP NOPP SEED BLOCK ENVS VAR_CAP
+export OUT Q PILOT OPP NOPP SEED BLOCK ENVS THREADS VAR_CAP
 echo "${UNITS[@]}" | tr ' ' '\n' | xargs -P "$NP" -I{} bash -c 'run_unit "$@"' _ {} || alert "some units failed (see above)"
 grep -h "^ALERT\|Traceback" "$OUT"/units/u-*/proc.txt >> "$OUT/ALERT" 2>/dev/null || true
 # first question's numbers to PROGRESS as the milestone read
