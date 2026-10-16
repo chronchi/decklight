@@ -70,49 +70,9 @@ def ga_schedule(names: list[str], ga_opps: int, ga_seeds: int, seed0: int = 0) -
     return sched
 
 
-class RouteWindowSearch(WindowSearch):
-    """WindowSearch that tags every rollout obs id into `route` as None (inside the search).
-
-    search_game_gen yields outer decisions ([obs]) and rollout batches through one
-    channel; the shared forward tells them apart by these tags (see tag_game): a
-    rollout obs goes to the base policy, an outer obs to S's or R's policy by seat.
-    """
-
-    def __init__(self, *a, route: dict, **k) -> None:
-        super().__init__(*a, **k)
-        self._route = route
-
-    def rollouts_gen(self, *a, **k):
-        gen = super().rollouts_gen(*a, **k)
-        try:
-            req = next(gen)
-            while True:
-                for o in req:
-                    self._route[id(o)] = None
-                fb = yield req
-                req = gen.send(fb)
-        except StopIteration as stop:
-            return stop.value
-
-
-def tag_game(idx: int, s_seat: int, gen, route: dict):
-    """Tag every obs id a game yields with (idx, s_seat); rollout obs are pre-tagged
-    None by RouteWindowSearch (setdefault keeps that tag: marking runs first, as the
-    inner generator drives rollouts_gen before this wrapper sees the request)."""
-    try:
-        req = next(gen)
-        while True:
-            for o in req:
-                route.setdefault(id(o), (idx, s_seat))
-            fb = yield req
-            req = gen.send(fb)
-    except StopIteration as stop:
-        return stop.value
-
-
-def seat_of(obs: dict) -> int:
-    """Absolute seat of the acting player: global[4] ("I went first") is 1 iff seat 0 acts."""
-    return 0 if int(obs["global"][4]) == 1 else 1
+# D3: RouteWindowSearch/tag_game/seat_of moved verbatim to src/ygo_zero/search/product.py
+# (the EDOPro host driver reuses them); search_match behaviour is bit-identical.
+from ygo_zero.search.product import RouteWindowSearch, seat_of, tag_game
 
 
 def sample_decks(n: int, seed: int) -> list[str]:
