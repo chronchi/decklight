@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ygo-zero annotation viewer</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+:root { color-scheme: light dark; --fg: #111; --bg: #fff; --mut: #666; --line: #ddd; --acc: #06c; }
+@media (prefers-color-scheme: dark) { :root { --fg: #eee; --bg: #161616; --mut: #aaa; --line: #444; --acc: #6cf; } }
+* { box-sizing: border-box; }
+body { font-family: system-ui, sans-serif; color: var(--fg); background: var(--bg); margin: 0 auto; max-width: 70rem; padding: 0.75rem; line-height: 1.4; }
+nav a { margin-right: 1rem; }
+table { border-collapse: collapse; width: 100%; font-size: 0.85rem; }
+th, td { border: 1px solid var(--line); padding: 0.25rem 0.4rem; text-align: left; }
+th.sortable { cursor: pointer; color: var(--acc); }
+tfoot td { font-style: italic; color: var(--mut); }
+.tblwrap { overflow-x: auto; }
+.mut { color: var(--mut); font-size: 0.85rem; }
+canvas { max-width: 100%; }
+.charts { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+@media (max-width: 45rem) { .charts { grid-template-columns: 1fr; } table { font-size: 0.75rem; } }
+form.filters label { margin-right: 0.75rem; white-space: nowrap; }
+.mk { font-weight: bold; }
+footer { margin-top: 2rem; border-top: 1px solid var(--line); padding-top: 0.5rem; }
+.lbl-blunder { color: #c00; } .lbl-mistake { color: #c60; } .lbl-inaccuracy { color: #990; }
+@media (prefers-color-scheme: dark) { .lbl-blunder { color: #f66; } .lbl-mistake { color: #fa0; } .lbl-inaccuracy { color: #cc3; } }
+</style>
+</head>
+<body>
+<nav><a href="#/">runs</a><span id="crumb"></span></nav>
+<main id="app">loading…</main>
+<footer class="mut">Static viewer. Serve with <code>python -m http.server -d DIR</code> (plain file:// cannot fetch the JSON). Evals are P(win | both sides continue like our policy): relative to policy, not absolute.</footer>
+<script>
+"use strict";
+const app = document.getElementById("app");
+const crumb = document.getElementById("crumb");
+let charts = [];
+function dropCharts() { charts.forEach(c => c.destroy()); charts = []; }
+if (window.matchMedia && matchMedia("(prefers-color-scheme: dark)").matches && window.Chart) {
+  Chart.defaults.color = "#ccc"; Chart.defaults.borderColor = "#444";
+}
+async function j(path) { const r = await fetch(path); if (!r.ok) throw new Error("fetch " + path + ": " + r.status); return r.json(); }
+const esc = s => String(s).replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const fmt = (x, d=3) => (x === null || x === undefined) ? "–" : Number(x).toFixed(d);
+const enc = encodeURIComponent;
+
+function route() {
+  const h = location.hash || "#/";
+  const parts = h.slice(2).split("/").map(decodeURIComponent);
+  dropCharts();
+  if (parts[0] === "run" && parts[1] && !parts[2]) return runPage(parts[1]);
+  if (parts[0] === "game" && parts[1] && parts[2] !== undefined) return gamePage(parts[1], parts[2]);
+  return runsPage();
+}
+window.addEventListener("hashchange", route);
+
+// ---- Runs page ----
+const METRICS = [
+  ["ece", "ECE (lower is better)"],
+  ["swing_winner_winrate", "swing-winner win rate"],
+  ["mean_regret_pp", "mean regret per game (win-pp)"],
+  ["labels_per_game", "labels≥mistake per game"],
+  ["interruptions_per_game", "interruptions per game"],
+];
+function metricVal(r, m) {
+  if (m === "labels_per_game") return (r.labels_per_game ? (r.labels_per_game.mistake || 0) + (r.labels_per_game.blunder || 0) : null);
+  return r[m];
+}
+async function runsPage() {
+  crumb.textContent = "";
+  const runs = await j("data/runs.json");
+  let h = `<h1>runs over time (${runs.length})</h1>
+  <div class="tblwrap"><table><tr><th>run</th><th>date</th><th>games</th><th>ECE</th><th>swing winrate</th><th>mean regret</th><th>mist+blu/game</th><th>inter/game</th><th>neg/game</th></tr>`;
+  for (const r of runs) {
+    const lb = r.labels_per_game || {};
+    h += `<tr><td><a href="#/run/${enc(r.name)}">${esc(r.name)}</a></td><td>${esc(r.date || "")}</td><td>${r.n_games}</td><td>${fmt(r.ece, 4)}</td><td>${fmt(r.swing_winner_winrate)}</td><td>${fmt(r.mean_regret_pp, 2)}</td><td>${fmt((lb.mistake || 0) + (lb.blunder || 0))}</td><td>${fmt(r.interruptions_per_game, 2)}</td><td>${fmt(r.negations_per_game, 2)}</td></tr>`;
+  }
+  h += `</table></div>
+  <h2>metric across runs</h2>
+  <label>metric <select id="metsel">${METRICS.map(([v, l]) => `<option value="${v}">${l}</option>`).join("")}</select></label>
+  <canvas id="mc" height="120"></canvas>`;
+  app.innerHTML = h;
+  const sel = document.getElementById("metsel");
+  const draw = () => {
+    dropCharts();
+    const m = sel.value;
+    const pts = runs.map(r => metricVal(r, m));
+    charts.push(new Chart(document.getElementById("mc"), { type: "line",
+      data: { labels: runs.map(r => r.name), datasets: [{ label: m, data: pts, spanGaps: true }] },
+      options: { responsive: true } }));
+  };
+  sel.onchange = draw; draw();
+}
+
+// ---- Run page ----
+let runRows = [];
+function rowPass(r, f) {
+  if (f.deck && !(r.decks || []).join(" ").toLowerCase().includes(f.deck)) return false;
+  if (f.seat !== "" && String(r.seats) !== String(f.seat)) return false;
+  if (f.winner !== "" && String(r.winner) !== String(f.winner)) return false;
+  if (f.mist && !(r.n_labels > 0)) return false;
+  if (f.swing !== "" && String(r.swing_turn) !== String(f.swing)) return false;
+  return true;
+}
+function drawRunTable() {
+  const f = {
+    deck: (document.getElementById("fdeck").value || "").toLowerCase(),
+    seat: document.getElementById("fseat").value,
+    winner: document.getElementById("fwin").value,
+    mist: document.getElementById("fmist").checked,
+    swing: document.getElementById("fswing").value.trim(),
+  };
+  const sortK = drawRunTable.k || "idx", dir = drawRunTable.d || 1;
+  const rows = runRows.filter(r => rowPass(r, f)).sort((a, b) => {
+    const x = a[sortK], y = b[sortK];
+    if (x === null || x === undefined) return 1; if (y === null || y === undefined) return -1;
+    return (x < y ? -1 : x > y ? 1 : 0) * dir;
+  });
+  const cols = [["idx","game"],["decks","decks"],["seats","seat"],["winner","win"],["turns","turns"],["n_labels","≥mist"],["mean_regret","regret"],["swing_turn","swing"],["final_card_adv","adv"]];
+  let h = `<table><tr>${cols.map(([k, l]) => `<th class="sortable" data-k="${k}">${l}${drawRunTable.k === k ? (dir > 0 ? " ▲" : " ▼") : ""}</th>`).join("")}</tr>`;
+  for (const r of rows) h += `<tr><td><a href="#/game/${enc(drawRunTable.run)}/${r.idx}">${r.idx}</a></td><td>${esc((r.decks || []).join(" vs "))}</td><td>${r.seats}</td><td>${r.winner}</td><td>${r.turns}</td><td>${r.n_labels}</td><td>${fmt(r.mean_regret, 2)}</td><td>${r.swing_turn ?? "–"}</td><td>${r.final_card_adv ?? "–"}</td></tr>`;
+  h += `</table><p class="mut">${rows.length}/${runRows.length} games</p>`;
+  document.getElementById("gamelist").innerHTML = h;
+  document.querySelectorAll("#gamelist th.sortable").forEach(th => th.onclick = () => {
+    const k = th.dataset.k;
+    if (drawRunTable.k === k) drawRunTable.d = -(drawRunTable.d || 1); else { drawRunTable.k = k; drawRunTable.d = 1; }
+    drawRunTable();
+  });
+}
+async function runPage(name) {
+  crumb.innerHTML = ` / ${esc(name)}`;
+  const [index, summary] = await Promise.all([j(`data/${enc(name)}/index.json`), j(`data/${enc(name)}/summary.json`)]);
+  runRows = index; drawRunTable.k = "idx"; drawRunTable.d = 1; drawRunTable.run = name;
+  const cal = summary.calibration || { bins: [] };
+  let h = `<h1>run ${esc(name)}</h1><p class="mut">${esc(summary.meta?.timestamp || "")} · commit ${esc(summary.meta?.commit || "")} · ${summary.meta?.n_games} games, ${summary.meta?.n_truncated} truncated, ${summary.meta?.n_searched_decisions} searched</p>
+  <h2>games</h2>
+  <form class="filters" onsubmit="return false">
+    <label>deck <input id="fdeck" size="12"></label>
+    <label>seat <select id="fseat"><option value="">any</option><option>0</option><option>1</option></select></label>
+    <label>winner <select id="fwin"><option value="">any</option><option>0</option><option>1</option></select></label>
+    <label><input type="checkbox" id="fmist"> labels ≥ mistake</label>
+    <label>swing turn <input id="fswing" size="3"></label>
+  </form>
+  <div class="tblwrap" id="gamelist"></div>
+  <h2>calibration (searcher view)</h2>
+  <p class="mut">ECE ${fmt(cal.ece, 4)} · Brier ${Object.entries(cal.brier_by_bucket || {}).map(([k, v]) => `${esc(k)}: ${fmt(v)}`).join(", ")}</p>
+  <div class="charts"><div><canvas id="rel"></canvas></div><div><canvas id="tempo"></canvas></div></div>
+  <div class="tblwrap"><table><tr><th>p-hat</th><th>n</th><th>win rate</th><th>mean p-hat</th></tr>
+  ${(cal.bins || []).map(b => `<tr><td>${b.lo?.toFixed(1)}–${b.hi?.toFixed(1)}</td><td>${b.n}</td><td>${fmt(b.won)}</td><td>${fmt(b.mean_p)}</td></tr>`).join("")}</table></div>
+  <h2>tempo by turn (win-pp for turn player)</h2>
+  <div class="tblwrap"><table><tr><th>turn</th><th>seat</th><th>n</th><th>mean</th><th>p10</th><th>p90</th></tr>
+  ${(summary.tempo?.by_turn_seat || []).map(r => `<tr><td>${r.turn}</td><td>${r.seat}</td><td>${r.n}</td><td>${fmt(r.mean_pp, 1)}</td><td>${fmt(r.p10_pp, 1)}</td><td>${fmt(r.p90_pp, 1)}</td></tr>`).join("")}</table></div>
+  <p class="mut">swing-turn share ${Object.entries(summary.tempo?.swing_share || {}).map(([k, v]) => `T${k}: ${fmt(v, 2)}`).join(", ")} · swing winner wins ${fmt(summary.tempo?.swing_winner_winrate)} (n=${summary.tempo?.n_swing_games})</p>
+  <h2>mining top 20 (significant ≥ mistake per opportunity)</h2>
+  <div class="tblwrap"><table><tr><th>kind</th><th>msg</th><th>turns</th><th>first</th><th>deck_s</th><th>hits/opps</th><th>rate</th></tr>
+  ${(summary.mining || []).map(m => `<tr><td>${esc(m.kind)}</td><td>${m.msg}</td><td>${esc(m.bucket)}</td><td>${m.seat_first}</td><td>${esc(m.deck_s)}</td><td>${m.hits}/${m.opportunities}</td><td>${fmt(m.rate, 4)}</td></tr>`).join("")}</table></div>`;
+  app.innerHTML = h;
+  ["fdeck","fseat","fwin","fmist","fswing"].forEach(id => document.getElementById(id).oninput = drawRunTable);
+  drawRunTable();
+  const bins = (cal.bins || []).filter(b => b.n);
+  charts.push(new Chart(document.getElementById("rel"), { type: "scatter",
+    data: { datasets: [
+      { label: "bin win rate", data: bins.map(b => ({ x: b.mean_p, y: b.won })), pointRadius: bins.map(b => Math.max(2, Math.sqrt(b.n) / 3)) },
+      { label: "ideal", data: [{ x: 0, y: 0 }, { x: 1, y: 1 }], showLine: true, pointRadius: 0 }] },
+    options: { plugins: { title: { display: true, text: "reliability" } }, scales: { x: { min: 0, max: 1 }, y: { min: 0, max: 1 } } } }));
+  const tt = summary.tempo?.by_turn_seat || [];
+  charts.push(new Chart(document.getElementById("tempo"), { type: "bar",
+    data: { labels: tt.map(r => `T${r.turn}`), datasets: [{ label: "mean win-pp", data: tt.map(r => r.mean_pp) }] },
+    options: { plugins: { title: { display: true, text: "tempo by turn" } } } }));
+}
+
+// ---- Game page ----
+const turnLines = {
+  id: "turnLines",
+  afterDatasetsDraw(chart, args, opts) {
+    const lines = (chart.config.options.plugins?.turnLines?.at || []).map(Number);
+    if (!lines.length) return;
+    const { ctx, chartArea, scales } = chart;
+    const x = scales.x;
+    ctx.save(); ctx.strokeStyle = opts.color || "#888"; ctx.setLineDash([4, 3]);
+    for (const k of lines) {
+      const px = x.getPixelForValue(k);
+      if (px < chartArea.left || px > chartArea.right) continue;
+      ctx.beginPath(); ctx.moveTo(px, chartArea.top); ctx.lineTo(px, chartArea.bottom); ctx.stroke();
+    }
+    ctx.restore();
+  }
+};
+if (window.Chart) Chart.register(turnLines);
+const LBLC = { blunder: "#c00", mistake: "#c60", inaccuracy: "#990" };
+async function gamePage(run, idx) {
+  crumb.innerHTML = ` / <a href="#/run/${enc(run)}">${esc(run)}</a> / game ${esc(idx)}`;
+  const [g, index] = await Promise.all([j(`data/${enc(run)}/${enc(idx)}.json`), j(`data/${enc(run)}/index.json`)]);
+  const order = index.map(r => r.idx).sort((a, b) => a - b);
+  const gpos = order.indexOf(g.game_idx);
+  const prev = order[gpos - 1], next = order[gpos + 1];
+  document.onkeydown = e => {
+    if (e.key === "ArrowLeft" && prev !== undefined) location.hash = `#/game/${enc(run)}/${prev}`;
+    if (e.key === "ArrowRight" && next !== undefined) location.hash = `#/game/${enc(run)}/${next}`;
+  };
+  const decks = (g.decks || []).join(" vs ");
+  const lbl = g.labels || {};
+  let h = `<h1>game ${g.game_idx}: ${esc(decks)}</h1>
+  <p class="mut">seat ${g.seat} (${esc(g.deck_s || "")}), first: ${g.s_first} · winner: player ${g.winner} · ${g.n_choices} decisions, ${g.n_searched} searched, ${g.n_overridden} overridden · labels: ${lbl.inaccuracy || 0} inacc, ${lbl.mistake || 0} mist, ${lbl.blunder || 0} blu · mean regret ${fmt(g.mean_regret_pp, 2)} win-pp · swing turn ${g.swing_turn ?? "–"}</p>
+  <p>${prev !== undefined ? `<a href="#/game/${enc(run)}/${prev}">← prev</a>` : ""} ${next !== undefined ? `<a href="#/game/${enc(run)}/${next}">next →</a>` : ""}</p>
+  <h2>eval (player-0 win %)</h2><canvas id="ev"></canvas>
+  <h2>tempo per turn (win-pp for turn player)</h2><canvas id="tm"></canvas>
+  <h2>turns</h2><div class="tblwrap"><table>
+  <tr><th>T</th><th>TP</th><th>LP 0–1</th><th>hand</th><th>field</th><th>GY</th><th>ban</th><th>ext</th><th>adv</th><th>v_p0</th><th>v_p1</th><th>v_comb</th><th>dis</th><th>tempo</th><th>events</th></tr>`;
+  for (const t of g.turns || []) {
+    const evc = t.ev ? `act ${t.ev[0].activations}/${t.ev[1].activations} int ${t.ev[0].activations_opp_turn + t.ev[1].activations_opp_turn} neg ${t.ev[0].negated_by_p_suffered + t.ev[1].negated_by_p_suffered}` : "–";
+    const tp = (t.tempo_pp ?? t.tempo_search_pp);
+    h += `<tr><td>${t.turn}</td><td>P${t.turn_player}</td><td>${t.lp[0]}–${t.lp[1]}</td><td>${t.p0.hand}/${t.p1.hand}</td><td>${t.p0.field}/${t.p1.field}</td><td>${t.p0.gy}/${t.p1.gy}</td><td>${t.p0.ban}/${t.p1.ban}</td><td>${t.p0.extra_used}/${t.p1.extra_used}</td><td>${t.card_adv > 0 ? "+" : ""}${t.card_adv}</td><td>${fmt(t.v_p0, 2)}</td><td>${fmt(t.v_p1, 2)}</td><td>${fmt(t.v_comb, 2)}</td><td>${fmt(t.disagree, 2)}</td><td>${tp === null || tp === undefined ? "–" : (tp >= 0 ? "+" : "") + Number(tp).toFixed(1)}</td><td>${evc}</td></tr>`;
+  }
+  h += `</table></div><p class="mut">hand/field/GY/ban/ext as P0/P1; adv = P0 minus P1 hand+field; v_* from value net at turn start when present; events act per seat, int = opp-turn activations, neg = negations suffered.</p>
+  <h2>labelled moves</h2>`;
+  const labelled = (g.evals || []).filter(e => e.label && e.label !== "none");
+  if (!labelled.length) h += `<p>None.</p>`;
+  for (const e of labelled) {
+    h += `<div id="mv-${e.k}"><h3 class="lbl-${e.label}">Turn ${e.turn} decision ${e.k} (${e.label}, seat ${e.seat}, ${esc(e.kind)})</h3>
+    <p>Played <b>${esc(e.played_desc || "")}</b> over search-best <b>${esc(e.best_desc || "")}</b>: regret ${fmt(e.regret_pp, 1)} win-pp (gap/SE ${fmt(e.gap_se, 1)}).</p><ul>`;
+    for (const c of e.cands || []) {
+      const marks = [c.opt === e.played ? "played" : "", c.opt === e.best ? "search-best" : ""].filter(Boolean).join(", ");
+      h += `<li>${esc(c.desc)} — ${fmt(c.win_pct, 1)}% ± ${fmt(c.se_pp, 1)}pp${marks ? ` <i>(${marks})</i>` : ""}</li>`;
+    }
+    h += `</ul></div>`;
+  }
+  app.innerHTML = h;
+
+  // eval chart: full curve when present, else search eval points
+  let pts, marks = [];
+  if (g.curve_full && g.curve_full.length) {
+    pts = g.curve_full.map(p => ({ x: p.k, y: (p.v0 + 1) / 2 * 100 }));
+  } else {
+    pts = (g.evals || []).map(e => ({ x: e.k, y: e.p0_win_pct === null || e.p0_win_pct === undefined ? null : e.p0_win_pct * 100 }));
+  }
+  const evByK = Object.fromEntries((g.evals || []).map(e => [e.k, e]));
+  marks = (g.evals || []).filter(e => e.label && e.label !== "none").map(e => ({
+    x: e.k, y: evByK[e.k] ? (g.curve_full ? null : (e.p0_win_pct === null ? null : e.p0_win_pct * 100)) : null, _e: e,
+  }));
+  // y for marks: nearest curve value at same k
+  const yAt = new Map(pts.map(p => [p.x, p.y]));
+  marks = marks.map(m => ({ x: m.x, y: yAt.get(m.x) ?? null, _e: m._e })).filter(m => m.y !== null);
+  const starts = Object.values(g.turn_starts || {});
+  const evChart = new Chart(document.getElementById("ev"), { type: "line",
+    data: { datasets: [
+      { label: g.curve_full ? "value net (p0 win %)" : "search eval (p0 win %)", data: pts, pointRadius: 0, borderWidth: 1.5, spanGaps: true },
+      ...Object.keys(LBLC).map(L => ({ label: L, data: marks.filter(m => m._e.label === L).map(m => ({ x: m.x, y: m.y })),
+        type: "scatter", pointStyle: "triangle", pointRadius: 6, backgroundColor: LBLC[L], borderColor: LBLC[L] })),
+    ] },
+    options: { responsive: true, plugins: { turnLines: { at: starts } },
+      onClick: (evt, els) => { const el = els.find(e => e.datasetIndex > 0); if (!el) return;
+        const m = evChart.data.datasets[el.datasetIndex].data[el.index];
+        const k = marks.flat().find(mm => mm.x === m.x); const tgt = document.getElementById("mv-" + m.x);
+        if (tgt) tgt.scrollIntoView(); } },
+    plugins: [turnLines] });
+  charts.push(evChart);
+  // tempo chart
+  const turns = g.turns || [];
+  const hasSearch = turns.some(t => t.tempo_search_pp !== null && t.tempo_search_pp !== undefined);
+  const tsets = [{ label: "tempo (win-pp)", data: turns.map(t => t.tempo_pp ?? t.tempo_search_pp ?? null) }];
+  if (hasSearch && turns.some(t => t.tempo_pp !== null && t.tempo_pp !== undefined))
+    tsets.push({ label: "search tempo (win-pp)", data: turns.map(t => t.tempo_search_pp ?? null) });
+  charts.push(new Chart(document.getElementById("tm"), { type: "bar",
+    data: { labels: turns.map(t => `T${t.turn} P${t.turn_player}`), datasets: tsets }, options: { responsive: true } }));
+}
+route();
+</script>
+</body>
+</html>
