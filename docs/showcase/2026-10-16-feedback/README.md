@@ -38,3 +38,20 @@ Per game:
 3. any play no human would make;
 4. the strength you'd guess for each side: casual / locals / regionals / top-cut;
 5. your own level and format (Master Duel, EDOPro, paper).
+
+## Mitsurugi games (user: "play a couple mitsurugi decks and tell me the lines it played")
+`GAMES="sample mitsurugi-meta2:snake-eye,sample tearlaments:mitsurugi-meta1" bash scripts/launch/laptop-feedback-games.sh mitsurugi-20261016`
+
+| game | result | turns | searched / changed | wall |
+|---|---|---|---|---|
+| mitsurugi-1: Mitsurugi (meta2, first) vs Snake-Eye | Mitsurugi wins | 3 | 49 / 25 | 362 s |
+| mitsurugi-2: Tearlaments (first) vs Mitsurugi (meta1) | Mitsurugi wins | 6 | 110 / 53 | 1047 s |
+
+- **mitsurugi-1**: turn 1 bricks (Pre-Preparation is Ashed). On turn 2 Mitsurugi defends with Purulia, Ash, Droll
+  (held until after Poplar's first search) and Dominus Impulse. On turn 3 it OTKs:
+  Ragged Records → Fallen & Virtuous on Temple → Habakiri pulls Saji → Ritual → Murakumo wipes the board → a second
+  Ritual tributing Aramasa → Kusanagi → three attacks.
+- **mitsurugi-2**: Mitsurugi breaks a full Tearlaments board (Rulkallos, Kitkallos, Kelbek, Merrli) through Fuwalos,
+  Mudora, Ash, the Rulkallos negate and Kaleido-Heart. Line: Prayers (tribute Kusanagi) → Aramasa → Habakiri →
+  Ritual → Murakumo wipe → Mirror re-ritual → three attacks. Turn 4: Dyna Mondo, then Gorgon, then Prayers with
+  both effects. Turn 6: Dharc steals Kitkallos for lethal.

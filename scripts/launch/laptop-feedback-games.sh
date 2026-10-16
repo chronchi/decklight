@@ -3,12 +3,13 @@
 # like 2 games, then also 2 games with decks seen ... P vs P using the best model we have now including the searches").
 # The product (scripts/product.sh) on BOTH seats, CPU, one process per game, 1 thread each, cores 0-3.
 # Unseen = decks/newcards (archetypes with 0 cards in any training data, ADR 0007), seen = training pool decks.
-# Usage: bash scripts/launch/laptop-feedback-games.sh <name>
+# Usage: [GAMES="sample a:b,..."] bash scripts/launch/laptop-feedback-games.sh <name>
 set -uo pipefail
 cd "$(dirname "$0")/../.."
 NAME="$1"; OUT="runs/$NAME"; mkdir -p "$OUT"
 . scripts/product.sh
-GAMES=("newcards goldpride:ragnaraika" "newcards dragunity:dinomorphia" "sample snake-eye:tearlaments" "sample sky-striker:dragon-link")
+# GAMES env: comma-separated "<deck-set> <a:b>" entries (max 4, one core each); default = the 2026-10-16 feedback set
+IFS=',' read -ra GAMES <<< "${GAMES:-newcards goldpride:ragnaraika,newcards dragunity:dinomorphia,sample snake-eye:tearlaments,sample sky-striker:dragon-link}"
 PIDS=()
 for i in "${!GAMES[@]}"; do
   read -r SET PAIR <<< "${GAMES[$i]}"
