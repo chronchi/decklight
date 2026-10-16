@@ -215,9 +215,21 @@ def _card_adv(counts: dict, p0: int = 0, p1: int = 1) -> int:
 
 
 def annotate_game(
-    rec: dict, snaps: list[dict], end_snap: dict, descs: dict[int, list[tuple[int, str]]]
+    rec: dict,
+    snaps: list[dict],
+    end_snap: dict,
+    descs: dict[int, list[tuple[int, str]]],
+    values: dict | None = None,
 ) -> dict:
-    """Build the per-game annotation from a record + replay snapshots (pure)."""
+    """Build the per-game annotation from a record + replay snapshots (pure).
+
+    `values` is one `score_decisions.py` line for this game (k/actor/turn/v
+    lists, actor's-view win estimates in [-1, 1]) or None. Without it the
+    output is the search-log annotation; with it the game additionally gains
+    `curve_full` (per-decision v0), per-turn v_p0/v_p1/v_comb/disagree, a
+    full-curve `tempo` (the search tempo moves to `tempo_search`, likewise
+    `swing_turn` -> `swing_turn_search`).
+    """
     if not snaps:
         raise ValueError(f"game {rec.get('game_idx')}: no replay snapshots")
     search_by_k = {int(e["k"]): e for e in rec.get("search", [])}
@@ -324,8 +336,88 @@ def annotate_game(
             "mean_regret_pp": (sum(r / 2 * 100 for r in regrets) / len(regrets) if regrets else 0.0),
         },
     }
+    if values is not None:
+        _attach_values(ann, turns, turn_nos, snaps, values, rec.get("game_idx"))
     _assert_no_nan(ann)
     return ann
+
+
+def _attach_values(
+    ann: dict, turns: dict[int, dict], turn_nos: list[int], snaps: list[dict], values: dict, game_idx
+) -> None:
+    """Add the value-net full curve, per-turn v_comb/disagreement and full-curve tempo (pure)."""
+    vk = [int(k) for k in values.get("k", [])]
+    va = [int(x) for x in values.get("actor", [])]
+    vt = [int(x) for x in values.get("turn", [])]
+    vv = [float(x) for x in values.get("v", [])]
+    n = len(snaps)
+    if not (len(vk) == len(va) == len(vt) == len(vv) == n):
+        raise ValueError(
+            f"game {game_idx}: values length {[len(vk), len(va), len(vt), len(vv)]} != {n} replay decisions"
+        )
+    if vk != list(range(n)):
+        raise ValueError(f"game {game_idx}: values k is not 0..{n - 1}")
+    for v in vv:
+        _check_finite([v], f"game {game_idx} values")
+    v_by_k = dict(zip(vk, vv, strict=True))
+    curve_full = []
+    for k, s in enumerate(snaps):
+        v = v_by_k[k]
+        a = int(s["actor"])
+        if a != va[k] or int(s["turn"]) != vt[k]:
+            raise ValueError(f"game {game_idx}: values actor/turn mismatch at k={k}")
+        v0 = v if a == 0 else -v
+        curve_full.append({"k": k, "actor": a, "turn": int(s["turn"]), "v": v, "v0": v0})
+    ann["curve_full"] = curve_full
+
+    # Each player's own value at their first decision in each turn.
+    first_v: dict[tuple[int, int], float] = {}
+    for k, s in enumerate(snaps):
+        first_v.setdefault((int(s["turn"]), int(s["actor"])), v_by_k[k])
+    for t in turn_nos:
+        v_p0 = first_v.get((t, 0))
+        v_p1 = first_v.get((t, 1))
+        v_comb: float | None
+        disagree: float | None
+        if v_p0 is not None and v_p1 is not None:
+            v_comb = (v_p0 - v_p1) / 2
+            disagree = v_p0 + v_p1
+        elif v_p0 is not None:
+            v_comb = v_p0  # player 0's view already
+            disagree = None
+        elif v_p1 is not None:
+            v_comb = -v_p1  # player 1's view flipped to player 0's view
+            disagree = None
+        else:
+            v_comb = None
+            disagree = None
+        turns[t]["v_p0"] = v_p0
+        turns[t]["v_p1"] = v_p1
+        turns[t]["v_comb"] = v_comb
+        turns[t]["disagree"] = disagree
+
+    # Tempo from the full curve: v_comb change between consecutive turn starts,
+    # from the turn player's view (win pp = dv * 50). The search tempo is kept.
+    ann["tempo_search"] = ann["tempo"]
+    ann["swing_turn_search"] = ann["swing_turn"]
+    full: dict[int, dict] = {}
+    have = [t for t in turn_nos if turns[t]["v_comb"] is not None]
+    for i, t in enumerate(have[:-1]):
+        t2 = have[i + 1]
+        tp = turns[t]["turn_player"]
+        dpp = (turns[t2]["v_comb"] - turns[t]["v_comb"]) * 50.0
+        if tp == 1:
+            dpp = -dpp
+        full[t] = {
+            "to_turn": t2,
+            "dp_tp": dpp / 100.0,
+            "dp_tp_pp": dpp,
+            "turn_player": tp,
+            "tempo_cards": turns[t]["d_card_adv"] if tp == 0 else -turns[t]["d_card_adv"],
+            "tempo_lp": turns[t]["d_lp"][tp],
+        }
+    ann["tempo"] = full
+    ann["swing_turn"] = max(full, key=lambda t: abs(full[t]["dp_tp"])) if full else None
 
 
 def _assert_no_nan(obj) -> None:
@@ -365,6 +457,11 @@ def summarize(anns: list[dict], input_dirs: list[str], commit: str) -> dict:
     swing_wins = 0
     swing_n = 0
     n_trunc = 0
+    has_values = any("curve_full" in a for a in anns)
+    # Value-net full curve: (bucket, bin) -> [n, won, p_sum]; v_comb sign; |disagree|.
+    vcal: dict[tuple[str, int], list] = defaultdict(lambda: [0, 0, 0.0])
+    vcomb_sign: dict[str, list[int]] = defaultdict(lambda: [0, 0])
+    disagree_abs: dict[str, list[float]] = defaultdict(list)
     for ann in anns:
         if ann["truncated"]:
             n_trunc += 1
@@ -404,6 +501,25 @@ def summarize(anns: list[dict], input_dirs: list[str], commit: str) -> dict:
             if lead != 0:
                 lp_acc[sb]["n"] += 1
                 lp_acc[sb]["ok"] += 1 if (lead > 0) == (winner == 0) else 0
+            if "curve_full" in ann:
+                # Value calibration at turn starts, both seats: each seat's own
+                # first-decision value predicts that seat's win.
+                for p, key in ((0, "v_p0"), (1, "v_p1")):
+                    v = ts.get(key)
+                    if v is not None:
+                        ph = (v + 1) / 2
+                        b = min(int(ph * CAL_N_BINS), CAL_N_BINS - 1)
+                        cell = vcal[(sb, b)]
+                        cell[0] += 1
+                        cell[1] += 1 if winner == p else 0
+                        cell[2] += ph
+                vc = ts.get("v_comb")
+                if vc is not None and vc != 0:
+                    vcomb_sign[sb][0] += 1
+                    vcomb_sign[sb][1] += 1 if (vc > 0) == (winner == 0) else 0
+                d = ts.get("disagree")
+                if d is not None:
+                    disagree_abs[sb].append(abs(d))
         for t, tp in ann["tempo"].items():
             tempo_vals[(int(t), int(tp["turn_player"]))].append(tp["dp_tp"])
         if ann["swing_turn"] is not None:
@@ -488,6 +604,40 @@ def summarize(anns: list[dict], input_dirs: list[str], commit: str) -> dict:
             "n_swing_games": swing_n,
         },
     }
+    if has_values:
+        vcal_sec = {}
+        for sb in SIGN_BUCKETS:
+            bins = []
+            num = 0.0
+            den = 0
+            for b in range(CAL_N_BINS):
+                n_, won_, ps_ = vcal[(sb, b)]
+                wr = won_ / n_ if n_ else None
+                mp = ps_ / n_ if n_ else None
+                if n_:
+                    num += n_ * abs(wr - mp)  # type: ignore[operator]
+                    den += n_
+                bins.append(
+                    {
+                        "lo": round(b * CAL_BIN_WIDTH, 1),
+                        "hi": round((b + 1) * CAL_BIN_WIDTH, 1),
+                        "n": n_,
+                        "won": wr,
+                        "mean_p": mp,
+                    }
+                )
+            vcal_sec[sb] = {"bins": bins, "ece": (num / den) if den else None}
+        summary["value_calibration"] = vcal_sec
+        summary["v_comb_sign"] = {
+            sb: {"n": vcomb_sign[sb][0],
+                 "acc": (vcomb_sign[sb][1] / vcomb_sign[sb][0] if vcomb_sign[sb][0] else None)}
+            for sb in SIGN_BUCKETS
+        }
+        summary["disagree"] = {
+            sb: {"n": len(disagree_abs[sb]),
+                 "mean_abs": (sum(disagree_abs[sb]) / len(disagree_abs[sb]) if disagree_abs[sb] else None)}
+            for sb in SIGN_BUCKETS
+        }
     _assert_no_nan(summary)
     return summary
 
@@ -522,6 +672,10 @@ def render_game_md(ann: dict) -> str:
         result,
         stats,
         "- Evals are P(win | both sides continue like our policy P): relative to policy, not absolute.",
+    ]
+    if "curve_full" in ann:
+        lines.append("- Full-curve evals (v_comb) from the value net at every decision of both seats.")
+    lines += [
         "",
         "## Turns",
         "",
@@ -538,7 +692,10 @@ def render_game_md(ann: dict) -> str:
             c = ts["counts"][p]
             eu = extra_start[p] - c[6]
             adv = ts["card_adv"] if p == 0 else -ts["card_adv"]
-            eval_p0 = _pct((curve_v0 + 1) / 2) if curve_v0 is not None and p == 0 else ""
+            if p == 0 and ts.get("v_comb") is not None:
+                eval_p0 = _pct((ts["v_comb"] + 1) / 2)
+            else:
+                eval_p0 = _pct((curve_v0 + 1) / 2) if curve_v0 is not None and p == 0 else ""
             tempo_pp = ""
             if tp_info and p == ts["turn_player"]:
                 tempo_pp = f"{tp_info['dp_tp_pp']:+.1f}pp"
@@ -647,6 +804,39 @@ def render_summary_md(summary: dict) -> str:
         )
     else:
         lines.append("Swing winner goes on to win: -.")
+    if "value_calibration" in summary:
+        lines += [
+            "",
+            "## Value calibration at turn starts (both seats, non-truncated games)",
+            "",
+            "| turn bucket | n | ECE |",
+            "|---|---|---|",
+        ]
+        for b in SIGN_BUCKETS:
+            n_b = sum(x["n"] for x in summary["value_calibration"][b]["bins"])
+            ece = summary["value_calibration"][b]["ece"]
+            lines.append(f"| {b} | {n_b} | {ece:.4f} |" if ece is not None else f"| {b} | {n_b} | - |")
+        lines += [
+            "",
+            "## Winner sign accuracy of v_comb",
+            "",
+            "| bucket | v_comb |",
+            "|---|---|",
+        ]
+        for b in SIGN_BUCKETS:
+            lines.append(f"| {b} | {_acc_cell(summary['v_comb_sign'], b)} |")
+        lines += [
+            "",
+            "## Disagreement |v_p0 + v_p1|",
+            "",
+            "| bucket | n | mean |",
+            "|---|---|---|",
+        ]
+        for b in SIGN_BUCKETS:
+            d = summary["disagree"][b]
+            lines.append(
+                f"| {b} | {d['n']} | {d['mean_abs']:.3f} |" if d["mean_abs"] is not None else f"| {b} | {d['n']} | - |"
+            )
     return "\n".join(lines) + "\n"
 
 

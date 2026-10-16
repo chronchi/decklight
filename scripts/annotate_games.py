@@ -38,18 +38,21 @@ def _worker_init() -> None:
     _NAMES = CardNames().names
 
 
-def _annotate_one(payload: tuple[dict, str]) -> dict:
+def _annotate_one(payload: tuple[dict, dict | None]) -> dict:
     import render_showcase as R
 
     from ygo_zero.decks import load_ydk
 
-    rec, _ = payload
+    rec, values = payload
 
     def deck(name: str):
         return load_ydk(R.deck_path(name))
 
     snaps, end_snap, descs = A.replay(rec, _ENGINE, deck, R.describe, _NAMES)
-    ann = A.annotate_game(rec, snaps, end_snap, descs)
+    if values is None:
+        ann = A.annotate_game(rec, snaps, end_snap, descs)
+    else:
+        ann = A.annotate_game(rec, snaps, end_snap, descs, values)
     return {"ann": ann, "md": A.render_game_md(ann)}
 
 
@@ -77,6 +80,8 @@ def main() -> int:
     ap.add_argument("--md-games", default="", help="comma-separated game_idx for Markdown")
     ap.add_argument("--workers", type=int, default=4)
     ap.add_argument("--max-games", type=int, default=0)
+    ap.add_argument("--values", type=Path, default=None,
+                    help="optional score_decisions.py values.jsonl for full-curve evals")
     a = ap.parse_args()
 
     for d in a.games:
@@ -90,13 +95,28 @@ def main() -> int:
     if sum(len(r.get("search", [])) for r in recs) == 0:
         print("ALERT annotate: 0 search entries in the whole input", file=sys.stderr)
         return 2
+    by_idx: dict = {}
+    if a.values is not None:
+        if not a.values.is_file():
+            print(f"ALERT annotate: no such values file: {a.values}", file=sys.stderr)
+            return 2
+        for line in a.values.read_text().splitlines():
+            if not line.strip():
+                continue
+            v = json.loads(line)
+            by_idx[v["game_idx"]] = v
+        missing = [r.get("game_idx") for r in recs if r.get("game_idx") not in by_idx]
+        if missing:
+            print(f"ALERT annotate: {len(missing)} games without values (e.g. {missing[:3]})", file=sys.stderr)
+            return 2
 
     workers = max(1, min(int(a.workers), 4))
     anns: list[dict] = []
     mds: list[str] = []
     try:
         with concurrent.futures.ProcessPoolExecutor(max_workers=workers, initializer=_worker_init) as ex:
-            for out in ex.map(_annotate_one, [(r, "") for r in recs]):
+            payloads = [(r, by_idx.get(r.get("game_idx")) if by_idx else None) for r in recs]
+            for out in ex.map(_annotate_one, payloads):
                 anns.append(out["ann"])
                 mds.append(out["md"])
     except A.ReplayMismatch as e:
@@ -142,6 +162,11 @@ def main() -> int:
     print(f"ECE={summary['calibration']['ece']:.4f} Brier={summary['calibration']['brier_by_bucket']}")
     tp = summary["tempo"]
     print(f"swing_share={tp['swing_share']} swing_winner_winrate={tp['swing_winner_winrate']:.3f}")
+    if "value_calibration" in summary:
+        eces = {b: summary["value_calibration"][b]["ece"] for b in ("<=2", "3", "4", "5+")}
+        accs = {b: summary["v_comb_sign"][b]["acc"] for b in ("<=2", "3", "4", "5+")}
+        dis = {b: summary["disagree"][b]["mean_abs"] for b in ("<=2", "3", "4", "5+")}
+        print(f"value_ECE={eces} v_comb_sign_acc={accs} mean_|disagree|={dis}")
     print(f"wrote {a.out}")
     return 0
 

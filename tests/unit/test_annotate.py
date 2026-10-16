@@ -188,3 +188,113 @@ def test_markdown_renders():
     json.dumps(ann)
     json.dumps(sm)
     assert math.isfinite(ann["summary"]["mean_regret_pp"])
+
+
+EXPECTED_NO_VALUE_KEYS = {
+    "game_idx", "decks", "seed", "seat", "s_first", "deck_s", "winner", "truncated",
+    "n_choices", "turns", "evals", "curve", "tempo", "swing_turn", "summary",
+}
+
+
+def test_no_values_output_shape_unchanged():
+    ann = _two_turn_game()
+    assert set(ann.keys()) == EXPECTED_NO_VALUE_KEYS
+    assert "curve_full" not in ann and "tempo_search" not in ann
+    assert all("v_comb" not in ts for ts in ann["turns"].values())
+
+
+def _values_of(snaps, fn):
+    """A score_decisions-style values line: v = fn(turn, actor)."""
+    return {
+        "game_idx": 0,
+        "seed": 1,
+        "decks": ["a", "b"],
+        "s_seat": 0,
+        "k": [s["k"] for s in snaps],
+        "actor": [s["actor"] for s in snaps],
+        "turn": [s["turn"] for s in snaps],
+        "v": [round(fn(s["turn"], s["actor"]), 4) for s in snaps],
+    }
+
+
+def _valued_game():
+    """Three turns, both seats act every turn; v = 0.1 * turn * (+1 actor 0, -1 actor 1)."""
+    s1 = [
+        snap(0, 1, actor=0, tp=0),
+        snap(1, 1, actor=1, tp=0),
+        snap(2, 2, actor=1, tp=1),
+        snap(3, 2, actor=0, tp=1),
+        snap(4, 3, actor=0, tp=0),
+        snap(5, 3, actor=1, tp=0),
+    ]
+    search = [entry(0, (0.0, 0.0), (-0.4, -0.4), seat=0, turn=1)]
+    r = rec_of(search, turns=3)
+    values = _values_of(s1, lambda t, a: 0.1 * t * (1 if a == 0 else -1))
+    plain = A.annotate_game(r, s1, s1[-1], {0: [(1, "A"), (0, "B")]})
+    valued = A.annotate_game(r, s1, s1[-1], {0: [(1, "A"), (0, "B")]}, values)
+    return plain, valued
+
+
+def test_values_curve_full_and_v_comb():
+    plain, valued = _valued_game()
+    assert "curve_full" not in plain
+    cf = valued["curve_full"]
+    assert len(cf) == 6
+    # v0 is player 0's view: v if actor 0 else -v -> 0.1 * turn everywhere here
+    for e in cf:
+        assert e["v0"] == pytest.approx(0.1 * e["turn"])
+    for t in (1, 2, 3):
+        ts = valued["turns"][t]
+        assert ts["v_p0"] == pytest.approx(0.1 * t)
+        assert ts["v_p1"] == pytest.approx(-0.1 * t)
+        assert ts["v_comb"] == pytest.approx(0.1 * t)
+        assert ts["disagree"] == pytest.approx(0.0)
+
+
+def test_values_tempo_from_full_curve_and_search_kept():
+    plain, valued = _valued_game()
+    # search tempo preserved under its new name
+    assert valued["tempo_search"] == plain["tempo"]
+    assert valued["swing_turn_search"] == plain["swing_turn"]
+    # full-curve tempo: v_comb 0.1 -> 0.2 -> 0.3, i.e. +5 win-pp per turn for player 0's view
+    assert set(valued["tempo"]) == {1, 2}
+    assert valued["tempo"][1]["to_turn"] == 2
+    assert valued["tempo"][1]["dp_tp_pp"] == pytest.approx(5.0)  # turn 1 player is seat 0
+    assert valued["tempo"][2]["dp_tp_pp"] == pytest.approx(-5.0)  # turn 2 player is seat 1
+    assert valued["swing_turn"] in (1, 2)
+
+
+def test_values_summary_sections():
+    _, valued = _valued_game()
+    sm = A.summarize([valued], ["d"], "abc")
+    assert "value_calibration" in sm and "v_comb_sign" in sm and "disagree" in sm
+    assert sm["v_comb_sign"]["<=2"]["n"] == 2  # turns 1 and 2 share the bucket
+    assert sm["v_comb_sign"]["<=2"]["acc"] == 1.0  # winner is seat 0, v_comb > 0
+    assert sm["disagree"]["<=2"]["mean_abs"] == pytest.approx(0.0)
+    smd = A.render_summary_md(sm)
+    assert "v_comb" in smd and "Disagreement" in smd
+    md = A.render_game_md(valued)
+    assert "v_comb" in md  # eval column now comes from the full curve
+    import json
+
+    json.dumps(valued)
+    json.dumps(sm)
+
+
+def test_values_single_seat_turn_fallback():
+    # a turn where only seat 1 acts: v_comb is seat 1's value flipped to player 0's view
+    s1 = [snap(0, 1, actor=1, tp=1)]
+    r = rec_of([], turns=1)
+    values = _values_of(s1, lambda t, a: -0.2)
+    ann = A.annotate_game(r, s1, s1[-1], {}, values)
+    assert ann["turns"][1]["v_p0"] is None
+    assert ann["turns"][1]["v_comb"] == pytest.approx(0.2)
+    assert ann["turns"][1]["disagree"] is None
+
+
+def test_values_length_mismatch_raises():
+    s1 = [snap(0, 1), snap(1, 1)]
+    r = rec_of([], turns=1)
+    bad = {"k": [0], "actor": [0], "turn": [1], "v": [0.1]}
+    with pytest.raises(ValueError):
+        A.annotate_game(r, s1, s1[-1], {}, bad)
