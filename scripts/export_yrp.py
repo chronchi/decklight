@@ -27,6 +27,11 @@ from ygo_zero.engine.env import PyEnv
 
 
 def deck_path(name: str) -> Path:
+    p = Path(name)  # an explicit path (e.g. an edopro_host human.ydk) loads directly
+    if p.is_file():
+        return p
+    if p.suffix != ".ydk" and p.with_suffix(".ydk").is_file():
+        return p.with_suffix(".ydk")
     for d in ("pool", "gauntlet", "newcards"):
         p = ROOT / "decks" / d / f"{name}.ydk"
         if p.is_file():
@@ -41,6 +46,8 @@ def main() -> None:
     ap.add_argument("--out", type=Path, required=True)
     ap.add_argument("--name0", default="Player 1", help="name shown for seat 0 (goes first; max 19 chars)")
     ap.add_argument("--name1", default="Player 2")
+    ap.add_argument("--deck0", type=Path, default=None, help="override .ydk path for seat 0's deck")
+    ap.add_argument("--deck1", type=Path, default=None, help="override .ydk path for seat 1's deck")
     ap.add_argument("--edopro", type=Path, default=None,
                     help="a local EDOPro install (ProjectIgnis/): also verify with its core and scripts, then copy the "
                     "file into its replay/ folder")  # fmt: skip
@@ -51,7 +58,8 @@ def main() -> None:
     if rec is None:
         sys.exit(f"no game_idx {a.idx} in {a.games}")
     d0, d1 = rec["decks"]
-    cfg = DuelConfig(load_ydk(deck_path(d0)), load_ydk(deck_path(d1)), seed=rec["seed"])
+    cfg = DuelConfig(load_ydk(a.deck0 or deck_path(d0)), load_ydk(a.deck1 or deck_path(d1)),
+                      seed=rec["seed"])
     engine = Engine()
     env = PyEnv.replay(engine, cfg, rec["choices"])
     if rec.get("truncated") or not env.done or env.winner != rec["winner"]:
