@@ -55,6 +55,10 @@ class PyEnv:
     def knowledge_resyncs(self) -> int:
         return self.duel.knowledge_resyncs
 
+    def pending_decision(self) -> Decision | None:
+        """The decision the current player must answer (None once the duel ends)."""
+        return self.dec
+
     def history_log(self) -> np.ndarray:
         """All recorded entries in absolute form [n, 14] (see `obs.history_log`)."""
         return O.history_log(self.history)
