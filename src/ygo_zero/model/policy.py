@@ -249,6 +249,14 @@ class PolicyNet(nn.Module):
         logits, enc = self._run(obs)
         return logits, self.value_head(enc[:, 0]).squeeze(-1)
 
+    def features(self, obs: dict[str, torch.Tensor]) -> torch.Tensor:
+        """State embedding the value head reads (enc[:, 0]).
+
+        New accessor only: it shares `_run` with `forward_value`, so `forward_value`'s
+        outputs are unchanged (covered by tests/unit/test_aux.py)."""
+        _, enc = self._run(obs)
+        return enc[:, 0]
+
     def forward_q(self, obs: dict[str, torch.Tensor]) -> tuple[torch.Tensor, torch.Tensor]:
         """(logits, Q[B, n_opt]): Q(s,a) = V(s) + q_head(feat) when value_head exists, else q_head(feat).
 

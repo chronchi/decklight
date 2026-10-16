@@ -138,6 +138,7 @@ def main() -> None:
     ap.add_argument("--holdout-file", type=Path, default=ROOT / "decks" / "pool" / "HOLDOUT")
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--threads", type=int, default=4)
+    ap.add_argument("--num-envs", type=int, default=64, help="VecEnv size (big batches win on a small GPU: NOTEBOOK 2026-10-16 17:45)")
     ap.add_argument("--device", default="cpu")
     ap.add_argument("--policy", choices=["bc", "stub"], default="bc")
     args = ap.parse_args()
@@ -185,7 +186,7 @@ def main() -> None:
     args.out.mkdir(parents=True, exist_ok=True)
     student, league_pols, student_tag = make_policies(
         args.policy, args.ckpt, entries, args.emb, args.device, args.seed, args.temp)
-    vec = VecEnv(Engine(), all_decks, min(64, len(sched)), args.threads, seed=args.seed)
+    vec = VecEnv(Engine(), all_decks, min(args.num_envs, len(sched)), args.threads, seed=args.seed)
     vec.set_schedule([(i, j, s) for i, j, s, _, _, _, _, _ in sched])
     vec.set_max_decisions(MAX_DECISIONS)
     seat_of = {k: seat for _, _, _, k, seat, _, _, _ in sched}
