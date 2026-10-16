@@ -592,6 +592,8 @@ def main() -> None:
     ap.add_argument("--ent-coef", type=float, default=0.003)
     ap.add_argument("--kl-coef", type=float, default=0.1)
     ap.add_argument("--value-warmup", type=int, default=2, help="first iterations train the value head only")
+    ap.add_argument("--value-lr", type=float, default=3e-4,
+                    help="lr of the value head's own optimizer (warm-up iterations); lower to fine-tune a trained head")
     ap.add_argument("--priv-critic", type=int, choices=(0, 1), default=0,
                     help="1: separate privileged critic (sees hidden cards); the policy stays honest")
     ap.add_argument("--value-init", type=Path, default=None,
@@ -764,7 +766,7 @@ def main() -> None:
     if use_q_policy:
         vopt = torch.optim.AdamW(model.q_head.parameters(), lr=3e-4, **_fused)
     else:
-        vopt = torch.optim.AdamW(model.value_head.parameters(), lr=3e-4, **_fused)
+        vopt = torch.optim.AdamW(model.value_head.parameters(), lr=args.value_lr, **_fused)
     critic, copt = None, None
     if args.priv_critic:
         critic = load_critic(args.critic_init or args.init, emb, a, q=use_q_critic).to(dev).eval()
