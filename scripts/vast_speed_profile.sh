@@ -9,7 +9,7 @@
 #     to prof-<proc>.json; the "exit 124" ALERT lines this causes are expected, noted in PROGRESS, not relayed);
 #   phase C (C_MIN, default 6): like B with YGO_BLOCKING_SYNC=1 (blocking CUDA sync via cudaSetDeviceFlags) and
 #     GPU_MARGIN=1.0.
-# Env: LAT_MIN (8), B_MIN (8), C_MIN (6), GA_SEEDS (6), SMOKE=1 (2/3/2 min, GA_SEEDS=1).
+# Env: LAT_RT ("1"; e.g. "1 4" = phase A per --replay-threads value), PHASES (ABC; A = latency only), LAT_MIN (8), B_MIN (8), C_MIN (6), GA_SEEDS (6), SMOKE=1 (2/3/2 min, GA_SEEDS=1).
 # Usage: bash scripts/vast_speed_profile.sh <name>.
 # Results: runs/<name>/{lat-gpu,lat-cpu,phase-b,phase-c}, PROGRESS, ALERT. ALERT lines: empty prof files and
 # 0 searched decisions per phase (plus relayed failures).
@@ -36,35 +36,40 @@ GS=${GA_SEEDS:-6}
 [ "${SMOKE:-0}" = 1 ] && { LAT_MIN=2; B_MIN=3; C_MIN=2; GS=1; }
 LAT_MIN=${LAT_MIN:-8}; B_MIN=${B_MIN:-8}; C_MIN=${C_MIN:-6}
 
-# Phase A: latency, 1 GPU proc + a concurrent CPU-only run on 4 other cores (same deals, seeds 9000+).
-LAT_ARGS="--ckpt $PRODUCT_CKPT --value $PRODUCT_VALUE --opp ygoagent --ga-seeds $GS --deal-seed0 9000 \
-  $PRODUCT_SEARCH --prof 1 --latency 1 --nproc 1 --proc 0"
-# shellcheck disable=SC2086
-timeout "${LAT_MIN}m" uv run --no-sync python scripts/search_match.py $LAT_ARGS --device cuda \
-  --out "$OUT/lat-gpu" > "$OUT/lat-gpu.txt" 2>&1 &
-GPU_PID=$!
-NC=$(nproc); CPUSET="$((NC - 4))-$((NC - 1))"
-[ "$NC" -ge 5 ] || CPUSET="0-$((NC - 1))"  # tiny box: share everything rather than a negative range
-# shellcheck disable=SC2086
-taskset -c "$CPUSET" timeout "${LAT_MIN}m" uv run --no-sync python scripts/search_match.py $LAT_ARGS --device cpu \
-  --out "$OUT/lat-cpu" > "$OUT/lat-cpu.txt" 2>&1 &
-CPU_PID=$!
-wait $GPU_PID; g=$?; wait $CPU_PID; c=$?
-tick "phase A latency done (gpu exit $g, cpu exit $c on cores $CPUSET)"
-echo "$(date +%T) phase A: width-1 runs cannot finish all deals in ${LAT_MIN}m, so exit 124 (timeout) is expected" \
-  >> "$OUT/PROGRESS"
-for d in lat-gpu lat-cpu; do
-  if uv run --no-sync python scripts/search_match.py --summarize "$OUT/$d" > "$OUT/$d/summary.txt" 2>&1; then
-    echo "$d $(head -1 "$OUT/$d/summary.txt")" >> "$OUT/PROGRESS"
-  else
-    alert "$d: summarize failed: $(tail -1 "$OUT/$d/summary.txt")"
-  fi
-  uv run --no-sync python scripts/audit/latency_report.py "$OUT/$d" > "$OUT/$d/latency.txt" 2>&1 \
-    && sed "s/^/$(date +%T) $d /" "$OUT/$d/latency.txt" >> "$OUT/PROGRESS" \
-    || alert "$d: $(tail -1 "$OUT/$d/latency.txt")"
-  [ -s "$OUT/$d/prof-0.json" ] || alert "$d: empty or missing prof-0.json"
+# Phase A: latency (once per value of LAT_RT = --replay-threads, speed plan E6), 1 GPU proc + a concurrent CPU-only run on 4 other cores (same deals, seeds 9000+).
+# LAT_RT (default "1"): e.g. "1 4"; dirs lat-gpu / lat-cpu for 1, lat-gpu-rt4 / lat-cpu-rt4 otherwise.
+for RT in ${LAT_RT:-1}; do
+  SFX=""; [ "$RT" = 1 ] || SFX="-rt$RT"
+  LAT_ARGS="--ckpt $PRODUCT_CKPT --value $PRODUCT_VALUE --opp ygoagent --ga-seeds $GS --deal-seed0 9000 \
+    $PRODUCT_SEARCH --prof 1 --latency 1 --nproc 1 --proc 0 --replay-threads $RT"
+  # shellcheck disable=SC2086
+  timeout "${LAT_MIN}m" uv run --no-sync python scripts/search_match.py $LAT_ARGS --device cuda \
+    --out "$OUT/lat-gpu$SFX" > "$OUT/lat-gpu$SFX.txt" 2>&1 &
+  GPU_PID=$!
+  NC=$(nproc); CPUSET="$((NC - 4))-$((NC - 1))"
+  [ "$NC" -ge 5 ] || CPUSET="0-$((NC - 1))"  # tiny box: share everything rather than a negative range
+  # shellcheck disable=SC2086
+  taskset -c "$CPUSET" timeout "${LAT_MIN}m" uv run --no-sync python scripts/search_match.py $LAT_ARGS --device cpu \
+    --out "$OUT/lat-cpu$SFX" > "$OUT/lat-cpu$SFX.txt" 2>&1 &
+  CPU_PID=$!
+  wait $GPU_PID; g=$?; wait $CPU_PID; c=$?
+  tick "phase A latency done (replay threads $RT, gpu exit $g, cpu exit $c on cores $CPUSET)"
+  echo "$(date +%T) phase A: width-1 runs cannot finish all deals in ${LAT_MIN}m, so exit 124 (timeout) is expected" \
+    >> "$OUT/PROGRESS"
+  for d in lat-gpu$SFX lat-cpu$SFX; do
+    if uv run --no-sync python scripts/search_match.py --summarize "$OUT/$d" > "$OUT/$d/summary.txt" 2>&1; then
+      echo "$d $(head -1 "$OUT/$d/summary.txt")" >> "$OUT/PROGRESS"
+    else
+      alert "$d: summarize failed: $(tail -1 "$OUT/$d/summary.txt")"
+    fi
+    uv run --no-sync python scripts/audit/latency_report.py "$OUT/$d" > "$OUT/$d/latency.txt" 2>&1 \
+      && sed "s/^/$(date +%T) $d /" "$OUT/$d/latency.txt" >> "$OUT/PROGRESS" \
+      || alert "$d: $(tail -1 "$OUT/$d/latency.txt")"
+    [ -s "$OUT/$d/prof-0.json" ] || alert "$d: empty or missing prof-0.json"
+  done
 done
 
+[ "${PHASES:-ABC}" = A ] && { tick "PHASES=A: skipping B and C"; kill "$USAGE_PID" 2>/dev/null; echo done > "$OUT/DONE"; exit 0; }
 # Phase B: throughput at production sizing, --prof 1, SIGTERM at the cap (expected "exit 124" alerts stay in $tag/ALERT).
 export VARIANTS="prof|--opp ygoagent --ga-seeds $GS $PRODUCT_SEARCH --prof 1"
 VAR_CAP="${B_MIN}m" CKPT="$PRODUCT_CKPT" SM_ARGS="--value $PRODUCT_VALUE --deal-seed0 9000" \
