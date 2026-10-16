@@ -40,25 +40,34 @@ Q0=$(uv run --no-sync python -c "import json; print(json.load(open('$Q'))[0]['id
 T0=$SECONDS
 uv run --no-sync python scripts/tech_ab.py --questions "$Q" --only "$Q0" --skip-aa \
   --pilot "$PILOT" --opp "$OPP" --opp-decks decks/gauntlet --n-opp-decks "$NOPP" --seed "$SEED" \
-  --seed0 0 --seeds "${PROBE_SEEDS:-5}" --threads 1 --num-envs 16 --device cuda \
-  --out "$OUT/probe" > "$OUT/probe.txt" 2>&1 || { alert "probe failed: $(tail -1 "$OUT/probe.txt")"; exit 3; }
+  --seed0 0 --seeds "${PROBE_SEEDS:-5}" --threads 1 --num-envs 32 --device cuda \
+  --out "$OUT/probe" > "$OUT/probe.txt" 2>&1 &
+PP=$!; GMB=0; RMB=0
+# sample GPU memory / RSS while the probe runs (reading after it exits gave nothing: tech-ab-20261016-1015)
+while kill -0 $PP 2>/dev/null; do
+  g=$(nvidia-smi --query-compute-apps=used_memory --format=csv,noheader,nounits 2>/dev/null | sort -n | tail -1)
+  r=$(ps -o rss= --ppid $PP 2>/dev/null | sort -n | tail -1)
+  [ "${g:-0}" -gt "$GMB" ] && GMB=$g; [ $(( ${r:-0} / 1024 )) -gt "$RMB" ] && RMB=$(( ${r:-0} / 1024 ))
+  sleep 2
+done
+wait $PP || { alert "probe failed: $(tail -1 "$OUT/probe.txt")"; exit 3; }
 PSEC=$((SECONDS - T0))
 GAMES=$(uv run --no-sync python -c "import json; print(2*json.load(open('$OUT/probe/$Q0/report.json'))['n_pairs'])")
 GPS=$(python3 -c "print(${GAMES}/${PSEC})")
-GMB=$(nvidia-smi --query-compute-apps=used_memory --format=csv,noheader,nounits 2>/dev/null | sort -n | tail -1)
 GTOT=$(nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits | head -1)
 RTOT=$(free -m | awk '/Mem/{print $2}')
-RMB=$(ps -o rss= -p $$ 2>/dev/null | awk '{print int($1/1024)}')
-GMB=${GMB:-1500}; RMB=${RMB:-1500}
-NP=$(python3 -c "print(max(1, min($J, int($GTOT*0.85/($GMB*1.5)), int($RTOT*0.8/($RMB*1.3)))))")
-ENVS=$(python3 -c "print(max(4, min(32, $J*2//max(1,$NP))))")
+[ "$GMB" -gt 0 ] || { alert "probe: no GPU memory reading"; exit 3; }
+[ "$RMB" -gt 0 ] || RMB=1500
+# one core per process (VecEnv --threads 1); GPU memory measured with a 1.2x margin
+NP=$(python3 -c "print(max(1, min($J, int($GTOT*0.9/($GMB*1.2)), int($RTOT*0.8/($RMB*1.3)))))")
+ENVS=32
 echo "cores $J, gpu ${GTOT}MB, ram ${RTOT}MB; probe ${GPS} games/s gpu ${GMB}MB rss ${RMB}MB -> $NP procs x $ENVS envs" \
   | tee "$OUT/sizing.txt"
 TOTAL=$((25 * NOPP * SEEDS * 2 * 2 + NOPP * SEEDS * 2 * 2))
 ETA=$(python3 -c "print($TOTAL/($GPS*$NP)/3600)")
 echo "$(date +%T) milestone: probe ${GPS} games/s/proc x $NP procs; ETA ${ETA} h for $TOTAL games" >> "$OUT/PROGRESS"
-if python3 -c "exit(0 if $TOTAL/($GPS*$NP) > 6500 else 1)"; then
-  alert "ETA ${ETA} h exceeds the 2 h cap at measured throughput; rerun with fewer questions"
+if python3 -c "exit(0 if $TOTAL/($GPS*$NP) > ${ETA_MAX_S:-6500} else 1)"; then
+  alert "ETA ${ETA} h exceeds the cap (ETA_MAX_S ${ETA_MAX_S:-6500} s) at measured throughput; rent a bigger box"
   exit 5
 fi
 # milestone 1: full-scale A/A must be exactly 0, else stop before spending on questions
