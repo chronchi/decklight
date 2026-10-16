@@ -31,12 +31,12 @@ for arm in hppo-p2 hppo-p; do
 done
 . scripts/cores.sh
 J=$(box_cores)
-# probe: one process scores 8 games; its peak GPU memory and RSS size the pool
+# probe: one process scores 200 games (~60 s; 8 games took 5 s, too fast to sample, score-20261016-0942); its peak GPU memory and RSS size the pool
 uv run --no-sync python scripts/score_decisions.py --games "$IN/hppo-p2" --value "$VAL" \
-  --out "$OUT/probe.jsonl" --device cuda --max-games 8 --batch 2048 > "$OUT/probe.txt" 2>&1 &
+  --out "$OUT/probe.jsonl" --device cuda --max-games 200 --batch 2048 > "$OUT/probe.txt" 2>&1 &
 PP=$!; GMB=0; RMB=0
-for _ in $(seq 12); do
-  sleep 10
+for _ in $(seq 60); do
+  sleep 3
   kill -0 $PP 2>/dev/null || break
   g=$(nvidia-smi --query-compute-apps=used_memory --format=csv,noheader,nounits 2>/dev/null | sort -n | tail -1)
   r=$(ps -o rss= --ppid $PP 2>/dev/null | sort -n | tail -1)
