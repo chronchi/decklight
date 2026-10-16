@@ -1,5 +1,8 @@
 // Port of src/ygo_zero/engine/{obs,env}.py.
 #include <algorithm>
+#include <chrono>
+#include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <stdexcept>
 
@@ -46,12 +49,51 @@ bool revealing(Kind k) { return k == ACTIVATE || k == SUMMON || k == SPSUMMON ||
 
 }  // namespace
 
+bool prof_on() {
+  static bool on = std::getenv("YGOENV_PROFILE") != nullptr;
+  return on;
+}
+
+uint64_t now_us() {
+  using namespace std::chrono;
+  return static_cast<uint64_t>(duration_cast<microseconds>(steady_clock::now().time_since_epoch()).count());
+}
+
+void Prof::dump(const char* what) const {
+  std::fprintf(stderr,
+               "[ygo-prof] %s steps=%llu boards=%llu autos=%llu keys=%llu fills=%llu declares=%llu "
+               "lqueries=%llu "
+               "advance=%llu decide=%llu options=%llu qloc=%llu qfield=%llu board_rest=%llu "
+               "history=%llu keymatch=%llu fill=%llu respond=%llu\n",
+               what, (unsigned long long)steps, (unsigned long long)boards, (unsigned long long)autos,
+               (unsigned long long)keys, (unsigned long long)fills, (unsigned long long)declares,
+               (unsigned long long)lqueries,
+               (unsigned long long)advance_us, (unsigned long long)decide_us, (unsigned long long)options_us,
+               (unsigned long long)qloc_us, (unsigned long long)qfield_us, (unsigned long long)board_rest_us,
+               (unsigned long long)history_us, (unsigned long long)keymatch_us, (unsigned long long)fill_us,
+               (unsigned long long)respond_us);
+}
+
+namespace {
+
+struct Span {
+  uint64_t& acc;
+  uint64_t t0 = 0;
+  bool on = false;
+  Span(uint64_t& a, bool on_) : acc(a), on(on_) { if (on) t0 = now_us(); }
+  ~Span() { if (on) acc += now_us() - t0; }
+};
+
+}  // namespace
+
 bool Board::is_public(const CardState& c) {
   if (c.location == LOCATION_GRAVE || c.location == LOCATION_OVERLAY) return true;
   return c.is_public || ((c.position & POS_FACEUP) && c.location != LOCATION_HAND);
 }
 
-Board::Board(Duel& duel, int me) : me(me) {
+Board::Board(Duel& duel, int me, Prof* prof) : me(me) {
+  bool on = prof && prof_on();
+  uint64_t t_start = on ? now_us() : 0, t_loc = 0, t_field = 0;
   std::unordered_map<uint64_t, std::vector<std::optional<CardState>>> q;
   for (int p = 0; p < 2; ++p)
     for (uint32_t loc : QUERY_LOCATIONS) {
@@ -59,7 +101,9 @@ Board::Board(Duel& duel, int me) : me(me) {
       counts_[key(p, loc, 0, 0)] = static_cast<int>(std::count_if(cards.begin(), cards.end(), [](auto& c) { return c.has_value(); }));
       q[key(p, loc, 0, 0)] = std::move(cards);
     }
+  if (on) t_loc = now_us();
   Bytes field = duel.query_field();
+  if (on) t_field = now_us();
   // LPs and chain (layout: query.py lps / parse_chain)
   auto rd32 = [&](size_t p) { uint32_t v; std::memcpy(&v, field.data() + p, 4); return v; };
   size_t pos = 4;
@@ -119,6 +163,13 @@ Board::Board(Duel& duel, int me) : me(me) {
   for (int i = 0; i < static_cast<int>(rows.size()); ++i) {
     auto& c = rows[i].card;
     index_[key(c.controller, c.location, c.sequence, c.overlay_index)] = i;
+  }
+  if (on) {
+    uint64_t t_end = now_us();
+    prof->qloc_us += t_loc - t_start;
+    prof->qfield_us += t_field - t_loc;
+    prof->board_rest_us += t_end - t_field;
+    ++prof->boards;
   }
 }
 
@@ -269,6 +320,115 @@ HistoryEntry history_entry(const Board& board, const Option& opt, int msg_type, 
   return e;
 }
 
+// ---------------------------------------------------------------- E5b light replay path
+//
+// The full Board costs 14 query_location calls per decision, but an intermediate replay
+// step only needs, for the chosen option (plain replay) or every option (replay_keys key
+// match), the equivalent of Board::option_code (visibility of that one card) and the
+// history entry's is_public flag. Both derive from the single CardState of the option's
+// card, so one location query per distinct (controller, location) per step suffices.
+//
+// Exactness (replay/bit-identity tests verify it): with the truncation guard below, every
+// card the light path can observe maps 1:1 to a Board row with the same CardState:
+// - a card owned by the viewer is always in rows (every own location incl. deck, plus own
+//   overlay materials) with visible=true;
+// - an opponent card in DECK is never in rows and an opponent card in EXTRA face-down is
+//   skipped by the Board ctor; both fall into Board::option_code's hidden-pile fallback,
+//   which reports opt.code unconditionally, so no query is needed there;
+// - every other card present in its location query is in rows (ROW_LOCS loop, overlay
+//   rows); a card absent from its query reproduces Board's r<0 fallback exactly.
+// Truncation guard: rows hold distinct physical cards (each card lives in exactly one
+// location; own-deck and overlay rows don't overlap location rows), so rows <= physical
+// cards = main0+extra0+main1+extra1+setup + Duel-created cards (tokens). Replays with
+// more physical cards than MAX_CARDS (all our decks are <= 150; that needs 10+ tokens in
+// one game) keep the full Board: light_ok() is false and LightScope stays inactive.
+// Own-deck choices stay exact even past the guard (Board fallback for the viewer reports
+// the code either way), but the guard conservatively disables the whole path.
+
+namespace {
+uint64_t light_nphys(const DuelConfig& c) {
+  return c.main0.size() + c.extra0.size() + c.main1.size() + c.extra1.size() + c.setup.size();
+}
+}  // namespace
+
+struct LightScope {
+  Env* e;
+  explicit LightScope(Env* e_) : e(e_) {
+    e->light_ = light_nphys(e->config_) <= static_cast<uint64_t>(MAX_CARDS);
+  }
+  ~LightScope() { e->light_ = false; }
+  void stop() { e->light_ = false; }
+};
+
+const std::vector<std::optional<CardState>>& Env::light_loc(uint32_t con, uint32_t loc, LocCache& cache) {
+  uint64_t k = (uint64_t{con} << 32) | loc;
+  for (auto& [ck, cards] : cache)
+    if (ck == k) return cards;
+  uint64_t t0 = prof_on_ ? now_us() : 0;
+  auto cards = duel_->query_location(static_cast<uint8_t>(con), loc);
+  if (prof_on_) {
+    prof_.qloc_us += now_us() - t0;
+    ++prof_.lqueries;
+  }
+  cache.emplace_back(k, std::move(cards));
+  return cache.back().second;
+}
+
+std::pair<uint32_t, bool> Env::light_opt(const Option& opt, LocCache& cache) {
+  // {code column, entry publicity for a non-revealing kind}. Revealing kinds are always
+  // public; the caller applies that (history_entry) or doesn't need it (key match).
+  int me = dec_->player;
+  if (!opt.has_card) return {opt.code, !(opt.kind == POSITION && (opt.arg & POS_FACEDOWN))};
+  uint32_t con = opt.card.controller, loc = opt.card.location;
+  bool mine = con == static_cast<uint32_t>(me);
+  if (!mine && (loc == LOCATION_DECK || loc == LOCATION_EXTRA)) return {opt.code, true};
+  if (loc & LOCATION_OVERLAY) {
+    // Overlay materials live in the MZONE card's overlay list; the ref's position is the
+    // material index (see ref_key). A bogus index reproduces the r<0 fallback exactly.
+    bool found = false;
+    for (auto& o : light_loc(con, LOCATION_MZONE, cache))
+      if (o && o->sequence == opt.card.sequence) {
+        found = opt.card.position < o->overlay.size();
+        break;
+      }
+    if (!found) return {(mine || loc == LOCATION_DECK || loc == LOCATION_EXTRA) ? opt.code : 0, !mine};
+    return {opt.code, true};
+  }
+  const CardState* c = nullptr;
+  for (auto& o : light_loc(con, loc, cache))
+    if (o && o->sequence == opt.card.sequence) {
+      c = &*o;
+      break;
+    }
+  if (!c) {
+    // Same query the Board would run, same absence: exact r<0 fallback.
+    return {(mine || loc == LOCATION_DECK || loc == LOCATION_EXTRA) ? opt.code : 0, !mine};
+  }
+  if (loc == LOCATION_EXTRA && !mine && !(c->position & POS_FACEUP)) return {opt.code, true};
+  bool pub = Board::is_public(*c);
+  return {(mine || pub) ? opt.code : 0, !mine || pub};
+}
+
+HistoryEntry Env::light_history(const Option& opt, int msg_type, int step, int turn, int phase,
+                                 LocCache& cache) {
+  auto [code, pub] = light_opt(opt, cache);
+  HistoryEntry e{{static_cast<int32_t>(opt.kind),
+                  -1,
+                  static_cast<int32_t>(code),
+                  i32(opt.desc >> 20),
+                  static_cast<int32_t>(opt.desc & 0xFFFFF),
+                  i32(static_cast<uint64_t>(opt.arg)),
+                  msg_type,
+                  opt.has_card ? loc_id(opt.card.location) : 0,
+                  opt.has_card ? static_cast<int32_t>(opt.card.controller ^ dec_->player) : -1,
+                  step},
+                 dec_->player,
+                 turn,
+                 phase,
+                 revealing(opt.kind) || pub};
+  return e;
+}
+
 void write_history_row(int32_t* o, const HistoryEntry& e, int me, int turn) {
   std::copy(e.row.begin(), e.row.end(), o);
   if (o[8] >= 0) o[8] ^= e.actor ^ me;
@@ -315,13 +475,21 @@ std::vector<std::array<int32_t, HLOG_COLS>> Env::history_log() const {
 }
 
 void Env::next_decision() {
-  const Bytes* msg = duel_->advance();
+  const Bytes* msg;
+  {
+    Span s(prof_.advance_us, prof_on_);
+    msg = duel_->advance();
+  }
   if (!msg) {
     dec_.reset();
     return;
   }
   int p = (*msg)[1];
-  dec_ = make_decision(*msg, engine_, [this, p] { return known_codes(p); });
+  Span s(prof_.decide_us, prof_on_);
+  dec_ = make_decision(*msg, engine_, [this, p] {
+    if (prof_on_) ++prof_.declares;
+    return known_codes(p);
+  });
 }
 
 std::set<uint32_t> Env::known_codes(int p) {
@@ -340,34 +508,55 @@ std::set<uint32_t> Env::known_codes(int p) {
 
 void Env::take(int index, bool record) {
   const Option& opt = opts_[index];
-  if (record) history_.push_back(history_entry(*board_, opt, dec_->msg_type, dec_->step, duel_->turn, duel_->phase));
+  if (record) {
+    Span s(prof_.history_us, prof_on_);
+    if (light_) {
+      LocCache cache;
+      history_.push_back(light_history(opt, dec_->msg_type, dec_->step, duel_->turn, duel_->phase, cache));
+    } else {
+      history_.push_back(history_entry(*board_, opt, dec_->msg_type, dec_->step, duel_->turn, duel_->phase));
+    }
+  }
   ++decisions;
   Bytes resp;
-  if (dec_->choose(index, resp)) {
-    duel_->respond(resp);
-    next_decision();
+  bool done = false;
+  {
+    Span s(prof_.respond_us, prof_on_);
+    done = dec_->choose(index, resp);
+    if (done) {
+      duel_->respond(resp);
+    }
   }
+  if (done) next_decision();
 }
 
 bool Env::settle_fast() {
   while (dec_) {
-    auto opts = dec_->options();
+    std::vector<Option> opts;
+    {
+      Span s(prof_.options_us, prof_on_);
+      opts = dec_->options();
+    }
     if (opts.empty()) throw std::runtime_error("no legal option");
     if (auto_single_ && opts.size() == 1) {
+      if (prof_on_) ++prof_.autos;
       opts_ = std::move(opts);
       take(0, false);
       continue;
     }
+    if (prof_on_) ++prof_.steps;
     truncated += opts.size() > MAX_OPTIONS;
     if (opts.size() > MAX_OPTIONS) opts.resize(MAX_OPTIONS);
     opts_ = std::move(opts);
-    board_ = std::make_unique<Board>(*duel_, dec_->player);
+    if (!light_) board_ = std::make_unique<Board>(*duel_, dec_->player, prof_on_ ? &prof_ : nullptr);
     return true;
   }
   return false;
 }
 
 void Env::fill_obs(Obs& obs) {
+  Span s(prof_.fill_us, prof_on_);
+  if (prof_on_) ++prof_.fills;
   obs.clear();
   board_->fill(obs, *duel_, dec_->msg_type, dec_->selected);
   for (size_t i = 0; i < opts_.size(); ++i) {
@@ -398,6 +587,9 @@ bool Env::settle(Obs& obs) {
 }
 
 bool Env::replay(const std::vector<int>& choices, Obs& obs) {
+  prof_on_ = prof_on();
+  prof_.clear();
+  LightScope light(this);
   board_.reset();
   dec_.reset();
   duel_ = std::make_unique<Duel>(engine_, config_);
@@ -406,18 +598,27 @@ bool Env::replay(const std::vector<int>& choices, Obs& obs) {
   decisions = truncated = 0;
   next_decision();
   for (size_t k = 0; k < choices.size(); ++k) {
-    if (!settle_fast()) return false;  // duel ended before choice k (step-loop would misbehave here)
+    if (!settle_fast()) {
+      if (prof_on_) prof_.dump("replay-early");
+      return false;  // duel ended before choice k (step-loop would misbehave here)
+    }
     int index = choices[k];
     if (index < 0 || index >= num_options()) throw std::out_of_range("option index");
     this->choices.push_back(index);
     take(index, true);
   }
-  return settle(obs);
+  light.stop();  // the final decision needs the full Board for fill_obs
+  bool ok = settle(obs);
+  if (prof_on_) prof_.dump("replay");
+  return ok;
 }
 
 Env::ReplayKeysResult Env::replay_keys(const std::vector<std::array<int32_t, 8>>& keys,
                                        const std::vector<int>& ranks, Obs& obs) {
   ReplayKeysResult r;
+  prof_on_ = prof_on();
+  prof_.clear();
+  LightScope light(this);
   board_.reset();
   dec_.reset();
   duel_ = std::make_unique<Duel>(engine_, config_);
@@ -435,13 +636,35 @@ Env::ReplayKeysResult Env::replay_keys(const std::vector<std::array<int32_t, 8>>
     int rank = ranks[k];
     int last = -1, at_rank = -1;
     int seen = 0;
-    for (size_t j = 0; j < opts_.size(); ++j) {
-      auto row = board_->option_row(opts_[j], dec_->msg_type, dec_->step);
-      if (row[0] == key[0] && row[2] == key[1] && row[3] == key[2] && row[4] == key[3] &&
-          row[5] == key[4] && row[6] == key[5] && row[7] == key[6] && row[8] == key[7]) {
-        if (seen == rank) at_rank = static_cast<int>(j);
-        last = static_cast<int>(j);
-        ++seen;
+    {
+      Span s(prof_.keymatch_us, prof_on_);
+      if (prof_on_) prof_.keys += opts_.size();
+      LocCache cache;  // one query per distinct (controller, location) in this decision
+      for (size_t j = 0; j < opts_.size(); ++j) {
+        const Option& o = opts_[j];
+        int32_t code = 0;
+        if (light_) {
+          code = static_cast<int32_t>(light_opt(o, cache).first);
+        } else {
+          auto row = board_->option_row(o, dec_->msg_type, dec_->step);
+          if (!(row[0] == key[0] && row[2] == key[1] && row[3] == key[2] && row[4] == key[3] &&
+                row[5] == key[4] && row[6] == key[5] && row[7] == key[6] && row[8] == key[7]))
+            continue;
+          if (seen == rank) at_rank = static_cast<int>(j);
+          last = static_cast<int>(j);
+          ++seen;
+          continue;
+        }
+        if (static_cast<int32_t>(o.kind) == key[0] && code == key[1] &&
+            static_cast<int32_t>(o.desc >> 20) == key[2] &&
+            static_cast<int32_t>(o.desc & 0xFFFFF) == key[3] &&
+            static_cast<int32_t>(static_cast<uint64_t>(o.arg)) == key[4] && dec_->msg_type == key[5] &&
+            (o.has_card ? loc_id(o.card.location) : 0) == key[6] &&
+            (o.has_card ? static_cast<int32_t>(o.card.controller ^ dec_->player) : -1) == key[7]) {
+          if (seen == rank) at_rank = static_cast<int>(j);
+          last = static_cast<int>(j);
+          ++seen;
+        }
       }
     }
     int idx = -1;
@@ -460,9 +683,11 @@ Env::ReplayKeysResult Env::replay_keys(const std::vector<std::array<int32_t, 8>>
       return r;
     }
   }
+  light.stop();  // the final decision needs the full Board for fill_obs
   if (!settle_fast()) return r;  // all keys consumed but the duel ended: ok=false, reason "" (caller obs-checks None)
   fill_obs(obs);
   r.ok = true;
+  if (prof_on_) prof_.dump("replay_keys");
   return r;
 }
 

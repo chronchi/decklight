@@ -231,3 +231,45 @@ def test_replay_releases_gil(engine, decks):
     two = time.perf_counter() - t0
     # 2 threads x the same work: with the GIL released both run in parallel on 2 cores.
     assert two < 1.6 * one, f"no GIL release: 1-thread {one:.2f}s, 2-thread {two:.2f}s"
+
+
+def test_replay_full_games_all_decks(engine, decks):
+    """Light-path fuzz (E5b): full random-policy games over every fixture-deck pairing.
+
+    For several seeds per pairing, compare replay_from_reset against the step loop at a
+    mid-game cut, at 3/4 and at the full (possibly terminal) prefix, plus replay_keys
+    against the Python key loop at the mid cut: identical obs, done/winner, choices,
+    decisions, history_log. Exercises deck searches, grave/banished plays and long
+    histories that the fixed-prefix tests above may miss.
+    """
+    names = sorted(decks)
+    pairs = [(a, b) for i, a in enumerate(names) for b in names[i:]]
+    assert len(pairs) >= 6, f"expected all fixture decks, got {names}"
+    for a, b in pairs:
+        for gs in range(2):
+            cfg = DuelConfig(decks[a], decks[b], seed=500 + gs)
+            prefix, _ = _random_prefix(engine, cfg, seed=1000 + gs, length=400)
+            assert len(prefix) >= 50, f"prefix too short for {a} vs {b}"
+            cuts = [len(prefix) // 2, 3 * len(prefix) // 4, len(prefix)]
+            for n in cuts:
+                ref = CppEnv(engine, cfg, True)
+                obs_ref = ref.reset()
+                for c in prefix[:n]:
+                    obs_ref = ref.step(c)
+                got = CppEnv(engine, cfg, True)
+                obs = got.replay_from_reset(prefix[:n])
+                assert obs_equal(obs, obs_ref), f"obs differs {a} vs {b} seed {gs} cut {n}"
+                a_, b_ = _state(ref), _state(got)
+                assert a_["done"] == b_["done"] and a_["winner"] == b_["winner"]
+                assert a_["choices"] == b_["choices"] and a_["decisions"] == b_["decisions"]
+                assert np.array_equal(a_["hlog"], b_["hlog"]), \
+                    f"history_log differs {a} vs {b} seed {gs} cut {n}"
+            # replay_keys at the mid cut (semantic loop comparison)
+            n = len(prefix) // 2
+            pkeys = prefix_keys_for(engine, cfg, prefix[:n], True)
+            o_py, res_py, reason_py = _python_keys_loop(engine, cfg, [(k, r) for k, r in pkeys])
+            e2 = CppEnv(engine, cfg, True)
+            o_cpp, res_cpp, reason_cpp = e2.replay_keys(pkeys)
+            assert list(res_cpp) == res_py, f"resolved differ {a} vs {b} seed {gs}"
+            assert reason_cpp == reason_py, f"reason differs {a} vs {b} seed {gs}"
+            assert obs_equal(o_cpp, o_py), f"keys obs differs {a} vs {b} seed {gs}"

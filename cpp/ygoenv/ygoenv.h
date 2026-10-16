@@ -185,6 +185,20 @@ using CodePool = std::function<std::set<uint32_t>()>;
 std::unique_ptr<Decision> make_decision(const Bytes& msg, Engine& engine, const CodePool& pool);
 bool is_declarable(const CardData& cd, const std::vector<uint64_t>& opcodes);
 
+// E5b profiling: per-replay accumulators, dumped to stderr when YGOENV_PROFILE=1.
+// Off by default; each timed region is a single branch on a cached flag.
+struct Prof {
+  uint64_t advance_us = 0, decide_us = 0, options_us = 0;
+  uint64_t qloc_us = 0, qfield_us = 0, board_rest_us = 0;
+  uint64_t history_us = 0, keymatch_us = 0, fill_us = 0, respond_us = 0;
+  uint64_t steps = 0, boards = 0, autos = 0, keys = 0, fills = 0, declares = 0;
+  uint64_t lqueries = 0;  // E5b: query_location calls made by the light replay path
+  void clear() { *this = Prof{}; }
+  void dump(const char* what) const;
+};
+bool prof_on();
+uint64_t now_us();
+
 // ---------------------------------------------------------------- observation
 
 constexpr int OBS_VERSION = 1;
@@ -232,7 +246,7 @@ struct HistoryEntry {
 
 class Board {
  public:
-  Board(Duel& duel, int me);
+  Board(Duel& duel, int me, Prof* prof = nullptr);
   int row_of(const CardRef* ref) const;
   uint32_t option_code(const Option& opt) const;
   std::set<uint32_t> visible_codes() const;
@@ -312,11 +326,30 @@ class Env {
   std::unique_ptr<Board> board_;
   std::vector<Option> opts_;
   std::vector<HistoryEntry> history_;
+  Prof prof_;
+   bool prof_on_ = false;
+   // E5b light replay path: when true, intermediate replay steps skip the full Board and
+   // record history entries from per-option card queries (exactly equivalent; see env.cpp).
+   // Set only inside replay()/replay_keys() via LightScope (RAII: always cleared on exit),
+   // so the step()/reset() path is untouched.
+   bool light_ = false;
+
+   friend struct LightScope;
 
    void next_decision();
    std::set<uint32_t> known_codes(int p);
    void take(int index, bool record);
    bool settle(Obs& obs);
+   // E5b light path: per-step cache of single-location queries, keyed by
+   // (controller, location). Cleared at every decision (board state changes).
+   using LocCache = std::vector<std::pair<uint64_t, std::vector<std::optional<CardState>>>>;
+   const std::vector<std::optional<CardState>>& light_loc(uint32_t con, uint32_t loc, LocCache& cache);
+   // {code column, entry publicity for a non-revealing kind}: the exact equivalent of
+   // (Board::option_code, history_entry.is_public) for one option, querying at most the
+   // option card's own location. Revealing kinds are always public (caller applies that).
+   std::pair<uint32_t, bool> light_opt(const Option& opt, LocCache& cache);
+   HistoryEntry light_history(const Option& opt, int msg_type, int step, int turn, int phase,
+                              LocCache& cache);
    // Settle without building the output obs (replay fast path): runs the auto-single loop,
    // records truncation, and leaves opts_/board_ ready for the next take. Identical state
    // effects to settle(); only the Obs fill is skipped.
