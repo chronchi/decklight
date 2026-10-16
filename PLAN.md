@@ -50,6 +50,8 @@ p = 0.08). The search's gain is per-game lookahead over near-ties, not a pattern
 - RL checkpoints are gated both raw and with search;
 - the DAGS starts are rebuilt from train decks only (`starts-train.jsonl`).
 
+**Current product (2026-10-16): P + hppo + value_p2, defined in `scripts/product.sh`** (0.629 vs ygo-agent; NOTEBOOK 2026-10-16 10:10). Jobs that play the product source that file; past job scripts keep their own paths.
+
 **Outcome of step 3 (2026-10-09, NOTEBOOK 06:40–07:20):** rl5 (league + curriculum) and rl6 (+ gated hint bank)
 both card at 39–40% vs ygo-agent (base_r3 44.0%), n.s. vs base_r3, with a late drift away from ygo-agent. Fitting the
 banked winning lines directly memorises them (trained hard starts 0.10 → 0.58) with zero transfer to held-out hard

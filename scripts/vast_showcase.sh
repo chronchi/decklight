@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Showcase games (user 2026-10-15: "3 for each ... our network vs our network (the best product not just raw) ... one of
-# the games with one of the decks being mitsurugi"): the product (P + hppo + value_p, guardfix settings) on BOTH seats
+# the games with one of the decks being mitsurugi"): the product (scripts/product.sh; was P + hppo + value_p) on BOTH seats
 # (search_match --both-search 1), on PAIRS (pool decks, seat 0 first), deal seed 12345. One process per game.
 # Env: PAIRS. Usage: bash scripts/vast_showcase.sh <name>. vast GPU only.
 set -uo pipefail
@@ -14,13 +14,15 @@ for try in 1 2 3; do
   sleep 10
 done
 uv run --no-sync python -c "import torch; assert torch.cuda.is_available()" || { alert "no CUDA torch"; exit 3; }
+. scripts/product.sh
 PAIRS=${PAIRS:-mitsurugi-meta1:snake-eye,branded:tearlaments,blue-eyes:sky-striker}
 IFS=',' read -ra PS <<< "$PAIRS"
 PIDS=()
 for i in "${!PS[@]}"; do
-  YGO_FLIGHT_DIR="$OUT/g$i/flight" uv run --no-sync python scripts/search_match.py --ckpt data/cache/P/best.pt \
-    --value data/cache/value_p/best.pt --device cuda --opp self --both-search 1 --honest 1 --k 4 --samples 4 \
-    --horizon 1 --det-tries 32 --det-fallback skip --conf-skip 0.9 --pairs "${PS[$i]}" --seeds 1 --deal-seed0 12345 \
+  # shellcheck disable=SC2086
+  YGO_FLIGHT_DIR="$OUT/g$i/flight" uv run --no-sync python scripts/search_match.py --ckpt "$PRODUCT_CKPT" \
+    --value "$PRODUCT_VALUE" --device cuda --opp self --both-search 1 $PRODUCT_SEARCH \
+    --pairs "${PS[$i]}" --seeds 1 --deal-seed0 "${DEAL_SEED0:-12345}" \
     --s-seat-only 0 --width 1 --out "$OUT/g$i" > "$OUT/g$i.txt" 2>&1 &
   PIDS+=($!)
 done
