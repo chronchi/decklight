@@ -341,7 +341,8 @@ def main() -> None:
     ap.add_argument("--out", type=Path, default=None)
     ap.add_argument("--games-limit", type=int, default=0, help="debug: cap the total games")
     ap.add_argument("--pairs", default="",
-                    help="explicit pool deck pairs 'a:b,c:d' (seat 0 deck first) instead of --deck-set; showcase games")
+                    help="explicit deck pairs 'a:b,c:d' (seat 0 deck first) from decks/pool, or decks/newcards with "
+                         "--deck-set newcards; showcase games")
     ap.add_argument("--both-search", type=int, choices=(0, 1), default=0,
                     help="--opp self: both seats search (the product vs itself); log entries carry the seat")
     ap.add_argument("--prof", type=int, choices=(0, 1), default=0,
@@ -495,9 +496,11 @@ def main() -> None:
         if args.pairs:
             want = [tuple(x.split(":")) for x in args.pairs.split(",")]
             names = sorted({d for pr in want for d in pr})
-            missing = [d for d in names if not (ROOT / "decks/pool" / f"{d}.ydk").is_file()]
+            if args.deck_set == "newcards":  # --pairs from decks/newcards instead of the pool
+                deck_dir = ROOT / "decks" / "newcards"
+            missing = [d for d in names if not (deck_dir / f"{d}.ydk").is_file()]
             if missing or any(len(pr) != 2 for pr in want):
-                fail(f"--pairs: bad pairs or decks not in decks/pool: {missing or want}")
+                fail(f"--pairs: bad pairs or decks not in {deck_dir.name}: {missing or want}")
         elif args.deck_set == "sample":
             names = sample_decks(args.decks, args.seed)
         elif args.deck_set == "holdout":
