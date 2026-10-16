@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import math
 import random
+import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
@@ -108,8 +109,8 @@ class WindowSearch:
     def __init__(self, engine: Engine, logits: LogitsFn, k: int = 4, horizon: int = 1, own_frac: float = 0.0,
                  max_rollout: int = 300, batch: int = 512, seed: int = 0, value: ValueFn | None = None,
                  horizons: tuple[int, ...] | list[int] | None = None, samples: int = 1,
-                 rollout_temp: float = 1.0, select: str | None = None, tie_eps: float = 0.0,
-                 conf_skip: float = 1.01, ho=None, windows: str = "opp") -> None:  # fmt: skip
+                  rollout_temp: float = 1.0, select: str | None = None, tie_eps: float = 0.0,
+                  conf_skip: float = 1.01, ho=None, windows: str = "opp", prof: bool = False) -> None:  # fmt: skip
         self.engine, self.logits, self.k, self.horizon = engine, logits, k, horizon
         self.value, self.win = value, (1.0 if value is not None else WIN)
         self.own_frac, self.max_rollout, self.batch = own_frac, max_rollout, batch
@@ -128,6 +129,8 @@ class WindowSearch:
         if windows not in ("opp", "all"):
             raise ValueError(f"windows must be 'opp' or 'all', got {windows!r}")
         self.ho, self.windows = ho, windows
+        self.prof = prof  # --prof 1: rollouts_gen times each phase into self.last_prof (play is bit-identical)
+        self.last_prof: dict = {}
 
     def _hs(self) -> tuple[int, ...]:
         return self.horizons if self.horizons is not None else (self.horizon,)
@@ -191,6 +194,9 @@ class WindowSearch:
         n_cands = max((j for _, j, _, _ in branches), default=-1) + 1
         B = len(branches)
         envs, obs = [], []
+        _prof = self.prof
+        if _prof:
+            _t0 = time.perf_counter()
         for p, _, _, s in branches:
             if worlds is None:
                 cfg, pp = config, p
@@ -207,6 +213,14 @@ class WindowSearch:
                 o = e.step(c)
             envs.append(e)
             obs.append(o)
+        if _prof:
+            _t_setup = time.perf_counter() - _t0
+            _t_env = 0.0
+            _t_wait = 0.0
+            _t_value = 0.0
+            _rounds = 0
+            _obs_fwd = 0
+            _t_roll0 = time.perf_counter()
         H = len(hs)
         snap_board: list[list[float | None]] = [[None] * H for _ in range(B)]
         snap_cards: list[list[float | None]] = [[None] * H for _ in range(B)]
@@ -268,7 +282,13 @@ class WindowSearch:
                 act.append(i)
             if not act:
                 break
+            if _prof:
+                _tw = time.perf_counter()
             lg = yield [obs[i] for i in act]
+            if _prof:
+                _t_wait += time.perf_counter() - _tw
+                _rounds += 1
+                _obs_fwd += len(act)
             for i, row in zip(act, lg, strict=True):
                 n[i] += 1
                 z, key = guard.mask(i, obs[i], _masked(row, obs[i]))
@@ -291,7 +311,11 @@ class WindowSearch:
                             a = int(li)
                             break
                 guard.note(i, key, a)
+                if _prof:
+                    _te = time.perf_counter()
                 obs[i] = envs[i].step(a)
+                if _prof:
+                    _t_env += time.perf_counter() - _te
         # Any branch still live (should not happen) gets its current position for remaining horizons.
         for i in range(B):
             if live[i] and obs[i] is not None:
@@ -304,6 +328,8 @@ class WindowSearch:
                         _snapshot(i, h_idx, True)
         # Batched learned-value scoring for non-terminal snapshots.
         snap_value: list[list[float | None]] = [[None] * H for _ in range(B)]
+        if _prof:
+            _t_py = time.perf_counter() - _t_roll0 - _t_env - _t_wait
         if self.value is not None:
             for i in range(B):
                 for h_idx in range(H):
@@ -312,7 +338,11 @@ class WindowSearch:
             need = [(i, h_idx) for i in range(B) for h_idx in range(H)
                     if snap_board[i][h_idx] is not None and snap_value[i][h_idx] is None]
             if need:
+                if _prof:
+                    _tv = time.perf_counter()
                 v = self.value(_batch([snap_vobs[i][h_idx] for i, h_idx in need]))  # type: ignore[index]
+                if _prof:
+                    _t_value += time.perf_counter() - _tv
                 for (i, h_idx), x in zip(need, v, strict=True):
                     snap_value[i][h_idx] = float(x) if snap_actor[i][h_idx] == me else -float(x)
         # Average over samples per candidate.
@@ -349,6 +379,11 @@ class WindowSearch:
             for j in range(n_cands):
                 if counts[j]:
                     out[kk][j] /= counts[j]
+        if _prof:
+            self.last_prof = {
+                "t_setup": _t_setup, "t_env": _t_env, "t_py": _t_py, "t_wait": _t_wait,
+                "rounds": _rounds, "obs_fwd": _obs_fwd, "rollout_len": list(n), "t_value": _t_value,
+            }
         if single_legacy:
             # Legacy shape: plain score list for the single horizon (today's behaviour).
             sel = self._select_key()

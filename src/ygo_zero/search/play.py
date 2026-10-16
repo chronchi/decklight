@@ -62,6 +62,17 @@ def softmax_conf(z: np.ndarray) -> float:
     return float((e / e.sum()).max())
 
 
+def _accum_win_prof(wprof: dict, search: WindowSearch) -> None:
+    """Fold one rollouts_gen call's `search.last_prof` into the per-decision wprof accumulator."""
+    lp = getattr(search, "last_prof", {})
+    for kk in ("t_setup", "t_env", "t_py", "t_wait"):
+        wprof[kk] += float(lp.get(kk, 0.0))
+    for kk in ("rounds", "obs_fwd"):
+        wprof[kk] += int(lp.get(kk, 0))
+    wprof["rollout_len"].extend(lp.get("rollout_len", []))
+    wprof["t_value"] += float(lp.get("t_value", 0.0))
+
+
 @dataclass
 class GameResult:
     winner: int | None  # 0/1 seat, 2 = draw; None when truncated
@@ -84,6 +95,9 @@ class GameResult:
     log: list[dict] = field(default_factory=list)  # one entry per searched S decision (teacher records)
     decision_turns: list[int] = field(default_factory=list)  # turn number of every decision
     search_cut: bool = False  # max_searches reached: the rest of the game was played raw
+    lat_raw: list[float] = field(default_factory=list)  # latency mode: wall s per raw move
+    lat_search: list[float] = field(default_factory=list)  # latency mode: wall s per searched move
+    lat_turn: list[float] = field(default_factory=list)  # latency mode: wall s per own turn
 
 
 def search_game_gen(
@@ -110,6 +124,9 @@ def search_game_gen(
     max_searches: int = 0,
     ho: HonestRule | None = None,
     both_search: bool = False,
+    prof: bool = False,
+    latency: bool = False,
+    inflight: dict | None = None,
 ):
     """Play one live game; S (absolute seat `s_seat`) searches, R plays raw. Returns a GameResult.
 
@@ -147,6 +164,13 @@ def search_game_gen(
     `ho` (honest override, search/honest.py): candidates are merged by meaning, and the search leaves the policy's
     pick only when the best challenger's paired gap is significant; undecided gaps get `ho.step` more samples for the
     two candidates, up to `ho.s_max`. `margin` is ignored with `ho`. The log entry gets an "ho" dict.
+
+    `prof`: per searched decision the log entry gains a "prof" dict of perf_counter timings (determinizer build and
+    sampling, the WindowSearch phase breakdown, wall); play is bit-identical with it on or off. It also enables the
+    search's own window timings. `latency`: every decision's wall seconds go to `lat_raw` (raw moves) or
+    `lat_search` (searched moves), and each own turn's first-to-last S-decision span goes to `lat_turn`.
+    `inflight`: when given, `inflight[game_seed]` mirrors `res.choices` live (same list), so a SIGTERM handler can
+    dump the choice prefix of games still in flight; the driver pops finished games.
     """
     if guard_mode not in ("shared", "per_seat"):
         raise ValueError(f"guard_mode must be 'shared' or 'per_seat', got {guard_mode!r}")
@@ -163,6 +187,13 @@ def search_game_gen(
         t.update(env)
     guard = LoopGuard()  # slot 0 (shared) or slot = seat (per_seat); see the docstring
     res = GameResult(winner=None, truncated=False, turns=1)
+    if inflight is not None:
+        inflight[game_seed] = res.choices
+    if prof:
+        search.prof = True  # window phase timings feed the per-decision prof dict
+    lat_open_turn: int | None = None  # latency mode: turn whose own-turn span is open
+    lat_open_start = 0.0
+    lat_last_end = 0.0
     capped0 = search.capped
     for c in prefix:
         if obs is None:
@@ -185,6 +216,9 @@ def search_game_gen(
         if stop_turn and turn > stop_turn:
             break
         res.turns = turn
+        t_dec = time.perf_counter() if latency else 0.0
+        n_log0 = len(res.log)
+        is_own = latency and me in searchers and int(obs["global"][5]) == 1
         n_legal = int(obs["action_mask"].sum())
         z = _masked((yield [obs])[0], obs)
         if bool(np.isnan(np.asarray(z, dtype=np.float64)).any()):
@@ -219,12 +253,19 @@ def search_game_gen(
                     worlds = None
                     det = None
                     skip_search = False
+                    t_det_init = 0.0
+                    t_det = 0.0
                     if trackers:
+                        if prof:
+                            t_di = time.perf_counter()
                         det = Determinizer(
                             engine, config, auto_single, me, res.choices, trackers[me].seen,
                             obs, random.Random(f"{search.seed}:{game_seed}:{k}:det"),
                             prefix_keys=res.choice_keys, tries=det_tries,
                         )
+                        if prof:
+                            t_det_init = time.perf_counter() - t_di
+                            t_ds = time.perf_counter()
                         worlds = []
                         for _ in range(search.samples):
                             got = det.sample()
@@ -233,6 +274,8 @@ def search_game_gen(
                                     worlds.append((config, list(res.choices)))
                             else:
                                 worlds.append(got)
+                        if prof:
+                            t_det += time.perf_counter() - t_ds
                         res.det_proposals += det.proposals
                         res.det_accepted += det.accepted
                         res.det_fallbacks += det.fallbacks
@@ -241,16 +284,21 @@ def search_game_gen(
                             res.det_skipped += 1
                             skip_search = True
                     if not skip_search:
+                        wprof: dict = {"t_setup": 0.0, "t_env": 0.0, "t_py": 0.0, "t_wait": 0.0,
+                                       "rounds": 0, "obs_fwd": 0, "rollout_len": [],
+                                       "t_value": 0.0}  # fmt: skip
                         scores_all = yield from search.rollouts_gen(
                             config, auto_single, branches, me, turn_start=turn,
                             game_seed=game_seed, decision_k=k, worlds=worlds,
                         )  # fmt: skip
+                        if prof:
+                            _accum_win_prof(wprof, search)
                         res.search_s += time.perf_counter() - t0
-                        sel_scores = (
-                            scores_all[search._select_key()]
-                            if isinstance(scores_all, dict)
-                            else scores_all
-                        )
+                        if isinstance(scores_all, dict):
+                            scores_all = {kk: [float(x) for x in col] for kk, col in scores_all.items()}
+                            sel_scores = scores_all[search._select_key()]
+                        else:
+                            sel_scores = scores_all
                         best = max(range(len(cands)), key=lambda j: (sel_scores[j], -j))
                         a = cands[best]
                         ho_log = None
@@ -269,12 +317,16 @@ def search_game_gen(
                                 pair = (pick_j, dec.challenger_j)
                                 if worlds is not None and det is not None:
                                     p0, a0, f0, t0d = det.proposals, det.accepted, det.fallbacks, det.seconds
+                                    if prof:
+                                        t_ds = time.perf_counter()
                                     for _ in range(extra):
                                         got = det.sample()
                                         if got is not None:
                                             worlds.append(got)
                                         elif det_fallback == "true":
                                             worlds.append((config, list(res.choices)))
+                                    if prof:
+                                        t_det += time.perf_counter() - t_ds
                                     res.det_proposals += det.proposals - p0
                                     res.det_accepted += det.accepted - a0
                                     res.det_fallbacks += det.fallbacks - f0
@@ -285,6 +337,8 @@ def search_game_gen(
                                     config, auto_single, xb, me, turn_start=turn,
                                     game_seed=game_seed, decision_k=k, worlds=worlds,
                                 )  # fmt: skip
+                                if prof:
+                                    _accum_win_prof(wprof, search)
                                 got_s = getattr(search, "last_samples", [])
                                 for j in pair:
                                     samples[j].extend(got_s[j])
@@ -306,14 +360,24 @@ def search_game_gen(
                         res.n_searched += 1
                         res.n_branches += len(branches)
                         res.searched_idx.append(k)
+                        if prof:
+                            wprof = {
+                                "t_det_init": t_det_init, "t_det": t_det,
+                                "n_prop": det.proposals if det is not None else 0,
+                                "n_acc": det.accepted if det is not None else 0,
+                                **wprof, "t_wall": time.perf_counter() - t0,
+                            }
                         res.log.append({
                             "k": k, "seat": me, "kind": "window" if window else "own", "turn": turn,
                             "cands": [int(x) for x in cands],
                             "scores": [float(x) for x in sel_scores],
-                            "scores_all": {search._select_key(): [float(x) for x in sel_scores]},
+                            "scores_all": ({kk: [float(x) for x in col] for kk, col in scores_all.items()}
+                                           if isinstance(scores_all, dict)
+                                           else {search._select_key(): [float(x) for x in sel_scores]}),
                             "chosen": int(a), "played": int(a_pol), "best": int(cands[best]),
                             "samples": [[round(x, 4) for x in col] for col in getattr(search, "last_samples", [])],
                             **({"ho": ho_log} if ho_log is not None else {}),
+                            **({"prof": wprof} if prof else {}),
                         })
                         if a != a_pol:
                             res.n_override += 1
@@ -328,6 +392,17 @@ def search_game_gen(
         obs = env.step(a)
         for t in trackers.values():
             t.update(env)
+        if latency:
+            w_end = time.perf_counter()
+            (res.lat_search if len(res.log) > n_log0 else res.lat_raw).append(round(w_end - t_dec, 4))
+            if is_own:
+                if lat_open_turn != turn:
+                    if lat_open_turn is not None:
+                        res.lat_turn.append(round(lat_last_end - lat_open_start, 4))
+                    lat_open_turn, lat_open_start = turn, t_dec
+                lat_last_end = w_end
+    if latency and lat_open_turn is not None:
+        res.lat_turn.append(round(lat_last_end - lat_open_start, 4))
     flight.close()
     res.truncated = obs is not None
     res.winner = None if res.truncated else int(env.winner)

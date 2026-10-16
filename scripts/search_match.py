@@ -35,6 +35,7 @@ import argparse
 import json
 import os
 import random
+import signal
 import statistics
 import sys
 import time
@@ -339,6 +340,12 @@ def main() -> None:
                     help="explicit pool deck pairs 'a:b,c:d' (seat 0 deck first) instead of --deck-set; showcase games")
     ap.add_argument("--both-search", type=int, choices=(0, 1), default=0,
                     help="--opp self: both seats search (the product vs itself); log entries carry the seat")
+    ap.add_argument("--prof", type=int, choices=(0, 1), default=0,
+                    help="1: per-search timings in the log (play is bit-identical), per-proc forward counters "
+                         "to prof-<proc>.json, SIGTERM dumps in-flight choice prefixes to inflight-<proc>.jsonl")
+    ap.add_argument("--latency", type=int, choices=(0, 1), default=0,
+                    help="1: latency mode (implies width 1, claim 0): per-raw-move, per-searched-move and per-own-turn "
+                         "wall seconds in the game record (lat_raw, lat_search, lat_turn)")
     ap.add_argument("--summarize", type=Path, default=None, help="merge <dir>/games-*.jsonl to summary.json")
     args = ap.parse_args()
     if args.summarize is not None:
@@ -348,6 +355,19 @@ def main() -> None:
         args.conf_skip = 0.0  # softmax max is always >= 0: no decision is searched
     if args.ckpt is None or args.out is None:
         ap.error("--ckpt and --out are required (or --summarize <dir>)")
+    if os.environ.get("YGO_BLOCKING_SYNC") == "1":
+        # M0 phase C: blocking CUDA sync instead of spin-wait (must run before torch creates its CUDA context).
+        import ctypes
+
+        try:
+            rc = ctypes.CDLL("libcuda.so.1").cudaSetDeviceFlags(4)  # cudaDeviceScheduleBlockingSync
+            if rc != 0:
+                fail(f"YGO_BLOCKING_SYNC=1: cudaSetDeviceFlags returned {rc}")
+            print("YGO_BLOCKING_SYNC=1: blocking CUDA sync set", flush=True)
+        except OSError as e:
+            fail(f"YGO_BLOCKING_SYNC=1 but libcuda is missing: {e}")
+    PROF = bool(args.prof)
+    LAT = bool(args.latency)
 
     from ygo_zero.eval.bc_policy import BCPolicy
 
@@ -364,7 +384,8 @@ def main() -> None:
         value = vcls(args.value, args.emb, device=args.device, batch=args.batch).values
 
     def base_logits(obs_list: list[dict]) -> np.ndarray:
-        out = [pol.logits(_batch(obs_list[i : i + args.batch])) for i in range(0, len(obs_list), args.batch)]
+        out = [_timed_logits(pol.logits, _timed_batch(obs_list[i : i + args.batch]))
+               for i in range(0, len(obs_list), args.batch)]
         lg = np.concatenate(out)
         if bool(np.isnan(lg).any()):
             raise RuntimeError("ALERT search_match: NaN logits from the policy forward")
@@ -372,6 +393,49 @@ def main() -> None:
 
     def never(buf) -> np.ndarray:
         raise AssertionError("WindowSearch.logits is unused: play.py drives rollouts via drive_many")
+
+    # --prof 1 per-process forward counters (written to prof-<proc>.json at exit and on SIGTERM).
+    prof_fwd: dict = {"calls": 0, "hist": {}, "t_batch": 0.0, "t_fwd": 0.0, "t_gpu": 0.0,
+                      "t_sync": 0.0, "t_h2d": 0.0, "t_d2h": 0.0, "t_ygo": 0.0}
+    _use_cuda = False
+    if PROF:
+        import torch
+
+        _use_cuda = torch.cuda.is_available()
+
+    def _timed_batch(obs_list: list[dict]) -> dict:
+        if not PROF:
+            return _batch(obs_list)
+        t = time.perf_counter()
+        buf = _batch(obs_list)
+        prof_fwd["t_batch"] += time.perf_counter() - t
+        return buf
+
+    def _timed_logits(logits_fn, buf: dict) -> np.ndarray:
+        """One policy forward with --prof timing: wall into t_fwd, GPU-timeline time (CUDA events, else wall)
+        into t_gpu, host wait beyond GPU time into t_sync. H2D/D2H stay 0: BCPolicy.logits fuses the copies with
+        the forward, so they sit inside t_gpu."""
+        if not PROF:
+            return logits_fn(buf)
+        if _use_cuda:
+            start, end = torch.cuda.Event(enable_timing=True), torch.cuda.Event(enable_timing=True)
+            t = time.perf_counter()
+            start.record()
+            out = logits_fn(buf)
+            end.record()
+            end.synchronize()
+            wall = time.perf_counter() - t
+            gpu = start.elapsed_time(end) / 1000.0
+            prof_fwd["t_fwd"] += wall
+            prof_fwd["t_gpu"] += gpu
+            prof_fwd["t_sync"] += max(0.0, wall - gpu)
+            return out
+        t = time.perf_counter()
+        out = logits_fn(buf)
+        wall = time.perf_counter() - t
+        prof_fwd["t_fwd"] += wall
+        prof_fwd["t_gpu"] += wall
+        return out
 
     route: dict[int, tuple[int, int] | None] = {}  # id(obs) -> None (rollout) | (game idx, s_seat)
     r_n: dict[int, int] = {}  # game idx -> R outer decisions (0 in a finished game = routing broke)
@@ -453,7 +517,8 @@ def main() -> None:
         opp = BCPolicy(args.opp_ckpt, args.emb, threads=1, device=args.device, batch=args.batch)
 
         def opp_logits(obs_list: list[dict]) -> np.ndarray:
-            out = [opp.logits(_batch(obs_list[i : i + args.batch])) for i in range(0, len(obs_list), args.batch)]
+            out = [_timed_logits(opp.logits, _timed_batch(obs_list[i : i + args.batch]))
+                   for i in range(0, len(obs_list), args.batch)]
             lg = np.concatenate(out)
             if bool(np.isnan(lg).any()):
                 raise RuntimeError("ALERT search_match: NaN logits from the --opp-ckpt forward")
@@ -471,6 +536,9 @@ def main() -> None:
         sched = sched[: args.games_limit]
     by_idx = {e[4]: e for e in sched}  # idx is the full schedule's (kept by --s-seat-only), not a position in sched
     claim = bool(args.save_records is not None if args.claim is None else args.claim)
+    if LAT:
+        args.width = 1  # latency mode: one game at a time, so t_wall is the true decision latency
+        claim = False
     if claim and args.out is None:
         ap.error("--claim 1 needs --out (claims live in <out>/claims)")
     if claim:
@@ -498,6 +566,9 @@ def main() -> None:
           flush=True)
 
     def forward(obs_list: list[dict]) -> np.ndarray:
+        if PROF:
+            prof_fwd["calls"] += 1
+            prof_fwd["hist"][str(len(obs_list))] = prof_fwd["hist"].get(str(len(obs_list)), 0) + 1
         if not routed:
             return base_logits(obs_list)
         # R's outer decisions go to R's policy; everything else (S outer + all rollouts,
@@ -533,15 +604,21 @@ def main() -> None:
                 lg[i] = b[k]
         if r_obs:
             if args.opp == "ygoagent":
-                buf = _batch(r_obs)
+                buf = _timed_batch(r_obs)
                 buf["player"] = np.array(r_me, np.int64)  # CppEnv obs carry no seat; global[4] does
+                t_ya = time.perf_counter() if PROF else 0.0
                 acts = opp(buf, np.arange(len(r_obs)), keys=np.array(r_keys, np.int64))
+                if PROF:
+                    prof_fwd["t_ygo"] += time.perf_counter() - t_ya
                 for i, a in zip(r_at, acts, strict=True):  # one-hot argmax: the inner argmax plays R's pick
                     lg[i, int(a)] = 1.0
             elif args.opp == "greedy":
-                buf = _batch(r_obs)
+                buf = _timed_batch(r_obs)
                 buf["player"] = np.array(r_me, np.int64)
+                t_ya = time.perf_counter() if PROF else 0.0
                 acts = opp(buf, np.arange(len(r_obs)))
+                if PROF:
+                    prof_fwd["t_ygo"] += time.perf_counter() - t_ya
                 for i, a in zip(r_at, acts, strict=True):  # one-hot: the inner argmax plays R's pick
                     lg[i, int(a)] = 1.0
             else:  # ckpt: R plays another BC checkpoint raw (argmax through the shared guard discipline)
@@ -553,6 +630,8 @@ def main() -> None:
         return lg
 
     cfgs: dict[int, DuelConfig] = {}  # game idx -> DuelConfig (teacher records + replay check)
+    inflight_choices: dict[int, list] = {}  # --prof 1: idx -> live res.choices (same list; popped when done)
+    inflight_meta: dict[int, dict] = {}  # idx -> {decks, seed, s_seat} for the SIGTERM dump
 
     ho_rule = (HonestRule(z=args.ho_z, min_gap=args.ho_min_gap, s_max=args.ho_s_max, step=args.ho_step)
                if args.ho else None)
@@ -575,10 +654,13 @@ def main() -> None:
                     seed=s,
                 )
             cfgs[idx] = cfg
+            if PROF:
+                inflight_meta[idx] = {"decks": [names[di], names[dj]], "seed": s, "s_seat": s_seat}
             if not routed:
                 ws = WindowSearch(
                     engine, never, k=args.k, horizon=args.horizon, samples=args.samples,
                     rollout_temp=args.rollout_temp, batch=args.batch, seed=args.seed, value=value,
+                    prof=PROF,
                 )  # fmt: skip
                 gen = search_game_gen(
                     engine, cfg, ws, s_seat, argmax_select, game_seed=idx,
@@ -586,12 +668,13 @@ def main() -> None:
                     honest=bool(args.honest), det_tries=args.det_tries, det_fallback=args.det_fallback,
                     margin=args.margin, max_search_turn=args.max_search_turn, stop_turn=args.stop_turn,
                     max_searches=args.max_searches, ho=ho_rule, both_search=bool(args.both_search),
+                    prof=PROF, latency=LAT, inflight=inflight_choices if PROF else None,
                 )  # fmt: skip
             else:
                 ws = RouteWindowSearch(
                     engine, never, k=args.k, horizon=args.horizon, samples=args.samples,
                     rollout_temp=args.rollout_temp, batch=args.batch, seed=args.seed, value=value,
-                    route=route,
+                    route=route, prof=PROF,
                 )  # fmt: skip
                 # Card-faithful loop guard (NOTEBOOK 2026-10-09 08:40): each policy guards its own decisions; ygo-agent
                 # and greedy have no guard. `--guard-legacy 1` restores the shared guard of E2 (forbade ygo-agent's
@@ -604,7 +687,7 @@ def main() -> None:
                     guard_mode="shared" if legacy else "per_seat",
                     unguarded_seat=None if legacy or args.opp == "ckpt" else 1 - s_seat, margin=args.margin,
                     max_search_turn=args.max_search_turn, stop_turn=args.stop_turn, max_searches=args.max_searches,
-                    ho=ho_rule,
+                    ho=ho_rule, prof=PROF, latency=LAT, inflight=inflight_choices if PROF else None,
                 ), route)  # fmt: skip
             yield idx, gen
 
@@ -670,10 +753,80 @@ def main() -> None:
         return sum(1 for lb in labels if lb != "skip")
 
     got, tot_s, tot_labels = 0, 0, 0
+
+    def _thread_cpu() -> dict:
+        """Per-thread CPU seconds (utime+stime) from /proc/self/task/*/stat."""
+        out: dict[str, float] = {}
+        try:
+            hz = os.sysconf("SC_CLK_TCK")
+            task = Path("/proc/self/task")
+            tids = [d.name for d in task.iterdir()]
+        except OSError:
+            return out
+        for tid in tids:
+            try:
+                st = (task / tid / "stat").read_text()
+            except OSError:
+                continue
+            tail = st.rsplit(")", 1)[-1].split()  # after "pid (comm)": field 3 (state) is index 0
+            if len(tail) > 13:
+                try:
+                    out[tid] = round((int(tail[11]) + int(tail[12])) / hz, 2)  # utime (14) + stime (15)
+                except ValueError:
+                    continue
+        return out
+
+    def write_prof() -> None:
+        """Write prof-<proc>.json: forward counters plus process/thread/GPU counters."""
+        if not PROF:
+            return
+        import threading
+
+        rec = dict(prof_fwd)
+        rec["hist"] = {str(k): v for k, v in prof_fwd["hist"].items()}
+        rec["proc"] = args.proc
+        rec["process_time"] = round(time.process_time(), 3)
+        rec["wall"] = round(time.time() - t0, 3)
+        rec["threads"] = threading.active_count()
+        try:
+            import torch as _t
+
+            rec["torch_threads"] = _t.get_num_threads()
+            rec["cuda_reserved"] = _t.cuda.memory_reserved() if _t.cuda.is_available() else None
+        except Exception:  # noqa: BLE001 -- profiling must never fail the match
+            rec["torch_threads"] = None
+            rec["cuda_reserved"] = None
+        rec["thread_cpu"] = _thread_cpu()
+        rec["games"] = got
+        rec["searched"] = tot_s
+        (args.out / f"prof-{args.proc}.json").write_text(json.dumps(rec, indent=1))
+
+    if PROF:
+        def _on_term(signum, frame) -> None:
+            # End-of-phase SIGTERM (M0 throughput arms): dump every in-flight game's choice prefix for the
+            # determinism check against cached games, plus the partial forward counters, then die as usual.
+            try:
+                with (args.out / f"inflight-{args.proc}.jsonl").open("w") as f:
+                    for idx, ch in inflight_choices.items():
+                        m = inflight_meta.get(idx, {})
+                        f.write(json.dumps({"decks": m.get("decks"), "seed": m.get("seed"),
+                                            "s_seat": m.get("s_seat"),
+                                            "choices": [int(c) for c in ch]}) + "\n")
+                try:
+                    write_prof()
+                except Exception:  # noqa: BLE001, S110 -- the inflight dump matters more
+                    pass
+            finally:
+                signal.signal(signal.SIGTERM, signal.SIG_DFL)
+                os.kill(os.getpid(), signal.SIGTERM)
+
+        signal.signal(signal.SIGTERM, _on_term)
+
     try:
         with path.open("w") as f:
             for idx, res in drive_many(jobs(), forward, args.width):
                 di, dj, s, s_seat, _ = by_idx[idx]
+                inflight_choices.pop(idx, None)  # finished: no longer in flight
                 if res.winner is None and not res.truncated:
                     fail(f"game {idx} ended with neither winner nor truncation")
                 if args.opp == "ygoagent":
@@ -690,12 +843,20 @@ def main() -> None:
                     "det_proposals": res.det_proposals, "det_accepted": res.det_accepted,
                     "det_fallbacks": res.det_fallbacks, "det_skipped": res.det_skipped,
                     "det_fallback": args.det_fallback, "det_s": round(res.det_s, 3),
+                    # latency mode: per-move and per-own-turn walls (scripts/audit/latency_report.py)
+                    **({"lat_raw": res.lat_raw, "lat_search": res.lat_search, "lat_turn": res.lat_turn}
+                       if LAT else {}),
                     # per searched decision: candidates, per-sample rollout scores, pick (offline budget curve and
                     # noise SE; NOTEBOOK 2026-10-09 08:40)
                     "search": [{"k": int(e["k"]), "seat": int(e.get("seat", s_seat)), "kind": e.get("kind"),
                                 "turn": int(e.get("turn", 0)),
                                 "cands": [int(x) for x in e["cands"]], "samples": e.get("samples", []),
                                 "chosen": int(e["chosen"]), "played": int(e["played"]),
+                                **({"scores": [float(x) for x in e["scores"]]} if "scores" in e else {}),
+                                **({"scores_all": {kk: [float(x) for x in col]
+                                                   for kk, col in e["scores_all"].items()}}
+                                   if "scores_all" in e else {}),
+                                **({"prof": e["prof"]} if "prof" in e else {}),
                                 **({"ho": e["ho"]} if "ho" in e else {})} for e in res.log],
                 }
                 if args.opp == "ygoagent":  # paired-gate fields (playtest per_game format + search stats)
@@ -717,6 +878,7 @@ def main() -> None:
             print(str(e), flush=True)
             raise SystemExit(1) from None
         raise
+    write_prof()  # --prof 1: per-proc forward counters next to the games file (also written on SIGTERM)
     branches = 0  # capped share needs branch totals: re-read this proc's file (cheap, local)
     capped = 0
     for raw in path.read_text().splitlines():
