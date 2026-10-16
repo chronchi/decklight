@@ -168,3 +168,53 @@ def test_exit_codes(tmp_path):
     with pytest.raises(SystemExit) as e:
         BV.main(["--run", f"bad={empty}", "--out", str(out)])
     assert e.value.code != 0  # 0 games
+
+
+def _aux_turn():
+    t = _turn(0)
+    t["aux"] = {
+        "0": {"k": 0, "pred_lp": [100, -200], "pred_cards": [0.0] * 14,
+              "pred_ends": 0.2, "pred_turns": 4.0,
+              "real_lp": [-500, -1000], "real_cards": [0.0] * 14,
+              "real_ends": 0, "real_turns": 2},
+        "1": {"k": 1, "pred_lp": [0, 0], "pred_cards": [0.0] * 14,
+              "pred_ends": 0.8, "pred_turns": 3.0,
+              "real_lp": None, "real_cards": None, "real_ends": 1, "real_turns": 2},
+    }
+    return t
+
+
+def _aux_summary():
+    s = _summary()
+    s["aux"] = {
+        "n_points": 2,
+        "ends": {"n": 2, "brier": 0.1, "brier_base": 0.25, "ece": 0.05,
+                 "base_rate": 0.5, "bins": [{"lo": 0.0, "hi": 0.1, "n": 1, "rate": 0.0, "mean_p": 0.05}]},
+        "d_lp": {"n": 2, "mae": 100.0, "mse": 10000.0, "mse_base": 20000.0, "r2": 0.5},
+        "d_cards": {"n": 14, "mae": 0.1, "mse": 0.01, "mse_base": 0.02, "r2": 0.5},
+        "turns_left": {"n": 2, "mae": 0.5, "mse": 0.25, "mse_base": 1.0, "r2": 0.75, "mean": 2.0},
+    }
+    return s
+
+
+def test_build_with_aux(tmp_path):
+    d = tmp_path / "ann-aux"
+    (d / "games").mkdir(parents=True)
+    (d / "summary.json").write_text(json.dumps(_aux_summary()))
+    ann = _ann(0, True)
+    ann["turns"]["1"] = _aux_turn()
+    (d / "games" / "game-0.json").write_text(json.dumps(ann))
+    out = tmp_path / "viewer-aux"
+    assert BV.main(["--run", f"ra={d}", "--out", str(out)]) == 0
+    g0 = json.loads((out / "data" / "ra" / "0.json").read_text())
+    assert "aux" in g0["turns"][0]
+    assert g0["turns"][0]["aux"]["0"]["pred_ends"] == pytest.approx(0.2)
+    runs = json.loads((out / "data" / "runs.json").read_text())
+    assert runs[0]["aux"]["ends_brier"] == pytest.approx(0.1)
+    assert runs[0]["aux"]["d_lp_mae"] == pytest.approx(100.0)
+    # run without aux still builds and has no aux headline
+    ann2, _ = _write_ann(tmp_path, name="ann-noaux")
+    assert BV.main(["--run", "rb=" + str(ann2), "--out", str(out)]) == 0
+    runs = json.loads((out / "data" / "runs.json").read_text())
+    by_name = {r["name"]: r for r in runs}
+    assert "aux" not in by_name["rb"]

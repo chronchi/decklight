@@ -298,3 +298,89 @@ def test_values_length_mismatch_raises():
     bad = {"k": [0], "actor": [0], "turn": [1], "v": [0.1]}
     with pytest.raises(ValueError):
         A.annotate_game(r, s1, s1[-1], {}, bad)
+
+
+def _aux_values_of(snaps, d_lp=None, d_cards=None, ends=None, turns_left=None):
+    n = len(snaps)
+    base = _values_of(snaps, lambda t, a: 0.1)
+    base["aux"] = {
+        "d_lp": [[0, 0] for _ in range(n)] if d_lp is None else d_lp,
+        "d_cards": [[0.0] * 14 for _ in range(n)] if d_cards is None else d_cards,
+        "ends": [0.1 for _ in range(n)] if ends is None else ends,
+        "turns_left": [2.0 for _ in range(n)] if turns_left is None else turns_left,
+    }
+    return base
+
+
+def _aux_game():
+    """Turn 1 (P0 to move, both seats act), turn 2 (P1 to move, both act), turn 3 (P0)."""
+    c_hand2 = list(BASE)
+    c_hand2[1] = 4  # one fewer hand card
+    s1 = [
+        snap(0, 1, actor=0, tp=0, lp0=8000, lp1=8000),
+        snap(1, 1, actor=1, tp=0, lp0=8000, lp1=8000),
+        snap(2, 2, actor=1, tp=1, lp0=7500, lp1=8000, c0=c_hand2),
+        snap(3, 2, actor=0, tp=1, lp0=7500, lp1=8000, c0=c_hand2),
+        snap(4, 3, actor=0, tp=0, lp0=7500, lp1=7000),
+    ]
+    r = rec_of([], turns=3)
+    values = _aux_values_of(
+        s1,
+        d_lp=[[100, -200], [0, -500], [0, 0], [-100, 0], [50, 50]],
+        ends=[0.2, 0.8, 0.9, 0.1, 0.95],
+        turns_left=[4.0, 3.0, 2.0, 1.0, 0.5],
+    )
+    ann = A.annotate_game(r, s1, s1[-1], {}, values)
+    return ann
+
+
+def test_aux_predicted_vs_realized():
+    ann = _aux_game()
+    # seat 0 turn 1: next own start is k4 (turn 3): me 7500-8000=-500, opp 7000-8000=-1000
+    a00 = ann["turns"][1]["aux"]["0"]
+    assert a00["pred_lp"] == [100, -200]
+    assert a00["real_lp"] == [-500, -1000]
+    assert a00["real_ends"] == 0
+    assert a00["real_turns"] == 2  # end turn 3 - turn 1
+    assert a00["pred_ends"] == pytest.approx(0.2)
+    # seat 1 turn 1 (k1): next own start k2 (turn 2)
+    a01 = ann["turns"][1]["aux"]["1"]
+    assert a01["real_ends"] == 0
+    assert a01["k"] == 1
+    # seat 1 turn 2 (k2): no later own turn -> ends, no card/LP target
+    a12 = ann["turns"][2]["aux"]["1"]
+    assert a12["real_ends"] == 1
+    assert a12["real_lp"] is None and a12["real_cards"] is None
+    # seat 0 turn 2 (k3): next own start k4
+    assert ann["turns"][2]["aux"]["0"]["real_ends"] == 0
+    # turn 3 seat 0: last turn -> ends
+    assert ann["turns"][3]["aux"]["0"]["real_ends"] == 1
+
+
+def test_aux_summary_and_markdown():
+    ann = _aux_game()
+    sm = A.summarize([ann], ["d"], "abc")
+    assert "aux" in sm
+    assert sm["aux"]["n_points"] == 5  # (t1:2 seats) + (t2:2) + (t3:1)
+    assert sm["aux"]["ends"]["n"] == 5
+    assert 0.0 <= sm["aux"]["ends"]["brier"] <= 1.0
+    assert sm["aux"]["d_lp"]["n"] == 6  # 3 has_next points x 2
+    assert sm["aux"]["d_cards"]["n"] == 3 * 14
+    assert sm["aux"]["turns_left"]["n"] == 5
+    md = A.render_game_md(ann)
+    assert "P(end)" in md and "T left" in md
+    smd = A.render_summary_md(sm)
+    assert "Aux heads" in smd
+    import json
+
+    json.dumps(ann)
+    json.dumps(sm)
+
+
+def test_aux_length_mismatch_raises():
+    s1 = [snap(0, 1), snap(1, 1)]
+    r = rec_of([], turns=1)
+    values = _aux_values_of(s1)
+    values["aux"]["ends"] = [0.1]  # short
+    with pytest.raises(ValueError):
+        A.annotate_game(r, s1, s1[-1], {}, values)

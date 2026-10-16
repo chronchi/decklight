@@ -120,6 +120,26 @@ def compact_game(ann: dict, ev_rec: dict | None) -> dict:
         for k in ("v_p0", "v_p1", "v_comb", "disagree"):
             if ts.get(k) is not None:
                 row[k] = ts[k]
+        aux_d = ts.get("aux")
+        if isinstance(aux_d, dict) and aux_d:
+            row_aux: dict = {}
+            for sk, rec in aux_d.items():
+                if not isinstance(rec, dict):
+                    continue
+                try:
+                    s = str(int(sk))
+                except (TypeError, ValueError):
+                    s = str(sk)
+                entry: dict = {"k": int(rec.get("k", 0))}
+                for kk in ("pred_lp", "pred_cards", "real_lp", "real_cards"):
+                    if rec.get(kk) is not None:
+                        entry[kk] = rec[kk]
+                for kk in ("pred_ends", "pred_turns", "real_ends", "real_turns"):
+                    if rec.get(kk) is not None:
+                        entry[kk] = rec[kk]
+                row_aux[s] = entry
+            if row_aux:
+                row["aux"] = row_aux
         tp = (ann.get("tempo") or {}).get(str(t))
         if tp is not None:
             row["tempo_pp"] = tp.get("dp_tp_pp")
@@ -260,6 +280,23 @@ def run_headline(summary: dict, compacts: list[dict], events: dict) -> dict:
         "negations_per_game": (n_neg / n_ev_games) if n_ev_games else None,
         "n_event_games": n_ev_games,
     }
+    aux = summary.get("aux")
+    if isinstance(aux, dict):
+        try:
+            headline["aux"] = {
+                "n_points": aux.get("n_points"),
+                "ends_brier": (aux.get("ends") or {}).get("brier"),
+                "ends_brier_base": (aux.get("ends") or {}).get("brier_base"),
+                "ends_ece": (aux.get("ends") or {}).get("ece"),
+                "d_lp_mae": (aux.get("d_lp") or {}).get("mae"),
+                "d_lp_r2": (aux.get("d_lp") or {}).get("r2"),
+                "d_cards_mae": (aux.get("d_cards") or {}).get("mae"),
+                "d_cards_r2": (aux.get("d_cards") or {}).get("r2"),
+                "turns_mae": (aux.get("turns_left") or {}).get("mae"),
+                "turns_r2": (aux.get("turns_left") or {}).get("r2"),
+            }
+        except AttributeError:
+            pass
     return r3(headline)
 
 

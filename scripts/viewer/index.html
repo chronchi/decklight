@@ -62,22 +62,43 @@ const METRICS = [
   ["mean_regret_pp", "mean regret per game (win-pp)"],
   ["labels_per_game", "labels≥mistake per game"],
   ["interruptions_per_game", "interruptions per game"],
+  ["aux_ends_brier", "aux P(ends) Brier (lower is better)"],
+  ["aux_d_lp_mae", "aux d_lp MAE (lower is better)"],
+  ["aux_turns_mae", "aux turns_left MAE (lower is better)"],
 ];
 function metricVal(r, m) {
   if (m === "labels_per_game") return (r.labels_per_game ? (r.labels_per_game.mistake || 0) + (r.labels_per_game.blunder || 0) : null);
+  if (m === "aux_ends_brier") return (r.aux ? r.aux.ends_brier : null);
+  if (m === "aux_d_lp_mae") return (r.aux ? r.aux.d_lp_mae : null);
+  if (m === "aux_turns_mae") return (r.aux ? r.aux.turns_mae : null);
   return r[m];
 }
 async function runsPage() {
   crumb.textContent = "";
   const runs = await j("data/runs.json");
+  const anyAux = runs.some(r => r.aux);
   let h = `<h1>runs over time (${runs.length})</h1>
   <div class="tblwrap"><table><tr><th>run</th><th>date</th><th>games</th><th>ECE</th><th>swing winrate</th><th>mean regret</th><th>mist+blu/game</th><th>inter/game</th><th>neg/game</th></tr>`;
   for (const r of runs) {
     const lb = r.labels_per_game || {};
     h += `<tr><td><a href="#/run/${enc(r.name)}">${esc(r.name)}</a></td><td>${esc(r.date || "")}</td><td>${r.n_games}</td><td>${fmt(r.ece, 4)}</td><td>${fmt(r.swing_winner_winrate)}</td><td>${fmt(r.mean_regret_pp, 2)}</td><td>${fmt((lb.mistake || 0) + (lb.blunder || 0))}</td><td>${fmt(r.interruptions_per_game, 2)}</td><td>${fmt(r.negations_per_game, 2)}</td></tr>`;
   }
-  h += `</table></div>
-  <h2>metric across runs</h2>
+  h += `</table></div>`;
+  if (anyAux) {
+    h += `<h2>aux heads: predicted vs realized (turn-seat points)</h2>
+    <div class="tblwrap"><table><tr><th>run</th><th>points</th><th>ends Brier/base</th><th>d_lp MAE/R²</th><th>d_cards MAE/R²</th><th>turns MAE/R²</th></tr>`;
+    for (const r of runs) {
+      const a = r.aux;
+      if (!a) { h += `<tr><td><a href="#/run/${enc(r.name)}">${esc(r.name)}</a></td><td colspan="5">–</td></tr>`; continue; }
+      h += `<tr><td><a href="#/run/${enc(r.name)}">${esc(r.name)}</a></td><td>${a.n_points ?? "–"}</td>`
+        + `<td>${fmt(a.ends_brier, 4)}/${fmt(a.ends_brier_base, 4)}</td>`
+        + `<td>${fmt(a.d_lp_mae, 1)}/${fmt(a.d_lp_r2)}</td>`
+        + `<td>${fmt(a.d_cards_mae, 3)}/${fmt(a.d_cards_r2)}</td>`
+        + `<td>${fmt(a.turns_mae, 2)}/${fmt(a.turns_r2)}</td></tr>`;
+    }
+    h += `</table></div><p class="mut">Brier/MAE lower is better; R² vs the 0-change baseline (turns_left vs its mean). Ends base = base-rate predictor.</p>`;
+  }
+  h += `<h2>metric across runs</h2>
   <label>metric <select id="metsel">${METRICS.map(([v, l]) => `<option value="${v}">${l}</option>`).join("")}</select></label>
   <canvas id="mc" height="120"></canvas>`;
   app.innerHTML = h;
@@ -152,6 +173,16 @@ async function runPage(name) {
   <div class="tblwrap"><table><tr><th>turn</th><th>seat</th><th>n</th><th>mean</th><th>p10</th><th>p90</th></tr>
   ${(summary.tempo?.by_turn_seat || []).map(r => `<tr><td>${r.turn}</td><td>${r.seat}</td><td>${r.n}</td><td>${fmt(r.mean_pp, 1)}</td><td>${fmt(r.p10_pp, 1)}</td><td>${fmt(r.p90_pp, 1)}</td></tr>`).join("")}</table></div>
   <p class="mut">swing-turn share ${Object.entries(summary.tempo?.swing_share || {}).map(([k, v]) => `T${k}: ${fmt(v, 2)}`).join(", ")} · swing winner wins ${fmt(summary.tempo?.swing_winner_winrate)} (n=${summary.tempo?.n_swing_games})</p>
+  ${summary.aux ? `<h2>aux heads: predicted vs realized (${summary.aux.n_points} turn-seat points)</h2>
+  <div class="tblwrap"><table><tr><th>head</th><th>n</th><th>MAE/Brier</th><th>base</th><th>R²</th></tr>
+  <tr><td>P(ends)</td><td>${summary.aux.ends.n}</td><td>${fmt(summary.aux.ends.brier, 4)}</td><td>${fmt(summary.aux.ends.brier_base, 4)}</td><td>–</td></tr>
+  <tr><td>d_lp</td><td>${summary.aux.d_lp.n}</td><td>${fmt(summary.aux.d_lp.mae, 1)}</td><td>–</td><td>${fmt(summary.aux.d_lp.r2)}</td></tr>
+  <tr><td>d_cards</td><td>${summary.aux.d_cards.n}</td><td>${fmt(summary.aux.d_cards.mae, 3)}</td><td>–</td><td>${fmt(summary.aux.d_cards.r2)}</td></tr>
+  <tr><td>turns_left</td><td>${summary.aux.turns_left.n}</td><td>${fmt(summary.aux.turns_left.mae, 2)}</td><td>mean ${fmt(summary.aux.turns_left.mean, 2)}</td><td>${fmt(summary.aux.turns_left.r2)}</td></tr>
+  </table></div>
+  <p class="mut">R² vs the 0-change baseline (turns_left vs its mean ${fmt(summary.aux.turns_left.mean, 2)}); ends base = base-rate ${fmt(summary.aux.ends.base_rate, 3)} predictor, ECE ${fmt(summary.aux.ends.ece, 4)}.</p>
+  <div class="tblwrap"><table><tr><th>p(ends) bin</th><th>n</th><th>end rate</th><th>mean p</th></tr>
+  ${(summary.aux.ends.bins || []).filter(b => b.n).map(b => `<tr><td>${b.lo?.toFixed(1)}–${b.hi?.toFixed(1)}</td><td>${b.n}</td><td>${fmt(b.rate)}</td><td>${fmt(b.mean_p)}</td></tr>`).join("")}</table></div>` : ""}
   <h2>mining top 20 (significant ≥ mistake per opportunity)</h2>
   <div class="tblwrap"><table><tr><th>kind</th><th>msg</th><th>turns</th><th>first</th><th>deck_s</th><th>hits/opps</th><th>rate</th></tr>
   ${(summary.mining || []).map(m => `<tr><td>${esc(m.kind)}</td><td>${m.msg}</td><td>${esc(m.bucket)}</td><td>${m.seat_first}</td><td>${esc(m.deck_s)}</td><td>${m.hits}/${m.opportunities}</td><td>${fmt(m.rate, 4)}</td></tr>`).join("")}</table></div>`;
@@ -204,16 +235,31 @@ async function gamePage(run, idx) {
   let h = `<h1>game ${g.game_idx}: ${esc(decks)}</h1>
   <p class="mut">seat ${g.seat} (${esc(g.deck_s || "")}), first: ${g.s_first} · winner: player ${g.winner} · ${g.n_choices} decisions, ${g.n_searched} searched, ${g.n_overridden} overridden · labels: ${lbl.inaccuracy || 0} inacc, ${lbl.mistake || 0} mist, ${lbl.blunder || 0} blu · mean regret ${fmt(g.mean_regret_pp, 2)} win-pp · swing turn ${g.swing_turn ?? "–"}</p>
   <p>${prev !== undefined ? `<a href="#/game/${enc(run)}/${prev}">← prev</a>` : ""} ${next !== undefined ? `<a href="#/game/${enc(run)}/${next}">next →</a>` : ""}</p>
-  <h2>eval (player-0 win %)</h2><canvas id="ev"></canvas>
+  <h2>eval (player-0 win %) + lethal risk P(end) %</h2><canvas id="ev"></canvas>
   <h2>tempo per turn (win-pp for turn player)</h2><canvas id="tm"></canvas>
   <h2>turns</h2><div class="tblwrap"><table>
-  <tr><th>T</th><th>TP</th><th>LP 0–1</th><th>hand</th><th>field</th><th>GY</th><th>ban</th><th>ext</th><th>adv</th><th>v_p0</th><th>v_p1</th><th>v_comb</th><th>dis</th><th>tempo</th><th>events</th></tr>`;
+  ${(() => { const anyAux = (g.turns || []).some(t => t.aux); return `<tr><th>T</th><th>TP</th><th>LP 0–1</th><th>hand</th><th>field</th><th>GY</th><th>ban</th><th>ext</th><th>adv</th><th>v_p0</th><th>v_p1</th><th>v_comb</th><th>dis</th><th>tempo</th><th>events</th>${anyAux ? "<th>aux ΔLP pred/real</th><th>aux cards h/f pred→real</th><th>P(end) pred/real</th><th>T left pred/real</th>" : ""}</tr>`; })()}`;
+  const auxSeat = (t, s) => (t.aux ? (t.aux[String(s)] ?? t.aux[s]) : null);
+  const sgn = v => ((v >= 0 ? "+" : "") + v);
+  const auxLp = t => [0, 1].map(s => { const r = auxSeat(t, s); if (!r) return null;
+    const p = r.pred_lp || [0, 0]; const rl = r.real_lp;
+    return `${s}:${sgn(p[0])}/${sgn(p[1])}(${rl ? sgn(rl[0]) + "/" + sgn(rl[1]) : "end"})`; }).filter(Boolean).join("<br>");
+  const auxCards = t => [0, 1].map(s => { const r = auxSeat(t, s); if (!r || !r.pred_cards) return null;
+    const pc = r.pred_cards, rc = r.real_cards;
+    const ph = pc[1], pf = pc[2] + pc[3];
+    const rh = rc ? rc[1] : null, rf = rc ? rc[2] + rc[3] : null;
+    return `${s}:h${ph}→${rh === null ? "end" : rh} f${pf}→${rf === null ? "end" : rf}`; }).filter(Boolean).join("<br>");
+  const auxEnds = t => [0, 1].map(s => { const r = auxSeat(t, s); if (!r || r.pred_ends === null || r.pred_ends === undefined) return null;
+    return `${s}:${(Number(r.pred_ends) * 100).toFixed(1)}%/${r.real_ends}`; }).filter(Boolean).join("<br>");
+  const auxTurns = t => [0, 1].map(s => { const r = auxSeat(t, s); if (!r || r.pred_turns === null || r.pred_turns === undefined) return null;
+    return `${s}:${Number(r.pred_turns).toFixed(1)}/${r.real_turns}`; }).filter(Boolean).join("<br>");
+  const anyAuxT = (g.turns || []).some(t => t.aux);
   for (const t of g.turns || []) {
     const evc = t.ev ? `act ${t.ev[0].activations}/${t.ev[1].activations} int ${t.ev[0].activations_opp_turn + t.ev[1].activations_opp_turn} neg ${t.ev[0].negated_by_p_suffered + t.ev[1].negated_by_p_suffered}` : "–";
     const tp = (t.tempo_pp ?? t.tempo_search_pp);
-    h += `<tr><td>${t.turn}</td><td>P${t.turn_player}</td><td>${t.lp[0]}–${t.lp[1]}</td><td>${t.p0.hand}/${t.p1.hand}</td><td>${t.p0.field}/${t.p1.field}</td><td>${t.p0.gy}/${t.p1.gy}</td><td>${t.p0.ban}/${t.p1.ban}</td><td>${t.p0.extra_used}/${t.p1.extra_used}</td><td>${t.card_adv > 0 ? "+" : ""}${t.card_adv}</td><td>${fmt(t.v_p0, 2)}</td><td>${fmt(t.v_p1, 2)}</td><td>${fmt(t.v_comb, 2)}</td><td>${fmt(t.disagree, 2)}</td><td>${tp === null || tp === undefined ? "–" : (tp >= 0 ? "+" : "") + Number(tp).toFixed(1)}</td><td>${evc}</td></tr>`;
+    h += `<tr><td>${t.turn}</td><td>P${t.turn_player}</td><td>${t.lp[0]}–${t.lp[1]}</td><td>${t.p0.hand}/${t.p1.hand}</td><td>${t.p0.field}/${t.p1.field}</td><td>${t.p0.gy}/${t.p1.gy}</td><td>${t.p0.ban}/${t.p1.ban}</td><td>${t.p0.extra_used}/${t.p1.extra_used}</td><td>${t.card_adv > 0 ? "+" : ""}${t.card_adv}</td><td>${fmt(t.v_p0, 2)}</td><td>${fmt(t.v_p1, 2)}</td><td>${fmt(t.v_comb, 2)}</td><td>${fmt(t.disagree, 2)}</td><td>${tp === null || tp === undefined ? "–" : (tp >= 0 ? "+" : "") + Number(tp).toFixed(1)}</td><td>${evc}</td>${anyAuxT ? `<td>${auxLp(t)}</td><td>${auxCards(t)}</td><td>${auxEnds(t)}</td><td>${auxTurns(t)}</td>` : ""}</tr>`;
   }
-  h += `</table></div><p class="mut">hand/field/GY/ban/ext as P0/P1; adv = P0 minus P1 hand+field; v_* from value net at turn start when present; events act per seat, int = opp-turn activations, neg = negations suffered.</p>
+  h += `</table></div><p class="mut">hand/field/GY/ban/ext as P0/P1; adv = P0 minus P1 hand+field; v_* from value net at turn start when present; events act per seat, int = opp-turn activations, neg = negations suffered.${anyAuxT ? " aux ΔLP in LP (me/opp, pred then real; end = no next own turn); aux cards = own hand/field change; P(end) = P(game ends before my next turn); T left = duel turns to game end." : ""}</p>
   <h2>labelled moves</h2>`;
   const labelled = (g.evals || []).filter(e => e.label && e.label !== "none");
   if (!labelled.length) h += `<p>None.</p>`;
@@ -243,9 +289,20 @@ async function gamePage(run, idx) {
   const yAt = new Map(pts.map(p => [p.x, p.y]));
   marks = marks.map(m => ({ x: m.x, y: yAt.get(m.x) ?? null, _e: m._e })).filter(m => m.y !== null);
   const starts = Object.values(g.turn_starts || {});
+  const riskPts = [];
+  for (const t of g.turns || []) {
+    if (!t.aux) continue;
+    for (const s of ["0", "1"]) {
+      const r = t.aux[s] ?? t.aux[Number(s)];
+      if (r && r.pred_ends !== null && r.pred_ends !== undefined && r.k !== undefined)
+        riskPts.push({ x: r.k, y: Number(r.pred_ends) * 100, _s: Number(s), _t: t.turn });
+    }
+  }
+  riskPts.sort((a, b) => a.x - b.x);
   const evChart = new Chart(document.getElementById("ev"), { type: "line",
     data: { datasets: [
       { label: g.curve_full ? "value net (p0 win %)" : "search eval (p0 win %)", data: pts, pointRadius: 0, borderWidth: 1.5, spanGaps: true },
+      ...(riskPts.length ? [{ label: "lethal risk P(end) %", data: riskPts, pointRadius: 3, borderWidth: 1, borderDash: [5, 3], borderColor: "#c00", backgroundColor: "#c00", spanGaps: true }] : []),
       ...Object.keys(LBLC).map(L => ({ label: L, data: marks.filter(m => m._e.label === L).map(m => ({ x: m.x, y: m.y })),
         type: "scatter", pointStyle: "triangle", pointRadius: 6, backgroundColor: LBLC[L], borderColor: LBLC[L] })),
     ] },

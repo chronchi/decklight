@@ -418,6 +418,114 @@ def _attach_values(
         }
     ann["tempo"] = full
     ann["swing_turn"] = max(full, key=lambda t: abs(full[t]["dp_tp"])) if full else None
+    if isinstance(values.get("aux"), dict):
+        _attach_aux(ann, turns, turn_nos, snaps, values, game_idx)
+
+
+def _aux_starts(snaps: list[dict]) -> dict[int, list[tuple[int, int]]]:
+    """Per seat: [(duel turn, first decision pos)] of that seat's own-turn starts.
+
+    Own-turn start = the seat's first decision in a duel turn where it is the
+    turn player (mirrors eval/aux._own_turn_starts, on replay snaps).
+    """
+    starts: dict[int, list[tuple[int, int]]] = {0: [], 1: []}
+    seen: dict[int, set[int]] = {0: set(), 1: set()}
+    for j, s in enumerate(snaps):
+        a = int(s["actor"])
+        t = int(s["turn"])
+        if int(s["turn_player"]) == a and t not in seen[a]:
+            seen[a].add(t)
+            starts[a].append((t, j))
+    return starts
+
+
+def _attach_aux(
+    ann: dict, turns: dict[int, dict], turn_nos: list[int], snaps: list[dict], values: dict, game_idx
+) -> None:
+    """Add per-turn-per-seat aux predictions + realized outcomes (pure).
+
+    Predictions are read at the seat's first decision of the turn; realized
+    outcomes are computed from the replay snaps by that seat's next own-turn
+    start (or the game end). Stored as turns[t]["aux"][seat] with string seat
+    keys for JSON stability (counts use int keys internally; both read back).
+    """
+    aux = values.get("aux", {})
+    n = len(snaps)
+    try:
+        ad_lp = [[float(x) for x in row] for row in aux.get("d_lp", [])]
+        ad_cards = [[float(x) for x in row] for row in aux.get("d_cards", [])]
+        a_ends = [float(x) for x in aux.get("ends", [])]
+        a_turns = [float(x) for x in aux.get("turns_left", [])]
+    except (TypeError, ValueError):
+        raise ValueError(f"game {game_idx}: malformed aux arrays")
+    if not (len(ad_lp) == len(ad_cards) == len(a_ends) == len(a_turns) == n):
+        raise ValueError(
+            f"game {game_idx}: aux length {[len(ad_lp), len(ad_cards), len(a_ends), len(a_turns)]}"
+            f" != {n} replay decisions"
+        )
+    for row in ad_lp:
+        if len(row) != 2:
+            raise ValueError(f"game {game_idx}: aux d_lp row len {len(row)} != 2")
+        _check_finite(row, f"game {game_idx} aux d_lp")
+    for row in ad_cards:
+        if len(row) != 14:
+            raise ValueError(f"game {game_idx}: aux d_cards row len {len(row)} != 14")
+        _check_finite(row, f"game {game_idx} aux d_cards")
+    _check_finite(a_ends, f"game {game_idx} aux ends")
+    _check_finite(a_turns, f"game {game_idx} aux turns_left")
+    for p in a_ends:
+        if not 0.0 <= p <= 1.0:
+            raise ValueError(f"game {game_idx}: aux ends {p} outside [0, 1]")
+
+    first_pos: dict[tuple[int, int], int] = {}
+    for k, s in enumerate(snaps):
+        first_pos.setdefault((int(s["turn"]), int(s["actor"])), k)
+    starts = _aux_starts(snaps)
+    start_turns = {s: [t for t, _ in starts[s]] for s in (0, 1)}
+    start_pos = {s: [j for _, j in starts[s]] for s in (0, 1)}
+    end_turn = max(int(s["turn"]) for s in snaps)
+
+    import bisect
+
+    for t in turn_nos:
+        per_seat: dict = {}
+        for s in (0, 1):
+            if (t, s) not in first_pos:
+                continue
+            pos = first_pos[(t, s)]
+            pred_lp = [round(ad_lp[pos][0]), round(ad_lp[pos][1])]
+            pred_cards = [round(float(x), 2) for x in ad_cards[pos]]
+            pred_ends = round(float(a_ends[pos]), 3)
+            pred_turns = round(float(a_turns[pos]), 2)
+            # next own-turn start strictly after duel turn t
+            idx = bisect.bisect_right(start_turns[s], int(t))
+            if idx < len(start_pos[s]):
+                j = int(start_pos[s][idx])
+                now_lp, fut_lp = snaps[pos]["lp"], snaps[j]["lp"]
+                real_lp = [int(fut_lp[s]) - int(now_lp[s]), int(fut_lp[1 - s]) - int(now_lp[1 - s])]
+                now_c, fut_c = snaps[pos]["counts"], snaps[j]["counts"]
+                real_me = [int(b) - int(a) for a, b in zip(now_c[s], fut_c[s], strict=True)]
+                real_op = [int(b) - int(a) for a, b in zip(now_c[1 - s], fut_c[1 - s], strict=True)]
+                real_cards: list | None = [round(float(x), 2) for x in (real_me + real_op)]
+                real_ends = 0
+            else:
+                real_lp = None
+                real_cards = None
+                real_ends = 1
+            real_turns = int(end_turn) - int(t)
+            per_seat[str(s)] = {
+                "k": int(pos),
+                "pred_lp": pred_lp,
+                "pred_cards": pred_cards,
+                "pred_ends": pred_ends,
+                "pred_turns": pred_turns,
+                "real_lp": real_lp,
+                "real_cards": real_cards,
+                "real_ends": int(real_ends),
+                "real_turns": int(real_turns),
+            }
+        if per_seat:
+            turns[t]["aux"] = per_seat
 
 
 def _assert_no_nan(obj) -> None:
@@ -462,6 +570,18 @@ def summarize(anns: list[dict], input_dirs: list[str], commit: str) -> dict:
     vcal: dict[tuple[str, int], list] = defaultdict(lambda: [0, 0, 0.0])
     vcomb_sign: dict[str, list[int]] = defaultdict(lambda: [0, 0])
     disagree_abs: dict[str, list[float]] = defaultdict(list)
+    # Aux heads: predicted vs realized at each seat's first decision per turn.
+    aux_ends_pred: list[float] = []
+    aux_ends_real: list[float] = []
+    aux_lp_se = aux_lp_se0 = 0.0
+    aux_lp_ae = 0.0
+    aux_lp_n = 0
+    aux_cards_se = aux_cards_se0 = 0.0
+    aux_cards_ae = 0.0
+    aux_cards_n = 0
+    aux_turns_pred: list[float] = []
+    aux_turns_real: list[float] = []
+    aux_points = 0
     for ann in anns:
         if ann["truncated"]:
             n_trunc += 1
@@ -520,6 +640,46 @@ def summarize(anns: list[dict], input_dirs: list[str], commit: str) -> dict:
                 d = ts.get("disagree")
                 if d is not None:
                     disagree_abs[sb].append(abs(d))
+            aux_d = ts.get("aux")
+            if isinstance(aux_d, dict):
+                for seat_rec in aux_d.values():
+                    if not isinstance(seat_rec, dict):
+                        continue
+                    try:
+                        pe = float(seat_rec["pred_ends"])
+                        re_ = float(seat_rec["real_ends"])
+                        pt = float(seat_rec["pred_turns"])
+                        rt = float(seat_rec["real_turns"])
+                    except (KeyError, TypeError, ValueError):
+                        continue
+                    aux_points += 1
+                    aux_ends_pred.append(pe)
+                    aux_ends_real.append(re_)
+                    aux_turns_pred.append(pt)
+                    aux_turns_real.append(rt)
+                    rl = seat_rec.get("real_lp")
+                    pl = seat_rec.get("pred_lp")
+                    if isinstance(rl, (list, tuple)) and isinstance(pl, (list, tuple)) and len(rl) == 2 and len(pl) == 2:
+                        for p_, r_ in zip(pl, rl, strict=True):
+                            e = float(p_) - float(r_)
+                            aux_lp_se += e * e
+                            aux_lp_se0 += float(r_) * float(r_)
+                            aux_lp_ae += abs(e)
+                            aux_lp_n += 1
+                    rc = seat_rec.get("real_cards")
+                    pc = seat_rec.get("pred_cards")
+                    if (
+                        isinstance(rc, (list, tuple))
+                        and isinstance(pc, (list, tuple))
+                        and len(rc) == 14
+                        and len(pc) == 14
+                    ):
+                        for p_, r_ in zip(pc, rc, strict=True):
+                            e = float(p_) - float(r_)
+                            aux_cards_se += e * e
+                            aux_cards_se0 += float(r_) * float(r_)
+                            aux_cards_ae += abs(e)
+                            aux_cards_n += 1
         for t, tp in ann["tempo"].items():
             tempo_vals[(int(t), int(tp["turn_player"]))].append(tp["dp_tp"])
         if ann["swing_turn"] is not None:
@@ -638,8 +798,78 @@ def summarize(anns: list[dict], input_dirs: list[str], commit: str) -> dict:
                  "mean_abs": (sum(disagree_abs[sb]) / len(disagree_abs[sb]) if disagree_abs[sb] else None)}
             for sb in SIGN_BUCKETS
         }
+    if aux_points:
+        summary["aux"] = _summarize_aux(
+            aux_ends_pred, aux_ends_real, aux_lp_se, aux_lp_se0, aux_lp_ae, aux_lp_n,
+            aux_cards_se, aux_cards_se0, aux_cards_ae, aux_cards_n,
+            aux_turns_pred, aux_turns_real, aux_points,
+        )
     _assert_no_nan(summary)
     return summary
+
+
+def _r2(mse: float | None, mse_base: float | None) -> float | None:
+    if mse is None or mse_base is None or not math.isfinite(mse) or not math.isfinite(mse_base):
+        return None
+    if mse_base <= 0:
+        return None
+    return 1.0 - mse / mse_base
+
+
+def _summarize_aux(ends_pred, ends_real, lp_se, lp_se0, lp_ae, lp_n,
+                   cards_se, cards_se0, cards_ae, cards_n,
+                   turns_pred, turns_real, n_points) -> dict:
+    """Per-head predicted-vs-realized accuracy over turn-seat points (pure)."""
+    n = len(ends_pred)
+    bins = [{"lo": round(b * CAL_BIN_WIDTH, 1), "hi": round((b + 1) * CAL_BIN_WIDTH, 1),
+             "n": 0, "rate": None, "mean_p": None} for b in range(CAL_N_BINS)]
+    brier = brier_base = ece = None
+    base_rate = None
+    if n:
+        base_rate = sum(ends_real) / n
+        se = sum((p - y) ** 2 for p, y in zip(ends_pred, ends_real, strict=True))
+        se0 = sum((base_rate - y) ** 2 for y in ends_real)
+        brier = se / n
+        brier_base = se0 / n
+        cells: dict[int, dict] = {b: {"n": 0, "y": 0.0, "p": 0.0} for b in range(CAL_N_BINS)}
+        for p, y in zip(ends_pred, ends_real, strict=True):
+            b = min(int(p * CAL_N_BINS), CAL_N_BINS - 1)
+            cells[b]["n"] += 1
+            cells[b]["y"] += y
+            cells[b]["p"] += p
+        num = 0.0
+        for b in range(CAL_N_BINS):
+            c = cells[b]
+            if c["n"]:
+                rate = c["y"] / c["n"]
+                mp = c["p"] / c["n"]
+                num += c["n"] * abs(rate - mp)
+                bins[b] = {"lo": bins[b]["lo"], "hi": bins[b]["hi"],
+                           "n": c["n"], "rate": rate, "mean_p": mp}
+        ece = num / n
+    lp_mse = (lp_se / lp_n) if lp_n else None
+    lp_mse0 = (lp_se0 / lp_n) if lp_n else None
+    cards_mse = (cards_se / cards_n) if cards_n else None
+    cards_mse0 = (cards_se0 / cards_n) if cards_n else None
+    tn = len(turns_pred)
+    t_se = sum((p - y) ** 2 for p, y in zip(turns_pred, turns_real, strict=True)) if tn else None
+    t_ae = sum(abs(p - y) for p, y in zip(turns_pred, turns_real, strict=True)) if tn else None
+    t_mean = (sum(turns_real) / tn) if tn else None
+    t_se0 = sum((t_mean - y) ** 2 for y in turns_real) if tn and t_mean is not None else None
+    t_mse = (t_se / tn) if tn and t_se is not None else None
+    t_mse0 = (t_se0 / tn) if tn and t_se0 is not None else None
+    return {
+        "n_points": n_points,
+        "ends": {"n": n, "brier": brier, "brier_base": brier_base, "ece": ece,
+                 "base_rate": base_rate, "bins": bins},
+        "d_lp": {"n": lp_n, "mae": (lp_ae / lp_n) if lp_n else None, "mse": lp_mse,
+                 "mse_base": lp_mse0, "r2": _r2(lp_mse, lp_mse0)},
+        "d_cards": {"n": cards_n, "mae": (cards_ae / cards_n) if cards_n else None, "mse": cards_mse,
+                    "mse_base": cards_mse0, "r2": _r2(cards_mse, cards_mse0)},
+        "turns_left": {"n": tn, "mae": (t_ae / tn) if tn and t_ae is not None else None,
+                       "mse": t_mse, "mse_base": t_mse0, "r2": _r2(t_mse, t_mse0),
+                       "mean": t_mean},
+    }
 
 
 # ---------------------------------------------------------------- markdown ---
@@ -675,13 +905,24 @@ def render_game_md(ann: dict) -> str:
     ]
     if "curve_full" in ann:
         lines.append("- Full-curve evals (v_comb) from the value net at every decision of both seats.")
+    has_aux = any(isinstance(ts.get("aux"), dict) for ts in ann["turns"].values())
+    if has_aux:
+        lines.append("- Aux: predicted vs actual by the seat's next own turn (ΔLP me/opp in LP, P(end), turns left).")
     lines += [
         "",
         "## Turns",
         "",
-        "| turn | player | LP (own-opp) | hand | field | GY | banished | extra used | card_adv | eval p0 | tempo |",
-        "|---|---|---|---|---|---|---|---|---|---|---|",
     ]
+    if has_aux:
+        lines += [
+            "| turn | player | LP (own-opp) | hand | field | GY | banished | extra used | card_adv | eval p0 | tempo | aux ΔLP pred/real | P(end) pred/real | T left pred/real |",
+            "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|",
+        ]
+    else:
+        lines += [
+            "| turn | player | LP (own-opp) | hand | field | GY | banished | extra used | card_adv | eval p0 | tempo |",
+            "|---|---|---|---|---|---|---|---|---|---|---|",
+        ]
     first_turn = min(ann["turns"])
     extra_start = {p: ann["turns"][first_turn]["counts"][p][6] for p in (0, 1)}
     for t in sorted(ann["turns"]):
@@ -699,12 +940,15 @@ def render_game_md(ann: dict) -> str:
             tempo_pp = ""
             if tp_info and p == ts["turn_player"]:
                 tempo_pp = f"{tp_info['dp_tp_pp']:+.1f}pp"
-            lines.append(
+            base = (
                 f"| {t} | P{p}{' (to move)' if p == ts['turn_player'] else ''} "
                 f"| {ts['lp'][p]}-{ts['lp'][1 - p]} "
                 f"| {c[1]} | {c[2] + c[3]} | {c[4]} | {c[5]} | {eu} | {adv:+d} | "
                 f"{eval_p0} | {tempo_pp} |"
             )
+            if has_aux:
+                base += f" {_aux_lp_cell(ts, p)} | {_aux_ends_cell(ts, p)} | {_aux_turns_cell(ts, p)} |"
+            lines.append(base)
     labelled = [ev for ev in ann["evals"] if ev["label"] != "none"]
     lines += ["", "## Labelled moves", ""]
     if not labelled:
@@ -837,7 +1081,71 @@ def render_summary_md(summary: dict) -> str:
             lines.append(
                 f"| {b} | {d['n']} | {d['mean_abs']:.3f} |" if d["mean_abs"] is not None else f"| {b} | {d['n']} | - |"
             )
+    if "aux" in summary:
+        ax = summary["aux"]
+        lines += [
+            "",
+            "## Aux heads: predicted vs realized (turn-seat points, non-truncated games)",
+            "",
+            f"- Points: {ax['n_points']}.",
+            (
+                f"- P(ends): Brier {ax['ends']['brier']:.4f} vs base-rate {_fmt1(ax['ends']['brier_base'])} "
+                f"(base rate {_fmt1(ax['ends']['base_rate'])}, ECE {_fmt1(ax['ends']['ece'])})."
+            ),
+            f"- d_lp (LP units): MAE {_fmt1(ax['d_lp']['mae'])} R² vs 0 {_fmt1(ax['d_lp']['r2'])} (n={ax['d_lp']['n']}).",
+            f"- d_cards: MAE {_fmt1(ax['d_cards']['mae'])} R² vs 0 {_fmt1(ax['d_cards']['r2'])} (n={ax['d_cards']['n']}).",
+            (
+                f"- turns_left: MAE {_fmt1(ax['turns_left']['mae'])} R² vs mean {_fmt1(ax['turns_left']['r2'])} "
+                f"(mean {_fmt1(ax['turns_left']['mean'])}, n={ax['turns_left']['n']})."
+            ),
+            "",
+            "| p(ends) bin | n | end rate | mean p |",
+            "|---|---|---|---|",
+        ]
+        for b in ax["ends"]["bins"]:
+            if not b["n"]:
+                continue
+            lines.append(f"| {b['lo']:.1f}-{b['hi']:.1f} | {b['n']} | {b['rate']:.3f} | {b['mean_p']:.3f} |")
     return "\n".join(lines) + "\n"
+
+
+def _fmt1(x: float | None) -> str:
+    return "-" if x is None else f"{x:.4f}"
+
+
+def _aux_seat(ts: dict, p: int) -> dict | None:
+    aux_d = ts.get("aux")
+    if not isinstance(aux_d, dict):
+        return None
+    for k in (str(p), p):
+        if k in aux_d and isinstance(aux_d[k], dict):
+            return aux_d[k]
+    return None
+
+
+def _aux_lp_cell(ts: dict, p: int) -> str:
+    rec = _aux_seat(ts, p)
+    if rec is None:
+        return ""
+    pl = rec.get("pred_lp") or [0, 0]
+    rl = rec.get("real_lp")
+    if rl is None:
+        return f"{pl[0]:+d}/{pl[1]:+d} (end)"
+    return f"{pl[0]:+d}/{pl[1]:+d} ({rl[0]:+d}/{rl[1]:+d})"
+
+
+def _aux_ends_cell(ts: dict, p: int) -> str:
+    rec = _aux_seat(ts, p)
+    if rec is None:
+        return ""
+    return f"{float(rec['pred_ends']) * 100:.1f}%/{int(rec['real_ends'])}"
+
+
+def _aux_turns_cell(ts: dict, p: int) -> str:
+    rec = _aux_seat(ts, p)
+    if rec is None:
+        return ""
+    return f"{float(rec['pred_turns']):.1f}/{int(rec['real_turns'])}"
 
 
 def _msg_name(t: int) -> str:

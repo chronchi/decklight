@@ -6,7 +6,8 @@
 #     (22 files each), data/cache/value_p2/best.pt (the product value), data/cards/emb
 #   outputs in runs/<name>/: values-<arm>.jsonl (merged shards) + ann-<arm>/ (the launcher pulls
 #     runs/<name>/ back).
-# Env: SCORE_CAP (40m per scoring arm). Usage: bash scripts/vast_score_decisions.sh <name>.
+# Env: SCORE_CAP (40m per scoring arm), AUX (0/1: also score data/cache/aux_p2/aux.pt heads).
+# Usage: [AUX=1] bash scripts/vast_score_decisions.sh <name>.
 # Do NOT run on the laptop (vast GPU only).
 set -uo pipefail
 export PATH="$HOME/.local/bin:$PATH"
@@ -25,6 +26,11 @@ export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 T0=$SECONDS
 tick() { echo "$(date +%T) $1 $((SECONDS - T0)) s" | tee -a "$OUT/PROGRESS"; }
 IN=data/cache/score-in; VAL=data/cache/value_p2/best.pt
+AUX="${AUX:-0}"; AUXPT=data/cache/aux_p2/aux.pt; AUX_ARG=""
+if [ "$AUX" = 1 ]; then
+  [ -s "$AUXPT" ] || { alert "missing aux checkpoint $AUXPT (AUX=1)"; exit 3; }
+  AUX_ARG="--aux $AUXPT"
+fi
 [ -s "$VAL" ] || { alert "missing product value $VAL"; exit 3; }
 for arm in hppo-p2 hppo-p; do
   ls "$IN/$arm"/games-*.jsonl > /dev/null 2>&1 || { alert "no games in $IN/$arm"; exit 3; }
@@ -33,7 +39,7 @@ done
 J=$(box_cores)
 # probe: one process scores 200 games (~60 s; 8 games took 5 s, too fast to sample, score-20261016-0942); its peak GPU memory and RSS size the pool
 uv run --no-sync python scripts/score_decisions.py --games "$IN/hppo-p2" --value "$VAL" \
-  --out "$OUT/probe.jsonl" --device cuda --max-games 200 --batch 2048 > "$OUT/probe.txt" 2>&1 &
+  --out "$OUT/probe.jsonl" --device cuda --max-games 200 --batch 2048 $AUX_ARG > "$OUT/probe.txt" 2>&1 &
 PP=$!; GMB=0; RMB=0
 for _ in $(seq 60); do
   sleep 3
@@ -55,11 +61,12 @@ for arm in hppo-p2 hppo-p; do
   PIDS=()
   for ((p = 0; p < NP; p++)); do
     timeout "${SCORE_CAP:-40m}" uv run --no-sync python scripts/score_decisions.py --games "$IN/$arm" \
-      --value "$VAL" --out "$d/values-$p.jsonl" --device cuda --batch 2048 --shard "$p/$NP" \
+      --value "$VAL" --out "$d/values-$p.jsonl" --device cuda --batch 2048 --shard "$p/$NP" $AUX_ARG \
       > "$d/score-$p.txt" 2>&1 &
     PIDS+=($!)
   done
   # first milestone: the first shard file with >= 50 games -> decisions/s to PROGRESS
+  # (+ aux summary when AUX=1; ALERT on any NaN aux value)
   MS=0
   while kill -0 "${PIDS[@]}" 2>/dev/null; do
     sleep 15
@@ -75,6 +82,31 @@ for x in open('$f'):
     r = json.loads(x); n += 1; d += len(r['k'])
 print(f'{n} {d}')")
         echo "$(date +%T) milestone $arm first shard: $stat (games decisions) in $((SECONDS - T0)) s" >> "$OUT/PROGRESS"
+        if [ "$AUX" = 1 ]; then
+          auxstat=$(python3 -c "
+import json, math
+ends = []; alp = []
+for x in open('$f'):
+    r = json.loads(x)
+    ax = r.get('aux')
+    if not ax: continue
+    ends.extend(ax.get('ends', []))
+    for pair in ax.get('d_lp', []):
+        alp.extend(abs(float(v)) for v in pair)
+bad = any(not math.isfinite(v) for v in ends + alp)
+if bad:
+    print('NAN')
+else:
+    me = (sum(ends) / len(ends)) if ends else float('nan')
+    ml = (sum(alp) / len(alp)) if alp else float('nan')
+    print(f'mean_Pends={me:.4f} mean_abs_dlp={ml:.1f} n={len(ends)}')
+")
+          if [ "$auxstat" = NAN ]; then
+            echo "ALERT $arm: NaN in aux values ($f)" | tee -a "$OUT/ALERT"
+          else
+            echo "$(date +%T) milestone $arm aux first shard: $auxstat" >> "$OUT/PROGRESS"
+          fi
+        fi
         break
       fi
     done

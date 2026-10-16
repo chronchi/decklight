@@ -68,6 +68,48 @@ def iter_records(dirs: list[Path], max_games: int):
                     return
 
 
+def _sha256(path: Path) -> str:
+    import hashlib
+
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def load_aux_model(aux_path: Path, device: str):
+    """Load an aux.pt checkpoint (train_aux.py format) onto device, eval mode."""
+    import torch
+
+    from ygo_zero.eval.aux import AuxHeads
+
+    ckpt = torch.load(aux_path, map_location="cpu", weights_only=False)
+    state = ckpt.get("model", ckpt)
+    # infer the trunk width from the neck weight [256, emb_dim]
+    neck_w = None
+    for k in ("neck.0.weight", "neck.0.weight", "neck.weight"):
+        if k in state:
+            neck_w = state[k]
+            break
+    if neck_w is None:
+        # fall back: first 2-D weight with dim 0 == 256
+        for v in state.values():
+            import torch as _t
+
+            if isinstance(v, _t.Tensor) and v.dim() == 2 and v.shape[0] == 256:
+                neck_w = v
+                break
+    if neck_w is None:
+        fail(f"bad aux checkpoint {aux_path}: no neck weight found")
+    emb_dim = int(neck_w.shape[1])
+    aux = AuxHeads(emb_dim)
+    conv = {k: (v.float() if v.is_floating_point() else v) for k, v in state.items()}
+    aux.load_state_dict(conv)
+    aux.to(device).eval()
+    return aux, ckpt.get("value_sha256")
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--games", nargs="+", required=True, type=Path)
@@ -78,6 +120,7 @@ def main() -> int:
     ap.add_argument("--max-games", type=int, default=0)
     ap.add_argument("--batch", type=int, default=2048, help="max obs held / scored at once")
     ap.add_argument("--shard", default="0/1", help="i/n: score games i::n")
+    ap.add_argument("--aux", type=Path, default=None, help="optional aux.pt checkpoint (train_aux.py)")
     a = ap.parse_args()
 
     for d in a.games:
@@ -88,7 +131,17 @@ def main() -> int:
     from ygo_zero.eval.value import ValueNet
 
     t0 = time.time()
-    value = ValueNet(a.value, a.emb, device=a.device, batch=min(a.batch, 512)).values
+    scorer = ValueNet(a.value, a.emb, device=a.device, batch=min(a.batch, 512))
+    value = scorer.values
+
+    aux_model = None
+    if a.aux is not None:
+        if not a.aux.is_file():
+            fail(f"no such aux checkpoint: {a.aux}")
+        want = _sha256(Path(a.value))
+        aux_model, got_sha = load_aux_model(a.aux, a.device)
+        if got_sha != want:
+            fail(f"aux value_sha256 {got_sha} != value ckpt {a.value} sha {want}")
 
     import render_showcase as R
 
@@ -107,32 +160,104 @@ def main() -> int:
     out_lines: list[str] = []
     pend_obs: list[dict] = []
     pend_pos: list[tuple[int, int]] = []  # (line idx, decision idx)
-    per_game: list[dict] = []  # parallel to recs: k/actor/turn/v lists
+    per_game: list[dict] = []  # parallel to recs: k/actor/turn/v (+aux) lists
     for r in recs:
-        per_game.append(
-            {
-                "game_idx": r.get("game_idx"),
-                "seed": r.get("seed"),
-                "decks": list(r.get("decks", [])),
-                "s_seat": r.get("s_seat"),
-                "k": [],
-                "actor": [],
-                "turn": [],
-                "v": [],
-            }
-        )
+        g0: dict = {
+            "game_idx": r.get("game_idx"),
+            "seed": r.get("seed"),
+            "decks": list(r.get("decks", [])),
+            "s_seat": r.get("s_seat"),
+            "k": [],
+            "actor": [],
+            "turn": [],
+            "v": [],
+        }
+        if aux_model is not None:
+            g0["aux"] = {"d_lp": [], "d_cards": [], "ends": [], "turns_left": []}
+        per_game.append(g0)
+
+    _checked_trunk = {"done": False}
 
     def flush() -> None:
         if not pend_obs:
             return
         buf = {k: np.stack([o[k] for o in pend_obs]) for k in pend_obs[0]}
-        v = value(buf)
-        if len(v) != len(pend_obs):
-            fail(f"value returned {len(v)} scores for {len(pend_obs)} obs")
-        if bool(np.isnan(np.asarray(v)).any()):
+        if aux_model is None:
+            v = value(buf)
+            if len(v) != len(pend_obs):
+                fail(f"value returned {len(v)} scores for {len(pend_obs)} obs")
+            if bool(np.isnan(np.asarray(v)).any()):
+                fail("NaN in value scores")
+            for (li, di), x in zip(pend_pos, v, strict=True):
+                per_game[li]["v"][di] = round(float(np.clip(x, -1, 1)), 4)
+            pend_obs.clear()
+            pend_pos.clear()
+            return
+        import torch
+
+        n = len(pend_obs)
+        vs: list[float] = []
+        lp_out: list = []
+        cards_out: list = []
+        ends_out: list = []
+        turns_out: list = []
+        bs = max(1, int(getattr(scorer, "batch", 512)))
+        for i in range(0, n, bs):
+            sub = {k: v[i : i + bs] for k, v in buf.items()}
+            t = scorer._tensor(sub)
+            with torch.no_grad():
+                feat = scorer.model.features(t)
+                v_t = scorer.model.value_head(feat).squeeze(-1)
+                if not _checked_trunk["done"]:
+                    _, v_ref = scorer.model.forward_value(t)
+                    if not torch.equal(v_t.cpu(), v_ref.cpu()):
+                        fail("trunk value_head != forward_value on the first batch")
+                    _checked_trunk["done"] = True
+                pred = aux_model(feat)
+                d_lp = pred["d_lp"].float().cpu().numpy()
+                d_cards = pred["d_cards"].float().cpu().numpy()
+                ends_l = pred["ends"].float().cpu().numpy()
+                turns_l = pred["turns_left"].float().cpu().numpy()
+            vv = v_t.float().cpu().numpy()
+            if vv.ndim == 0:
+                vv = vv.reshape(1)
+            vs.extend([float(x) for x in vv])
+            lp_out.extend(d_lp)
+            cards_out.extend(d_cards)
+            ends_out.extend([float(x) for x in np.asarray(ends_l).reshape(-1)])
+            turns_out.extend([float(x) for x in np.asarray(turns_l).reshape(-1)])
+        if len(vs) != n:
+            fail(f"value returned {len(vs)} scores for {n} obs")
+        if bool(np.isnan(np.asarray(vs)).any()):
             fail("NaN in value scores")
-        for (li, di), x in zip(pend_pos, v, strict=True):
+        arr_lp = np.asarray(lp_out, dtype=np.float64)
+        arr_cards = np.asarray(cards_out, dtype=np.float64)
+        arr_ends_l = np.asarray(ends_out, dtype=np.float64)
+        arr_turns_l = np.asarray(turns_out, dtype=np.float64)
+        if (
+            bool(np.isnan(arr_lp).any())
+            or bool(np.isnan(arr_cards).any())
+            or bool(np.isnan(arr_ends_l).any())
+            or bool(np.isnan(arr_turns_l).any())
+        ):
+            fail("NaN in aux scores")
+        ends_p = 1.0 / (1.0 + np.exp(-arr_ends_l))
+        turns_e = np.expm1(arr_turns_l)
+        if bool(np.isnan(ends_p).any()) or bool(np.isnan(turns_e).any()):
+            fail("NaN in aux scores")
+        for idx, ((li, di), x) in enumerate(zip(pend_pos, vs, strict=True)):
             per_game[li]["v"][di] = round(float(np.clip(x, -1, 1)), 4)
+            lp_pair = [round(float(vv * 8000.0)) for vv in arr_lp[idx].tolist()]
+            cards_row = [round(float(vv), 2) for vv in arr_cards[idx].tolist()]
+            e_p = round(float(ends_p[idx]), 3)
+            t_e = round(float(turns_e[idx]), 2)
+            for z in (e_p, t_e, *cards_row, *lp_pair):
+                if not np.isfinite(z):
+                    fail("NaN in aux scores")
+            per_game[li]["aux"]["d_lp"].append(lp_pair)
+            per_game[li]["aux"]["d_cards"].append(cards_row)
+            per_game[li]["aux"]["ends"].append(e_p)
+            per_game[li]["aux"]["turns_left"].append(t_e)
         pend_obs.clear()
         pend_pos.clear()
 
@@ -176,6 +301,22 @@ def main() -> int:
     for g in per_game:
         if any(not np.isfinite(x) for x in g["v"]):
             fail(f"game {g['game_idx']}: NaN in final values")
+        if aux_model is not None:
+            ax = g.get("aux", {})
+            n = len(g["k"])
+            if not (
+                len(ax.get("d_lp", [])) == n
+                and len(ax.get("d_cards", [])) == n
+                and len(ax.get("ends", [])) == n
+                and len(ax.get("turns_left", [])) == n
+            ):
+                fail(f"game {g['game_idx']}: aux length != decisions")
+            for arr in (ax["ends"], ax["turns_left"]):
+                if any(not np.isfinite(x) for x in arr):
+                    fail(f"game {g['game_idx']}: NaN in final aux")
+            for row in list(ax["d_lp"]) + list(ax["d_cards"]):
+                if any(not np.isfinite(x) for x in row):
+                    fail(f"game {g['game_idx']}: NaN in final aux")
         out_lines.append(json.dumps(g))
     a.out.parent.mkdir(parents=True, exist_ok=True)
     a.out.write_text("\n".join(out_lines) + "\n")

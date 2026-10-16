@@ -167,6 +167,14 @@ def main() -> int:
         accs = {b: summary["v_comb_sign"][b]["acc"] for b in ("<=2", "3", "4", "5+")}
         dis = {b: summary["disagree"][b]["mean_abs"] for b in ("<=2", "3", "4", "5+")}
         print(f"value_ECE={eces} v_comb_sign_acc={accs} mean_|disagree|={dis}")
+    if "aux" in summary:
+        ax = summary["aux"]
+        print(
+            f"aux_points={ax['n_points']} ends_Brier={ax['ends']['brier']:.4f}/{ax['ends']['brier_base']:.4f}"
+            f" d_lp_MAE={ax['d_lp']['mae']:.1f}_R2={ax['d_lp']['r2']}"
+            f" d_cards_MAE={ax['d_cards']['mae']:.3f}_R2={ax['d_cards']['r2']}"
+            f" turns_MAE={ax['turns_left']['mae']:.2f}_R2={ax['turns_left']['r2']}"
+        )
     print(f"wrote {a.out}")
     return 0
 

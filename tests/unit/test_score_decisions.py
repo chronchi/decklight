@@ -177,3 +177,109 @@ def test_zero_games_exits_2(tmp_path, monkeypatch):
         assert e.value.code == 2
     finally:
         sys.argv = old
+
+
+def _tiny_value_and_aux(tmp_path: Path):
+    """Random-init tiny value ckpt + matching aux.pt (CPU-only, no trained weights)."""
+    import hashlib
+
+    import torch
+
+    from ygo_zero.eval.aux import AUX_SPEC, AuxHeads
+    from ygo_zero.model.policy import PolicyNet
+
+    torch.set_num_threads(1)
+    torch.manual_seed(0)
+    rng = np.random.default_rng(0)
+    n, ed = 50, 8
+    emb_path = tmp_path / "tiny-emb.npz"
+    np.savez(emb_path, codes=np.arange(1, n + 1),
+             card=rng.normal(size=(n, ed)).astype(np.float32),
+             effects=rng.normal(size=(n, 2, ed)).astype(np.float32),
+             n_effects=np.ones(n, dtype=np.int64))
+    emb = dict(np.load(emb_path))
+    net = PolicyNet(emb, d=8, layers=1, heads=2, value=True)
+    vdir = tmp_path / "vinit"
+    vdir.mkdir(exist_ok=True)
+    vckpt = vdir / "best.pt"
+    torch.save({k: v for k, v in net.state_dict().items()}, vckpt)
+    (vdir / "metrics.jsonl").write_text(
+        json.dumps({"args": {"d": 8, "layers": 1, "heads": 2, "value": True}}) + "\n"
+    )
+    sha = hashlib.sha256(vckpt.read_bytes()).hexdigest()
+    aux = AuxHeads(8)
+    aux_path = tmp_path / "aux.pt"
+    torch.save(
+        {"model": {k: v.half() if v.is_floating_point() else v for k, v in aux.state_dict().items()},
+         "aux_spec": AUX_SPEC, "value_sha256": sha},
+        aux_path,
+    )
+    return emb_path, vckpt, aux_path
+
+
+def _run_score_real(monkeypatch, games_dir: Path, out: Path, emb: Path, vckpt: Path, extra=()):
+    import render_showcase as R
+
+    fixtures = ROOT / "tests" / "fixtures" / "decks"
+    monkeypatch.setattr(R, "deck_path", lambda n: fixtures / f"{n}.ydk")
+    old = sys.argv
+    sys.argv = [
+        "score_decisions", "--games", str(games_dir), "--value", str(vckpt),
+        "--emb", str(emb), "--out", str(out), "--batch", "16", "--device", "cpu",
+        *extra,
+    ]
+    try:
+        assert score_decisions.main() == 0
+    finally:
+        sys.argv = old
+    return [json.loads(x) for x in out.read_text().splitlines() if x.strip()]
+
+
+def test_aux_adds_aligned_arrays_and_leaves_v_identical(engine, decks, tmp_path, monkeypatch):
+    emb, vckpt, auxpt = _tiny_value_and_aux(tmp_path)
+    games_dir = _write_games_dir(tmp_path, engine, decks, n_games=2)
+    plain = _run_score_real(monkeypatch, games_dir, tmp_path / "plain.jsonl", emb, vckpt)
+    assert all("aux" not in r for r in plain)
+    scored = _run_score_real(
+        monkeypatch, games_dir, tmp_path / "aux.jsonl", emb, vckpt, ("--aux", str(auxpt)))
+    assert len(scored) == len(plain)
+    for p, s in zip(plain, scored, strict=True):
+        assert s["k"] == p["k"] and s["v"] == p["v"]  # trunk value head equals today's v
+        ax = s["aux"]
+        n = len(s["k"])
+        assert len(ax["d_lp"]) == len(ax["d_cards"]) == len(ax["ends"]) == len(ax["turns_left"]) == n
+        for pair in ax["d_lp"]:
+            assert len(pair) == 2 and all(float(x) == int(x) for x in pair)
+        for row in ax["d_cards"]:
+            assert len(row) == 14 and all(x == pytest.approx(round(x, 2)) for x in row)
+        for e in ax["ends"]:
+            assert 0.0 <= e <= 1.0 and e == pytest.approx(round(e, 3))
+        for t in ax["turns_left"]:
+            assert t == pytest.approx(round(t, 2))
+        assert all(np.isfinite(s["v"]))
+
+
+def test_aux_sha_mismatch_exits_2(engine, decks, tmp_path, monkeypatch):
+    import torch
+
+    from ygo_zero.eval.aux import AUX_SPEC, AuxHeads
+
+    emb, vckpt, _ = _tiny_value_and_aux(tmp_path)
+    bad = tmp_path / "aux-bad.pt"
+    torch.save({"model": {k: v for k, v in AuxHeads(8).state_dict().items()},
+                "aux_spec": AUX_SPEC, "value_sha256": "0" * 64}, bad)
+    games_dir = _write_games_dir(tmp_path, engine, decks, n_games=1)
+    import render_showcase as R
+
+    fixtures = ROOT / "tests" / "fixtures" / "decks"
+    monkeypatch.setattr(R, "deck_path", lambda n: fixtures / f"{n}.ydk")
+    old = sys.argv
+    sys.argv = ["score_decisions", "--games", str(games_dir), "--value", str(vckpt),
+                "--emb", str(emb), "--out", str(tmp_path / "o.jsonl"),
+                "--aux", str(bad), "--device", "cpu"]
+    try:
+        with pytest.raises(SystemExit) as e:
+            score_decisions.main()
+        assert e.value.code == 2
+    finally:
+        sys.argv = old
