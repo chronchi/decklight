@@ -1,0 +1,49 @@
+diff --git a/field.cpp b/field.cpp
+index f0c4c66..41df59a 100644
+--- a/field.cpp
++++ b/field.cpp
+@@ -1426,14 +1426,19 @@ void field::release_oath_relation(effect* reason_effect) {
+ 			oeit.second = nullptr;
+ }
+ void field::reset_phase(uint32_t phase) {
+-	for(auto eit = effects.pheff.begin(); eit != effects.pheff.end();) {
+-		auto rm = eit++;
+-		if((*rm)->reset(phase, RESET_PHASE)) {
+-			if((*rm)->is_flag(EFFECT_FLAG_FIELD_ONLY))
+-				remove_effect((*rm));
+-			else
+-				(*rm)->handler->remove_effect((*rm));
+-		}
++	// ygo-zero: removing a grant effect also removes the effects it granted, which can be the next element of
++	// pheff (the saved iterator then points at a freed node). Collect first, then remove what is still there.
++	std::vector<effect*> rms;
++	for(auto* peffect : effects.pheff)
++		if(peffect->reset(phase, RESET_PHASE))
++			rms.push_back(peffect);
++	for(auto* peffect : rms) {
++		if(effects.pheff.find(peffect) == effects.pheff.end())
++			continue;
++		if(peffect->is_flag(EFFECT_FLAG_FIELD_ONLY))
++			remove_effect(peffect);
++		else
++			peffect->handler->remove_effect(peffect);
+ 	}
+ }
+ void field::reset_chain() {
+diff --git a/processor.cpp b/processor.cpp
+index d2c6c09..50d773c 100644
+--- a/processor.cpp
++++ b/processor.cpp
+@@ -3260,9 +3260,9 @@ bool field::process(Processors::Turn& arg) {
+ 	case 0: {
+ 		//Pre Draw
+ 		core.used_event.clear();
+-		for(auto& peffect : core.reseted_effects) {
+-			pduel->delete_effect(peffect);
+-		}
++		// ygo-zero: reset effects are no longer freed here but with the duel (~duel frees every effect). Cards keep
++		// raw pointers to them (current.reason_effect of a card drawn by Maxx "C"'s temporary effect), and later
++		// events read them: heap-use-after-free, engine segfaults (NOTEBOOK 2026-10-15 23:30).
+ 		core.reseted_effects.clear();
+ 		core.effect_count_code.clear();
+ 		for(uint8_t p = 0; p < 2; ++p) {

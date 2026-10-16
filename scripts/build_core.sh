@@ -8,6 +8,10 @@ OUT="$ROOT/build/core"
 if ! grep -q QUERY_CARDID "$SRC/ocgapi_constants.h"; then
     git -C "$SRC" apply "$ROOT/third_party/patches/ygopro-core-query-cardid.patch"
 fi
+# two heap-use-after-free fixes (NOTEBOOK 2026-10-15 23:30: field::reset_phase iterator, reset effects freed too early)
+if ! grep -q "reset effects are no longer freed here" "$SRC/processor.cpp"; then
+    git -C "$SRC" apply "$ROOT/third_party/patches/ygopro-core-uaf-fixes.patch"
+fi
 cd "$ROOT"
 if [ ! -f "$OUT/build.ninja" ]; then
     uv run --group dev meson setup "$OUT" "$SRC" --buildtype=release -Ddefault_library=shared -Db_ndebug=true
