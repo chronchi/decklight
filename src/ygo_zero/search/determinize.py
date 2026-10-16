@@ -133,6 +133,30 @@ def root_obs_equal(a: dict | None, b: dict | None) -> bool:
     return True
 
 
+# Speed plan E5: use the C++ replay fast path (one GIL-released call, obs built only at
+# the end). Tests set this False to reach the old per-step Python loop for bit-identity.
+USE_CPP_REPLAY = True
+
+
+def _replay_semantic(env: CppEnv, keys_ranks) -> tuple:
+    """Old per-step semantic loop (kept for the bit-identity test); returns
+    (obs, resolved, failed_reason_or_None) with the same semantics as the C++ replay_keys."""
+    obs = env.reset()
+    resolved: list[int] = []
+    failed: str | None = None
+    for key, rank in keys_ranks:
+        if obs is None:
+            failed = "replay_error"
+            break
+        idx = find_by_key_rank(obs, key, rank)
+        if idx is None:
+            failed = "no_key"
+            break
+        resolved.append(idx)
+        obs = env.step(idx)
+    return obs, resolved, failed
+
+
 def _is_public(loc: int, pos: int, is_pub: bool) -> bool:
     """Mirror of `Board::is_public` (cpp/ygoenv/env.cpp): is this card public to a non-holder?"""
     if loc == C.LOCATION_GRAVE:
@@ -364,28 +388,23 @@ class Determinizer:
                 world = self._build_config(mains)
                 try:
                     env = CppEnv(self.engine, world, self.auto_single)
-                    obs = env.reset()
                     if semantic:
                         assert self.prefix_keys is not None
-                        resolved: list[int] = []
-                        failed: str | None = None
-                        for key, rank in self.prefix_keys:
-                            if obs is None:
-                                failed = "replay_error"
-                                break
-                            idx = find_by_key_rank(obs, key, rank)
-                            if idx is None:
-                                failed = "no_key"
-                                break
-                            resolved.append(idx)
-                            obs = env.step(idx)
+                        if USE_CPP_REPLAY:
+                            obs, resolved, failed = env.replay_keys(self.prefix_keys)
+                        else:
+                            obs, resolved, failed = _replay_semantic(env, self.prefix_keys)
                         if failed is not None:
                             self.reasons[failed] += 1
                             continue
                     else:
                         resolved = list(self.prefix)
-                        for c in self.prefix:
-                            obs = env.step(c)
+                        if USE_CPP_REPLAY:
+                            obs = env.replay_from_reset(self.prefix)
+                        else:
+                            obs = env.reset()
+                            for c in self.prefix:
+                                obs = env.step(c)
                 except Exception:
                     self.reasons["replay_error"] += 1
                     continue

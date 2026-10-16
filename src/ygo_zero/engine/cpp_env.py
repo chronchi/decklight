@@ -81,6 +81,22 @@ class CppEnv:
     def step(self, index: int):
         return self._env.step(index)
 
+    def replay_from_reset(self, choices: Sequence[int]):
+        """Reset, replay `choices`, return the final obs (None if the duel ended).
+
+        One C++ call with the GIL released; identical state effects to reset + step per
+        choice. Out-of-range indices raise, exactly like `step`."""
+        return self._env.replay([int(c) for c in choices])
+
+    def replay_keys(self, keys_ranks: Sequence[tuple[tuple[int, ...], int]]):
+        """Reset, then resolve each (key, rank) to a legal option by meaning
+        (`find_by_key_rank` semantics) and step it. Returns
+        `(obs | None, resolved: list[int], reason: str | None)` with reason `no_key`
+        (no legal option has the key) or `replay_error` (the duel ended before all keys
+        were consumed). When every key resolved, reason is None and obs is the final obs
+        (None if the duel ended exactly at the end, as in the Python loop)."""
+        return self._env.replay_keys([(tuple(int(x) for x in k), int(r)) for k, r in keys_ranks])
+
     def cards(self) -> dict:
         """Every card of both players (DECK/HAND/MZONE/SZONE/GRAVE/REMOVED/EXTRA) with its
         creation id: dict of numpy arrays `player, location, sequence, position, code, cardid,

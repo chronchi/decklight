@@ -264,7 +264,32 @@ class Env {
   bool reset(Obs& obs);
   bool step(int index, Obs& obs);
 
-  bool done() const { return duel_->ended; }
+   // Replay a whole choice prefix with a single call (speed plan E5): reset, step every
+   // choice, and fill `obs` only for the final pending decision. Every other side effect
+   // (history entries, knowledge, `choices`, `decisions`, `truncated`) is identical to
+   // calling `reset` + `step` per choice. Returns false if the duel ended (like `step`;
+   // `obs` is untouched then). Throws `std::out_of_range` on an out-of-range index, exactly
+   // like `step` (the Python callers count that as `replay_error`).
+   bool replay(const std::vector<int>& choices, Obs& obs);
+   // Semantic replay (Determinizer.sample's inner loop): reset, then for each (key, rank)
+   // find the legal option whose option_row columns [0,2,3,4,5,6,7,8] equal key, taking the
+   // rank-th copy or the last copy when fewer exist (exactly `find_by_key_rank`), step it
+   // and record the resolved index. Stops at the first failure. Returns (num resolved,
+   // reason): reason is "no_key" (no legal option has the key), "replay_error" (the duel
+   // ended before all keys were consumed, or a step threw, e.g. out-of-range), or "" when
+   // every key resolved. When every key resolved, `obs` holds the final pending decision,
+   // or is untouched with `ok=false` if the duel ended exactly at the end (the caller then
+   // runs its obs-equality check, which treats None as a mismatch, as the Python loop does).
+   // `resolved` holds the indices resolved before the stop (all of them on success).
+   struct ReplayKeysResult {
+     bool ok = false;  // false = duel ended (obs untouched); true = obs holds the final decision
+     std::vector<int> resolved;
+     std::string reason;  // "" on success, else "no_key" | "replay_error"
+   };
+   ReplayKeysResult replay_keys(const std::vector<std::array<int32_t, 8>>& keys,
+                                const std::vector<int>& ranks, Obs& obs);
+
+   bool done() const { return duel_->ended; }
    int winner() const { return duel_->winner; }
    int player() const { return dec_->player; }
    int num_options() const { return static_cast<int>(opts_.size()); }
@@ -288,10 +313,15 @@ class Env {
   std::vector<Option> opts_;
   std::vector<HistoryEntry> history_;
 
-  void next_decision();
-  std::set<uint32_t> known_codes(int p);
-  void take(int index, bool record);
-  bool settle(Obs& obs);
+   void next_decision();
+   std::set<uint32_t> known_codes(int p);
+   void take(int index, bool record);
+   bool settle(Obs& obs);
+   // Settle without building the output obs (replay fast path): runs the auto-single loop,
+   // records truncation, and leaves opts_/board_ ready for the next take. Identical state
+   // effects to settle(); only the Obs fill is skipped.
+   bool settle_fast();
+   void fill_obs(Obs& obs);
 };
 
 }  // namespace ygo

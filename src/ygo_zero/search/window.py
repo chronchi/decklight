@@ -208,9 +208,7 @@ class WindowSearch:
                 else:  # plain DuelConfig (tests): today's replay of p
                     cfg, pp = w, p
             e = CppEnv(self.engine, cfg, auto_single)
-            o = e.reset()
-            for c in pp:
-                o = e.step(c)
+            o = e.replay_from_reset(pp)
             envs.append(e)
             obs.append(o)
         if _prof:

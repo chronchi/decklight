@@ -94,14 +94,50 @@ PYBIND11_MODULE(_ygoenv, m) {
            })
       .def("step",
            [](Env& env, int index) -> py::object {
-             Obs obs;
-             bool ok;
-             {
-               py::gil_scoped_release nogil;
-               ok = env.step(index, obs);
-             }
-             return ok ? to_dict(obs) : py::none();
-           })
+              Obs obs;
+              bool ok;
+              {
+                py::gil_scoped_release nogil;
+                ok = env.step(index, obs);
+              }
+              return ok ? to_dict(obs) : py::none();
+            })
+      .def("replay",
+           [](Env& env, std::vector<int> choices) -> py::object {
+              Obs obs;
+              bool ok;
+              {
+                py::gil_scoped_release nogil;
+                ok = env.replay(choices, obs);
+              }
+              return ok ? to_dict(obs) : py::none();
+            })
+      .def("replay_keys",
+           [](Env& env, py::list keys_ranks) -> py::tuple {
+              std::vector<std::array<int32_t, 8>> keys;
+              std::vector<int> ranks;
+              keys.reserve(keys_ranks.size());
+              ranks.reserve(keys_ranks.size());
+              for (auto item : keys_ranks) {
+                py::tuple t = py::cast<py::tuple>(item);
+                py::tuple k = py::cast<py::tuple>(t[0]);
+                if (k.size() != 8) throw std::invalid_argument("replay_keys: each key has 8 ints");
+                std::array<int32_t, 8> a;
+                for (size_t i = 0; i < 8; ++i) a[i] = k[i].cast<int32_t>();
+                keys.push_back(a);
+                ranks.push_back(t[1].cast<int>());
+              }
+              Obs obs;
+              Env::ReplayKeysResult r;
+              {
+                py::gil_scoped_release nogil;
+                r = env.replay_keys(keys, ranks, obs);
+              }
+              py::object o = r.ok ? to_dict(obs) : py::none();
+              py::object reason =
+                  r.reason.empty() ? py::none() : py::object(py::str(r.reason));
+              return py::make_tuple(std::move(o), std::move(r.resolved), std::move(reason));
+            })
       .def_property_readonly("done", &Env::done)
       .def_property_readonly("winner", [](const Env& e) -> py::object {
         if (e.winner() < 0) return py::none();

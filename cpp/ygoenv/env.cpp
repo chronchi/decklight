@@ -349,7 +349,7 @@ void Env::take(int index, bool record) {
   }
 }
 
-bool Env::settle(Obs& obs) {
+bool Env::settle_fast() {
   while (dec_) {
     auto opts = dec_->options();
     if (opts.empty()) throw std::runtime_error("no legal option");
@@ -362,30 +362,108 @@ bool Env::settle(Obs& obs) {
     if (opts.size() > MAX_OPTIONS) opts.resize(MAX_OPTIONS);
     opts_ = std::move(opts);
     board_ = std::make_unique<Board>(*duel_, dec_->player);
-    obs.clear();
-    board_->fill(obs, *duel_, dec_->msg_type, dec_->selected);
-    for (size_t i = 0; i < opts_.size(); ++i) {
-      auto row = board_->option_row(opts_[i], dec_->msg_type, dec_->step);
-      std::copy(row.begin(), row.end(), &obs.actions[i * ACTION_COLS]);
-      obs.action_mask[i] = 1;
-    }
-    int me = dec_->player;
-    size_t n = std::min<size_t>(history_.size(), HISTORY);
-    for (size_t i = 0; i < n; ++i) {
-      const auto& e = history_[history_.size() - 1 - i];
-      write_history_row(&obs.history[i * HISTORY_COLS], e, me, duel_->turn);
-      obs.history_mask[i] = 1;
-    }
-    size_t m = 0;  // long window over salient entries only (most recent first)
-    for (size_t i = history_.size(); i-- > 0 && m < HISTORY_MAX;) {
-      const auto& e = history_[i];
-      if (!is_salient(static_cast<Kind>(e.row[0]))) continue;
-      write_history_row(&obs.hist_long[m * HISTORY_COLS], e, me, duel_->turn);
-      obs.hist_long_mask[m++] = 1;
-    }
     return true;
   }
   return false;
+}
+
+void Env::fill_obs(Obs& obs) {
+  obs.clear();
+  board_->fill(obs, *duel_, dec_->msg_type, dec_->selected);
+  for (size_t i = 0; i < opts_.size(); ++i) {
+    auto row = board_->option_row(opts_[i], dec_->msg_type, dec_->step);
+    std::copy(row.begin(), row.end(), &obs.actions[i * ACTION_COLS]);
+    obs.action_mask[i] = 1;
+  }
+  int me = dec_->player;
+  size_t n = std::min<size_t>(history_.size(), HISTORY);
+  for (size_t i = 0; i < n; ++i) {
+    const auto& e = history_[history_.size() - 1 - i];
+    write_history_row(&obs.history[i * HISTORY_COLS], e, me, duel_->turn);
+    obs.history_mask[i] = 1;
+  }
+  size_t m = 0;  // long window over salient entries only (most recent first)
+  for (size_t i = history_.size(); i-- > 0 && m < HISTORY_MAX;) {
+    const auto& e = history_[i];
+    if (!is_salient(static_cast<Kind>(e.row[0]))) continue;
+    write_history_row(&obs.hist_long[m * HISTORY_COLS], e, me, duel_->turn);
+    obs.hist_long_mask[m++] = 1;
+  }
+}
+
+bool Env::settle(Obs& obs) {
+  if (!settle_fast()) return false;
+  fill_obs(obs);
+  return true;
+}
+
+bool Env::replay(const std::vector<int>& choices, Obs& obs) {
+  board_.reset();
+  dec_.reset();
+  duel_ = std::make_unique<Duel>(engine_, config_);
+  history_.clear();
+  this->choices.clear();
+  decisions = truncated = 0;
+  next_decision();
+  for (size_t k = 0; k < choices.size(); ++k) {
+    if (!settle_fast()) return false;  // duel ended before choice k (step-loop would misbehave here)
+    int index = choices[k];
+    if (index < 0 || index >= num_options()) throw std::out_of_range("option index");
+    this->choices.push_back(index);
+    take(index, true);
+  }
+  return settle(obs);
+}
+
+Env::ReplayKeysResult Env::replay_keys(const std::vector<std::array<int32_t, 8>>& keys,
+                                       const std::vector<int>& ranks, Obs& obs) {
+  ReplayKeysResult r;
+  board_.reset();
+  dec_.reset();
+  duel_ = std::make_unique<Duel>(engine_, config_);
+  history_.clear();
+  choices.clear();
+  decisions = truncated = 0;
+  next_decision();
+  for (size_t k = 0; k < keys.size(); ++k) {
+    if (!settle_fast()) {
+      r.reason = "replay_error";  // duel ended before key k was consumed
+      return r;
+    }
+    // find_by_key_rank over option_row columns [0,2,3,4,5,6,7,8]
+    const auto& key = keys[k];
+    int rank = ranks[k];
+    int last = -1, at_rank = -1;
+    int seen = 0;
+    for (size_t j = 0; j < opts_.size(); ++j) {
+      auto row = board_->option_row(opts_[j], dec_->msg_type, dec_->step);
+      if (row[0] == key[0] && row[2] == key[1] && row[3] == key[2] && row[4] == key[3] &&
+          row[5] == key[4] && row[6] == key[5] && row[7] == key[6] && row[8] == key[7]) {
+        if (seen == rank) at_rank = static_cast<int>(j);
+        last = static_cast<int>(j);
+        ++seen;
+      }
+    }
+    int idx = -1;
+    if (seen == 0) {
+      r.reason = "no_key";
+      return r;
+    }
+    idx = (rank < seen) ? at_rank : last;
+    r.resolved.push_back(idx);
+    choices.push_back(idx);
+    try {
+      take(idx, true);
+    } catch (...) {
+      // NB: choices keeps the entry, exactly like step() (push before take) on a throw.
+      r.reason = "replay_error";
+      return r;
+    }
+  }
+  if (!settle_fast()) return r;  // all keys consumed but the duel ended: ok=false, reason "" (caller obs-checks None)
+  fill_obs(obs);
+  r.ok = true;
+  return r;
 }
 
 }  // namespace ygo
