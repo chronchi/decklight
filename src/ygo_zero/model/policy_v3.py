@@ -19,6 +19,7 @@ selected by the run arg `v3` through `make_policy`.
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import numpy as np
@@ -31,6 +32,9 @@ from ygo_zero.model.policy import PolicyNet, trim_obs
 ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_STRINGS = ROOT / "data" / "cards" / "emb" / "strings-qwen3-0.6b-d512.npz"
 DEFAULT_LUA = ROOT / "data" / "cards" / "lua_desc.npz"
+# Custom cards: point the product at merged tables without touching checkpoints' stored args.
+STRINGS_ENV = "YGO_STRINGS"
+LUA_ENV = "YGO_LUA"
 N_LUA = 16 + 34 + 13 + 32 + 5 + 1 + 4 + 1
 
 
@@ -49,9 +53,13 @@ def lua_bits(feats: np.ndarray) -> np.ndarray:
 
 
 def load_desc_tables(strings: Path | str | None = None, lua: Path | str | None = None) -> dict[str, np.ndarray]:
-    """The extra arrays v3 needs, to merge into the card-embedding dict passed to PolicyNetV3."""
-    s = np.load(strings or DEFAULT_STRINGS)
-    y = np.load(lua or DEFAULT_LUA)
+    """The extra arrays v3 needs, to merge into the card-embedding dict passed to PolicyNetV3.
+
+    Explicit args win; else `$YGO_STRINGS` / `$YGO_LUA` (merged tables for custom cards); else the
+    stock `data/cards` files.
+    """
+    s = np.load(strings or os.environ.get(STRINGS_ENV) or DEFAULT_STRINGS)
+    y = np.load(lua or os.environ.get(LUA_ENV) or DEFAULT_LUA)
     return {"str_keys": s["keys"], "str_rows": s["rows"], "str_vecs": s["vecs"], "lua_keys": y["keys"],
             "lua_feats": y["feats"]}  # fmt: skip
 

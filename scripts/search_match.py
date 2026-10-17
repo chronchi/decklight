@@ -229,7 +229,8 @@ def main() -> None:
     ap.add_argument("--value-priv", type=int, default=0,
                     help="1: --value is a privileged critic (train_rl --priv-critic critic.pt) reading each sampled "
                          "world's hidden cards; needs --honest 1 (else it reads the real game's hidden cards)")
-    ap.add_argument("--emb", type=Path, default=ROOT / "data/cards/emb/qwen3-0.6b-d512.npz")
+    ap.add_argument("--emb", type=Path, default=None,
+                    help="card embeddings (default: $YGO_EMB or data/cards/emb/qwen3-0.6b-d512.npz)")
     ap.add_argument("--device", default="cpu")
     ap.add_argument("--decks", type=int, default=8, help="sampled pool decks (half train, half holdout)")
     ap.add_argument("--seeds", type=int, default=3, help="match seeds per ordered deck pair")
@@ -316,6 +317,8 @@ def main() -> None:
     if args.summarize is not None:
         summarize(args.summarize)
         return
+    if args.emb is None:
+        args.emb = Path(os.environ.get("YGO_EMB") or ROOT / "data/cards/emb/qwen3-0.6b-d512.npz")
     if args.raw:
         args.conf_skip = 0.0  # softmax max is always >= 0: no decision is searched
     if args.ckpt is None or args.out is None:

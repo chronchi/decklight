@@ -35,7 +35,8 @@ from ygo_zero.play.session import (
     write_record as _write_record,
 )
 
-EMB_PATH = Path(__file__).resolve().parents[3] / "data" / "cards" / "emb" / "qwen3-0.6b-d512.npz"
+EMB_PATH = Path(os.environ.get("YGO_EMB") or
+               Path(__file__).resolve().parents[3] / "data" / "cards" / "emb" / "qwen3-0.6b-d512.npz")
 
 EXTRA_TYPES = C.TYPE_FUSION | C.TYPE_SYNCHRO | C.TYPE_XYZ
 

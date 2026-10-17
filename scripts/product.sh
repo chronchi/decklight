@@ -9,3 +9,9 @@ PRODUCT_VALUE=data/cache/value_p2/best.pt
 PRODUCT_VALUE_DIR=data/cache/value_p2  # what launchers ship to the box (--data)
 # search_match args of the product's search (honest k4 s4 h1, det-tries 32, skip, conf-skip 0.9)
 PRODUCT_SEARCH="--honest 1 --det-tries 32 --det-fallback skip --horizon 1 --k 4 --samples 4 --conf-skip 0.9"
+# Custom cards: the product reads these env vars when set (merged npz files covering the extra
+# cards; see scripts/embed_cards.py --only-missing). Defaults = the stock files above.
+#   YGO_EXTRA_CARDS : extra card dirs for the engine/DBs (engine/resources.py)
+#   YGO_EMB         : merged card embeddings (search/product.py, search_match --emb, edopro host)
+#   YGO_STRINGS     : merged effect-string table (model/policy_v3.py)
+#   YGO_LUA         : merged lua_desc table (model/policy_v3.py)

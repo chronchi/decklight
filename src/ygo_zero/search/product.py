@@ -10,6 +10,7 @@ from the product flags for both search_match-style jobs and the EDOPro host driv
 from __future__ import annotations
 
 import hashlib
+import os
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -28,6 +29,8 @@ PRODUCT_DET_FALLBACK = "skip"
 PRODUCT_CONF_SKIP = 0.9
 PRODUCT_ROLLOUT_TEMP = 1.0
 PRODUCT_EMB = ROOT / "data" / "cards" / "emb" / "qwen3-0.6b-d512.npz"  # same file search_match uses
+# Custom cards: $YGO_EMB points the product at a merged card-embedding npz (default: stock).
+EMB_ENV = "YGO_EMB"
 PRODUCT_CKPT = ROOT / "data" / "cache" / "P" / "best.pt"
 PRODUCT_VALUE = ROOT / "data" / "cache" / "value_p2" / "best.pt"
 
@@ -137,10 +140,13 @@ def sha256_file(path: str | Path) -> str:
 
 
 def resolve_product_paths(ckpt=None, value=None, emb=None) -> tuple[Path, Path | None, Path]:
-    """Product ckpt/value/emb paths (defaults: scripts/product.sh), all required to exist."""
+    """Product ckpt/value/emb paths (defaults: scripts/product.sh), all required to exist.
+
+    `emb` falls back to `$YGO_EMB` (a merged npz covering custom cards) before the stock file.
+    """
     ckpt_p = Path(ckpt) if ckpt is not None else PRODUCT_CKPT
     value_p = Path(value) if value is not None else PRODUCT_VALUE
-    emb_p = Path(emb) if emb is not None else PRODUCT_EMB
+    emb_p = Path(emb or os.environ.get(EMB_ENV) or PRODUCT_EMB)
     missing = [str(p) for p in (ckpt_p, emb_p) if not p.is_file()]
     if value_p is not None and not value_p.is_file():
         missing.append(str(value_p))

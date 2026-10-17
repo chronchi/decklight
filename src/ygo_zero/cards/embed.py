@@ -129,11 +129,89 @@ def build(dim: int = 512, batch: int = 32, limit: int | None = None, codes: list
     return out
 
 
+def missing_card_codes(base: str | Path) -> tuple[list[int], dict[int, str]]:
+    """Codes in the current card DBs (`YGO_EXTRA_CARDS` included) absent from `base` npz, with names.
+
+    No model load: for `--only-missing --dry-run`.
+    """
+    z = np.load(base)
+    have = {int(c) for c in z["codes"]}
+    texts = card_texts()
+    missing = sorted(c for c in texts if c not in have)
+    return missing, {c: texts[c][0] for c in missing}
+
+
+def append_card_embeddings(base: str | Path, out: str | Path, dim: int = 512,
+                            batch: int = 32, encode=None) -> Path:
+    """Embed the codes missing from `base` and write the merged npz to `out` (same schema as `build`).
+
+    Base rows are kept verbatim (same order, same values); new codes are appended sorted. When
+    nothing is missing, `out` is still written (a copy of `base`). `encode` maps unique new texts
+    to fp16 vectors (default: the Qwen model; tests pass a fake so no model ever loads on laptop).
+    """
+    import time as _time
+
+    t0 = _time.time()
+    z = np.load(base)
+    if int(z["dim"]) != dim:
+        raise SystemExit(f"ALERT embed: base dim {int(z['dim'])} != --dim {dim}")
+    base_codes = [int(c) for c in z["codes"]]
+    missing, _names = missing_card_codes(base)
+    texts = card_texts()
+    uniq: dict[str, int] = {}
+    card_rows: list[int] = []
+    eff_rows: list[list[int]] = []
+    for code in missing:
+        name, desc = texts[code]
+        card_rows.append(uniq.setdefault(f"{name}. {desc}", len(uniq)))
+        eff_rows.append([uniq.setdefault(e, len(uniq)) for e in split_effects(desc)[:MAX_EFFECTS]])
+    vecs = None
+    if uniq:
+        if encode is None:
+            os.environ.setdefault("HF_HOME", str(ROOT / "data" / "cache" / "hf"))
+            from sentence_transformers import SentenceTransformer
+
+            model = SentenceTransformer(MODEL, device=pick_device(), truncate_dim=dim)
+
+            def encode(texts: list[str]) -> np.ndarray:
+                return model.encode(texts, batch_size=batch, normalize_embeddings=True,
+                                    convert_to_numpy=True, show_progress_bar=False).astype(np.float16)
+
+        vecs = np.asarray(encode(list(uniq)), dtype=np.float16)
+        if vecs.shape != (len(uniq), dim) or not np.isfinite(vecs).all() or \
+                (np.abs(vecs).sum(1) == 0).any():
+            raise SystemExit("ALERT embed: non-finite, zero or misshaped card vectors")
+    n_new = len(missing)
+    card = np.concatenate([np.array(z["card"]),
+                           vecs[card_rows] if n_new else np.zeros((0, dim), np.float16)])
+    eff = np.concatenate([np.array(z["effects"]),
+                          np.zeros((n_new, MAX_EFFECTS, dim), np.float16)]) if n_new else \
+        np.array(z["effects"])
+    n_eff = np.array(z["n_effects"])
+    if n_new:
+        assert vecs is not None
+        n_new_eff = np.zeros(n_new, np.int8)
+        for j, rows in enumerate(eff_rows):
+            if rows:
+                eff[len(n_eff) + j, : len(rows)] = vecs[rows]
+                n_new_eff[j] = len(rows)
+        n_eff = np.concatenate([n_eff, n_new_eff])
+    out = Path(out)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    np.savez_compressed(out, codes=np.array(base_codes + missing, dtype=np.int64), card=card,
+                        effects=eff, n_effects=n_eff, model=MODEL, dim=dim)
+    print(f"merged {base} + {n_new} cards -> {out} ({_time.time() - t0:.0f}s)", flush=True)
+    return out
+
+
 class CardEmbeddings:
-    """Lookup of the cached vectors by card code (unknown / hidden codes -> zeros, flagged)."""
+    """Lookup of the cached vectors by card code (unknown / hidden codes -> zeros, flagged).
+
+    `path` or `$YGO_EMB` (a merged npz covering custom cards) or the newest stock build.
+    """
 
     def __init__(self, path: Path | None = None) -> None:
-        path = path or max(EMB_DIR.glob("qwen3-0.6b-d*.npz"))
+        path = path or os.environ.get("YGO_EMB") or max(EMB_DIR.glob("qwen3-0.6b-d*.npz"))
         z = np.load(path)
         self.codes = z["codes"]
         self.card = z["card"]
