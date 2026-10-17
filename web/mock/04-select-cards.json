@@ -1,0 +1,77 @@
+{
+  "t": "state",
+  "view": {
+    "turn": 3,
+    "phase": "main1",
+    "turn_player": "you",
+    "you": {
+      "lp": 8000,
+      "deck": 26,
+      "extra_count": 15,
+      "hand": [
+        {"uid": "yh1", "code": 14558128, "name": "Ash Blossom & Joyous Spring", "faceup": true, "pos": null, "atk": 0, "def": 1800, "level": 3, "rank": 0, "link": 0, "counters": 0, "overlays": []},
+        {"uid": "yh4", "code": 94145021, "name": "Droll & Lock Bird", "faceup": true, "pos": null, "atk": 0, "def": 0, "level": 1, "rank": 0, "link": 0, "counters": 0, "overlays": []}
+      ],
+      "mzone": [
+        {"uid": "ym1", "code": 18176525, "name": "Mitsurugi no Mikoto, Saji", "faceup": true, "pos": "atk", "atk": 1200, "def": 600, "level": 4, "rank": 0, "link": 0, "counters": 0, "overlays": []},
+        null,
+        null,
+        null,
+        null
+      ],
+      "emz": [null, null],
+      "szone": [null, null, null, null, null],
+      "field": null,
+      "gy": [
+        {"uid": "yg1", "code": 13048472, "name": "Pre-Preparation of Rites", "faceup": true, "pos": null, "atk": 0, "def": 0, "level": 0, "rank": 0, "link": 0, "counters": 0, "overlays": []}
+      ],
+      "banished": [],
+      "extra": [
+        {"uid": "ye1", "code": 44698398, "name": "Divine Golden Shadow Dragon Dragluxion", "faceup": false, "pos": null, "atk": 2500, "def": 2000, "level": 0, "rank": 8, "link": 0, "counters": 0, "overlays": []}
+      ]
+    },
+    "bot": {
+      "lp": 8000,
+      "deck": 30,
+      "extra_count": 15,
+      "hand": [null, null, null],
+      "mzone": [
+        {"uid": "bm1", "code": 48452496, "name": "Snake-Eyes Flamberge Dragon", "faceup": true, "pos": "atk", "atk": 3000, "def": 3000, "level": 9, "rank": 0, "link": 0, "counters": 0, "overlays": []},
+        null,
+        null,
+        null,
+        null
+      ],
+      "emz": [null, null],
+      "szone": [null, null, null, null, null],
+      "field": {"uid": "bf1", "code": 53639887, "name": "Divine Temple of the Snake-Eye", "faceup": true, "pos": null, "atk": 0, "def": 0, "level": 0, "rank": 0, "link": 0, "counters": 0, "overlays": []},
+      "gy": [
+        {"uid": "bg1", "code": 9674034, "name": "Snake-Eye Ash", "faceup": true, "pos": null, "atk": 100, "def": 2000, "level": 1, "rank": 0, "link": 0, "counters": 0, "overlays": []}
+      ],
+      "banished": [],
+      "extra": []
+    },
+    "chain": []
+  },
+  "prompt": {
+    "id": 34,
+    "kind": "card",
+    "text": "Select the card(s) to add to your hand",
+    "card": {"uid": "yg1", "code": 13048472, "name": "Pre-Preparation of Rites", "faceup": true, "pos": null, "atk": 0, "def": 0, "level": 0, "rank": 0, "link": 0, "counters": 0, "overlays": []},
+    "options": [
+      {"index": 0, "verb": "select", "label": "Mitsurugi no Mikoto, Aramasa", "card": {"uid": "d0", "code": 40543231, "name": "Mitsurugi no Mikoto, Aramasa", "faceup": true, "pos": null, "atk": 1200, "def": 600, "level": 4, "rank": 0, "link": 0, "counters": 0, "overlays": []}, "where": {"side": "you", "zone": "deck", "seq": 3}, "effect": "Reptile / Effect — searches a Mitsurugi Ritual Spell on Normal Summon."},
+      {"index": 1, "verb": "select", "label": "Ame no Murakumo no Mitsurugi", "card": {"uid": "d1", "code": 19899073, "name": "Ame no Murakumo no Mitsurugi", "faceup": true, "pos": null, "atk": 2500, "def": 800, "level": 8, "rank": 0, "link": 0, "counters": 0, "overlays": []}, "where": {"side": "you", "zone": "deck", "seq": 7}, "effect": "Reptile / Ritual — Quick Effect: Tribute Reptiles to Special Summon itself from hand."},
+      {"index": 2, "verb": "select", "label": "Mitsurugi Prayers", "card": {"uid": "d2", "code": 45171524, "name": "Mitsurugi Prayers", "faceup": true, "pos": null, "atk": 0, "def": 0, "level": 0, "rank": 0, "link": 0, "counters": 0, "overlays": []}, "where": {"side": "you", "zone": "deck", "seq": 11}, "effect": "Ritual Spell — Tribute Reptiles whose Levels equal or exceed the Ritual Monster."},
+      {"index": 3, "verb": "select", "label": "Mitsurugi Mirror", "card": {"uid": "d3", "code": 49721684, "name": "Mitsurugi Mirror", "faceup": true, "pos": null, "atk": 0, "def": 0, "level": 0, "rank": 0, "link": 0, "counters": 0, "overlays": []}, "where": {"side": "you", "zone": "deck", "seq": 15}, "effect": "Continuous Trap — protects Mitsurugi monsters from destruction once per turn."},
+      {"index": 4, "verb": "finish", "label": "Confirm", "card": null, "where": null, "effect": null}
+    ],
+    "min": 1,
+    "max": 2
+  },
+  "log": [
+    {"n": 9, "actor": "you", "text": "Activates Pre-Preparation of Rites", "card": {"uid": "yg1", "code": 13048472, "name": "Pre-Preparation of Rites", "faceup": true, "pos": null, "atk": 0, "def": 0, "level": 0, "rank": 0, "link": 0, "counters": 0, "overlays": []}},
+    {"n": 10, "actor": "system", "text": "Resolving: select 1–2 cards", "card": null}
+  ],
+  "thinking": null,
+  "result": null
+}

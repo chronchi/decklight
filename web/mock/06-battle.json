@@ -1,0 +1,88 @@
+{
+  "t": "state",
+  "view": {
+    "turn": 3,
+    "phase": "battle",
+    "turn_player": "you",
+    "you": {
+      "lp": 8000,
+      "deck": 28,
+      "extra_count": 15,
+      "hand": [
+        {"uid": "yh1", "code": 14558128, "name": "Ash Blossom & Joyous Spring", "faceup": true, "pos": null, "atk": 0, "def": 1800, "level": 3, "rank": 0, "link": 0, "counters": 0, "overlays": []},
+        {"uid": "yh4", "code": 94145021, "name": "Droll & Lock Bird", "faceup": true, "pos": null, "atk": 0, "def": 0, "level": 1, "rank": 0, "link": 0, "counters": 0, "overlays": []}
+      ],
+      "mzone": [
+        {"uid": "ym1", "code": 18176525, "name": "Mitsurugi no Mikoto, Saji", "faceup": true, "pos": "atk", "atk": 1200, "def": 600, "level": 4, "rank": 0, "link": 0, "counters": 0, "overlays": []},
+        {"uid": "ym2", "code": 19899073, "name": "Ame no Murakumo no Mitsurugi", "faceup": true, "pos": "atk", "atk": 2500, "def": 800, "level": 8, "rank": 0, "link": 0, "counters": 0, "overlays": []},
+        null,
+        null,
+        null
+      ],
+      "emz": [null, null],
+      "szone": [
+        {"uid": "ys2", "code": 49721684, "name": "Mitsurugi Mirror", "faceup": true, "pos": null, "atk": 0, "def": 0, "level": 0, "rank": 0, "link": 0, "counters": 0, "overlays": []},
+        null,
+        null,
+        null,
+        null
+      ],
+      "field": null,
+      "gy": [
+        {"uid": "yg1", "code": 13048472, "name": "Pre-Preparation of Rites", "faceup": true, "pos": null, "atk": 0, "def": 0, "level": 0, "rank": 0, "link": 0, "counters": 0, "overlays": []}
+      ],
+      "banished": [],
+      "extra": [
+        {"uid": "ye1", "code": 44698398, "name": "Divine Golden Shadow Dragon Dragluxion", "faceup": false, "pos": null, "atk": 2500, "def": 2000, "level": 0, "rank": 8, "link": 0, "counters": 0, "overlays": []}
+      ]
+    },
+    "bot": {
+      "lp": 7300,
+      "deck": 30,
+      "extra_count": 15,
+      "hand": [null, null, null],
+      "mzone": [
+        {"uid": "bm1", "code": 48452496, "name": "Snake-Eyes Flamberge Dragon", "faceup": true, "pos": "atk", "atk": 3000, "def": 3000, "level": 9, "rank": 0, "link": 0, "counters": 0, "overlays": []},
+        {"uid": "bm2", "code": 0, "name": null, "faceup": false, "pos": "def", "atk": 0, "def": 0, "level": 0, "rank": 0, "link": 0, "counters": 0, "overlays": []},
+        null,
+        null,
+        null
+      ],
+      "emz": [null, null],
+      "szone": [
+        {"uid": "bs1", "code": 0, "name": null, "faceup": false, "pos": "set", "atk": 0, "def": 0, "level": 0, "rank": 0, "link": 0, "counters": 0, "overlays": []},
+        null,
+        null,
+        null,
+        null
+      ],
+      "field": {"uid": "bf1", "code": 53639887, "name": "Divine Temple of the Snake-Eye", "faceup": true, "pos": null, "atk": 0, "def": 0, "level": 0, "rank": 0, "link": 0, "counters": 0, "overlays": []},
+      "gy": [
+        {"uid": "bg1", "code": 9674034, "name": "Snake-Eye Ash", "faceup": true, "pos": null, "atk": 100, "def": 2000, "level": 1, "rank": 0, "link": 0, "counters": 0, "overlays": []}
+      ],
+      "banished": [],
+      "extra": []
+    },
+    "chain": []
+  },
+  "prompt": {
+    "id": 41,
+    "kind": "battle",
+    "text": "Choose an attacker",
+    "card": null,
+    "options": [
+      {"index": 0, "verb": "attack", "label": "Murakumo attacks Flamberge", "card": {"uid": "ym2", "code": 19899073, "name": "Ame no Murakumo no Mitsurugi", "faceup": true, "pos": "atk", "atk": 2500, "def": 800, "level": 8, "rank": 0, "link": 0, "counters": 0, "overlays": []}, "where": {"side": "you", "zone": "mzone", "seq": 1}, "effect": null},
+      {"index": 1, "verb": "attack", "label": "Saji attacks the face-down monster", "card": {"uid": "ym1", "code": 18176525, "name": "Mitsurugi no Mikoto, Saji", "faceup": true, "pos": "atk", "atk": 1200, "def": 600, "level": 4, "rank": 0, "link": 0, "counters": 0, "overlays": []}, "where": {"side": "you", "zone": "mzone", "seq": 0}, "effect": null},
+      {"index": 2, "verb": "to_main2", "label": "Main 2", "card": null, "where": null, "effect": null},
+      {"index": 3, "verb": "end_turn", "label": "End turn", "card": null, "where": null, "effect": null}
+    ],
+    "min": 0,
+    "max": 0
+  },
+  "log": [
+    {"n": 18, "actor": "system", "text": "Battle Phase", "card": null},
+    {"n": 19, "actor": "you", "text": "Ame no Murakumo no Mitsurugi attacks Snake-Eyes Flamberge Dragon", "card": {"uid": "ym2", "code": 19899073, "name": "Ame no Murakumo no Mitsurugi", "faceup": true, "pos": "atk", "atk": 2500, "def": 800, "level": 8, "rank": 0, "link": 0, "counters": 0, "overlays": []}}
+  ],
+  "thinking": null,
+  "result": null
+}

@@ -1,0 +1,63 @@
+{
+  "t": "state",
+  "view": {
+    "turn": 3,
+    "phase": "main1",
+    "turn_player": "you",
+    "you": {
+      "lp": 8000,
+      "deck": 28,
+      "extra_count": 15,
+      "hand": [
+        {"uid": "yh1", "code": 14558128, "name": "Ash Blossom & Joyous Spring", "faceup": true, "pos": null, "atk": 0, "def": 1800, "level": 3, "rank": 0, "link": 0, "counters": 0, "overlays": []}
+      ],
+      "mzone": [
+        {"uid": "ym2", "code": 19899073, "name": "Ame no Murakumo no Mitsurugi", "faceup": true, "pos": "atk", "atk": 2500, "def": 800, "level": 8, "rank": 0, "link": 0, "counters": 0, "overlays": []},
+        null,
+        null,
+        null,
+        null
+      ],
+      "emz": [null, null],
+      "szone": [null, null, null, null, null],
+      "field": null,
+      "gy": [],
+      "banished": [],
+      "extra": [
+        {"uid": "ye1", "code": 44698398, "name": "Divine Golden Shadow Dragon Dragluxion", "faceup": false, "pos": null, "atk": 2500, "def": 2000, "level": 0, "rank": 8, "link": 0, "counters": 0, "overlays": []}
+      ]
+    },
+    "bot": {
+      "lp": 8000,
+      "deck": 31,
+      "extra_count": 15,
+      "hand": [null, null, null, null],
+      "mzone": [null, null, null, null, null],
+      "emz": [null, null],
+      "szone": [null, null, null, null, null],
+      "field": null,
+      "gy": [],
+      "banished": [],
+      "extra": []
+    },
+    "chain": []
+  },
+  "prompt": {
+    "id": 52,
+    "kind": "position",
+    "text": "Change Ame no Murakumo no Mitsurugi's battle position?",
+    "card": {"uid": "ym2", "code": 19899073, "name": "Ame no Murakumo no Mitsurugi", "faceup": true, "pos": "atk", "atk": 2500, "def": 800, "level": 8, "rank": 0, "link": 0, "counters": 0, "overlays": []},
+    "options": [
+      {"index": 0, "verb": "position", "label": "To Attack (2500 ATK)", "card": {"uid": "ym2", "code": 19899073, "name": "Ame no Murakumo no Mitsurugi", "faceup": true, "pos": "atk", "atk": 2500, "def": 800, "level": 8, "rank": 0, "link": 0, "counters": 0, "overlays": []}, "where": {"side": "you", "zone": "mzone", "seq": 0}, "effect": null},
+      {"index": 1, "verb": "position", "label": "To Defense (800 DEF)", "card": {"uid": "ym2", "code": 19899073, "name": "Ame no Murakumo no Mitsurugi", "faceup": true, "pos": "def", "atk": 2500, "def": 800, "level": 8, "rank": 0, "link": 0, "counters": 0, "overlays": []}, "where": {"side": "you", "zone": "mzone", "seq": 0}, "effect": null},
+      {"index": 2, "verb": "pass", "label": "Keep position", "card": null, "where": null, "effect": null}
+    ],
+    "min": 0,
+    "max": 0
+  },
+  "log": [
+    {"n": 4, "actor": "you", "text": "Summoned Ame no Murakumo no Mitsurugi", "card": {"uid": "ym2", "code": 19899073, "name": "Ame no Murakumo no Mitsurugi", "faceup": true, "pos": "atk", "atk": 2500, "def": 800, "level": 8, "rank": 0, "link": 0, "counters": 0, "overlays": []}}
+  ],
+  "thinking": null,
+  "result": null
+}

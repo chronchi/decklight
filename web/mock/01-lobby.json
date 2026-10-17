@@ -1,0 +1,120 @@
+{
+  "t": "lobby",
+  "decks": [
+    {
+      "id": "pool-00",
+      "name": "Mitsurugi",
+      "group": "pool"
+    },
+    {
+      "id": "pool-01",
+      "name": "Snake-Eye",
+      "group": "pool"
+    },
+    {
+      "id": "pool-02",
+      "name": "Blue-Eyes",
+      "group": "pool"
+    },
+    {
+      "id": "pool-03",
+      "name": "Branded",
+      "group": "pool"
+    },
+    {
+      "id": "pool-04",
+      "name": "Yummy",
+      "group": "pool"
+    },
+    {
+      "id": "pool-05",
+      "name": "Kashtira",
+      "group": "pool"
+    },
+    {
+      "id": "pool-06",
+      "name": "Tearlaments",
+      "group": "pool"
+    },
+    {
+      "id": "pool-07",
+      "name": "Spright",
+      "group": "pool"
+    },
+    {
+      "id": "pool-08",
+      "name": "Labrynth",
+      "group": "pool"
+    },
+    {
+      "id": "pool-09",
+      "name": "Floowandereeze",
+      "group": "pool"
+    },
+    {
+      "id": "pool-10",
+      "name": "Mathmech",
+      "group": "pool"
+    },
+    {
+      "id": "pool-11",
+      "name": "Swordsoul",
+      "group": "pool"
+    },
+    {
+      "id": "pool-12",
+      "name": "Despia",
+      "group": "pool"
+    },
+    {
+      "id": "pool-13",
+      "name": "Exosister",
+      "group": "pool"
+    },
+    {
+      "id": "pool-14",
+      "name": "Purrely",
+      "group": "pool"
+    },
+    {
+      "id": "pool-15",
+      "name": "Rescue-ACE",
+      "group": "pool"
+    },
+    {
+      "id": "pool-16",
+      "name": "Vanquish Soul",
+      "group": "pool"
+    },
+    {
+      "id": "pool-17",
+      "name": "Fire King",
+      "group": "pool"
+    },
+    {
+      "id": "pool-18",
+      "name": "Voiceless Voice",
+      "group": "pool"
+    },
+    {
+      "id": "pool-19",
+      "name": "Tenpai",
+      "group": "pool"
+    },
+    {
+      "id": "branded-meta1",
+      "name": "Branded",
+      "group": "newcards"
+    },
+    {
+      "id": "yummy-meta1",
+      "name": "Yummy",
+      "group": "newcards"
+    },
+    {
+      "id": "pasted-2026-10-11",
+      "name": "My pasted deck",
+      "group": "user"
+    }
+  ]
+}

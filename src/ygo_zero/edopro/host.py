@@ -11,14 +11,11 @@ ygo_zero.engine.inverse (D1; imported lazily) into env option indices; the bot
 acts through the Bot interface (bot.py).
 """
 
-import json
 import os
 import random
 import socket
 import struct
 import threading
-import time
-from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
@@ -26,10 +23,17 @@ import numpy as np
 from ygo_zero.edopro import filter as F
 from ygo_zero.edopro import protocol as P
 from ygo_zero.edopro.bot import Bot
-from ygo_zero.edopro.product_bot import DriverError
 from ygo_zero.engine import constants as C
 from ygo_zero.engine.duel import TCG_FLAGS, DuelConfig, Engine
 from ygo_zero.engine.env import PyEnv
+from ygo_zero.play.session import (
+    DriverDiverged,
+    DuelResult,
+    DuelSession,
+)
+from ygo_zero.play.session import (
+    write_record as _write_record,
+)
 
 EMB_PATH = Path(__file__).resolve().parents[3] / "data" / "cards" / "emb" / "qwen3-0.6b-d512.npz"
 
@@ -69,19 +73,8 @@ class Surrender(Exception):
     pass
 
 
-@dataclass
-class DuelResult:
-    winner: int | None
-    turns: int
-    choices: list[int]
-    actors: list[int]
-    surrendered: bool = False
-    disconnected: bool = False
-    diverged: bool = False  # product driver lockstep broke: ALERTed, duel stopped
-
-
-class DriverDiverged(Exception):
-    """The product driver's env diverged from the host env (ALERTed): stop the duel."""
+# DuelResult / DriverDiverged live in ygo_zero.play.session (imported above);
+# they stay importable from here (`edopro.host.DuelResult`).
 
 
 class Session:
@@ -101,6 +94,7 @@ class Session:
         self.human_seat = 0
         self.bot_seat = 1
         self.env: PyEnv | None = None
+        self.duel: DuelSession | None = None
         self.sent_trace = 0
         self.completed_duel = False
         self.product_info: dict | None = None
@@ -233,21 +227,21 @@ class Session:
         # auto_single=False: every core prompt is a real decision for someone. With the
         # default True the env would silently answer single-option prompts (empty chains,
         # forced picks) that we already forwarded to the human, desyncing the stream.
-        self.env = PyEnv(self.host.engine, cfg, auto_single=False)
-        self.env.reset()
+        launcher = self.host.bot if hasattr(self.host.bot, "start_duel") else None
+        bot = None if launcher is not None else self.host.bot
+        self.duel = DuelSession(
+            self.host.engine, cfg, self.human_seat, bot=bot, launcher=launcher,
+            seed=seed, human_side=self.human_side, record_root=self.host.record_root)
+        self.duel.reset()
+        self.env = self.duel.env
         self.sent_trace = 0
+        driver = self.duel.driver
+        self.product_info = self.duel.product_info
         n0, e0 = len(cfg.deck0.main), len(cfg.deck0.extra)
         n1, e1 = len(cfg.deck1.main), len(cfg.deck1.extra)
         self.send(P.STOC_GAME_MSG, P.build_start(cfg.lp, n0, e0, n1, e1, self.human_seat))
         for seat in (0, 1):
             self.send_refresh(("loc", seat, C.LOCATION_EXTRA))
-        launcher = self.host.bot if hasattr(self.host.bot, "start_duel") else None
-        driver = None
-        self.product_info = None
-        if launcher is not None:
-            driver = launcher.start_duel(self.host.engine, cfg, self.bot_seat,
-                                         game_seed=seed, ws_seed=seed)
-            self.product_info = launcher.record_info(seed)
         try:
             if driver is not None:
                 result = self.run_duel_driver(cfg, seed, driver)
@@ -309,17 +303,6 @@ class Session:
             for ref in F.after_refreshes(raw):
                 self.send_refresh(ref)
 
-    def check_driver_step(self, driver, k: int, pre: tuple[int, int]) -> None:
-        """Outer decision k must match the host env's pre-step (player, option count); ALERT + stop if not."""
-        try:
-            want = driver.decision(k)
-        except DriverError as e:
-            raise DriverDiverged(str(e)) from None
-        if (want["player"], want["n_options"]) != pre:
-            raise DriverDiverged(
-                f"outer decision {k}: host (player={pre[0]}, options={pre[1]}) vs "
-                f"product (player={want['player']}, options={want['n_options']})")
-
     def run_duel_driver(self, cfg: DuelConfig, seed: int, driver) -> DuelResult:
         """The product duel: bot choices come from the driver, human choices go to both envs.
 
@@ -327,72 +310,37 @@ class Session:
         must equal the driver's outer decision log; singletons the product skipped are
         auto-taken (index 0) for the bot and dropped from the human feed. At the end the
         host history (mapped to product space) and the winner must equal the driver's.
+        Stepping and lockstep live in DuelSession; this keeps the socket feed.
         """
-        from ygo_zero.edopro.product_bot import host_to_product
         from ygo_zero.engine.inverse import choices_for_response  # D1; fail fast if missing
 
-        assert self.env is not None
+        assert self.env is not None and self.duel is not None
         env = self.env
-        prod_len = 0  # non-singleton host steps so far (= the driver's outer decision index)
-        try:
-            while not env.done:
-                self.pump()
-                if env.done:
-                    break
-                if env.player == self.bot_seat:
-                    if len(env.opts) == 1:
-                        env.step(0)  # singleton the product's CppEnv took automatically
-                        continue
-                    self.send(P.STOC_GAME_MSG, bytes([C.MSG_WAITING]))
-                    pre = (env.player, len(env.opts))
-                    try:
-                        idx = driver.next_bot()
-                    except DriverError as e:
-                        raise DriverDiverged(str(e)) from None
-                    self.check_driver_step(driver, prod_len, pre)
-                    env.step(idx)
-                    prod_len += 1
-                else:
-                    _, payload = self.await_packet({P.CTOS_RESPONSE})
-                    indices = choices_for_response(env, payload)
-                    if indices is None:
-                        self.send(P.STOC_GAME_MSG, bytes([C.MSG_RETRY]))
-                        continue
-                    prod: list[tuple[int, tuple[int, int], int]] = []
-                    for i in indices:
-                        pre = (env.player, len(env.opts))
-                        env.step(i)
-                        if pre[1] > 1:
-                            prod.append((prod_len, pre, i))
-                            prod_len += 1
-                    driver.feed_human([i for _, _, i in prod])
-                    for k, pre, _ in prod:
-                        self.check_driver_step(driver, k, pre)
+        while not env.done:
             self.pump()
-        except DriverError as e:
-            raise DriverDiverged(str(e)) from None
-        try:
-            driver.join(timeout=600)
-        except DriverError as e:
-            raise DriverDiverged(str(e)) from None
-        res = driver.res
-        if res is None:
-            raise DriverDiverged("product driver finished with no result")
-        mine = host_to_product(self.host.engine, cfg, env.choices)
-        if [int(c) for c in mine] != [int(c) for c in res.choices]:
-            raise DriverDiverged(
-                f"choice history mismatch: host {len(mine)} vs product {len(res.choices)} steps")
-        if res.winner != env.duel.winner or res.truncated:
-            raise DriverDiverged(
-                f"ending mismatch: product winner={res.winner} truncated={res.truncated} vs "
-                f"host winner={env.duel.winner}")
-        return DuelResult(env.duel.winner, env.duel.turn, list(env.choices),
-                          [e.actor for e in env.history])
+            if env.done:
+                break
+            if env.player == self.bot_seat:
+                if len(env.opts) == 1:
+                    env.step(0)  # singleton the product's CppEnv took automatically
+                    continue
+                self.send(P.STOC_GAME_MSG, bytes([C.MSG_WAITING]))
+                self.duel.step_bot()
+            else:
+                _, payload = self.await_packet({P.CTOS_RESPONSE})
+                indices = choices_for_response(env, payload)
+                if indices is None:
+                    self.send(P.STOC_GAME_MSG, bytes([C.MSG_RETRY]))
+                    continue
+                for i in indices:
+                    self.duel.step_human(i)
+        self.pump()
+        return self.duel.finish()
 
     def run_duel(self, cfg: DuelConfig, seed: int) -> DuelResult:
         from ygo_zero.engine.inverse import choices_for_response  # D1; fail fast if missing
 
-        assert self.env is not None
+        assert self.env is not None and self.duel is not None
         env = self.env
         while not env.done:
             self.pump()
@@ -400,7 +348,7 @@ class Session:
                 break
             if env.player == self.bot_seat:
                 self.send(P.STOC_GAME_MSG, bytes([C.MSG_WAITING]))
-                env.step(self.host.bot.next_choice(env))
+                self.duel.step_bot()
             else:
                 if os.environ.get("EDOPRO_DEBUG"):
                     print(f"ASK t={env.dec.msg.type} actor={env.player} step={env.dec.step}",
@@ -519,37 +467,15 @@ class DuelHost:
                         pass
 
     def write_record(self, cfg: DuelConfig, seed: int, result: DuelResult, session: Session) -> Path:
-        ts = time.strftime("%Y%m%d-%H%M%S")
-        outdir = self.record_root / ts
-        for k in range(100):
-            d = outdir if k == 0 else self.record_root / f"{ts}-{k}"
-            try:
-                d.mkdir(parents=True, exist_ok=False)
-                outdir = d
-                break
-            except FileExistsError:
-                continue
-        names = [self.deck_name(cfg.deck0, 0, session), self.deck_name(cfg.deck1, 1, session)]
-        rec = {
-            "game_idx": 0, "decks": names, "seed": seed, "choices": result.choices,
-            "auto_single": False,  # replay with PyEnv(..., auto_single=False)
-            "actors": result.actors, "turns": result.turns, "winner": result.winner,
-            "human_seat": session.human_seat, "surrendered": result.surrendered,
-            "disconnected": result.disconnected, "diverged": result.diverged,
-        }
-        if getattr(session, "product_info", None) is not None:
-            rec["product"] = session.product_info
-        (outdir / "game.jsonl").write_text(json.dumps(rec) + "\n")
-        human = cfg.deck0 if session.human_seat == 0 else cfg.deck1
-        side = session.human_side
-        ydk = "#main\n" + "".join(f"{c}\n" for c in human.main)
-        ydk += "#extra\n" + "".join(f"{c}\n" for c in human.extra)
-        ydk += "!side\n" + "".join(f"{c}\n" for c in side)
-        (outdir / "human.ydk").write_text(ydk)
+        bot_seat = 1 - session.human_seat
+        bot_deck = cfg.deck0 if bot_seat == 0 else cfg.deck1
+        path = _write_record(
+            self.record_root, cfg, seed, result, human_seat=session.human_seat,
+            human_side=session.human_side,
+            bot_name=self.deck_name(bot_deck, bot_seat, session),
+            product_info=getattr(session, "product_info", None))
         self._duels += 1
-        print(f"record -> {outdir / 'game.jsonl'} (winner seat {result.winner}, "
-              f"{result.turns} turns)", flush=True)
-        return outdir / "game.jsonl"
+        return path
 
     def deck_name(self, deck, seat: int, session: Session) -> str:
         if seat == session.human_seat:
