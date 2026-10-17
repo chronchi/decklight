@@ -50,3 +50,23 @@ today a whole bot turn arrives as snapshots and pieces jump into place. The same
 
 ## Order
 Cues first, then items 1–3, then 4–6, then 7–9. The user's further comments (due 2026-10-17) get folded in first.
+
+## 3. Accessibility (the user, 2026-10-17: "we have to implement this following accessibility standards as well, that's important in general")
+The whole client targets WCAG 2.2 AA:
+- Contrast: 4.5:1 for normal text; 3:1 for large text and for meaningful marks. Measured by script, not by eye.
+- No meaning carried by colour alone.
+- Touch targets at least 24 px, 44 px for primary buttons.
+- `prefers-reduced-motion` is honoured, and the pause and speed controls stay.
+- Accessible names on controls and cards; an `aria-live` region announces cues and prompts.
+- Dialogs follow the dialog pattern: focus moves in and returns, and Escape closes.
+- Everything works by keyboard, with a visible focus ring, and stays usable at 200% zoom.
+- axe-core runs in the screenshot script and fails on serious or critical issues.
+
+The ratios are met with desaturated colours, never with brightness or glow (the night design comes first).
+
+Negation cues (the user: "for negation it's too faint"):
+- a shape, a label naming the cause, and motion together;
+- at least 3:1 contrast;
+- the negated link stays marked until the chain ends;
+- held about 1.6 s at 1×.
+Cue lines are about 1.5–2× heavier, at least 2 px at 412 px width.
