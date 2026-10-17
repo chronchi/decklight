@@ -109,22 +109,23 @@ function footHTML(prompt, sel) {
 }
 
 // GY / banished / Extra list; each cell opens the card detail.
-export function pileSheetHTML(pile, cards, mock) {
+export function pileSheetHTML(pile, cards, mock, names) {
   const cells = (cards || []).slice().reverse().map((c) =>
     '<button class="cell" data-detailuid="' + esc(c ? c.uid : "") + '"><span class="cbox">' +
     (c ? cardHTML(c, {mock}) : '<div class="card back"></div>') +
     (c && !isHidden(c) ? '<span class="infobtn" role="button" tabindex="0" data-detailuid="' + esc(c.uid) + '" aria-label="Card details">ⓘ</span>' : "") +
     "</span>" +
     '<span class="cname">' + esc((c && c.name) || "Face-down") + "</span></button>").join("");
-  return '<div class="grab"></div><div class="stitle"><div class="tt"><span class="t">' + esc(pileTitle(pile)) +
+  return '<div class="grab"></div><div class="stitle"><div class="tt"><span class="t">' + esc(pileTitle(pile, names)) +
     '</span><span class="sub">' + (cards || []).length + " cards · newest first</span></div></div>" +
     '<div class="sbody">' + (cells ? '<div class="selectgrid">' + cells + "</div>" : '<p class="emptytx">Empty</p>') +
     '</div><div class="sfoot"><button class="bigbtn" data-act="closepile">Close</button></div>';
 }
 
-export function pileTitle(pile) {
+export function pileTitle(pile, names) {
   const [kind, who] = (pile || "").split(":");
-  const owner = who === "bot" ? "ygo-zero's " : "Your ";
+  const owner = names ? (who === "bot" ? names[1] + "’s " : names[0] + "’s ")
+    : who === "bot" ? "ygo-zero's " : "Your ";
   return owner + ({gy: "Graveyard", banished: "banished cards", extra: "Extra Deck"}[kind] || kind);
 }
 
@@ -141,7 +142,7 @@ export function statsLine(c) {
 
 // Info panel under your bar: the focused card, else the latest duel events.
 // info: {card, text, typeStr} for a focused card; events: newest last.
-export function infoHTML(info, events, mock, hint) {
+export function infoHTML(info, events, mock, hint, names) {
   if (info && info.card) {
     const c = info.card;
     const st = statsLine(c);
@@ -158,8 +159,9 @@ export function infoHTML(info, events, mock, hint) {
   const evs = (events || []).slice(-8);
   const rows = evs.map((e) => {
     const actor = e.actor === "you" || e.actor === "bot" ? e.actor : "system";
+    const who = actor === "you" ? (names ? names[0] : "You") : actor === "bot" ? (names ? names[1] : "Bot") : "";
     return '<div class="ev ' + actor + '"' + (e.card && e.card.uid ? ' data-focusuid="' + esc(e.card.uid) + '"' : "") + ">" +
-      '<span class="who">' + (actor === "you" ? "You" : actor === "bot" ? "Bot" : "") + "</span>" +
+      '<span class="who">' + esc(who) + "</span>" +
       '<span class="et">' + esc(e.text || "") + "</span></div>";
   }).join("");
   return '<div class="feed" data-act="log"><div class="evs">' + rows + "</div>" +

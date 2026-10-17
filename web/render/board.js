@@ -92,6 +92,7 @@ const PHASES = [
 export function midHTML(view, opts) {
   opts = opts || {};
   const yours = view.turn_player === "you";
+  const names = opts.names || null;
   const at = PHASES.findIndex(([k]) => k === view.phase);
   const track = PHASES.map((_, i) => '<i class="' + (i < at ? "done" : i === at ? "cur" : "") + '"></i>').join("");
   const name = at >= 0 ? PHASES[at][1] : view.phase;
@@ -109,7 +110,7 @@ export function midHTML(view, opts) {
   const bot = view.bot.emz || [null, null];
   return (
     '<div class="phase ' + (yours ? "you" : "bot") + '">' +
-    '<span class="who">' + (yours ? "Your turn" : "Bot's turn") + "</span>" +
+    '<span class="who">' + (names ? esc(names[yours ? 0 : 1]) + "’s turn" : (yours ? "Your turn" : "Bot's turn")) + "</span>" +
     '<span class="pname">' + esc(name) + "</span>" +
     '<span class="track" aria-hidden="true">' + track + "</span></div>" +
     emzSlot(you[0], bot[1]) + emzSlot(you[1], bot[0]) +
@@ -132,7 +133,7 @@ export function phaseBtnsHTML(prompt, locked) {
 export function barHTML(side, who, opts) {
   opts = opts || {};
   const frac = Math.max(0, Math.min(1, side.lp / 8000));
-  const name = who === "you" ? "You" : "ygo-zero";
+  const name = opts.name || (who === "you" ? "You" : "ygo-zero");
   let right = "";
   if (who === "bot") {
     if (opts.thinking) {

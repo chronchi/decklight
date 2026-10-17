@@ -268,8 +268,11 @@ def _visible(controller: int, c, me: int) -> bool:
 # --- view ---
 
 
-def build_view(env, human_seat: int) -> dict:
-    """The human's board view (hidden hand/banished cards are null entries)."""
+def build_view(env, human_seat: int, reveal_all: bool = False) -> dict:
+    """The human's board view (hidden hand/banished cards are null entries).
+
+    With `reveal_all` every card is visible (spectator replay: both hands face-up).
+    """
     duel = env.duel
     me = human_seat
     q = {(p, loc): duel.query_location(p, loc) for p in (0, 1)
@@ -285,7 +288,7 @@ def build_view(env, human_seat: int) -> dict:
     chain = parse_chain(field)
 
     def side(p: int) -> dict:
-        mine = p == me
+        mine = True if reveal_all else p == me
         hand = []
         for c in q[(p, C.LOCATION_HAND)]:
             if c is None:

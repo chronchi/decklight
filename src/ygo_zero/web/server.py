@@ -594,6 +594,12 @@ def create_app(*, token: str, engine=None, make_opponent=None,
         cached = srv.pics_dir / size / f"{code}.jpg"
         if cached.is_file():
             return Response(cached.read_bytes(), media_type="image/jpeg")
+        from ygo_zero.engine.resources import extra_card_dirs
+
+        for d in extra_card_dirs():
+            cand = d / "pics" / f"{code}.jpg"
+            if cand.is_file():
+                return Response(cand.read_bytes(), media_type="image/jpeg")
         try:
             data = await asyncio.to_thread(
                 _fetch_img, IMG_URLS[size].format(code=code))

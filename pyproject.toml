@@ -25,6 +25,7 @@ ml = [
 ]
 web = [
     "httpx>=0.27",
+    "imageio-ffmpeg>=0.5",
     "starlette>=0.37",
     "uvicorn>=0.29",
     "websockets>=13",

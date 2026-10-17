@@ -22,6 +22,16 @@ const qs = new URLSearchParams(location.search);
 const MOCK = qs.has("mock");
 let mockIdx = Math.max(0, parseInt(qs.get("i") || "0", 10) || 0);
 const TOKEN = qs.get("t") || "";
+// Spectator replay (game_video.py): ?replay=<frames-json-url>. Fetches the
+// frames once, renders each through the mock/live render path, no inputs.
+const REPLAY_URL = qs.get("replay");
+const IS_REPLAY = REPLAY_URL != null && REPLAY_URL !== "";
+let replayFrames = [];
+let replayIdx = -1;
+if (IS_REPLAY) {
+  window.frameCount = 0;
+  window.showFrame = async () => {};
+}
 
 const app = document.getElementById("app");
 const logside = document.getElementById("logside");
@@ -221,7 +231,7 @@ function detailCardForOpt(index) {
 
 // Card text from the server's /card/{code} endpoint, cached by code.
 function cardText(code) {
-  if (!code || MOCK) return null;
+  if (!code || MOCK || IS_REPLAY) return null;
   const t = texts.get(code);
   if (t) return typeof t === "object" ? t : null;
   texts.set(code, "pending");
@@ -252,6 +262,7 @@ function addEvents(list, reset) {
 // board-changing bot events get a small top-of-board banner. Only the
 // newest 3 events of a batch can trigger anything.
 function queueNotices(added) {
+  if (IS_REPLAY) return;   // the video shows every frame; no pop-up reveals or banners
   const fresh = added.slice().sort((a, b) => (a.n || 0) - (b.n || 0)).slice(-3);
   for (const e of fresh) {
     if (e.actor !== "bot") continue;
@@ -382,6 +393,7 @@ function pileCards(which) {
 }
 
 function hintFor(p) {
+  if (IS_REPLAY) return "";   // the caption bar carries the narration instead
   if (msg.result) return "";
   if (msg.thinking) return "";   // the bot bar already shows it
   if (!p) return "Waiting for ygo-zero…";
@@ -436,36 +448,63 @@ function gameMenuHTML() {
     "</div></div>";
 }
 
+function replayName(who) {
+  if (!msg.names) return undefined;
+  return who === "you" ? msg.names[0] : msg.names[1];
+}
+
+// Quiet narration bar where the prompt sheet normally sits (replay only).
+function captionHTML(m) {
+  const c = m.caption || {};
+  return '<div class="grab"></div><div class="stitle"><div class="tt"><span class="t">' +
+    esc(c.actor ? c.actor + " — " + (c.text || "") : (c.text || "")) + "</span></div></div>";
+}
+
 function renderGame() {
   const v = msg.view;
   const p = msg.prompt;
   const act = locked ? {} : actionableMap(p);
+  app.classList.toggle("replay", IS_REPLAY);
   if (focusUid && !findCard(focusUid)) focusUid = null;
   const yourTurn = v.turn_player === "you";
 
-  let h = barHTML(v.bot, "bot", {thinking: msg.thinking, active: !yourTurn});
+  let h = barHTML(v.bot, "bot", {thinking: msg.thinking, active: !yourTurn, name: replayName("bot")});
+  if (IS_REPLAY) {
+    // Spectator: seat 1's hand face-up under the top header (frames are reveal_all).
+    h += '<div id="thand" data-key="thand">' + handHTML(v.bot.hand, {}, MOCK, null) + "</div>";
+  }
   if (bannerText) h += '<div id="botbanner" data-key="botbanner">' + esc(bannerText) + "</div>";
   h += '<div id="board" data-key="board">';
   h += '<div class="field bot">' + sideHTML(v.bot, {mirror: true, mock: MOCK, actionable: act, focus: focusUid}) + "</div>";
-  h += '<div id="mid"><div id="midstrip" class="zrow">' + midHTML(v, {mock: MOCK, actionable: act, focus: focusUid}) + "</div>";
+  h += '<div id="mid"><div id="midstrip" class="zrow">' + midHTML(v, {mock: MOCK, actionable: act, focus: focusUid, names: msg.names || null}) + "</div>";
   const chain = chainHTML(v.chain, MOCK);
   if (chain) h += '<div id="chain">' + chain + "</div>";
   h += "</div>";
   h += '<div class="field you">' + sideHTML(v.you, {mirror: false, mock: MOCK, actionable: act, focus: focusUid}) + "</div>";
   h += "</div>";
-  h += barHTML(v.you, "you", {phaseBtns: phaseBtnsHTML(p, locked), active: yourTurn});
+  h += barHTML(v.you, "you", {phaseBtns: phaseBtnsHTML(p, locked), active: yourTurn, name: replayName("you")});
 
   let info = null;
-  if (focusUid) {
-    const c = findCard(focusUid);
-    const t = c && !isHidden(c) ? cardText(c.code) : null;
-    info = {card: c, text: t && t.text, typeStr: t && t.type_str};
-  }
-  h += '<div id="info" data-key="info">' + infoHTML(info, shownEvents(), MOCK, hintFor(p)) + "</div>";
-  h += '<div id="hand" data-key="hand" class="' + (locked ? "locked" : "") + '">' + handHTML(v.you.hand, act, MOCK, focusUid) + "</div>";
+  let sheet = "";
+  if (IS_REPLAY) {
+    // Bottom order: header → seat 0's hand → last 5 log lines → caption bar.
+    // The caption is a static block (see #app.replay #sheet): it never overlaps the hand.
+    h += '<div id="hand" data-key="hand">' + handHTML(v.you.hand, {}, MOCK, null) + "</div>";
+    h += '<div id="info" data-key="info">' +
+      infoHTML(null, shownEvents().slice(-5), MOCK, "", msg.names || null) + "</div>";
+    sheet = msg.caption && !msg.result ? captionHTML(msg) : "";
+  } else {
+    if (focusUid) {
+      const c = findCard(focusUid);
+      const t = c && !isHidden(c) ? cardText(c.code) : null;
+      info = {card: c, text: t && t.text, typeStr: t && t.type_str};
+    }
+    h += '<div id="info" data-key="info">' + infoHTML(info, shownEvents(), MOCK, hintFor(p), msg.names || null) + "</div>";
+    h += '<div id="hand" data-key="hand" class="' + (locked ? "locked" : "") + '">' + handHTML(v.you.hand, act, MOCK, focusUid) + "</div>";
 
-  const sheet = pileOpen ? pileSheetHTML(pileOpen, pileCards(pileOpen), MOCK)
-    : (p && !msg.result ? sheetHTML(p, MOCK, sel, expanded) : "");
+    sheet = pileOpen ? pileSheetHTML(pileOpen, pileCards(pileOpen), MOCK)
+      : (p && !msg.result ? sheetHTML(p, MOCK, sel, expanded) : "");
+  }
   if (pileOpen) h += '<div id="pscrim" data-key="pscrim" data-act="closepile"></div>';
   if (sheet) h += '<div id="sheet" data-key="sheet" class="' + (locked && !pileOpen ? "locked" : "") + (pileOpen ? " pilesheet" : "") + '">' + sheet + "</div>";
   const restore = saveScrolls(app, ["#sheet .sbody", "#info .ftext"]);
@@ -479,7 +518,11 @@ function renderGame() {
     const target = v[who].lp;
     const prev = lpShown[who] == null ? target : lpShown[who];
     lpShown[who] = target;
-    if (!el || prev === target || reducedMotion()) continue;
+    if (!el) continue;
+    if (IS_REPLAY) {
+      el.textContent = String(target);   // static screenshot: no count animation
+      continue;
+    }
     if (target < prev) el.classList.add("flash");
     const t0 = performance.now();
     const step = (t) => {
@@ -557,16 +600,32 @@ function renderOverlays(logh) {
   if (!revealLeaving) morph(ovReveal, revealCur ? revealHTML(revealCur) : "");
 
   let oh = "";
+  if (IS_REPLAY && msg && msg.title && replayIdx === 0) {
+    oh += '<div id="retitle" data-key="retitle"><div class="box"><div class="kicker">ygo-zero replay</div>' +
+      "<h2>" + esc(msg.title) + "</h2></div></div>";
+  }
   if (msg && msg.view && msg.result) {
-    const win = msg.result.winner === "you";
-    oh = '<div id="gameover" data-key="gameover" role="alertdialog" aria-label="Game over"><div class="box ' + (win ? "win" : "loss") + '">' +
-      '<div class="kicker">Duel over · turn ' + msg.view.turn + "</div>" +
-      "<h2>" + (win ? "Victory" : "Defeat") + "</h2>" +
-      '<p class="reason">' + esc(msg.result.reason === "win" ? "" : msg.result.reason || "") + "</p>" +
-      '<div class="score"><span class="you">You<b>' + msg.view.you.lp + "</b></span>" +
-      '<span class="bot">ygo-zero<b>' + msg.view.bot.lp + "</b></span></div>" +
-      '<div class="row"><button class="bigbtn" data-act="newgame">New game</button>' +
-      '<button class="bigbtn primary" data-act="rematch">Rematch</button></div></div></div>';
+    if (msg.names) {
+      const win = msg.result.winner;
+      const loser = msg.names[0] === win ? msg.names[1] : msg.names[0];
+      const reason = msg.result.reason === "surrender" && loser ? loser + " surrenders" : "";
+      oh += '<div id="gameover" data-key="gameover" role="alertdialog" aria-label="Game over"><div class="box">' +
+        '<div class="kicker">Duel over · turn ' + msg.view.turn + "</div>" +
+        "<h2>" + esc(win) + " wins</h2>" +
+        '<p class="reason">' + esc(reason) + "</p>" +
+        '<div class="score"><span class="you">' + esc(msg.names[0]) + "<b>" + msg.view.you.lp + "</b></span>" +
+        '<span class="bot">' + esc(msg.names[1]) + "<b>" + msg.view.bot.lp + "</b></span></div></div></div>";
+    } else {
+      const win = msg.result.winner === "you";
+      oh = '<div id="gameover" data-key="gameover" role="alertdialog" aria-label="Game over"><div class="box ' + (win ? "win" : "loss") + '">' +
+        '<div class="kicker">Duel over · turn ' + msg.view.turn + "</div>" +
+        "<h2>" + (win ? "Victory" : "Defeat") + "</h2>" +
+        '<p class="reason">' + esc(msg.result.reason === "win" ? "" : msg.result.reason || "") + "</p>" +
+        '<div class="score"><span class="you">You<b>' + msg.view.you.lp + "</b></span>" +
+        '<span class="bot">ygo-zero<b>' + msg.view.bot.lp + "</b></span></div>" +
+        '<div class="row"><button class="bigbtn" data-act="newgame">New game</button>' +
+        '<button class="bigbtn primary" data-act="rematch">Rematch</button></div></div></div>';
+    }
   }
   morph(ovOver, oh);
 }
@@ -637,6 +696,8 @@ function renderLobby() {
 }
 
 function render() {
+  // Static screenshots in replay mode: no entry animations, no transitions.
+  document.documentElement.classList.toggle("replay", IS_REPLAY);
   const before = snapshotRects();
   if (!msg || msg.t === "lobby") {
     renderLobby();
@@ -644,8 +705,9 @@ function render() {
   }
   if (msg.t === "state") {
     renderGame();
-    flipAnimate(before);
-    document.title = msg.prompt && msg.prompt.text ? msg.prompt.text + " · ygo-zero" : "ygo-zero";
+    if (!IS_REPLAY) flipAnimate(before);
+    document.title = msg.prompt && msg.prompt.text ? msg.prompt.text + " · ygo-zero"
+      : msg.caption && msg.caption.text ? msg.caption.text + " · ygo-zero" : "ygo-zero";
   } else if (msg.t === "error") {
     banner.hidden = false;
     banner.textContent = msg.text || "error";
@@ -980,7 +1042,64 @@ document.addEventListener("keydown", (ev) => {
   if (ev.key === "ArrowLeft") loadMock(mockIdx - 1);
 });
 
+// Wait for the card images visible in the current frame (bounded wait:
+// a missing image must never stall the video).
+function waitReplayImages(timeoutMs) {
+  const imgs = [...document.querySelectorAll("#app img")].filter((im) => !im.complete);
+  if (!imgs.length) return Promise.resolve();
+  return Promise.race([
+    Promise.all(imgs.map((im) => new Promise((res) => {
+      im.addEventListener("load", res, {once: true});
+      im.addEventListener("error", res, {once: true});
+    }))),
+    new Promise((res) => setTimeout(res, timeoutMs || 2500)),
+  ]);
+}
+
+async function loadReplay() {
+  let url = REPLAY_URL;
+  if (TOKEN && !url.includes("t=")) url += (url.includes("?") ? "&" : "?") + "t=" + encodeURIComponent(TOKEN);
+  const r = await fetch(url);
+  if (!r.ok) {
+    msg = {t: "error", text: "replay load failed: " + REPLAY_URL};
+    render();
+    return;
+  }
+  const j = await r.json();
+  replayFrames = Array.isArray(j) ? j : (j.frames || []);
+  window.frameCount = replayFrames.length;
+  window.showFrame = async (i) => {
+    i = Math.max(0, Math.min(replayFrames.length - 1, i));
+    replayIdx = i;
+    events = [];
+    for (let k = 0; k <= i; k++) {
+      for (const e of replayFrames[k].log || []) {
+        if (!events.some((x) => x.n === e.n)) events.push(e);
+      }
+    }
+    events.sort((a, b) => (a.n || 0) - (b.n || 0));
+    msg = replayFrames[i];
+    locked = false;
+    sel = [];
+    expanded = null;
+    menuUid = null;
+    detail = null;
+    gameMenu = false;
+    pileOpen = null;
+    revealCur = null;
+    revealQueue = [];
+    bannerText = null;
+    render();
+    await waitReplayImages(2500);
+  };
+  if (replayFrames.length) await window.showFrame(0);
+}
+
 async function boot() {
+  if (IS_REPLAY) {
+    await loadReplay();
+    return;
+  }
   if (MOCK) {
     await loadMock(mockIdx);
     return;
