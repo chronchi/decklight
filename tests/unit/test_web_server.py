@@ -283,10 +283,11 @@ def _verify_no_leak(engine, cfg, human_seat: int, choices: list[int],
     env = PyEnv(engine, cfg, auto_single=False)
     env.reset()
     # Codes revealed by announcement: a public history entry (e.g. the bot
-    # activating a card from its hand) or a chain link (every chained card is
-    # announced) makes the code public from then on, even while the card is
-    # still physically hidden - the same rules the model's own observation
-    # follows (`obs.history_entry.public`, `obs.chain_array`).
+    # activating a card from its hand), a chain link (every chained card is
+    # announced), or an engine confirm (searches, looks, set-confirms, all
+    # shown to both players) makes the code public from then on, even while
+    # the card is still physically hidden - the same rules the model's own
+    # observation follows (`obs.history_entry.public`, `obs.chain_array`).
     from ygo_zero.engine.query import parse_chain
 
     revealed: set[int] = set()
@@ -296,6 +297,28 @@ def _verify_no_leak(engine, cfg, human_seat: int, choices: list[int],
             if ch.code:
                 revealed.add(ch.code)
 
+    def note_confirmed(prev_trace: int) -> int:
+        """Codes the engine revealed via MSG_CONFIRM_CARDS (searches, looks,
+        set-confirms: the cues surface them, and EDOPro shows them to both
+        players, so they are public from then on). Returns the new trace len."""
+        import struct
+
+        trace = env.duel.trace
+        for raw in trace[prev_trace:]:
+            if raw[0] != C.MSG_CONFIRM_CARDS or len(raw) < 6:
+                continue
+            (count,) = struct.unpack_from("<I", raw, 2)
+            pos = 6
+            for _ in range(count):
+                if pos + 10 > len(raw):
+                    break
+                (code,) = struct.unpack_from("<I", raw, pos)
+                if code:
+                    revealed.add(code)
+                pos += 10
+        return len(trace)
+
+    prev_trace = note_confirmed(0)
     note_revealed()
     if 0 in needed:
         hidden_by_h[0] = _hidden_codes_of(env, human_seat) - revealed
@@ -305,6 +328,7 @@ def _verify_no_leak(engine, cfg, human_seat: int, choices: list[int],
         entry = env.history[h_cur - 1]
         if entry.public and entry.row[2]:
             revealed.add(entry.row[2])
+        prev_trace = note_confirmed(prev_trace)
         note_revealed()
         if h_cur in needed:
             hidden_by_h[h_cur] = _hidden_codes_of(env, human_seat) - revealed

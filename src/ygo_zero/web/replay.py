@@ -14,6 +14,7 @@ from collections.abc import Sequence
 
 from ygo_zero.engine.duel import DuelConfig, Engine
 from ygo_zero.engine.env import PyEnv
+from ygo_zero.web.cues import build_cues
 from ygo_zero.web.view import build_events, build_prompt, build_view
 
 # Narration-free log kinds in a video: the caption bar already says which
@@ -66,6 +67,7 @@ def replay_frames(
     env.reset()
     frames: list[dict] = []
     prev_len = 0
+    prev_trace = 0
     for k, idx in enumerate(choices):
         if env.done:
             raise RuntimeError(f"replay ended early at step {k} of {len(choices)}")
@@ -81,11 +83,13 @@ def replay_frames(
             label = _fallback_label(env, seat, int(idx))
         view = build_view(env, 0, reveal_all=True)
         log = _replay_log(env, prev_len)
+        cues, _ = build_cues(env, 0, since=prev_trace, reveal_all=True)
         frame: dict = {
             "t": "state",
             "view": view,
             "prompt": None,
             "log": log,
+            "cues": cues,
             "thinking": None,
             "result": None,
             # Frame 0 is the title card: no caption bar over it. The first
@@ -98,6 +102,7 @@ def replay_frames(
         frames.append(frame)
         prev_len = len(env.history)
         env.step(int(idx))
+        prev_trace = len(env.duel.trace)
     if env.done:
         if expect_winner is not None and env.winner != expect_winner:
             raise RuntimeError(
@@ -113,12 +118,14 @@ def replay_frames(
         )
     view = build_view(env, 0, reveal_all=True)
     log = _replay_log(env, prev_len)
+    final_cues, _ = build_cues(env, 0, since=prev_trace, reveal_all=True)
     frames.append(
         {
             "t": "state",
             "view": view,
             "prompt": None,
             "log": log,
+            "cues": final_cues,
             "thinking": None,
             "result": {"winner": names[winner], "reason": reason},
             "caption": {"actor": names[winner], "text": "Wins the duel"},

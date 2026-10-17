@@ -86,6 +86,7 @@ class Server:
         self.human_name = "human"
         self.prompt_id = 0
         self.log_sent = 0
+        self.cue_sent = 0
         self.gen = 0
         self.finished = False
         self.end_reason = ""
@@ -190,6 +191,7 @@ class Server:
         return None
 
     def state_message(self, *, full_log: bool = False, peek: bool = False) -> dict:
+        from ygo_zero.web.cues import build_cues
         from ygo_zero.web.view import build_events, build_prompt, build_view
 
         s = self.session
@@ -206,6 +208,10 @@ class Server:
         for e in log:
             if e["n"] in self.auto_passed:
                 e["actor"], e["text"], e["card"], e["kind"] = "system", "(auto-passed)", None, "auto_pass"
+        if not peek:
+            cues, self.cue_sent = build_cues(s.env, human, since=self.cue_sent)
+        else:
+            cues = []  # thinking ticker: transient cues wait for the real send
         if not full_log and not peek:
             self.log_sent = len(s.env.history)
         result = None
@@ -213,7 +219,7 @@ class Server:
             winner = "you" if s.result.winner == human else "bot"
             result = {"winner": winner, "reason": self.end_reason or "win"}
         return {"t": "state", "view": view, "prompt": prompt,
-                "log": log,
+                "log": log, "cues": cues,
                 "thinking": {"seconds": thinking} if thinking is not None else None,
                 "result": result}
 
@@ -427,6 +433,7 @@ class Server:
         self.mode = mode
         self.prompt_id = 0
         self.log_sent = 0
+        self.cue_sent = 0
         self.finished = False
         self.end_reason = ""
         self._last_sig = ()
