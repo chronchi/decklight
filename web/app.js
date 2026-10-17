@@ -4,6 +4,7 @@ import {handHTML, sheetHTML, pileSheetHTML, infoHTML, actionableMap, statsLine} 
 import {logHTML} from "./render/log.js";
 import {esc, imgUrl, isHidden, phHTML} from "./render/card.js";
 import {morph} from "./render/morph.js";
+import {createCuePlayer, recapItem} from "./cues.js";
 
 const MOCKS = [
   "mock/01-lobby.json",
@@ -16,6 +17,12 @@ const MOCKS = [
   "mock/08-game-over.json",
   "mock/09-gy-sheet.json",
   "mock/10-chain-3.json",
+  "mock/11-cues-activate.json",
+  "mock/12-cues-chain.json",
+  "mock/13-cues-summon.json",
+  "mock/14-cues-battle.json",
+  "mock/15-cues-moves.json",
+  "mock/16-cues-recap.json",
 ];
 
 const qs = new URLSearchParams(location.search);
@@ -53,6 +60,7 @@ const ovGame = ov("ov-gamemenu");
 const ovDetail = ov("ov-detail");
 const ovReveal = ov("ov-reveal");
 const ovOver = ov("ov-over");
+const ovCues = ov("ov-cues");
 
 let msg = null;          // latest server/mock message
 let locked = false;      // input disabled until the next state
@@ -85,6 +93,25 @@ try {
   if (saved === "auto" || saved === "all") chainMode = saved;
 } catch (e) { /* private mode: stay on auto */ }
 let inLobby = false;     // after Back to lobby: ignore states until new_game
+
+// Pacing cues (web/cues.js): speed "1" | "2" | "instant", pause after each bot
+// action, and the "what happened" recap at the start of your turn.
+let cueSpeed = "1";
+let cuePause = false;
+let cueRecap = true;
+try {
+  const sp = localStorage.getItem("ygo-cue-speed");
+  if (sp === "1" || sp === "2" || sp === "instant") cueSpeed = sp;
+  cuePause = localStorage.getItem("ygo-cue-pause") === "1";
+  cueRecap = localStorage.getItem("ygo-cue-recap") !== "0";
+} catch (e) { /* private mode: defaults */ }
+function saveSetting(k, v) {
+  try { localStorage.setItem(k, v); } catch (e) { /* ignore */ }
+}
+let recap = null;        // {turn, who, items:[{text, sub, card}]} shown at the start of your turn
+let recapAcc = null;     // collecting during the opponent's turn
+let lastCueN = -1;       // cues are deduped by trace index (peek states may repeat them)
+let lastCueTurn = 0;
 
 // Bot activation reveal queue + top-of-board banner.
 let revealQueue = [];
@@ -242,7 +269,7 @@ function cardText(code) {
   return null;
 }
 
-function addEvents(list, reset) {
+function addEvents(list, reset, notices) {
   const wasEmpty = events.length === 0;
   if (reset) events = [];
   const added = [];
@@ -255,7 +282,7 @@ function addEvents(list, reset) {
   }
   events.sort((a, b) => (a.n || 0) - (b.n || 0));
   // No reveals for the initial full-log replay or a reset batch.
-  if (!reset && !wasEmpty && added.length) queueNotices(added);
+  if (!reset && !wasEmpty && added.length && notices !== false) queueNotices(added);
 }
 
 // Bot notices: activations get a centered reveal (queued), other
@@ -338,6 +365,7 @@ function revealHTML(ev) {
 function choose(index) {
   if (locked || !msg || !msg.prompt) return;
   locked = true;
+  recap = null;   // the recap stays until your first move
   menuUid = null;
   expanded = null;
   render();
@@ -427,6 +455,39 @@ function morphBottom(container, html, listSel) {
   if (sc2) sc2.scrollTop = atBottom ? sc2.scrollHeight : Math.min(st, sc2.scrollHeight);
 }
 
+function speedSeg(v, label) {
+  return '<button role="radio" aria-checked="' + (cueSpeed === v) + '" class="' + (cueSpeed === v ? "sel" : "") +
+    '" data-act="cuespeed" data-v="' + v + '">' + label + "</button>";
+}
+
+function toggleRow(act, on, label, hint) {
+  return '<button class="mrow tog" role="switch" aria-checked="' + on + '" data-act="' + act + '">' +
+    '<span class="tl"><span>' + esc(label) + '</span><span class="th">' + esc(hint) + "</span></span>" +
+    '<span class="sw' + (on ? " on" : "") + '"><i></i></span></button>';
+}
+
+// "While you waited": the opponent's turn, in the info panel under your bar
+// (non-modal: the board stays usable; it closes with its X or your first move).
+function recapHTML(hint) {
+  if (!recap) return "";
+  const rows = recap.items.map((it, i) => {
+    const c = it.card;
+    const thumb = c && c.code ? '<span class="rth">' + phHTML(c) +
+      (!MOCK ? '<img alt="" src="' + imgUrl(c.code, "small") + '" onerror="this.remove()">' : "") + "</span>"
+      : '<span class="rth none"></span>';
+    const tag = c && c.code ? "button" : "div";
+    return "<" + tag + ' class="rrow' + (c && c.owner === "opp" ? " opp" : " me") + '"' +
+      (c && c.code ? ' data-recap="' + i + '"' : "") + ">" + thumb +
+      '<span class="rtx"><span>' + esc(it.text) + "</span>" + (it.sub ? '<span class="rsub">' + esc(it.sub) + "</span>" : "") +
+      "</span></" + tag + ">";
+  }).join("");
+  return '<div class="recap" data-key="recap" role="region" aria-label="What happened">' +
+    '<div class="rhead"><span class="kicker">While you waited</span><span class="rt">' + esc(recap.who) +
+    " · turn " + recap.turn + '</span><button class="iconbtn sm" data-act="closerecap" aria-label="Close recap">' +
+    '<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5 5l10 10M15 5 5 15"/></svg></button></div>' +
+    '<div class="rlist">' + rows + "</div>" + (hint ? '<div class="hint">' + esc(hint) + "</div>" : "") + "</div>";
+}
+
 function gameMenuHTML() {
   const seg = (v, label) =>
     '<button role="radio" aria-checked="' + (chainMode === v) + '" class="' + (chainMode === v ? "sel" : "") +
@@ -443,6 +504,11 @@ function gameMenuHTML() {
     '<div class="mrow" style="pointer-events:none">Chain responses</div>' +
     '<div class="seg" role="radiogroup">' + seg("auto", "Auto") + seg("all", "All") + "</div>" +
     '<div class="mhint">Auto skips empty windows with nothing to respond to.</div>' +
+    '<div class="msep"></div>' +
+    '<div class="mrow" style="pointer-events:none">Pacing</div>' +
+    '<div class="seg" role="radiogroup">' + speedSeg("1", "1×") + speedSeg("2", "2×") + speedSeg("instant", "Instant") + "</div>" +
+    toggleRow("cuepause", cuePause, "Pause after each bot action", "Tap anywhere to continue.") +
+    toggleRow("cuerecap", cueRecap, "Turn recap", "What the bot did, at the start of your turn.") +
     '<div class="msep"></div>' +
     '<div class="mrow disabled" aria-disabled="true">Sound<span class="sub">Off</span></div>' +
     "</div></div>";
@@ -499,7 +565,8 @@ function renderGame() {
       const t = c && !isHidden(c) ? cardText(c.code) : null;
       info = {card: c, text: t && t.text, typeStr: t && t.type_str};
     }
-    h += '<div id="info" data-key="info">' + infoHTML(info, shownEvents(), MOCK, hintFor(p), msg.names || null) + "</div>";
+    h += '<div id="info" data-key="info">' + (recap && !info ? recapHTML(hintFor(p))
+      : infoHTML(info, shownEvents(), MOCK, hintFor(p), msg.names || null)) + "</div>";
     h += '<div id="hand" data-key="hand" class="' + (locked ? "locked" : "") + '">' + handHTML(v.you.hand, act, MOCK, focusUid) + "</div>";
 
     sheet = pileOpen ? pileSheetHTML(pileOpen, pileCards(pileOpen), MOCK)
@@ -515,17 +582,21 @@ function renderGame() {
 
   for (const who of ["you", "bot"]) {
     const el = app.querySelector(".pbar." + who + " .lp");
-    const target = v[who].lp;
+    const ov = cue.lpOverride(who);   // a damage cue already ticked the counter down
+    const target = ov != null ? ov : v[who].lp;
     const prev = lpShown[who] == null ? target : lpShown[who];
     lpShown[who] = target;
     if (!el) continue;
-    if (IS_REPLAY) {
-      el.textContent = String(target);   // static screenshot: no count animation
+    if (IS_REPLAY || ov != null) {
+      el.textContent = String(target);   // static screenshot / cue-driven: no count animation
+      const bar = app.querySelector(".pbar." + who + " .lpbar > i");
+      if (bar && ov != null) bar.style.width = (Math.max(0, Math.min(1, target / 8000)) * 100).toFixed(1) + "%";
       continue;
     }
     if (target < prev) el.classList.add("flash");
     const t0 = performance.now();
     const step = (t) => {
+      if (cue.lpOverride(who) != null) return;   // a damage cue owns the counter now
       const k = Math.min(1, (t - t0) / 400);
       el.textContent = String(Math.round(prev + (target - prev) * (1 - Math.pow(1 - k, 3))));
       if (k < 1) requestAnimationFrame(step);
@@ -538,7 +609,7 @@ function renderGame() {
   const logh = logHTML(shownEvents(), MOCK);
   morphBottom(logside,
     '<div class="sidecard" data-key="side">' + (info && info.card ? infoHTML(info, null, MOCK, "")
-    : '<p class="emptytx">Tap any card to read it here.</p>') + "</div>" +
+    : recap && !IS_REPLAY ? recapHTML("") : '<p class="emptytx">Tap any card to read it here.</p>') + "</div>" +
     '<div class="loghead" data-key="lhead">Duel log' + logAllBtn() + '</div><div class="loglist" data-key="llist">' + logh + "</div>",
     ".loglist");
   renderOverlays(logh);
@@ -758,10 +829,17 @@ function onInfoBtn(el) {
 
 app.addEventListener("click", (ev) => {
   const t = ev.target;
+  // "Pause after each bot action": a tap anywhere steps to the next action (the
+  // menu and log stay reachable). While cues play, taps reach the board as usual.
+  if (cue.waiting() && !t.closest('[data-act="gamemenu"], [data-act="log"]')) {
+    cue.resume();
+    return;
+  }
   const info = t.closest("[data-detailcard], .infobtn");
   if (info && (info.getAttribute("data-detailcard") != null || info.getAttribute("data-detailuid") != null)) {
     if (onInfoBtn(info)) return;
   }
+  if (onRecapRow(t)) return;
   const ef = t.closest(".opt .ef");
   if (ef) {
     // Tapping the effect text expands it; tapping the rest of the row chooses.
@@ -836,6 +914,19 @@ app.addEventListener("click", (ev) => {
   }
 });
 
+// A recap line opens its card's details.
+function onRecapRow(target) {
+  const rr = target.closest("[data-recap]");
+  if (!rr || !recap) return false;
+  const it = recap.items[parseInt(rr.getAttribute("data-recap"), 10)];
+  if (it && it.card && it.card.code) {
+    detail = Object.assign({uid: "recap", pos: null, atk: 0, def: 0, level: 0, rank: 0, link: 0,
+      counters: 0, overlays: []}, it.card, {faceup: true});
+    render();
+  }
+  return true;
+}
+
 function onOverlayClick(ev) {
   const info = ev.target.closest("[data-detailcard], .infobtn");
   if (info && (info.getAttribute("data-detailcard") != null || info.getAttribute("data-detailuid") != null)) {
@@ -866,6 +957,7 @@ function onOverlayClick(ev) {
     }
     return;
   }
+  if (onRecapRow(ev.target)) return;
   const act = ev.target.closest("[data-act]");
   if (act) onAction(act.getAttribute("data-act"), act);
 }
@@ -889,6 +981,7 @@ function goLobby() {
   revealQueue = [];
   bannerText = null;
   inLobby = true;
+  resetCues();
   render();
 }
 
@@ -923,6 +1016,22 @@ function onAction(kind, el) {
     if (!MOCK && ws && msg && msg.view && !msg.result) ws.send({t: "surrender"});
     goLobby();
     return;
+  } else if (kind === "cuespeed") {
+    const v = el.getAttribute("data-v");
+    if (v === "1" || v === "2" || v === "instant") {
+      cueSpeed = v;
+      saveSetting("ygo-cue-speed", v);
+      if (v === "instant") cue.flush();
+    }
+  } else if (kind === "cuepause") {
+    cuePause = !cuePause;
+    saveSetting("ygo-cue-pause", cuePause ? "1" : "0");
+    if (!cuePause && cue.waiting()) cue.resume();
+  } else if (kind === "cuerecap") {
+    cueRecap = !cueRecap;
+    saveSetting("ygo-cue-recap", cueRecap ? "1" : "0");
+  } else if (kind === "closerecap") {
+    recap = null;
   } else if (kind === "chainset") {
     const v = el.getAttribute("data-v");
     if (v === "auto" || v === "all") {
@@ -937,6 +1046,7 @@ function onAction(kind, el) {
     revealQueue = [];
     revealCur = null;
     bannerText = null;
+    resetCues();
     sendGame({t: "new_game", deck: ydk ? {ydk} : lobbyPick.you, bot_deck: lobbyPick.bot,
       first: lobbyPick.first, mode: lobbyPick.mode, chain: chainMode});
     return;
@@ -993,6 +1103,83 @@ document.addEventListener("input", (ev) => {
   }
 });
 
+// ---- cues ----
+const cue = createCuePlayer({
+  layer: ovCues,
+  getView: () => (msg && msg.view) || null,
+  apply: (m) => applyState(m),
+  mock: MOCK,
+  names: () => (msg && msg.names) || null,
+  speed: () => (cueSpeed === "2" ? 2 : 1),
+  pause: () => cuePause && !IS_REPLAY,
+  textFor: (code) => {
+    const t = cardText(code);
+    return t && t.text ? t.text : null;
+  },
+});
+
+function resetCues() {
+  cue.reset();
+  recap = null;
+  recapAcc = null;
+  lastCueN = -1;
+  lastCueTurn = 0;
+}
+
+// New cues of a state message (peek/think states may repeat them: dedupe by trace index).
+function freshCues(m) {
+  if (!m || !Array.isArray(m.cues)) return [];
+  if (m.view && m.view.turn < lastCueTurn) lastCueN = -1;   // a new duel restarted the trace
+  if (m.view) lastCueTurn = m.view.turn;
+  const out = m.cues.filter((c) => c && (typeof c.n !== "number" || c.n > lastCueN));
+  for (const c of out) if (typeof c.n === "number" && c.n > lastCueN) lastCueN = c.n;
+  return out;
+}
+
+// Collect the opponent's turn for the recap; attach it to the message where your turn starts.
+function collectRecap(m, cues) {
+  const oppName = (m.names && m.names[1]) || "ygo-zero";
+  for (const c of cues) {
+    if (c.t === "turn") {
+      if (c.player === "opp") recapAcc = {turn: c.turn, who: oppName, items: []};
+      else if (recapAcc) {
+        if (recapAcc.items.length) m._recap = recapAcc;
+        recapAcc = null;
+      }
+      continue;
+    }
+    if (!recapAcc) continue;
+    const it = recapItem(c);
+    if (it) {
+      recapAcc.items.push(it);
+      if (recapAcc.items.length > 40) recapAcc.items.shift();
+    }
+  }
+}
+
+function receiveState(m) {
+  const cues = freshCues(m);
+  for (const c of cues) if (c.t === "activate" && c.card && c.card.code) cardText(c.card.code);   // warm the text cache
+  collectRecap(m, cues);
+  cue.enqueue(cueSpeed === "instant" ? [] : cues, m);
+}
+
+function applyState(m) {
+  if (!m) return;
+  if (msg && msg.t === "state" && msg.prompt && (!m.prompt || m.prompt.id !== msg.prompt.id)) {
+    sel = [];
+    expanded = null;
+  }
+  if (!m.prompt) sel = [];
+  // A cue-aware server replaces the old reveal/banner notices.
+  addEvents(m.log, false, !("cues" in m));
+  msg = m;
+  locked = false;
+  menuUid = null;
+  if (m._recap && cueRecap && !IS_REPLAY && !m.result) recap = m._recap;
+  render();
+}
+
 // ---- boot ----
 async function loadMock(i) {
   mockIdx = ((i % MOCKS.length) + MOCKS.length) % MOCKS.length;
@@ -1004,6 +1191,7 @@ async function loadMock(i) {
   }
   if (msg.t === "lobby") lobby = msg;
   if (msg.t === "state") addEvents(msg.log, true);
+  resetCues();
   locked = false;
   sel = [];
   expanded = null;
@@ -1026,6 +1214,7 @@ async function loadMock(i) {
   if (qs.get("picker") && msg.t === "lobby") pickerOpen = qs.get("picker");
   if (qs.get("gamemenu") && msg.t === "state") gameMenu = true;
   render();
+  if (msg.t === "state" && Array.isArray(msg.cues) && msg.cues.length) mockCues();
   if (qs.get("reveal") && msg.t === "state") {
     const c = findCard(qs.get("reveal"));
     if (c && !isHidden(c)) {
@@ -1034,6 +1223,32 @@ async function loadMock(i) {
       render();
     }
   }
+}
+
+// Mock cue playback. The mock's `prev_view` is the board before the cues
+// (default: the same view). ?cue=K&t=F freezes visible scene K at fraction F
+// (screenshots); ?recap=1 applies the whole list at once and opens the recap;
+// otherwise the cues play in real time and the mock's state applies after.
+function mockCues() {
+  const real = msg;
+  const base = Object.assign({}, real, {view: real.prev_view || real.view, prompt: null, result: null, cues: undefined});
+  const cues = real.cues;
+  if (qs.get("recap")) {
+    collectRecap(real, cues);
+    applyState(real);
+    return;
+  }
+  msg = base;
+  render();
+  if (qs.get("cue") != null) {
+    const k = parseInt(qs.get("cue"), 10) || 0;
+    const f = parseFloat(qs.get("t") || "0.5");
+    cue.freeze(cues, base.view.chain, k, isFinite(f) ? f : 0.5, "mock" + mockIdx);
+    window.cueFrozen = true;
+    return;
+  }
+  collectRecap(real, cues);
+  cue.enqueue(cueSpeed === "instant" ? [] : cues, real);
 }
 
 document.addEventListener("keydown", (ev) => {
@@ -1068,17 +1283,22 @@ async function loadReplay() {
   const j = await r.json();
   replayFrames = Array.isArray(j) ? j : (j.frames || []);
   window.frameCount = replayFrames.length;
-  window.showFrame = async (i) => {
-    i = Math.max(0, Math.min(replayFrames.length - 1, i));
-    replayIdx = i;
+  const baseChain = (i) => (i > 0 && replayFrames[i - 1].view && replayFrames[i - 1].view.chain) || [];
+  const frameCues = (i) => (i > 0 && Array.isArray(replayFrames[i].cues) ? replayFrames[i].cues : []);
+  // Visible cue scenes of frame i (ms at 1x): game_video.py samples each one.
+  window.cuePlan = (i) => cue.plan(frameCues(i), baseChain(i));
+  let frozenAt = -1;
+  // Board j with the log up to `upto` (the cues of frame upto play over board upto-1).
+  const setBoard = (j, upto) => {
+    replayIdx = upto;
     events = [];
-    for (let k = 0; k <= i; k++) {
+    for (let k = 0; k <= j; k++) {
       for (const e of replayFrames[k].log || []) {
         if (!events.some((x) => x.n === e.n)) events.push(e);
       }
     }
     events.sort((a, b) => (a.n || 0) - (b.n || 0));
-    msg = replayFrames[i];
+    msg = replayFrames[j];
     locked = false;
     sel = [];
     expanded = null;
@@ -1090,6 +1310,32 @@ async function loadReplay() {
     revealQueue = [];
     bannerText = null;
     render();
+  };
+  // showFrame(i): play frame i's cues over board i-1 in real time, then show board i.
+  // showFrame(i, {cue: k, t: f}): board i-1 with visible cue scene k frozen at fraction f.
+  // showFrame(i, {cues: false}): board i at once.
+  window.showFrame = async (i, o) => {
+    i = Math.max(0, Math.min(replayFrames.length - 1, i));
+    o = o || {};
+    const cues = frameCues(i);
+    if (o.cue != null) {
+      if (frozenAt !== i) {
+        cue.reset();
+        setBoard(Math.max(0, i - 1), i);
+        frozenAt = i;
+      }
+      cue.freeze(cues, baseChain(i), o.cue, o.t || 0, "frame" + i);
+      await waitReplayImages(2500);
+      await cue.waitImages(2500);
+      return;
+    }
+    frozenAt = -1;
+    cue.reset();
+    if (o.cues !== false && cues.length && replayIdx === i - 1 && cue.plan(cues, baseChain(i)).length) {
+      setBoard(i - 1, i);
+      await cue.playOnce(cues, baseChain(i));
+    }
+    setBoard(i, i);
     await waitReplayImages(2500);
   };
   if (replayFrames.length) await window.showFrame(0);
@@ -1126,15 +1372,8 @@ async function boot() {
         if (!msg || msg.t === "lobby") msg = m;
       } else if (m.t === "state") {
         if (inLobby) return;   // Back to lobby: ignore states until the next new_game
-        if (msg && msg.t === "state" && msg.prompt && (!m.prompt || m.prompt.id !== msg.prompt.id)) {
-          sel = [];
-          expanded = null;
-        }
-        if (!m.prompt) sel = [];
-        addEvents(m.log, false);
-        msg = m;
-        locked = false;
-        menuUid = null;
+        receiveState(m);
+        return;
       } else if (m.t === "error") {
         banner.hidden = false;
         banner.textContent = m.text || "error";

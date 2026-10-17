@@ -38,3 +38,6 @@ def test_replay_frames_fixture(engine):
     # spectator: seat 1's opening hand is fully visible
     hand = frames[0]["view"]["bot"]["hand"]
     assert hand and all(c is not None and c["code"] for c in hand)
+    # every step after the first carries the engine cues it caused (regression: cursor moved after the step)
+    with_cues = sum(1 for f in frames[1:] if f["cues"])
+    assert with_cues >= 10  # 15 of 49 on this fixture; 0 with the bug

@@ -9,6 +9,13 @@ The input is a `search_match` games-*.jsonl record (the same input
 and are served to web/app.js `?replay=` mode by the real Starlette app; each
 frame is screenshotted with Playwright Chromium and encoded to H.264 with
 imageio-ffmpeg.
+
+Pacing cues (web/cues.js): each frame's engine cues are drawn as short
+scenes before the frame's board. The client exposes `cuePlan(i)` (scene
+lengths at 1x) and `showFrame(i, {cue, t})` (scene frozen at fraction t);
+each scene is sampled at `--cue-fps` and every sample is held 1/cue-fps
+seconds (scaled by `--cue-speed`), so the video plays the cues at the
+client's own pace. `--cue-speed 0` turns the cues off (board frames only).
 """
 
 from __future__ import annotations
@@ -87,6 +94,10 @@ def main() -> int:
     ap.add_argument("--hold", type=float, default=1.1, help="base seconds per frame")
     ap.add_argument("--fps", type=int, default=10)
     ap.add_argument("--max-frames", type=int, default=None, help="render only the first N frames")
+    ap.add_argument("--cue-fps", type=float, default=8.0,
+                    help="screenshots per second of cue scene (default 8)")
+    ap.add_argument("--cue-speed", type=float, default=1.0,
+                    help="cue playback speed (1 = the client's 1x, 2 = 2x, 0 = no cues)")
     a = ap.parse_args()
 
     rec = next(
@@ -154,17 +165,20 @@ def main() -> int:
     from playwright.sync_api import sync_playwright
 
     errors: list[str] = []
-    durations: list[float] = []
+    board_hold: list[float] = []
     prev: dict | None = None
     for i, f in enumerate(frames):
         if i == len(frames) - 1 and not (a.max_frames is not None
                                           and len(frames) < len(rec["choices"]) + 1):
-            durations.append(4.0)  # the final board lingers
+            board_hold.append(4.0)  # the final board lingers
         elif i == 0:
-            durations.append(max(a.hold, 2.5))  # the title card
+            board_hold.append(max(a.hold, 2.5))  # the title card
         else:
-            durations.append(hold_for(f, prev, a.hold))
+            board_hold.append(hold_for(f, prev, a.hold))
         prev = f
+    # (png name, seconds) in play order: cue samples, then each frame's board.
+    shots: list[tuple[str, float]] = []
+    n_cue_shots = 0
 
     tmp = Path(tempfile.mkdtemp(prefix="game-video-"))
     try:
@@ -181,9 +195,25 @@ def main() -> int:
             assert n == len(frames), f"client loaded {n} frames, have {len(frames)}"
             last_hash, run = None, 0
             for i in range(len(frames)):
-                page.evaluate(f"showFrame({i})")
+                plan = page.evaluate(f"window.cuePlan ? cuePlan({i}) : []") if a.cue_speed > 0 else []
+                hold = board_hold[i]
+                if plan:
+                    # The cues already show the action: the board needs no extra hold.
+                    hold = min(hold, a.hold)
+                for k, ms in enumerate(plan):
+                    real = ms / 1000.0 / a.cue_speed
+                    n = max(2, round(real * a.cue_fps))
+                    for j in range(n):
+                        page.evaluate(f"showFrame({i}, {{cue: {k}, t: {(j + 0.5) / n:.4f}}})")
+                        png = tmp / f"cue-{i:04d}-{k:02d}-{j:02d}.png"
+                        page.screenshot(path=str(png))
+                        shots.append((png.name, real / n))
+                        n_cue_shots += 1
+                page.evaluate(f"showFrame({i}, {{cues: false}})")
                 png = tmp / f"frame-{i:04d}.png"
                 page.screenshot(path=str(png))
+                board_hold[i] = hold
+                shots.append((png.name, hold))
                 digest = hashlib.sha256(png.read_bytes()).hexdigest()
                 run = run + 1 if digest == last_hash else 0
                 last_hash = digest
@@ -204,9 +234,9 @@ def main() -> int:
     lst = tmp / "frames.ffconcat"
     with lst.open("w") as f:
         f.write("ffconcat version 1.0\n")
-        for i, d in enumerate(durations):
-            f.write(f"file '{tmp / f'frame-{i:04d}.png'}'\nduration {d:.3f}\n")
-        f.write(f"file '{tmp / f'frame-{len(frames) - 1:04d}.png'}'\n")
+        for name, d in shots:
+            f.write(f"file '{tmp / name}'\nduration {d:.3f}\n")
+        f.write(f"file '{tmp / shots[-1][0]}'\n")
     a.out.parent.mkdir(parents=True, exist_ok=True)
     cmd = [exe, "-y", "-f", "concat", "-safe", "0", "-i", str(lst),
            "-c:v", "libx264", "-pix_fmt", "yuv420p", "-r", str(a.fps),
@@ -223,13 +253,20 @@ def main() -> int:
         dst = a.out.parent / f"{a.out.stem}-{tag}.png"
         shutil.copyfile(tmp / f"frame-{i:04d}.png", dst)
     lines = []
-    for i, (f, d) in enumerate(zip(frames, durations)):
+    for i, (f, d) in enumerate(zip(frames, board_hold)):
         c = f.get("caption") or {}
         cap = (c.get("actor") + " — " + c.get("text")) if c.get("text") else ""
         lines.append(f"{i} {d:.3f} {' '.join(cap.split())}\n")
     Path(str(a.out) + ".frames.txt").write_text("".join(lines))
-    total = sum(durations)
-    print(f"frames={len(frames)} duration={total:.1f}s size={size}B out={a.out}")
+    total = sum(d for _, d in shots)
+    cue_s = total - sum(board_hold)
+    if a.cue_speed > 0 and n_cue_shots == 0 and len(frames) > 2:
+        # Fail loud: a cue-aware replay that drew no cue at all means the frames
+        # carry no `cues` (old server) or the client stopped exposing cuePlan.
+        print("ALERT game_video: no cue scenes were drawn (frames without cues?)", file=sys.stderr)
+        sys.exit(1)
+    print(f"frames={len(frames)} cue_shots={n_cue_shots} cue_time={cue_s:.1f}s "
+          f"duration={total:.1f}s size={size}B out={a.out}")
     return 0
 
 

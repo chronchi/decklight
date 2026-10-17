@@ -221,6 +221,7 @@ def check_d_closers(page, errors: list[str], ran: dict) -> None:
 
 _OVERLAYS = [("#detail", "#detail .dx"), ("#logdrawer", "#logdrawer [data-act=closelog]"),
              ("#gamemenu", "#gamemenu [data-act=closegamemenu]"),
+             ("#recap", "#recap .rhead [data-act=closerecap]"),
              ("#sheet.pilesheet", "[data-act=closepile].bigbtn")]
 
 
@@ -283,6 +284,8 @@ def main() -> int:
     ap.add_argument("--max-s", type=float, default=240)
     ap.add_argument("--shot-every", type=int, default=25)
     ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--cue-speed", default="2", choices=["1", "2", "instant"],
+                    help="client pacing-cue speed (web/cues.js); 1x makes a random duel run long")
     ap.add_argument("--surrender-thinking", action="store_true",
                     help="second game uses mode fast and surrenders while the bot thinks")
     args = ap.parse_args()
@@ -317,6 +320,8 @@ def main() -> int:
                     if m.type == "error" and "404" not in m.text else None)
             frames: list[str] = []
             page.on("websocket", lambda ws: ws.on("framereceived", lambda f: frames.append(f)))
+            page.add_init_script(
+                f"try {{ localStorage.setItem('ygo-cue-speed', '{args.cue_speed}'); }} catch (e) {{}}")
             page.goto(url)
             page.wait_for_selector("#startbtn", timeout=10000)
             page.screenshot(path=str(OUT / "00-lobby.png"))

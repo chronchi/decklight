@@ -101,8 +101,8 @@ def replay_frames(
             frame["title"] = f"{n0} vs {n1} · seed {cfg.seed} · ygo-zero"
         frames.append(frame)
         prev_len = len(env.history)
-        env.step(int(idx))
         prev_trace = len(env.duel.trace)
+        env.step(int(idx))
     if env.done:
         if expect_winner is not None and env.winner != expect_winner:
             raise RuntimeError(

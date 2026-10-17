@@ -39,6 +39,29 @@ MOCKS = [
     ("16-reveal", "1&reveal=bm1"),
 ]
 
+# Pacing cues frozen mid-scene: ?cue=K&t=F freezes visible scene K at fraction F
+# (web/cues.js). Indices follow planSteps() over each mock's cue list.
+CUE_SHOTS = [
+    ("20-cue-activate", "10&cue=0&t=0.6"),
+    ("21-cue-target", "10&cue=1&t=0.6"),
+    ("22-cue-summon-gy", "10&cue=2&t=0.55"),
+    ("23-cue-chain2", "11&cue=3&t=0.6"),
+    ("24-cue-chain3", "11&cue=4&t=0.6"),
+    ("25-cue-resolve", "11&cue=5&t=0.6"),
+    ("26-cue-negated", "11&cue=9&t=0.8"),
+    ("27-cue-turn", "12&cue=0&t=0.5"),
+    ("28-cue-materials", "12&cue=3&t=0.5"),
+    ("29-cue-link-summon", "12&cue=4&t=0.6"),
+    ("30-cue-phase", "13&cue=0&t=0.5"),
+    ("31-cue-attack", "13&cue=1&t=0.75"),
+    ("32-cue-destroyed", "13&cue=2&t=0.5"),
+    ("33-cue-damage", "13&cue=3&t=0.45"),
+    ("34-cue-set", "14&cue=0&t=0.5"),
+    ("35-cue-added", "14&cue=1&t=0.6"),
+    ("36-cue-confirm", "14&cue=2&t=0.6"),
+    ("37-cue-mill", "14&cue=4&t=0.5"),
+]
+
 
 def launch_kwargs():
     """Point at the pre-installed Chromium (brief: already in ~/.cache/ms-playwright)."""
@@ -119,6 +142,33 @@ def main() -> int:
                     errors.append("15-gamemenu has no game menu")
                 if name == "16-reveal" and not page.evaluate("!!document.querySelector('#reveal')"):
                     errors.append("16-reveal has no reveal overlay")
+            for name, i in CUE_SHOTS:
+                page.goto(f"{base}?mock=1&i={i}", wait_until="networkidle")
+                page.wait_for_timeout(250)
+                page.screenshot(path=str(OUT / f"{name}.png"))
+                print(f"shot {name}.png", flush=True)
+                if not page.evaluate("window.cueFrozen === true && "
+                                     "document.querySelector('#ov-cues .cue-stage').children.length > 0"):
+                    errors.append(f"{name}: no cue scene on screen")
+                if page.evaluate("document.documentElement.scrollWidth > window.innerWidth"):
+                    errors.append(f"horizontal overflow at 412px in {name}")
+            # Recap at the start of your turn, and a cue list played in real time.
+            page.goto(f"{base}?mock=1&i=15&recap=1", wait_until="networkidle")
+            page.wait_for_timeout(500)
+            page.screenshot(path=str(OUT / "38-recap.png"))
+            print("shot 38-recap.png", flush=True)
+            # Tapping a recap line opens that card's details.
+            page.locator("#info .recap [data-recap]").first.click()
+            page.wait_for_timeout(300)
+            if not page.evaluate("!!document.querySelector('#detail')"):
+                errors.append("38-recap: tapping a recap line opened no card detail")
+            if page.evaluate("document.querySelectorAll('#info .recap .rrow').length") < 4:
+                errors.append("38-recap: recap has fewer than 4 lines")
+            page.goto(f"{base}?mock=1&i=13", wait_until="networkidle")
+            page.wait_for_function("!document.querySelector('#ov-cues').classList.contains('playing')",
+                                   timeout=15000)
+            if page.evaluate("document.querySelector('.pbar.you .lp').textContent.trim()") != "6200":
+                errors.append("live cue playback did not end on the mock's board (LP != 6200)")
             # Detail overlay via a real tap (field monster -> detail X).
             page.goto(f"{base}?mock=1&i=1", wait_until="networkidle")
             page.wait_for_timeout(400)
@@ -171,7 +221,7 @@ def main() -> int:
         for e in errors:
             print(f"  {e}", flush=True)
         return 1
-    print(f"ok: {len(MOCKS) + 5} PNGs in {OUT}", flush=True)
+    print(f"ok: {len(MOCKS) + len(CUE_SHOTS) + 6} PNGs in {OUT}", flush=True)
     return 0
 
 
