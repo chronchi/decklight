@@ -584,7 +584,9 @@ def test_surrender_while_bot_thinks(tmp_path, engine):
     """Surrender cuts through a thinking product bot within ~1 s, and the abandoned
     driver does not write a second (diverged) record."""
     forward = _tiny_forward()
-    app = _make_app(tmp_path, engine, mode_factory=lambda m: _SlowLauncher(forward, 0.5))
+    # each forward outlasts the server's 1 s thinking ticker, so a thinking state is always sent; at 0.5 s a short
+    # bot turn could finish unseen and the loop below waited forever at the human's prompt (NOTEBOOK 2026-10-17)
+    app = _make_app(tmp_path, engine, mode_factory=lambda m: _SlowLauncher(forward, 1.3))
     human_text = (FIXTURES / "BlueEyes.ydk").read_text()
     bot_text = (FIXTURES / "Branded.ydk").read_text()
     with _client(app).websocket_connect(f"/ws?t={TOKEN}") as ws:
@@ -595,6 +597,7 @@ def test_surrender_while_bot_thinks(tmp_path, engine):
             assert m["t"] == "state" and m["result"] is None
             if m["thinking"] is not None and m["prompt"] is None:
                 break
+            assert m["prompt"] is None, "the bot's turn ended before a thinking state was seen"
         else:
             raise AssertionError("bot never reported thinking")
         t0 = time.monotonic()
