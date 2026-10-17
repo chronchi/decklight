@@ -1,12 +1,13 @@
 // Hand, prompt sheet, pile sheet and info panel builders.
 import {cardHTML, thumbHTML, esc, isHidden, isMonster} from "./card.js";
+import {negTag} from "./log.js";
 
 export function handHTML(hand, actionable, mock, focus) {
   return (hand || []).map((c) => {
     if (!c) return '<div class="hcard"><div class="card back"></div></div>';
     const act = !!(c.uid && actionable[c.uid] != null);
     return '<div class="hcard' + (act ? " lift" : "") + '" data-key="hand:' + esc(c.uid) + '">' +
-      cardHTML(c, {mock, actionable: act, focus: c.uid && c.uid === focus}) + "</div>";
+      cardHTML(c, {mock, actionable: act, focus: c.uid && c.uid === focus, kb: true}) + "</div>";
   }).join("");
 }
 
@@ -24,11 +25,11 @@ export function actionableMap(prompt) {
 const PRIMARY = ["activate", "normal", "special", "attack", "direct", "yes", "set", "set_spell", "position"];
 const SECONDARY = ["pass", "to_battle", "to_main2", "end_turn", "no"];
 
-// A span, not a button: it lives inside the option's <button>, and nested
-// <button> would auto-close the outer one in the HTML parser. It still has a
-// 44px hit area and is reachable by the .infobtn selector.
-export function infoBtn(optIndex) {
-  return '<span class="infobtn" role="button" tabindex="0" data-detailcard="' + optIndex + '" aria-label="Card details">ⓘ</span>';
+// A sibling of the option's button (never nested in it: a control inside a control is
+// unreachable for keyboards and screen readers), positioned over the row's corner.
+export function infoBtn(optIndex, name) {
+  return '<button class="infobtn" data-detailcard="' + optIndex + '" aria-label="' + esc("Card details" + (name ? ": " + name : "")) + '">' +
+    '<span aria-hidden="true">ⓘ</span></button>';
 }
 
 function rowHTML(opt, mock, selected, pickNo, expanded) {
@@ -39,10 +40,11 @@ function rowHTML(opt, mock, selected, pickNo, expanded) {
   if (expanded) cls.push("open");
   const eff = opt.effect ? '<span class="ef">' + esc(opt.effect) + "</span>" : "";
   const th = opt.card ? thumbHTML(opt.card, mock) : "";
-  const info = opt.card && !isHidden(opt.card) ? infoBtn(opt.index) : "";
-  return '<button class="' + cls.join(" ") + '" data-opt="' + opt.index + '">' + th +
+  const info = opt.card && !isHidden(opt.card) ? infoBtn(opt.index, opt.card.name) : "";
+  return '<div class="optw' + (info ? " hasinfo" : "") + '"><button class="' + cls.join(" ") + '" data-opt="' + opt.index + '"' +
+    (selected ? ' aria-pressed="true"' : "") + ">" + th +
     '<span class="tx"><span class="lb">' + esc(opt.label || opt.verb) + "</span>" + eff + "</span>" +
-    (pickNo ? '<span class="pick">' + pickNo + "</span>" : "") + info + "</button>";
+    (pickNo ? '<span class="pick"><span class="sr-only">picked </span>' + pickNo + "</span>" : "") + "</button>" + info + "</div>";
 }
 
 function headHTML(prompt, mock, sub) {
@@ -62,9 +64,10 @@ export function sheetHTML(prompt, mock, sel, expanded) {
       const base = o.card || prompt.card;
       if (!base) return '<button class="bigbtn" data-opt="' + o.index + '">' + esc(o.label) + "</button>";
       const c = Object.assign({}, base, {pos: def ? "def" : "atk"});
-      return '<button class="poscard" data-opt="' + o.index + '"><span class="pv">' +
-        '<span class="pcard' + (def ? " rot" : "") + '">' + cardHTML(c, {mock}) + "</span></span>" + infoBtn(o.index) +
-        '<span class="plab">' + (def ? "Defense" : "Attack") + "<b>" + (def ? base.def : base.atk) + "</b></span></button>";
+      return '<div class="posw"><button class="poscard" data-opt="' + o.index + '"><span class="pv" aria-hidden="true">' +
+        '<span class="pcard' + (def ? " rot" : "") + '">' + cardHTML(c, {mock}) + "</span></span>" +
+        '<span class="plab">' + (def ? "Defense" : "Attack") + "<b>" + (def ? base.def : base.atk) + "</b></span></button>" +
+        infoBtn(o.index, base.name) + "</div>";
     }).join("");
     return headHTML(prompt, mock) + '<div class="sbody"><div class="posrow">' + cards + "</div></div>" + footHTML(prompt, sel);
   }
@@ -74,10 +77,11 @@ export function sheetHTML(prompt, mock, sel, expanded) {
     const sub = prompt.min === prompt.max ? "Pick " + prompt.min : "Pick " + prompt.min + "–" + prompt.max;
     const grid = picks.map((o) => {
       const at = done.indexOf(o.index);
-      const info = o.card && !isHidden(o.card) ? infoBtn(o.index) : "";
-      return '<button class="cell" data-opt="' + o.index + '">' +
-        '<span class="cbox">' + cardHTML(o.card, {mock, selected: at >= 0, pick: at >= 0 ? at + 1 : null}) + info + "</span>" +
-        '<span class="cname">' + esc((o.card && o.card.name) || o.label) + "</span></button>";
+      const info = o.card && !isHidden(o.card) ? infoBtn(o.index, o.card.name) : "";
+      return '<div class="cellw"><button class="cell" data-opt="' + o.index + '" aria-pressed="' + (at >= 0) + '">' +
+        '<span class="cbox" aria-hidden="true">' + cardHTML(o.card, {mock, selected: at >= 0, pick: at >= 0 ? at + 1 : null}) + "</span>" +
+        '<span class="cname">' + esc((o.card && o.card.name) || o.label) + (at >= 0 ? '<span class="sr-only">, picked ' + (at + 1) + "</span>" : "") +
+        "</span></button>" + info + "</div>";
     }).join("");
     return headHTML(prompt, mock, sub) + '<div class="sbody"><div class="selectgrid">' + grid + "</div></div>" +
       footHTML(prompt, sel);
@@ -111,9 +115,10 @@ function footHTML(prompt, sel) {
 // GY / banished / Extra list; each cell opens the card detail.
 export function pileSheetHTML(pile, cards, mock, names) {
   const cells = (cards || []).slice().reverse().map((c) =>
-    '<button class="cell" data-detailuid="' + esc(c ? c.uid : "") + '"><span class="cbox">' +
+    '<button class="cell" data-detailuid="' + esc(c ? c.uid : "") + '"' +
+    (c && !isHidden(c) ? ' aria-label="' + esc((c.name || "") + ", card details") + '"' : "") + '><span class="cbox" aria-hidden="true">' +
     (c ? cardHTML(c, {mock}) : '<div class="card back"></div>') +
-    (c && !isHidden(c) ? '<span class="infobtn" role="button" tabindex="0" data-detailuid="' + esc(c.uid) + '" aria-label="Card details">ⓘ</span>' : "") +
+    (c && !isHidden(c) ? '<span class="infobtn">ⓘ</span>' : "") +
     "</span>" +
     '<span class="cname">' + esc((c && c.name) || "Face-down") + "</span></button>").join("");
   return '<div class="grab"></div><div class="stitle"><div class="tt"><span class="t">' + esc(pileTitle(pile, names)) +
@@ -160,10 +165,10 @@ export function infoHTML(info, events, mock, hint, names) {
   const rows = evs.map((e) => {
     const actor = e.actor === "you" || e.actor === "bot" ? e.actor : "system";
     const who = actor === "you" ? (names ? names[0] : "You") : actor === "bot" ? (names ? names[1] : "Bot") : "";
-    return '<div class="ev ' + actor + '"' + (e.card && e.card.uid ? ' data-focusuid="' + esc(e.card.uid) + '"' : "") + ">" +
+    return '<div class="ev ' + actor + '"' + (e.card && e.card.uid ? ' data-focusuid="' + esc(e.card.uid) + '" role="button" tabindex="0"' : "") + ">" +
       '<span class="who">' + esc(who) + "</span>" +
-      '<span class="et">' + esc(e.text || "") + "</span></div>";
+      '<span class="et">' + esc(e.text || "") + (e.neg ? negTag(e.neg) : "") + "</span></div>";
   }).join("");
-  return '<div class="feed" data-act="log"><div class="evs">' + rows + "</div>" +
+  return '<div class="feed" data-act="log"><div class="evs" role="log" aria-label="Latest moves">' + rows + "</div>" +
     (hint ? '<div class="hint">' + esc(hint) + "</div>" : "") + "</div>";
 }

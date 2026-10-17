@@ -63,6 +63,59 @@ CUE_SHOTS = [
 ]
 
 
+# Small-phone variants of the cue scenes whose lines must read at 360 px.
+CUE_SHOTS_360 = [
+    ("26-small-cue-negated", "11&cue=9&t=0.8"),
+    ("31-small-cue-attack", "13&cue=1&t=0.75"),
+    ("21-small-cue-target", "10&cue=1&t=0.6"),
+]
+
+# Contrast of the negation mark, from screenshot pixels. Two clips of the stamp's box, one with
+# the mark hidden; pixels that change are the mark (light) and its casing (dark). WCAG relative
+# luminance on the medians: mark vs the dimmed card under it, and mark vs its adjacent casing.
+NEG_CONTRAST_JS = """async ([a, b]) => {
+  const load = async (b64) => { const img = new Image(); img.src = 'data:image/png;base64,' + b64;
+    await img.decode(); const c = document.createElement('canvas'); c.width = img.width; c.height = img.height;
+    const g = c.getContext('2d'); g.drawImage(img, 0, 0); return g.getImageData(0, 0, c.width, c.height).data; };
+  const A = await load(a), B = await load(b);
+  const lin = (v) => { v /= 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); };
+  const L = (d, i) => 0.2126 * lin(d[i]) + 0.7152 * lin(d[i + 1]) + 0.0722 * lin(d[i + 2]);
+  const changed = [];
+  for (let i = 0; i < A.length; i += 4) {
+    const dd = Math.abs(A[i] - B[i]) + Math.abs(A[i + 1] - B[i + 1]) + Math.abs(A[i + 2] - B[i + 2]);
+    if (dd > 30) changed.push(i);
+  }
+  if (changed.length < 50) return {error: 'only ' + changed.length + ' changed pixels'};
+  changed.sort((x, y) => L(A, x) - L(A, y));
+  const n = changed.length, mark = changed.slice(Math.floor(n * 0.8)), casing = changed.slice(0, Math.floor(n * 0.2));
+  const med = (d, idx) => { const v = idx.map((i) => L(d, i)).sort((x, y) => x - y); return v[v.length >> 1]; };
+  const rgb = (d, idx) => { const i = idx[idx.length >> 1]; return [d[i], d[i + 1], d[i + 2]]; };
+  const lm = med(A, mark), lc = med(A, casing), lb = med(B, mark);
+  const lbMax = mark.map((i) => L(B, i)).sort((x, y) => x - y)[Math.floor(mark.length * 0.95)];
+  const cr = (x, y) => (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05);
+  return {mark_vs_card: +cr(lm, lb).toFixed(2), mark_vs_casing: +cr(lm, lc).toFixed(2),
+          mark_vs_lightest_card: +cr(lm, lbMax).toFixed(2),
+          mark_rgb: rgb(A, mark), card_rgb: rgb(B, mark), casing_rgb: rgb(A, casing), pixels: n};
+}"""
+
+
+def neg_contrast(page) -> dict:
+    """Pixel-measured contrast of the frozen negation stamp (see NEG_CONTRAST_JS)."""
+    import base64
+    box = page.evaluate("""() => { const m = document.querySelector('#ov-cues .negmark circle.case');
+      if (!m) return null; const r = m.getBoundingClientRect();
+      return {x: Math.max(0, r.x - 4), y: Math.max(0, r.y - 4), width: r.width + 8, height: r.height + 8}; }""")
+    if not box:
+        return {"error": "no negation stamp on screen"}
+    shown = page.screenshot(clip=box)
+    page.evaluate("""() => { const s = document.createElement('style'); s.id = 'neg-probe';
+      s.textContent = '#ov-cues .negmark{visibility:hidden}'; document.head.appendChild(s); }""")
+    page.wait_for_timeout(50)
+    hidden = page.screenshot(clip=box)
+    page.evaluate("() => document.getElementById('neg-probe').remove()")
+    return page.evaluate(NEG_CONTRAST_JS, [base64.b64encode(shown).decode(), base64.b64encode(hidden).decode()])
+
+
 def launch_kwargs():
     """Point at the pre-installed Chromium (brief: already in ~/.cache/ms-playwright)."""
     env = os.environ.get("CHROME_EXE")
@@ -152,6 +205,18 @@ def main() -> int:
                     errors.append(f"{name}: no cue scene on screen")
                 if page.evaluate("document.documentElement.scrollWidth > window.innerWidth"):
                     errors.append(f"horizontal overflow at 412px in {name}")
+                if name == "26-cue-negated":
+                    numbers["neg412"] = nc = neg_contrast(page)
+                    if "error" in nc or nc["mark_vs_casing"] < 3 or nc["mark_vs_card"] < 3:
+                        errors.append(f"26-cue-negated: negation mark contrast below 3:1 ({nc})")
+                    if not page.evaluate("/negated/i.test(document.querySelector('#ov-cues .cue-neg').textContent)"):
+                        errors.append("26-cue-negated: no 'negated' text label")
+            # A negated link stays marked in the chain strip (shape + word, not colour alone).
+            neg_html = page.evaluate("""async () => { const m = await import('./render/board.js');
+              return m.chainHTML([{card: {name: 'A'}, controller: 'bot'}, {card: {name: 'B'}, controller: 'you'}],
+                                 true, new Set([1])); }""")
+            if 'link bot neg' not in neg_html or 'negated' not in neg_html or neg_html.count(' neg"') != 1:
+                errors.append("chainHTML does not mark exactly the negated link")
             # Recap at the start of your turn, and a cue list played in real time.
             page.goto(f"{base}?mock=1&i=15&recap=1", wait_until="networkidle")
             page.wait_for_timeout(500)
@@ -199,6 +264,21 @@ def main() -> int:
                     numbers["m360"] = s.evaluate(MEASURE_JS)
                 if s.evaluate("document.documentElement.scrollWidth > window.innerWidth"):
                     errors.append(f"horizontal overflow at 360px in {nm}")
+            for nm, i in CUE_SHOTS_360:
+                s.goto(f"{base}?mock=1&i={i}", wait_until="networkidle")
+                s.wait_for_timeout(250)
+                s.screenshot(path=str(OUT / f"{nm}.png"))
+                print(f"shot {nm}.png", flush=True)
+                if not s.evaluate("window.cueFrozen === true"):
+                    errors.append(f"{nm}: no frozen cue scene")
+                if s.evaluate("document.documentElement.scrollWidth > window.innerWidth"):
+                    errors.append(f"horizontal overflow at 360px in {nm}")
+                if nm == "26-small-cue-negated":
+                    numbers["neg360"] = nc = neg_contrast(s)
+                    if "error" in nc or nc["mark_vs_casing"] < 3 or nc["mark_vs_card"] < 3:
+                        errors.append(f"{nm}: negation mark contrast below 3:1 ({nc})")
+                numbers.setdefault("lw360", s.evaluate(
+                    "getComputedStyle(document.querySelector('#ov-cues')).getPropertyValue('--cue-lw')"))
             ctx3.close()
             # Desktop shot of the main-phase board (log drawer open).
             ctx2 = browser.new_context(viewport={"width": 1280, "height": 800})
@@ -216,12 +296,15 @@ def main() -> int:
         httpd.shutdown()
     print(f"measure412: {numbers.get('m412')}", flush=True)
     print(f"measure360: {numbers.get('m360')}", flush=True)
+    print(f"negation contrast 412: {numbers.get('neg412')}", flush=True)
+    print(f"negation contrast 360: {numbers.get('neg360')}", flush=True)
+    print(f"cue line weight 360: {numbers.get('lw360')}", flush=True)
     if errors:
         print("ERRORS:", flush=True)
         for e in errors:
             print(f"  {e}", flush=True)
         return 1
-    print(f"ok: {len(MOCKS) + len(CUE_SHOTS) + 6} PNGs in {OUT}", flush=True)
+    print(f"ok: {len(MOCKS) + len(CUE_SHOTS) + len(CUE_SHOTS_360) + 6} PNGs in {OUT}", flush=True)
     return 0
 
 

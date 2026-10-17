@@ -1,10 +1,10 @@
 import {connectWS} from "./ws.js";
 import {barHTML, sideHTML, midHTML, phaseBtnsHTML, chainHTML} from "./render/board.js";
-import {handHTML, sheetHTML, pileSheetHTML, infoHTML, actionableMap, statsLine} from "./render/hand.js";
+import {handHTML, sheetHTML, pileSheetHTML, infoHTML, actionableMap, statsLine, pileTitle} from "./render/hand.js";
 import {logHTML} from "./render/log.js";
 import {esc, imgUrl, isHidden, phHTML} from "./render/card.js";
 import {morph} from "./render/morph.js";
-import {createCuePlayer, recapItem} from "./cues.js";
+import {createCuePlayer, recapItem, chainTracker, planSteps, stepText} from "./cues.js";
 
 const MOCKS = [
   "mock/01-lobby.json",
@@ -41,6 +41,16 @@ if (IS_REPLAY) {
 }
 
 const app = document.getElementById("app");
+// Screen readers: one polite live region for cue lines, prompts and results (never #app itself,
+// which would read every re-render).
+const srLive = document.getElementById("sr-live");
+function say(text) {
+  if (!srLive || !text || IS_REPLAY) return;
+  const p = document.createElement("p");
+  p.textContent = text;
+  srLive.appendChild(p);
+  while (srLive.children.length > 4) srLive.firstChild.remove();
+}
 const logside = document.getElementById("logside");
 const banner = document.getElementById("banner");
 // Persistent overlay containers: each is morphed separately so an open
@@ -191,11 +201,21 @@ function fit() {
   let hw = Math.min(w * 1.7, 112);
   const infoMin = window.innerWidth >= 900 ? 0 : 64;   // desktop: card info lives in the side panel
   const need = (w, hw) => 44 + 54 + (5 * w * R + 36) + (hw * R + 26) + infoMin;
+  const w0 = w, hw0 = hw;
   for (let i = 0; i < 200 && need(w, hw) > H; i++) {
     if (hw > w * 1.25) hw -= 1;
     else w -= 0.5;
   }
   w = Math.max(30, w);
+  // Short viewports (200% zoom on a laptop, landscape phones): rather than shrinking cards
+  // below legibility, keep them readable and let the page scroll (WCAG 1.4.4 / 1.4.10).
+  const short = w < Math.min(w0, 44);
+  if (short) {
+    w = Math.min(w0, 48);
+    hw = Math.min(hw0, w * 1.4);
+    root.style.setProperty("--app-h", Math.ceil(need(w, hw) + 120) + "px");
+  }
+  root.classList.toggle("short", short);
   root.style.setProperty("--card-w", w.toFixed(1) + "px");
   root.style.setProperty("--side-w", (w * SIDE).toFixed(1) + "px");
   root.style.setProperty("--hand-w", hw.toFixed(1) + "px");
@@ -305,6 +325,7 @@ function queueNotices(added) {
 }
 
 function showBanner(text) {
+  say(text);
   bannerText = text;
   clearTimeout(bannerTimer);
   bannerTimer = setTimeout(() => { bannerText = null; render(); }, 1400);
@@ -314,6 +335,7 @@ function showBanner(text) {
 function pumpReveal() {
   if (revealCur || revealLeaving || !revealQueue.length) return;
   revealCur = revealQueue.shift();
+  say("ygo-zero activates " + ((revealCur.card && revealCur.card.name) || "a card"));
   render();
   if (!MOCK) revealTimer = setTimeout(() => dismissReveal(), 1600);
 }
@@ -355,7 +377,7 @@ function revealHTML(ev) {
     ? '<div class="rface">' + phHTML(c) + '<img alt="" src="' + imgUrl(c.code, "full") + '" onerror="this.remove()"></div>'
     : '<div class="rface">' + phHTML(c) + "</div>";
   const txt = (t && t.text) || (MOCK ? "Card text loads from the server in a live game." : "");
-  return '<div id="reveal" data-key="reveal" data-act="closereveal" role="alertdialog" aria-label="ygo-zero activates">' +
+  return '<div id="reveal" data-key="reveal" data-act="closereveal" aria-hidden="true">' +
     face + '<div class="rkicker">ygo-zero activates</div>' +
     "<h2>" + esc(c.name || "") + "</h2>" +
     '<div class="rtext">' + esc(txt) + "</div></div>";
@@ -476,7 +498,7 @@ function recapHTML(hint) {
       (!MOCK ? '<img alt="" src="' + imgUrl(c.code, "small") + '" onerror="this.remove()">' : "") + "</span>"
       : '<span class="rth none"></span>';
     const tag = c && c.code ? "button" : "div";
-    return "<" + tag + ' class="rrow' + (c && c.owner === "opp" ? " opp" : " me") + '"' +
+    return "<" + tag + ' class="rrow' + (c && c.owner === "opp" ? " opp" : " me") + (it.neg ? " neg" : "") + '"' +
       (c && c.code ? ' data-recap="' + i + '"' : "") + ">" + thumb +
       '<span class="rtx"><span>' + esc(it.text) + "</span>" + (it.sub ? '<span class="rsub">' + esc(it.sub) + "</span>" : "") +
       "</span></" + tag + ">";
@@ -493,7 +515,7 @@ function gameMenuHTML() {
     '<button role="radio" aria-checked="' + (chainMode === v) + '" class="' + (chainMode === v ? "sel" : "") +
     '" data-act="chainset" data-v="' + v + '">' + label + "</button>";
   return '<div id="gscrim" data-key="gscrim" data-act="closegamemenu"></div>' +
-    '<div id="gamemenu" data-key="gamemenu" role="dialog" aria-label="Game menu">' +
+    '<div id="gamemenu" data-key="gamemenu" role="dialog" aria-modal="true" aria-label="Game menu" tabindex="-1">' +
     '<div class="mhead">Game menu<button class="iconbtn" data-act="closegamemenu" aria-label="Close game menu">' +
     '<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5 5l10 10M15 5 5 15"/></svg></button></div>' +
     '<div class="mbody">' +
@@ -501,13 +523,13 @@ function gameMenuHTML() {
     (surrenderArm ? "Tap again to surrender" : "Surrender") + "</button>" +
     '<button class="mrow" data-act="backlobby">Back to lobby</button>' +
     '<div class="msep"></div>' +
-    '<div class="mrow" style="pointer-events:none">Chain responses</div>' +
-    '<div class="seg" role="radiogroup">' + seg("auto", "Auto") + seg("all", "All") + "</div>" +
+    '<div class="mrow" style="pointer-events:none" id="gm-chain">Chain responses</div>' +
+    '<div class="seg" role="radiogroup" aria-labelledby="gm-chain">' + seg("auto", "Auto") + seg("all", "All") + "</div>" +
     '<div class="mhint">Auto skips empty windows with nothing to respond to.</div>' +
     '<div class="msep"></div>' +
-    '<div class="mrow" style="pointer-events:none">Pacing</div>' +
-    '<div class="seg" role="radiogroup">' + speedSeg("1", "1×") + speedSeg("2", "2×") + speedSeg("instant", "Instant") + "</div>" +
-    toggleRow("cuepause", cuePause, "Pause after each bot action", "Tap anywhere to continue.") +
+    '<div class="mrow" style="pointer-events:none" id="gm-pace">Pacing</div>' +
+    '<div class="seg" role="radiogroup" aria-labelledby="gm-pace">' + speedSeg("1", "1×") + speedSeg("2", "2×") + speedSeg("instant", "Instant") + "</div>" +
+    toggleRow("cuepause", cuePause, "Pause after each bot action", "Tap anywhere or press Enter to continue.") +
     toggleRow("cuerecap", cueRecap, "Turn recap", "What the bot did, at the start of your turn.") +
     '<div class="msep"></div>' +
     '<div class="mrow disabled" aria-disabled="true">Sound<span class="sub">Off</span></div>' +
@@ -543,7 +565,7 @@ function renderGame() {
   h += '<div id="board" data-key="board">';
   h += '<div class="field bot">' + sideHTML(v.bot, {mirror: true, mock: MOCK, actionable: act, focus: focusUid}) + "</div>";
   h += '<div id="mid"><div id="midstrip" class="zrow">' + midHTML(v, {mock: MOCK, actionable: act, focus: focusUid, names: msg.names || null}) + "</div>";
-  const chain = chainHTML(v.chain, MOCK);
+  const chain = chainHTML(v.chain, MOCK, chainNeg);
   if (chain) h += '<div id="chain">' + chain + "</div>";
   h += "</div>";
   h += '<div class="field you">' + sideHTML(v.you, {mirror: false, mock: MOCK, actionable: act, focus: focusUid}) + "</div>";
@@ -573,7 +595,11 @@ function renderGame() {
       : (p && !msg.result ? sheetHTML(p, MOCK, sel, expanded) : "");
   }
   if (pileOpen) h += '<div id="pscrim" data-key="pscrim" data-act="closepile"></div>';
-  if (sheet) h += '<div id="sheet" data-key="sheet" class="' + (locked && !pileOpen ? "locked" : "") + (pileOpen ? " pilesheet" : "") + '">' + sheet + "</div>";
+  if (sheet) {
+    const lab = pileOpen ? ' role="dialog" aria-modal="true" tabindex="-1" aria-label="' + esc(pileTitle(pileOpen, msg.names || null)) + '"'
+      : IS_REPLAY ? "" : ' role="region" aria-label="' + esc((p && p.text) || "Choose") + '"';
+    h += '<div id="sheet" data-key="sheet" class="' + (locked && !pileOpen ? "locked" : "") + (pileOpen ? " pilesheet" : "") + '"' + lab + ">" + sheet + "</div>";
+  }
   const restore = saveScrolls(app, ["#sheet .sbody", "#info .ftext"]);
   morph(app, h);
   restore();
@@ -625,7 +651,7 @@ function renderOverlays(logh) {
   let lh = "";
   if (logOpen) {
     lh = '<div id="scrim" data-key="scrim" data-act="closelog"></div>' +
-      '<div id="logdrawer" data-key="logdrawer" role="dialog" aria-label="Duel log">' +
+      '<div id="logdrawer" data-key="logdrawer" role="dialog" aria-modal="true" aria-label="Duel log" tabindex="-1">' +
       '<div class="loghead">Duel log' + logAllBtn() + '<button class="iconbtn" data-act="closelog" aria-label="Close log">' +
       '<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5 5l10 10M15 5 5 15"/></svg></button></div>' +
       '<div class="loglist">' + logh + "</div></div>";
@@ -640,11 +666,13 @@ function renderOverlays(logh) {
     const mhh = opts.length * 48 + 56;
     const top = Math.max(8, Math.min(window.innerHeight - mhh - 8, r.top - mhh - 8));
     const left = Math.max(8, Math.min(window.innerWidth - mw - 8, r.left + (r.width || 0) / 2 - mw / 2));
-    mh = '<div id="menu" data-key="menu" style="top:' + top + "px;left:" + left + "px;width:" + mw + 'px" role="menu">' +
-      opts.map((o) => '<button data-opt="' + o.index + '" class="' +
+    const mc = findCard(menuUid);
+    mh = '<div id="menu" data-key="menu" style="top:' + top + "px;left:" + left + "px;width:" + mw + 'px" role="menu" tabindex="-1"' +
+      ' aria-label="' + esc("Actions" + (mc && mc.name ? ": " + mc.name : "")) + '">' +
+      opts.map((o) => '<button role="menuitem" data-opt="' + o.index + '" class="' +
         (["activate", "normal", "special", "attack", "direct"].includes(o.verb) ? "primary" : "") + '">' +
         esc(o.label || o.verb) + "</button>").join("") +
-      '<button class="ghost" data-act="detail" data-uid="' + esc(menuUid) + '">Card details</button></div>';
+      '<button role="menuitem" class="ghost" data-act="detail" data-uid="' + esc(menuUid) + '">Card details</button></div>';
   }
   morph(ovMenu, mh);
 
@@ -658,13 +686,14 @@ function renderOverlays(logh) {
       ? '<div class="dface">' + phHTML(c) + '<img alt="" src="' + imgUrl(c.code, "full") + '" onerror="this.remove()"></div>'
       : '<div class="dface">' + phHTML(c) + "</div>";
     const meta = [t && t.type_str, statsLine(c)].filter(Boolean).join(" · ");
-    dh = '<div id="detail" data-key="detail" data-act="closedetail" role="dialog" aria-label="Card detail">' +
+    dh = '<div id="detail" data-key="detail" data-act="closedetail" role="dialog" aria-modal="true" tabindex="-1" aria-label="' +
+      esc("Card details: " + (c.name || "hidden card")) + '">' +
       '<button class="dx" data-act="closedetail" aria-label="Close card details">' +
       '<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5 5l10 10M15 5 5 15"/></svg></button>' + face +
       "<h2>" + esc(c.name || "Hidden card") + "</h2>" +
       (meta ? '<div class="typeline">' + esc(meta) + "</div>" : "") +
       '<div class="dtext">' + esc((t && t.text) || (MOCK ? "Card text loads from the server in a live game." : "")) + "</div>" +
-      '<div class="dclose">Tap anywhere to close</div></div>';
+      '<div class="dclose" aria-hidden="true">Tap anywhere to close</div></div>';
   }
   morph(ovDetail, dh);
 
@@ -688,7 +717,7 @@ function renderOverlays(logh) {
         '<span class="bot">' + esc(msg.names[1]) + "<b>" + msg.view.bot.lp + "</b></span></div></div></div>";
     } else {
       const win = msg.result.winner === "you";
-      oh = '<div id="gameover" data-key="gameover" role="alertdialog" aria-label="Game over"><div class="box ' + (win ? "win" : "loss") + '">' +
+      oh = '<div id="gameover" data-key="gameover" role="alertdialog" aria-modal="true" tabindex="-1" aria-label="' + (win ? "Victory" : "Defeat") + '"><div class="box ' + (win ? "win" : "loss") + '">' +
         '<div class="kicker">Duel over · turn ' + msg.view.turn + "</div>" +
         "<h2>" + (win ? "Victory" : "Defeat") + "</h2>" +
         '<p class="reason">' + esc(msg.result.reason === "win" ? "" : msg.result.reason || "") + "</p>" +
@@ -721,9 +750,9 @@ function pickerHTML(decks, side, label) {
     '<svg class="chev" viewBox="0 0 20 20" aria-hidden="true"><path d="M5 8l5 5 5-5"/></svg></button>';
   if (open) {
     h += '<div class="pickpanel"><input class="decksearch" type="search" placeholder="Search ' + decks.length +
-      ' decks" aria-label="Search decks" data-search="' + side + '"><div class="decklist">';
+      ' decks" aria-label="Search decks" data-search="' + side + '"><div class="decklist" role="listbox" aria-label="' + esc(label) + '">';
     for (const x of decks) {
-      h += '<button class="deckrow' + (cur === x.id ? " sel" : "") + '" data-' + side + 'deck="' + esc(x.id) +
+      h += '<button role="option" aria-selected="' + (cur === x.id) + '" class="deckrow' + (cur === x.id ? " sel" : "") + '" data-' + side + 'deck="' + esc(x.id) +
         '" data-dname="' + esc(x.name.toLowerCase()) + '"><span class="nm">' + esc(x.name) + '</span><span class="g">' +
         esc(GROUPS[x.group] || x.group) + "</span></button>";
     }
@@ -733,7 +762,7 @@ function pickerHTML(decks, side, label) {
 }
 
 function segHTML(label, key, items) {
-  return '<section class="field-group"><div class="flabel">' + esc(label) + '</div><div class="seg" role="radiogroup">' +
+  return '<section class="field-group"><div class="flabel" id="lb-' + key + '">' + esc(label) + '</div><div class="seg" role="radiogroup" aria-labelledby="lb-' + key + '">' +
     items.map(([k, t]) => '<button role="radio" aria-checked="' + (lobbyPick[key] === k) + '" class="' +
       (lobbyPick[key] === k ? "sel" : "") + (t.length > 10 ? " wide" : "") + '" data-' + key + '="' + k + '">' + t + "</button>").join("") +
     "</div></section>";
@@ -746,12 +775,13 @@ function renderLobby() {
   let h = '<div id="lobby"><div class="lscroll">';
   h += '<header class="hero"><div class="fan" aria-hidden="true"><i></i><i></i><i></i></div>' +
     '<h1>ygo<span>-zero</span></h1><p>Duel the bot from your phone.</p></header>';
+  h += '<h2 class="sr-only">New duel</h2>';
   h += pickerHTML(decks, "you", "Your deck");
   h += pickerHTML(decks, "bot", "ygo-zero plays");
   h += segHTML("Going first", "first", [["rps", "Rock-paper-scissors"], ["me", "Me"], ["bot", "Bot"]]);
   h += segHTML("Bot strength", "mode", [["product", "Full"], ["fast", "Fast"], ["random", "Random"]]);
   h += '<details class="ydk"><summary>Paste a .ydk instead<svg class="chev" viewBox="0 0 20 20" aria-hidden="true"><path d="M5 8l5 5 5-5"/></svg></summary>' +
-    '<textarea id="ydk" placeholder="#main&#10;14558128&#10;…" spellcheck="false"></textarea></details>';
+    '<textarea id="ydk" aria-label="Deck list in .ydk format" placeholder="#main&#10;14558128&#10;…" spellcheck="false"></textarea></details>';
   if (MOCK) h += '<div class="mocknav">mock ' + (mockIdx + 1) + "/" + MOCKS.length + " · ← → to step</div>";
   h += '</div><div id="startwrap"><button id="startbtn" data-act="start">Start duel</button></div></div>';
   app.innerHTML = h;
@@ -772,6 +802,7 @@ function render() {
   const before = snapshotRects();
   if (!msg || msg.t === "lobby") {
     renderLobby();
+    manageFocus();
     return;
   }
   if (msg.t === "state") {
@@ -779,6 +810,7 @@ function render() {
     if (!IS_REPLAY) flipAnimate(before);
     document.title = msg.prompt && msg.prompt.text ? msg.prompt.text + " · ygo-zero"
       : msg.caption && msg.caption.text ? msg.caption.text + " · ygo-zero" : "ygo-zero";
+    manageFocus();
   } else if (msg.t === "error") {
     banner.hidden = false;
     banner.textContent = msg.text || "error";
@@ -1092,7 +1124,7 @@ document.addEventListener("input", (ev) => {
   if (t.matches(".announce input")) {
     const q = t.value.toLowerCase();
     for (const b of t.closest("#sheet").querySelectorAll(".opt")) {
-      b.style.display = b.textContent.toLowerCase().includes(q) ? "" : "none";
+      (b.closest(".optw") || b).style.display = b.textContent.toLowerCase().includes(q) ? "" : "none";
     }
   }
   if (t.matches(".decksearch")) {
@@ -1103,6 +1135,111 @@ document.addEventListener("input", (ev) => {
   }
 });
 
+// ---- keyboard and focus (WCAG 2.1.1, 2.4.3, 2.4.7) ----
+// Modal layers, topmost first. Focus moves into the top one when it opens, Tab stays inside,
+// Escape closes it, and focus returns to the control that opened it.
+const FOCUSABLE = 'button:not([disabled]), [href], input, textarea, select, summary, [tabindex]:not([tabindex="-1"])';
+const visible = (el) => !!el && el.getClientRects().length > 0 && getComputedStyle(el).visibility !== "hidden";
+function topModal() {
+  if (IS_REPLAY) return null;
+  for (const sel of ["#detail", "#menu", "#gamemenu", "#sheet.pilesheet", "#logdrawer", "#gameover[role=alertdialog]"]) {
+    const el = document.querySelector(sel);
+    if (el && visible(el)) return el;
+  }
+  return null;
+}
+function focusables(root) {
+  return [...root.querySelectorAll(FOCUSABLE)].filter((el) => visible(el) && !el.closest("[aria-hidden=true]"));
+}
+// Where focus was before a modal opened: the element, plus a way to find its re-rendered twin.
+let modalTop = null;
+let opener = null;
+function describe(el) {
+  if (!el || el === document.body) return null;
+  for (const a of ["data-uid", "data-act", "data-pile", "data-opt", "data-pickopen", "data-recap"]) {
+    const v = el.getAttribute(a);
+    if (v != null) return {el, sel: "[" + a + '="' + CSS.escape(v) + '"]'};
+  }
+  return {el, sel: el.id ? "#" + CSS.escape(el.id) : null};
+}
+function restoreFocus() {
+  const o = opener;
+  opener = null;
+  if (!o) return;
+  let el = o.el && o.el.isConnected && visible(o.el) ? o.el : null;
+  if (!el && o.sel) el = [...document.querySelectorAll(o.sel)].find(visible) || null;
+  if (el) el.focus({preventScroll: true});
+}
+function manageFocus() {
+  const top = topModal();
+  if (top === modalTop) {
+    if (top && !top.contains(document.activeElement)) (focusables(top)[0] || top).focus({preventScroll: true});
+    return;
+  }
+  const prev = modalTop;
+  modalTop = top;
+  if (top) {
+    if (!prev || !prev.isConnected) opener = describe(document.activeElement) || opener;
+    (focusables(top)[0] || top).focus({preventScroll: true});
+  } else {
+    restoreFocus();
+  }
+  if (!top && document.activeElement === document.body) {
+    // A new prompt sheet after the old focus target went away: start at its first choice.
+    const first = document.querySelector("#sheet:not(.pilesheet) [data-opt]");
+    if (first && visible(first) && !locked) first.focus({preventScroll: true});
+  }
+}
+function closeTop() {
+  if (menuUid) { closeState("menu"); render(); closeOv("menu"); return true; }
+  if (detail) { closeState("detail"); render(); closeOv("detail"); return true; }
+  if (gameMenu) { closeState("gamemenu"); render(); closeOv("gamemenu"); return true; }
+  if (pileOpen) { closeState("pile"); render(); closeOv("pile"); return true; }
+  if (logOpen) { closeState("log"); render(); closeOv("log"); return true; }
+  if (revealCur) { dismissReveal(); return true; }
+  if (pickerOpen) { const side = pickerOpen; pickerOpen = null; renderLobby(); const b = app.querySelector('[data-pickopen="' + side + '"]'); if (b) b.focus(); return true; }
+  if (recap && document.activeElement && document.activeElement.closest(".recap")) { recap = null; render(); return true; }
+  return false;
+}
+document.addEventListener("keydown", (ev) => {
+  const t = ev.target;
+  const typing = t.matches && t.matches("input, textarea");
+  if (ev.key === "Escape") {
+    if (closeTop()) ev.preventDefault();
+    return;
+  }
+  // "Pause after each bot action": Enter continues, like a tap.
+  if (cue.waiting() && (ev.key === "Enter" || ev.key === " ") && !typing && !topModal()) {
+    ev.preventDefault();
+    cue.resume();
+    return;
+  }
+  if (ev.key === "Tab") {
+    const m = topModal();
+    if (!m) return;
+    const f = focusables(m);
+    if (!f.length) { ev.preventDefault(); m.focus(); return; }
+    const i = f.indexOf(document.activeElement);
+    if (ev.shiftKey && (i <= 0)) { ev.preventDefault(); f[f.length - 1].focus(); }
+    else if (!ev.shiftKey && (i < 0 || i === f.length - 1)) { ev.preventDefault(); f[0].focus(); }
+    return;
+  }
+  if ((ev.key === "ArrowDown" || ev.key === "ArrowUp") && t.closest && t.closest("#menu")) {
+    const items = focusables(document.getElementById("menu"));
+    const i = items.indexOf(t);
+    const n = items[(i + (ev.key === "ArrowDown" ? 1 : -1) + items.length) % items.length];
+    if (n) { ev.preventDefault(); n.focus(); }
+    return;
+  }
+  // Non-native controls (cards, log lines): Enter and Space activate, as on a button.
+  if ((ev.key === "Enter" || ev.key === " ") && !typing && t.getAttribute && t.getAttribute("role") === "button" &&
+      !t.matches("button, summary, a")) {
+    ev.preventDefault();
+    t.click();
+  }
+});
+if (reducedMotion()) document.documentElement.dataset.motion = "reduced";
+
 // ---- cues ----
 const cue = createCuePlayer({
   layer: ovCues,
@@ -1112,6 +1249,8 @@ const cue = createCuePlayer({
   names: () => (msg && msg.names) || null,
   speed: () => (cueSpeed === "2" ? 2 : 1),
   pause: () => cuePause && !IS_REPLAY,
+  announce: (t) => say(t),
+  reduced: () => reducedMotion() && !IS_REPLAY,
   textFor: (code) => {
     const t = cardText(code);
     return t && t.text ? t.text : null;
@@ -1122,6 +1261,8 @@ function resetCues() {
   cue.reset();
   recap = null;
   recapAcc = null;
+  liveChain = chainTracker();
+  chainNeg = new Set();
   lastCueN = -1;
   lastCueTurn = 0;
 }
@@ -1137,9 +1278,16 @@ function freshCues(m) {
 }
 
 // Collect the opponent's turn for the recap; attach it to the message where your turn starts.
+// Also tracks the chain, so negations know their cause (m._negs, applied with the board).
+let liveChain = chainTracker();
+let chainNeg = new Set();   // chain links shown negated in the chain strip until the chain ends
 function collectRecap(m, cues) {
   const oppName = (m.names && m.names[1]) || "ygo-zero";
+  m._negs = m._negs || [];
   for (const c of cues) {
+    const neg = liveChain.feed(c);
+    if (neg) m._negs.push(neg);
+    if (c.t === "chain_end") m._negs.push({end: true});
     if (c.t === "turn") {
       if (c.player === "opp") recapAcc = {turn: c.turn, who: oppName, items: []};
       else if (recapAcc) {
@@ -1149,7 +1297,7 @@ function collectRecap(m, cues) {
       continue;
     }
     if (!recapAcc) continue;
-    const it = recapItem(c);
+    const it = recapItem(c, neg);
     if (it) {
       recapAcc.items.push(it);
       if (recapAcc.items.length > 40) recapAcc.items.shift();
@@ -1161,7 +1309,55 @@ function receiveState(m) {
   const cues = freshCues(m);
   for (const c of cues) if (c.t === "activate" && c.card && c.card.code) cardText(c.card.code);   // warm the text cache
   collectRecap(m, cues);
+  if (cueSpeed === "instant" && cues.length) sayInstant(cues);
   cue.enqueue(cueSpeed === "instant" ? [] : cues, m);
+}
+
+// Instant pacing plays no scenes; screen readers still hear what happened (the last few lines).
+function sayInstant(cues) {
+  const lines = planSteps(cues, (msg && msg.view && msg.view.chain) || []).filter((s) => s.dur > 0)
+    .map((s) => stepText(s, msg && msg.names)).filter(Boolean);
+  if (lines.length > 6) say((lines.length - 5) + " earlier moves. " + lines.slice(-5).join(". "));
+  else if (lines.length) say(lines.join(". "));
+}
+
+// New prompts and the result, in words.
+function announceState(prev, m) {
+  if (IS_REPLAY) return;
+  const p = m.prompt;
+  if (p && (!prev || !prev.prompt || prev.prompt.id !== p.id)) {
+    if (p.kind === "idle" || p.kind === "battle") {
+      const n = Object.keys(actionableMap(p)).length;
+      say((p.kind === "battle" ? "Battle Phase, your move. " : "Your move. ") + n + (n === 1 ? " card can act." : " cards can act."));
+    } else {
+      const pick = p.kind === "card" ? (p.min === p.max ? " Pick " + p.min + "." : " Pick " + p.min + " to " + p.max + ".") : "";
+      const t = p.text || "Choose";
+      say(t + (/[.?!…]$/.test(t) ? "" : ".") + pick);
+    }
+  }
+  if (m.result && !(prev && prev.result)) {
+    const w = m.result.winner;
+    say("Duel over. " + (w === "you" ? "Victory." : w === "bot" ? "Defeat." : String(w) + " wins."));
+  }
+}
+
+// Negated chain links stay marked: in the chain strip until the chain ends, and on
+// the log line of the negated activation (with what negated it).
+function markNegations(m) {
+  for (const ng of m._negs || []) {
+    if (ng.end) { chainNeg = new Set(); continue; }
+    chainNeg.add(ng.link);
+    const code = ng.card && ng.card.code;
+    if (!code) continue;
+    for (let i = events.length - 1; i >= 0; i--) {
+      const e = events[i];
+      if (e.kind === "activate" && e.card && e.card.code === code && !e.neg) {
+        e.neg = ng.by && ng.by.name ? "by " + ng.by.name : (ng.disabled ? "effect" : "activation");
+        break;
+      }
+    }
+  }
+  if (m.view && (!m.view.chain || !m.view.chain.length)) chainNeg = new Set();
 }
 
 function applyState(m) {
@@ -1173,6 +1369,8 @@ function applyState(m) {
   if (!m.prompt) sel = [];
   // A cue-aware server replaces the old reveal/banner notices.
   addEvents(m.log, false, !("cues" in m));
+  markNegations(m);
+  announceState(msg && msg.t === "state" ? msg : null, m);
   msg = m;
   locked = false;
   menuUid = null;
@@ -1214,6 +1412,7 @@ async function loadMock(i) {
   if (qs.get("picker") && msg.t === "lobby") pickerOpen = qs.get("picker");
   if (qs.get("gamemenu") && msg.t === "state") gameMenu = true;
   render();
+  if (msg.t === "state" && !(Array.isArray(msg.cues) && msg.cues.length)) announceState(null, msg);
   if (msg.t === "state" && Array.isArray(msg.cues) && msg.cues.length) mockCues();
   if (qs.get("reveal") && msg.t === "state") {
     const c = findCard(qs.get("reveal"));

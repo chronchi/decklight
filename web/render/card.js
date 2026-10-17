@@ -40,12 +40,15 @@ function faceHTML(card, mock, size) {
 // The battle-relevant stat, shown under the card (never rotated with it).
 export function statHTML(card) {
   if (!card || card.faceup === false) return "";
+  return statInner(card);
+}
+function statInner(card) {
   if (card.pos !== "atk" && card.pos !== "def") return "";
   if (typeof card.atk !== "number") return "";
-  if (card.link > 0) return '<div class="stat atk">' + card.atk + '<i>L' + card.link + "</i></div>";
+  if (card.link > 0) return '<div class="stat atk" aria-hidden="true">' + card.atk + '<i>L' + card.link + "</i></div>";
   return card.pos === "def"
-    ? '<div class="stat def">' + card.def + "</div>"
-    : '<div class="stat atk">' + card.atk + "</div>";
+    ? '<div class="stat def" aria-hidden="true">' + card.def + "</div>"
+    : '<div class="stat atk" aria-hidden="true">' + card.atk + "</div>";
 }
 
 function badges(card) {
@@ -54,11 +57,30 @@ function badges(card) {
   if (card.overlays && card.overlays.length) out.push('<span class="bdg xyz">' + card.overlays.length + "</span>");
   if (card.counters) out.push('<span class="bdg ctr">' + card.counters + "</span>");
   if (!out.length) return "";
-  return '<div class="badges">' + out.join("") + "</div>";
+  return '<div class="badges" aria-hidden="true">' + out.join("") + "</div>";
+}
+
+// Spoken name and state of a card: "Ash Blossom, Defense Position, DEF 1800, can act".
+export function cardLabel(card, opts) {
+  opts = opts || {};
+  if (!card) return "";
+  const hidden = isHidden(card);
+  const parts = [hidden ? (card.name ? "Set card: " + card.name : "Face-down card") : card.name || "#" + card.code];
+  if (!hidden && card.pos === "atk") parts.push("Attack Position");
+  if (!hidden && card.pos === "def") parts.push("Defense Position");
+  if (opts.stat && !hidden && typeof card.atk === "number" && (card.pos === "atk" || card.pos === "def")) {
+    parts.push(card.link > 0 ? "ATK " + card.atk + ", Link " + card.link : card.pos === "def" ? "DEF " + card.def : "ATK " + card.atk);
+  }
+  if (card.overlays && card.overlays.length) parts.push(card.overlays.length + (card.overlays.length === 1 ? " material" : " materials"));
+  if (card.counters) parts.push(card.counters + (card.counters === 1 ? " counter" : " counters"));
+  if (opts.selected) parts.push("selected");
+  if (opts.actionable) parts.push("can act");
+  return parts.join(", ");
 }
 
 // A card filling its container (slot, hand cell, grid cell).
-// opts: {mock, actionable, selected, pick, rot (defense: rotate 90deg), stat, focus, bot}
+// opts: {mock, actionable, selected, pick, rot (defense: rotate 90deg), stat, focus, bot,
+//        kb (board/hand: the card itself is the control, reachable by Tab, named for screen readers)}
 export function cardHTML(card, opts) {
   opts = opts || {};
   if (!card) return "";
@@ -72,15 +94,20 @@ export function cardHTML(card, opts) {
   const uid = card.uid ? ' data-uid="' + esc(card.uid) + '"' : "";
   const key = card.uid ? ' data-key="' + esc(card.uid + ":" + (card.code || 0)) + '"' : "";
   const inner = hidden ? "" : faceHTML(card, opts.mock);
-  const pick = opts.pick ? '<div class="pick">' + opts.pick + "</div>" : "";
-  return '<div class="' + cls.join(" ") + '"' + uid + key + ">" + inner + "</div>" +
+  const pick = opts.pick ? '<div class="pick" aria-hidden="true">' + opts.pick + "</div>" : "";
+  // Controls only where tapping does something: actionable, or face-up (opens the details).
+  const a11y = opts.kb && (opts.actionable || !hidden)
+    ? ' role="button" tabindex="0" aria-label="' + esc(cardLabel(card, opts)) + '"' + (opts.actionable ? ' aria-haspopup="menu"' : "")
+    : opts.kb ? ' role="img" aria-label="' + esc(cardLabel(card, opts)) + '"' : "";
+  return '<div class="' + cls.join(" ") + '"' + uid + key + a11y + ">" + inner + "</div>" +
     (opts.stat ? statHTML(card) : "") + badges(card) + pick;
 }
 
 // Small fixed-size thumbnail (prompt rows, log, chain, info panel).
 export function thumbHTML(card, mock, cls) {
   cls = "thumb" + (cls ? " " + cls : "");
-  if (!card) return '<div class="' + cls + ' none"></div>';
-  if (isHidden(card)) return '<div class="' + cls + ' back"></div>';
-  return '<div class="' + cls + '">' + faceHTML(card, mock) + "</div>";
+  // Always beside its name in words: hidden from screen readers.
+  if (!card) return '<div class="' + cls + ' none" aria-hidden="true"></div>';
+  if (isHidden(card)) return '<div class="' + cls + ' back" aria-hidden="true"></div>';
+  return '<div class="' + cls + '" aria-hidden="true">' + faceHTML(card, mock) + "</div>";
 }

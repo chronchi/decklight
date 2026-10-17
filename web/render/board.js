@@ -23,7 +23,7 @@ function pileHTML(o) {
   let face = "";
   if (n) {
     face = o.top && !isHidden(o.top)
-      ? cardHTML(o.top, {mock: o.mock})
+      ? cardHTML(o.top, {mock: o.mock}).replace('class="card', 'aria-hidden="true" class="card')
       : '<div class="card back"></div>';
   }
   return "<" + el + ' class="slot side pile' + (n ? "" : " empty") + '"' + open +
@@ -36,8 +36,8 @@ function gyHTML(side, who, mock) {
   const gy = side.gy || [];
   const bn = (side.banished || []).length;
   const ban = bn
-    ? '<button class="banpill" data-pile="banished:' + who + '" aria-label="Banished ' + bn + '">' +
-      '<svg viewBox="0 0 12 12" aria-hidden="true"><circle cx="6" cy="6" r="4.5"/><path d="M3 9 9 3"/></svg>' + bn + "</button>"
+    ? '<button class="banpill" data-pile="banished:' + who + '" aria-label="Banished ' + bn + '"><span class="bp" aria-hidden="true">' +
+      '<svg viewBox="0 0 12 12"><circle cx="6" cy="6" r="4.5"/><path d="M3 9 9 3"/></svg>' + bn + "</span></button>"
     : "";
   return '<div class="gycell">' +
     pileHTML({tag: "GY", label: "Graveyard", count: gy.length, top: topOf(gy), mock, pile: "gy", who, openable: true}) +
@@ -64,6 +64,7 @@ export function sideHTML(side, opts) {
     focus: !!(c && c.uid && c.uid === opts.focus),
     rot: zone === "m" && (c && (c.pos === "def" || c.pos === "set")),
     stat: zone === "m",
+    kb: true,
   });
   const m = side.mzone.map((c) => slotHTML(c, ctx(c, "m")));
   const s = side.szone.map((c) => slotHTML(c, ctx(c, "s")));
@@ -99,7 +100,7 @@ export function midHTML(view, opts) {
   const emzSlot = (mine, theirs) => {
     const c = mine || theirs;
     const ctx = {
-      mock: opts.mock, stat: true,
+      mock: opts.mock, stat: true, kb: true,
       actionable: !!(c && c.uid && (opts.actionable || {})[c.uid] != null),
       focus: !!(c && c.uid && c.uid === opts.focus),
       rot: !!(c && (c.pos === "def" || c.pos === "set")),
@@ -153,19 +154,25 @@ export function barHTML(side, who, opts) {
     '<div class="pbar ' + who + (opts.active ? " active" : "") + '" data-key="bar-' + who + '">' +
     '<div class="lpblock"><span class="pname">' + esc(name) + "</span>" +
     '<span class="lp" data-lp="' + side.lp + '">' + side.lp + "</span>" +
-    '<span class="lpbar"><i style="width:' + Math.round(frac * 100) + '%"></i></span></div>' +
+    '<span class="lpbar" aria-hidden="true"><i style="width:' + Math.round(frac * 100) + '%"></i></span></div>' +
     '<div class="right">' + right + "</div></div>"
   );
 }
 
 // Small thumbnail used by the chain strip.
-export function chainHTML(chain, mock) {
+// Chain links: the controller is a shape (your number in a circle, the bot's in a square seal)
+// as well as a colour; a negated link keeps a slash. Spoken as one line per link.
+export function chainHTML(chain, mock, negated) {
   if (!chain || !chain.length) return "";
-  return '<span class="clabel">Chain</span>' + chain.map((link, i) => {
+  return '<span class="clabel" aria-hidden="true">Chain</span>' + chain.map((link, i) => {
     const c = link.card;
     const newest = i === chain.length - 1 ? " new" : "";
-    return '<div class="link ' + (link.controller === "bot" ? "bot" : "you") + newest + '"' +
-      (c && c.uid ? ' data-uid="' + esc(c.uid) + '"' : "") + ' title="' + esc((c && c.name) || "") + '">' +
-      thumbHTML(c, mock) + '<span class="cn">' + (i + 1) + "</span></div>";
+    const neg = negated && negated.has(i + 1);
+    const bot = link.controller === "bot";
+    const said = "Chain " + (i + 1) + ": " + ((c && c.name) || "a card") + ", " + (bot ? "ygo-zero" : "yours") + (neg ? ", negated" : "");
+    return '<div class="link ' + (bot ? "bot" : "you") + newest + (neg ? " neg" : "") + '" role="img" aria-label="' + esc(said) + '"' +
+      (c && c.uid ? ' data-uid="' + esc(c.uid) + '"' : "") + ' title="' + esc(((c && c.name) || "") + (neg ? " (negated)" : "")) + '">' +
+      thumbHTML(c, mock) + '<span class="cn">' + (i + 1) + "</span>" +
+      (neg ? '<span class="negx"></span>' : "") + "</div>";
   }).join("");
 }

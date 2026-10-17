@@ -17,7 +17,7 @@ export const DUR = {
   turn: 1100, phase: 750, draw: 450,
   move: {sent: 550, destroyed: 750, banished: 650, added: 750, returned: 600, material: 550,
     set: 600, summon: 650, spsummon: 650, other: 500},
-  summon: 850, actMe: 1000, actOpp: 1400, solve: 650, negate: 950, target: 650,
+  summon: 850, actMe: 1000, actOpp: 1400, solve: 650, negate: 1600, target: 650,
   attack: 750, battle: 1150, damage: 800, lp: 450, confirm: 950,
 };
 
@@ -40,6 +40,34 @@ const sameCard = (a, b) => !!a && !!b && ((a.uid && a.uid === b.uid) || (a.code 
 // battle cue sides may be {ref, atk, def} or a ref with atk/def on it
 const battleRef = (s) => (s ? s.ref || s.card || s : null);
 
+// Who negated what: chain links by number, the link resolving now and the one
+// that resolved last. A negation cue arrives while the negating link resolves
+// (Ash: "negate the activation"), or, for effects negated in advance
+// (Impermanence), when the negated link itself resolves; the cause is then the
+// link just above it, which resolved immediately before.
+export function chainTracker(baseChain) {
+  const links = new Map();
+  (baseChain || []).forEach((l, i) => links.set(i + 1, l.card));
+  let solving = 0;
+  let last = null;   // {link, card} of the last resolved link
+  return {
+    feed(c) {
+      if (c.t === "activate") links.set(c.link || links.size + 1, c.card);
+      else if (c.t === "chain_solving") solving = c.link;
+      else if (c.t === "chain_solved") { last = {link: c.link, card: links.get(c.link) || null}; solving = 0; }
+      else if (c.t === "chain_end") { links.clear(); solving = 0; last = null; }
+      else if (c.t === "chain_negated" || c.t === "chain_disabled") {
+        const card = links.get(c.link) || null;
+        let by = null;
+        if (solving && solving !== c.link) by = links.get(solving) || null;
+        else if (last && last.link === c.link + 1) by = last.card;
+        return {link: c.link, card, by, disabled: c.t === "chain_disabled"};
+      }
+      return null;
+    },
+  };
+}
+
 // Steps with dur 0 are model-only (no scene). `chain` is the chain as the
 // held board shows it (view.chain), so chain resolution can be drawn.
 export function planSteps(cues, baseChain) {
@@ -47,9 +75,11 @@ export function planSteps(cues, baseChain) {
   let chain = (baseChain || []).map((l, i) => ({link: i + 1, card: l.card, neg: false}));
   const snap = () => chain.map((l) => Object.assign({}, l));
   const push = (kind, cs, dur, extra) => steps.push(Object.assign({kind, cues: cs, dur}, extra || {}));
+  const tracker = chainTracker(baseChain);
   cues = cues || [];
   for (let i = 0; i < cues.length; i++) {
     const c = cues[i];
+    const neg = tracker.feed(c);
     switch (c.t) {
       case "turn": {
         let j = i + 1;
@@ -113,7 +143,8 @@ export function planSteps(cues, baseChain) {
       case "chain_disabled": {
         const l = chain.find((x) => x.link === c.link);
         if (l) l.neg = true;
-        push("negate", [c], DUR.negate, {link: c.link, card: l ? l.card : null, disabled: c.t === "chain_disabled"});
+        push("negate", [c], DUR.negate, {link: c.link, card: l ? l.card : (neg && neg.card), by: neg && neg.by,
+          disabled: c.t === "chain_disabled"});
         break;
       }
       case "chain_end":
@@ -167,10 +198,65 @@ export function planDurations(cues, baseChain) {
   return planSteps(cues, baseChain).filter((s) => s.dur > 0).map((s) => s.dur);
 }
 
+// ---------- spoken lines (screen readers: the polite live region) ----------
+
+// One sentence per visible scene, e.g. "ygo-zero activates Ash Blossom, chain 2".
+export function stepText(step, names) {
+  const opp = (names && names[1]) || "ygo-zero";
+  const you = names ? names[0] : "You";
+  const mine = (r) => r && r.owner === "me";
+  const who = (r) => (mine(r) ? you : opp);
+  const cname = (r) => (r && r.name) || "a face-down card";
+  const list = (rs) => {
+    const ns = (rs || []).map((r) => (mine(r) && !names ? "your " : "") + cname(r));
+    return ns.length > 3 ? ns.slice(0, 3).join(", ") + " and " + (ns.length - 3) + " more" : ns.join(", ");
+  };
+  const c = step.cues[0] || {};
+  switch (step.kind) {
+    case "banner":
+      if (step.turn) return "Turn " + step.turn + ", " + (step.player === "me" ? (names ? you + "’s" : "your") : opp + "’s") + " turn";
+      return PHASE_NAME[step.phase] || step.phase || "";
+    case "draw": {
+      const n = step.cues.reduce((a, x) => a + (x.count || 1), 0);
+      return (c.player === "me" ? (names ? you + " draws " : "You draw ") : opp + " draws ") + n + (n === 1 ? " card" : " cards");
+    }
+    case "moves":
+      return (MOVE_LABEL[step.reason] || "Moved") + ": " + list(step.cues.map((x) => x.card));
+    case "summon":
+      return who(c.card) + ", " + (HOW[step.how] || "Summon") + ": " + list(step.cues.map((x) => x.card));
+    case "activate":
+      return (mine(c.card) && !names ? "You activate " : who(c.card) + " activates ") + cname(c.card) + ", chain " + step.link;
+    case "solve":
+      return "Chain " + step.link + " resolves";
+    case "negate":
+      return "Chain " + step.link + (step.disabled ? ", effect negated: " : ", activation negated: ") + cname(step.card) +
+        (step.by && step.by.name && (!step.card || step.by.name !== step.card.name) ? ", by " + step.by.name : "");
+    case "target":
+      return (c.source ? cname(c.source) + " targets " : "Targets ") + list(c.cards);
+    case "attack": {
+      const a = c.t === "battle" ? battleRef(c.attacker) : c.attacker;
+      const tg = c.t === "battle" ? battleRef(c.target) : c.target;
+      return cname(a) + (tg ? " attacks " + cname(tg) : " attacks directly");
+    }
+    case "lp": {
+      const p = c.player === "me" ? (names ? you : "you") : opp;
+      const tail = typeof c.lp_after === "number" ? ", " + c.lp_after + " LP left" : "";
+      if (c.t === "damage") return (c.player === "me" && !names ? "You take " : p + " takes ") + c.amount + " damage" + tail;
+      if (c.t === "pay") return (c.player === "me" && !names ? "You pay " : p + " pays ") + c.amount + " LP" + tail;
+      if (c.t === "recover") return (c.player === "me" && !names ? "You gain " : p + " gains ") + c.amount + " LP" + tail;
+      return typeof c.lp === "number" ? p + ": " + c.lp + " LP" : "";
+    }
+    case "confirm":
+      return "Revealed: " + list(c.cards);
+    default:
+      return "";
+  }
+}
+
 // ---------- "what happened" lines (recap) ----------
 
 const nm = (r) => (r && r.name) || "a card";
-export function recapItem(c) {
+export function recapItem(c, neg) {
   const opp = (r) => r && r.owner === "opp";
   switch (c.t) {
     case "activate":
@@ -188,8 +274,11 @@ export function recapItem(c) {
     case "damage":
       return c.player === "me" ? {text: "You took " + c.amount + " damage", card: null} : null;
     case "chain_negated":
-    case "chain_disabled":
-      return {text: "Chain " + c.link + " was negated", card: null};
+    case "chain_disabled": {
+      const nmd = neg && neg.card && neg.card.name;
+      const text = (nmd ? nmd : "Chain " + c.link) + (c.t === "chain_disabled" ? "’s effect was negated" : " was negated");
+      return {text, sub: neg && neg.by && neg.by.name ? "by " + neg.by.name : "", card: neg && neg.card, neg: true};
+    }
     default:
       return null;
   }
@@ -248,6 +337,12 @@ function domCardAt(zone) {
     if (p.length >= 3 && p[1] === LOC_HEX[zone.loc] && (p[2] | 0) === seq) return el;
   }
   return null;
+}
+
+// Line weight for every cue stroke: scales with the board card (2.1 px at 412 px),
+// never thinner than 2 px.
+function lineW() {
+  return Math.max(2, cardSize().w * 0.036);
 }
 
 function cardSize() {
@@ -315,12 +410,51 @@ const srcUid = (r) => (r && r.uid && r.uid.indexOf(":") < 0 ? r.uid : null);
 const isHiddenRef = (r) => !r || (!r.code && !r.name);
 const sideCls = (r) => (r && r.owner === "opp" ? "opp" : "me");
 
+// ⊘ stamp over a card: a circle and its slash, each on a dark casing so the mark
+// keeps its contrast over bright art. Returns {set(k)} drawing it to fraction k.
+function negStamp(parent, r, lw) {
+  const s = svg(parent);
+  s.classList.add("negmark");
+  const cx = r.x + r.w / 2, cy = r.y + r.h / 2;
+  const rad = Math.min(r.w, r.h) * 0.36;
+  const w = lw * 1.75;
+  const c45 = Math.SQRT1_2 * rad;
+  const parts = [];
+  for (const cls of ["case", "mark"]) {
+    const sw = cls === "case" ? w + lw * 1.4 : w;
+    const circ = sv(s, "circle", {cx, cy, r: rad, class: cls});
+    const sl = sv(s, "line", {x1: cx - c45, y1: cy + c45, x2: cx + c45, y2: cy - c45, class: cls});
+    circ.style.strokeWidth = sw.toFixed(2);
+    sl.style.strokeWidth = sw.toFixed(2);
+    parts.push({circ, sl});
+  }
+  const C = 2 * Math.PI * rad, L = 2 * rad;
+  for (const p of parts) {
+    p.circ.style.strokeDasharray = C.toFixed(1);
+    p.sl.style.strokeDasharray = L.toFixed(1);
+  }
+  return {
+    svg: s,
+    set(kc, ks) {
+      for (const p of parts) {
+        p.circ.style.strokeDashoffset = (C * (1 - kc)).toFixed(1);
+        p.sl.style.strokeDashoffset = (L * (1 - ks)).toFixed(1);
+      }
+    },
+  };
+}
+const NEG_FILTER = "brightness(.42) saturate(.12)";
+
 // ---------- the player ----------
 
 // opts: {layer, getView(), apply(msg), mock, names() -> [me, opp], speed() -> 1|2|0,
 //        pause() -> bool, textFor(code) -> string|null, onIdle()}
+// The settled instant of a scene (fraction of its length): what reduced motion shows.
+const HOLD = 0.62;
+
 export function createCuePlayer(opts) {
   const layer = opts.layer;
+  layer.setAttribute("aria-hidden", "true");   // visual only: the live region speaks each scene
   layer.innerHTML = '<div class="cue-ghosts"></div><div class="cue-dim"></div><div class="cue-stage"></div>' +
     '<div class="cue-hint"></div>';
   const ghostsEl = layer.querySelector(".cue-ghosts");
@@ -683,9 +817,8 @@ export function createCuePlayer(opts) {
         num.style.top = (r.y + ch + 8) + "px";
         let slash = null;
         if (l.neg) {
-          slash = svg(box);
-          sv(slash, "line", {x1: r.x + 4, y1: r.y + ch - 4, x2: r.x + cw - 4, y2: r.y + 4, class: "neg"});
-          el.classList.add("negd");
+          el.style.filter = NEG_FILTER;
+          slash = negStamp(box, r, lineW()).svg;
         }
         return {l, el, r, num, slash};
       });
@@ -714,32 +847,41 @@ export function createCuePlayer(opts) {
     negate(step) {
       const a = appRect();
       const H = window.innerHeight;
-      const cw = Math.min(a.w * 0.32, 150);
+      const cw = Math.min(a.w * 0.34, 156);
       const ch = cw * 86 / 59;
-      const cy = a.y + Math.min(a.h, H) * 0.38;
+      const cy = a.y + Math.min(a.h, H) * 0.36;
       const r = {x: a.x + a.w / 2 - cw / 2, y: cy - ch / 2, w: cw, h: ch};
       const box = div(stage, "cue-neg");
       const el = cardNode(step.card || {}, true);
       box.appendChild(el);
       place(el, r);
-      const s = svg(box);
-      const line = sv(s, "line", {x1: r.x - 6, y1: r.y + ch + 6, x2: r.x + cw + 6, y2: r.y - 6, class: "neg"});
-      const len = Math.hypot(cw + 12, ch + 12);
-      line.style.strokeDasharray = len.toFixed(1);
-      const k = div(box, "kick", "Chain " + step.link + ' <i>·</i> <b>' + (step.disabled ? "effect negated" : "negated") + "</b>" +
-        (step.card && step.card.name ? '<span class="nm">' + esc(step.card.name) + "</span>" : ""));
+      const stamp = negStamp(box, r, lineW() * 1.0);
+      const what = step.disabled ? "Effect negated" : "Activation negated";
+      const by = step.by && step.by.name && (!step.card || step.by.name !== step.card.name || step.by.owner !== step.card.owner)
+        ? step.by : null;
+      const k = div(box, "kick",
+        "Chain " + step.link + ' <i>·</i> <b>' + what + "</b>" +
+        (step.card && step.card.name ? '<span class="nm">' + esc(step.card.name) + "</span>" : "") +
+        (by ? '<span class="by">by <em>' + esc(by.name) + "</em></span>" : ""));
       k.style.left = (a.x + a.w / 2) + "px";
       k.style.top = (r.y + ch + 16) + "px";
+      const T = step.dur;
       return {
         at(t) {
           dimAt(step, t);
-          const o = inOut(step, t, 200, 240);
+          const o = inOut(step, t, 200, 260);
+          const d = eInOut(seg(t, 160, 560));
+          // the card sinks: darker, greyer, a touch smaller
+          const sc = 1 - 0.04 * d;
+          place(el, {x: r.x + r.w * (1 - sc) / 2, y: r.y + r.h * (1 - sc) / 2, w: r.w * sc, h: r.h * sc});
           el.style.opacity = o.toFixed(3);
-          const d = eInOut(seg(t, 220, 620));
-          el.style.filter = "brightness(" + (1 - 0.35 * d).toFixed(3) + ") saturate(" + (1 - 0.7 * d).toFixed(3) + ")";
-          line.style.strokeDashoffset = (len * (1 - d)).toFixed(1);
-          s.style.opacity = o.toFixed(3);
-          k.style.opacity = Math.min(o, seg(t, 300, 520)).toFixed(3);
+          el.style.filter = "brightness(" + (1 - 0.58 * d).toFixed(3) + ") saturate(" + (1 - 0.88 * d).toFixed(3) + ")";
+          stamp.set(eOut(seg(t, 220, 640)), eOut(seg(t, 560, 820)));
+          stamp.svg.style.opacity = o.toFixed(3);
+          const kk = eOut(seg(t, 420, 700));
+          k.style.opacity = Math.min(o, kk).toFixed(3);
+          k.style.transform = "translate(-50%," + (5 * (1 - kk)).toFixed(1) + "px)";
+          void T;
         },
         finish() {},
       };
@@ -751,12 +893,16 @@ export function createCuePlayer(opts) {
       const src = c.source ? rectAt(c.source.zone, c.source.uid, {fallback: "none"}) : null;
       const parts = (c.cards || []).map((ref) => {
         const r = rectAt(ref.zone, ref.uid);
-        const ring = sv(s, "rect", {x: r.x - 3, y: r.y - 3, width: r.w + 6, height: r.h + 6, rx: 6, class: "ring"});
+        const lw = lineW();
+        const ring = sv(s, "rect", {x: r.x - 2 - lw, y: r.y - 2 - lw, width: r.w + 4 + 2 * lw, height: r.h + 4 + 2 * lw,
+          rx: 6, class: "ring"});
+        ring.style.strokeWidth = lw.toFixed(2);
         let line = null, len = 0;
         if (src) {
           const x1 = src.x + src.w / 2, y1 = src.y + src.h / 2, x2 = r.x + r.w / 2, y2 = r.y + r.h / 2;
           len = Math.hypot(x2 - x1, y2 - y1);
           line = sv(s, "line", {x1, y1, x2, y2, class: "tline"});
+          line.style.strokeWidth = lw.toFixed(2);
           line.style.strokeDasharray = len.toFixed(1);
         }
         return {ring, line, len};
@@ -842,12 +988,15 @@ export function createCuePlayer(opts) {
       }
       const T = step.dur;
       const drawEnd = 420;
+      // Heavier than the target line: ~4x the line weight at the attacker, ~1.6x at the tip.
+      const lw = lineW();
+      const bw0 = Math.max(lw * 4, cardSize().w * 0.15), bw1 = lw * 1.6;
       return {
         at(t) {
           const o = 1 - seg(t, T - 240, T);
           const u = eOut(seg(t, 0, drawEnd));
-          brush.setAttribute("d", u > 0 ? strokeTo(u, 4.2, 0.9, 0.12) : "");
-          brush2.setAttribute("d", u > 0 ? strokeTo(u * 0.92, 1.6, 0.4, 0.4) : "");
+          brush.setAttribute("d", u > 0 ? strokeTo(u, bw0, bw1, 0.12) : "");
+          brush2.setAttribute("d", u > 0 ? strokeTo(u * 0.92, bw1, lw, 0.4) : "");
           s.style.opacity = o.toFixed(3);
           if (nums) {
             const k = eOut(seg(t, drawEnd - 40, drawEnd + 240));
@@ -938,6 +1087,7 @@ export function createCuePlayer(opts) {
 
   function mount(step) {
     stage.innerHTML = "";
+    layer.style.setProperty("--cue-lw", lineW().toFixed(2) + "px");
     const f = SCENES[step.kind];
     let sc = null;
     try {
@@ -984,13 +1134,18 @@ export function createCuePlayer(opts) {
     const step = st.steps[st.si];
     st.scene = mount(step);
     st.t0 = performance.now();
-    st.scene.at(0);
+    if (opts.announce) opts.announce(stepText(step, opts.names && opts.names()));
+    // Reduced motion: each scene is shown settled (its frame at HOLD) and only fades in and out.
+    const still = opts.reduced && opts.reduced();
+    stage.style.opacity = "";
+    st.scene.at(still ? step.dur * HOLD : 0);
     const tick = (now) => {
       if (!st.scene) return;
       const sp = opts.speed() || 1;
       const el = (now - st.t0) * sp;
-      if (el >= step.dur) { nextStep(); return; }
-      st.scene.at(el);
+      if (el >= step.dur) { stage.style.opacity = ""; nextStep(); return; }
+      if (still) stage.style.opacity = Math.min(1, el / 160, (step.dur - el) / 200).toFixed(3);
+      else st.scene.at(el);
       st.raf = requestAnimationFrame(tick);
     };
     st.raf = requestAnimationFrame(tick);
@@ -1004,7 +1159,8 @@ export function createCuePlayer(opts) {
     const m = seg.msg || {};
     if (opts.pause() && seg.visible > 0 && !m.prompt && !m.result) {
       st.waiting = true;
-      hintEl.textContent = "Tap to continue";
+      hintEl.textContent = "Tap or press Enter to continue";
+      if (opts.announce) opts.announce("Paused. Press Enter to continue.");
       hintEl.classList.add("on");
       layer.classList.add("waiting");
       return;
