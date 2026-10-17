@@ -213,7 +213,16 @@ def _codes_in_state(msg: dict) -> tuple[set[int], str]:
             walk(o["card"])
     for e in msg["log"]:
         walk(e["card"])
-    return codes, json.dumps(msg)
+    # Name checks scan everything except effect descriptions: a public card's effect text may name a hidden card
+    # ("... using \"Fallen of Albaz\" as material") without revealing it (NOTEBOOK 2026-10-17).
+    def strip(x):
+        if isinstance(x, dict):
+            return {k: strip(v) for k, v in x.items() if k != "effect"}
+        if isinstance(x, list):
+            return [strip(v) for v in x]
+        return x
+
+    return codes, json.dumps(strip(msg))
 
 
 # --- game driver ---
