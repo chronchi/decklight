@@ -124,7 +124,8 @@ export function phaseBtnsHTML(prompt, locked) {
   if (!btns.length) return "";
   return '<span class="phasebtns">' + btns.map((o) =>
     '<button class="phbtn' + (o.verb === "end_turn" ? "" : " primary") + '" data-opt="' + o.index + '"' +
-    (locked ? " disabled" : "") + ">" + esc(o.label) + "</button>"
+    (locked ? " disabled" : "") + ' aria-label="' + esc(o.label) + '">' +
+    esc({to_battle: "Battle", to_main2: "Main 2", end_turn: "End turn"}[o.verb] || o.label) + "</button>"
   ).join("") + "</span>";
 }
 

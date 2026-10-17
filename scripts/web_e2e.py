@@ -43,21 +43,23 @@ def tap(page, loc, timeout: int = 2000) -> bool:
     """Click like a person: a bot-activation reveal covers the screen while it
     shows, and a tap on it dismisses it first (then the tap is retried)."""
     try:
-        loc.click(timeout=timeout)
+        loc.tap(timeout=timeout)
         return True
     except Exception:  # noqa: BLE001, S110
         pass
-    if page.locator("#reveal").count():
+    for _ in range(4):  # a bot combo can queue a couple of reveals
+        if not page.locator("#reveal").count():
+            return False
         try:
-            page.locator("#reveal").click(timeout=1000)
+            page.locator("#reveal").tap(timeout=1000)
         except Exception:  # noqa: BLE001, S110
             pass
         page.wait_for_timeout(400)
         try:
-            loc.click(timeout=timeout)
+            loc.tap(timeout=timeout)
             return True
-        except Exception:  # noqa: BLE001
-            return False
+        except Exception:  # noqa: BLE001, S112
+            continue
     return False
 
 
@@ -163,6 +165,85 @@ def check_c_sheet_info(page, errors: list[str], ran: dict) -> None:
         errors.append(f"(c) sheet info check failed: {e}")
 
 
+def check_d_closers(page, errors: list[str], ran: dict) -> None:
+    """(d) Pile sheet Close, pile scrim, log scrim and game-menu X all close (touch taps)."""
+    if ran["d"] or modal_visible(page) or page.locator("#sheet:not(.pile)").count():
+        return
+    piles = [p for p in page.locator("[data-pile]").all() if p.is_visible()]
+    if not piles:
+        return
+    ran["d"] = True
+
+    def closes(label, open_loc, sel, close_loc):
+        if not tap(page, open_loc, timeout=3000):
+            errors.append(f"(d) {label}: could not open")
+            return
+        page.wait_for_timeout(300)
+        if page.locator(sel).count() == 0:
+            errors.append(f"(d) {label}: did not open")
+            return
+        cl = close_loc()
+        if isinstance(cl, tuple):  # a scrim: tap its uncovered top-left strip
+            try:
+                cl[0].tap(position={"x": 16, "y": 40}, timeout=3000)
+                ok = True
+            except Exception:  # noqa: BLE001
+                ok = False
+        else:
+            ok = tap(page, cl, timeout=3000)
+        if not ok:
+            errors.append(f"(d) {label}: close tap failed")
+            return
+        page.wait_for_timeout(400)
+        if page.locator(sel).count() != 0:
+            errors.append(f"(d) {label}: still open after close")
+
+    try:
+        closes("pile Close", piles[0], "#sheet.pilesheet", lambda: page.locator("[data-act=closepile].bigbtn"))
+        closes("pile scrim", piles[0], "#sheet.pilesheet",
+               lambda: (page.locator("#pscrim"),))
+        logb = page.locator("[data-act=log]").first
+        closes("log scrim", logb, "#logdrawer", lambda: (page.locator("#scrim"),))
+        # Android back gesture: closes the drawer, and only the drawer
+        if tap(page, page.locator("[data-act=log]").first, timeout=3000):
+            page.wait_for_timeout(300)
+            page.evaluate("history.back()")
+            page.wait_for_timeout(500)
+            if page.locator("#logdrawer").count():
+                errors.append("(d) back gesture did not close the log drawer")
+            elif page.locator("#app").count() == 0:
+                errors.append("(d) back gesture left the page")
+        closes("game menu X", page.locator("[data-act=gamemenu]").first, "#gamemenu",
+               lambda: page.locator("#gamemenu [data-act=closegamemenu]").first)
+    except Exception as e:  # noqa: BLE001
+        errors.append(f"(d) closers check failed: {e}")
+
+
+_OVERLAYS = [("#detail", "#detail .dx"), ("#logdrawer", "#logdrawer [data-act=closelog]"),
+             ("#gamemenu", "#gamemenu [data-act=closegamemenu]"),
+             ("#sheet.pilesheet", "[data-act=closepile].bigbtn")]
+
+
+def close_stray_overlays(page, errors: list[str]) -> None:
+    """An overlay left open (a random tap landed on a card that stopped being
+    actionable, ...) is closed with its X like a person would; one that stays
+    open after the tap is a bug: fail loudly with which one."""
+    if modal_visible(page):
+        return
+    for sel, close in _OVERLAYS:
+        if page.locator(sel).count() == 0:
+            continue
+        ok = tap(page, page.locator(close).first, timeout=3000)
+        page.wait_for_timeout(400)
+        if not ok or page.locator(sel).count():
+            info = page.evaluate("""() => ({ov: history.state, top: (() => { const b = document.querySelector('%s');
+                if (!b) return 'no close control'; const r = b.getBoundingClientRect();
+                const e = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+                return e ? (e.id || e.className || e.tagName) : null; })()})""" % close)  # noqa: UP031 -- a JS template, braces clash with format()
+            errors.append(f"overlay {sel} stayed open after tapping {close} (tap ok={ok}, {info})")
+            return
+
+
 def surrender_through_menu(page, errors: list[str], within_s: float, label: str) -> bool:
     """Open the in-game menu and tap Surrender twice; wait for game over."""
     try:
@@ -215,7 +296,7 @@ def main() -> int:
                             "--token", tok], cwd=ROOT, stdout=open(OUT / "server.log", "w"),  # noqa: SIM115 -- the server lives for the whole run
                            stderr=subprocess.STDOUT)
     errors: list[str] = []
-    ran = {"a": False, "b": False, "c": False}
+    ran = {"a": False, "b": False, "c": False, "d": False}
     try:
         for _ in range(60):
             try:
@@ -230,7 +311,7 @@ def main() -> int:
         with sync_playwright() as pw:
             browser = pw.chromium.launch(**launch_kwargs())
             page = browser.new_page(viewport={"width": 412, "height": 915}, device_scale_factor=2,
-                                    is_mobile=True, has_touch=False)
+                                    is_mobile=True, has_touch=True)  # Chrome Android: taps
             page.on("pageerror", lambda e: errors.append(f"pageerror: {e} | {getattr(e, 'stack', '')}"))
             page.on("console", lambda m: errors.append(f"console.{m.type}: {m.text}")
                     if m.type == "error" and "404" not in m.text else None)
@@ -239,8 +320,8 @@ def main() -> int:
             page.goto(url)
             page.wait_for_selector("#startbtn", timeout=10000)
             page.screenshot(path=str(OUT / "00-lobby.png"))
-            page.click(f"[data-mode={args.mode}]")
-            page.click("#startbtn")
+            page.tap(f"[data-mode={args.mode}]")
+            page.tap("#startbtn")
             t0, clicks, last_change, last_html, shots = time.time(), 0, time.time(), "", 0
             over = False
             while time.time() - t0 < args.max_s:
@@ -252,6 +333,8 @@ def main() -> int:
                 check_a_log_drawer(page, errors, ran)
                 check_b_field_detail(page, errors, ran)
                 check_c_sheet_info(page, errors, ran)
+                check_d_closers(page, errors, ran)
+                close_stray_overlays(page, errors)
                 if errors:
                     break
                 html = page.inner_html("body")
@@ -259,6 +342,22 @@ def main() -> int:
                     last_html, last_change = html, time.time()
                 elif time.time() - last_change > 30:
                     errors.append("stall: page unchanged for 30 s")
+                    import signal as _sig
+                    srv.send_signal(_sig.SIGUSR1)  # server prints all thread stacks to server.log
+                    diag = page.evaluate("""() => { const s = document.querySelector('#sheet');
+                        const o = document.querySelector('#sheet [data-opt]'); let top = null;
+                        if (o) { const r = o.getBoundingClientRect();
+                          const e = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+                          top = e && (e.id || e.className || e.tagName); }
+                        return {sheet: s && s.className, app: document.querySelector('#app').className,
+                                opts: document.querySelectorAll('[data-opt]').length, top,
+                                layer: [...document.querySelectorAll('#layer > *')].map(e => e.id + ':' + e.innerHTML.length)}; }""")
+                    errors.append(f"stall diag: {diag}")
+                    try:
+                        page.locator("#sheet [data-opt]").first.tap(timeout=2000)
+                    except Exception as e:  # noqa: BLE001
+                        errors.append(f"stall tap: {str(e)[:600]}")
+                    time.sleep(1)
                     break
                 opts = [o for o in page.locator("[data-opt]:not([disabled])").all() if o.is_visible()]
                 acts = [a for a in page.locator(".actionable").all() if a.is_visible()]
@@ -283,11 +382,11 @@ def main() -> int:
             lobby_ok = False
             if over and not errors:
                 try:
-                    page.locator("[data-act=newgame]").click(timeout=5000)
+                    page.locator("[data-act=newgame]").tap(timeout=5000)
                     page.wait_for_selector("#startbtn", timeout=5000)
                     if args.surrender_thinking:
-                        page.click("[data-mode=fast]")
-                    page.click("#startbtn")
+                        page.tap("[data-mode=fast]")
+                    page.tap("#startbtn")
                     if args.surrender_thinking:
                         t1 = time.time()
                         while time.time() - t1 < 60:
@@ -328,7 +427,7 @@ def main() -> int:
             (OUT / "last-frames.json").write_text("\n".join(str(f) for f in frames[-3:]))
             browser.close()
         print(f"clicks={clicks} over={over} seconds={time.time() - t0:.0f} shots={shots}")
-        print(f"checks ran: a-log-drawer={ran['a']} b-field-detail={ran['b']} c-sheet-info={ran['c']}")
+        print(f"checks ran: a-log-drawer={ran['a']} b-field-detail={ran['b']} c-sheet-info={ran['c']} d-closers={ran['d']}")
         print(f"surrender_ok={surrender_ok} lobby_ok={lobby_ok}")
         for e in errors[:10]:
             print("ERROR", e)

@@ -11,6 +11,7 @@ counters, so `counters` is always 0.
 
 from __future__ import annotations
 
+import re
 import sqlite3
 from pathlib import Path
 
@@ -34,6 +35,30 @@ _LOC_ZONES = {
     C.LOCATION_HAND: "hand", C.LOCATION_GRAVE: "gy", C.LOCATION_REMOVED: "banished",
     C.LOCATION_EXTRA: "extra", C.LOCATION_DECK: "deck", C.LOCATION_OVERLAY: "extra",
 }
+
+_LOC_WORDS = {
+    C.LOCATION_HAND: "hand", C.LOCATION_GRAVE: "GY", C.LOCATION_REMOVED: "banishment",
+    C.LOCATION_EXTRA: "Extra Deck", C.LOCATION_DECK: "Deck", C.LOCATION_MZONE: "Monster Zone",
+    C.LOCATION_SZONE: "Spell & Trap Zone", C.LOCATION_OVERLAY: "Xyz Materials",
+}
+_FMT = re.compile(r"%l?[sdux]|%X")
+_GENERIC_TRIGGER = (0, 221)  # system strings "Activate the [Trigger] Effect of %ls from [%ls]?"
+
+
+def _fill(text: str, name: str = "", loc: str = "") -> str:
+    """Fill EDOPro printf placeholders (%ls name, %ls location, ...) as its client does;
+    no raw placeholder ever reaches the player."""
+    if not text or "%" not in text:
+        return text
+    args = [name, loc]
+    out = _FMT.sub(lambda m: args.pop(0) if args else "", text)
+    out = out.replace('""', "").replace("[]", "").replace("  ", " ")
+    return out.strip()
+
+
+def _loc_word(ref) -> str:
+    return _LOC_WORDS.get(getattr(ref, "location", 0), "") if ref is not None else ""
+
 
 _VERBS = {
     Kind.SUMMON: "normal", Kind.SPSUMMON: "special", Kind.MSET: "set",
@@ -71,7 +96,7 @@ _HIDDEN_SAY = {
     Kind.SSET: "sets a spell/trap", Kind.REPOS: "changes a monster's position",
     Kind.POSITION: "chooses a position", Kind.YES: "uses a hidden effect",
     Kind.NO: "declines a hidden effect", Kind.OPTION: "chooses an effect",
-    Kind.ATTACK: "attacks with a hidden monster",
+    Kind.ATTACK: "attacks with a hidden monster", Kind.PLACE: "chooses a zone",
 }
 
 
@@ -363,7 +388,7 @@ def _select_hint(env, human_seat: int) -> str:
             import struct
 
             (data,) = struct.unpack_from("<Q", raw, 3)
-            return DB.desc_text(data >> 20, data & 0xFFFFF)
+            return _fill(DB.desc_text(data >> 20, data & 0xFFFFF))
     return ""
 
 
@@ -385,10 +410,14 @@ def _prompt_text(env, human_seat: int, kind: str, view: dict, msg) -> str:
     if kind == "effectyn":
         c = _ref_card(env, human_seat, msg.card)
         nm = (c or {}).get("name") or "this card"
-        d = DB.desc_text(msg.description >> 20, msg.description & 0xFFFFF)
+        hi, lo = msg.description >> 20, msg.description & 0xFFFFF
+        loc = _loc_word(msg.card)
+        if hi <= 0 and lo in _GENERIC_TRIGGER:  # no effect-specific text: say where it is
+            return f"Use {nm}'s effect" + (f" in the {loc}?" if loc else "?")
+        d = _fill(DB.desc_text(hi, lo), nm, loc)
         return f"Use {nm}'s effect?" + (f' ("{d}")' if d else "")
     if kind == "yesno":
-        d = DB.desc_text(msg.description >> 20, msg.description & 0xFFFFF)
+        d = _fill(DB.desc_text(msg.description >> 20, msg.description & 0xFFFFF))
         return d or "Answer yes or no"
     if kind == "option":
         return "Choose one of the effect's options"
@@ -413,8 +442,17 @@ def _prompt_text(env, human_seat: int, kind: str, view: dict, msg) -> str:
 
 
 def _prompt_card(env, human_seat: int, kind: str, view: dict, msg) -> dict | None:
+    """The card the prompt is about: the message's own card when it names one
+    (effect yes/no, the monster whose position is chosen); else the activating
+    card on top of the chain."""
     if kind == "effectyn":
         return _ref_card(env, human_seat, msg.card)
+    if isinstance(msg, M.SelectPosition) and msg.code:
+        return _named_card(msg.code, f"pos:{msg.code}")
+    if getattr(msg, "card", None) is not None and hasattr(msg.card, "location"):
+        return _ref_card(env, human_seat, msg.card)
+    if kind == "place":
+        return None  # the message names no card; the chain top would be the wrong one
     if view["chain"]:
         return view["chain"][-1]["card"]
     return None
@@ -428,7 +466,10 @@ def _ref_card(env, human_seat: int, ref, board=None) -> dict | None:
     r = board.row_of(ref)
     if r >= 0:
         row = board.rows[r]
-        return _state_card(row.card, visible=row.visible)
+        d = _state_card(row.card, visible=row.visible)
+        if d["code"] and ref.location not in (C.LOCATION_MZONE, C.LOCATION_SZONE):
+            d["faceup"] = True  # revealed to the chooser (own Deck/GY/hand in a selection)
+        return d
     if ref.controller == human_seat or ref.location in (C.LOCATION_DECK, C.LOCATION_EXTRA):
         return _named_card(ref.code, _uid(ref.controller, ref.location,
                                           ref.sequence, ref.code))
@@ -458,7 +499,11 @@ def _verb(opt) -> str:
 
 def _effect(opt) -> str | None:
     if opt.kind in (Kind.ACTIVATE, Kind.OPTION, Kind.YES, Kind.NO) and opt.desc:
-        return DB.desc_text(opt.desc >> 20, opt.desc & 0xFFFFF) or None
+        hi, lo = opt.desc >> 20, opt.desc & 0xFFFFF
+        if hi <= 0 and lo in _GENERIC_TRIGGER and opt.kind in (Kind.YES, Kind.NO):
+            return None  # the prompt text already says it
+        nm = DB.names().get(getattr(opt.card, "code", 0), "") if opt.card is not None else ""
+        return _fill(DB.desc_text(hi, lo), nm, _loc_word(opt.card)) or None
     return None
 
 
@@ -574,7 +619,10 @@ def build_events(env, human_seat: int, since: int = 0) -> list[dict]:
             card = None
         else:
             nm = names.get(code, f"#{code}") if code else ""
-            text = f"{say} {nm}".strip()
+            if kind == Kind.PLACE:  # the zone itself is not in the history row
+                text = f"places {nm}" if nm else "chooses a zone"
+            else:
+                text = f"{say} {nm}".strip()
             card = _named_card(code, f"e{n}") if code else None
         out.append({"n": n, "actor": who, "text": text[:1].upper() + text[1:], "card": card,
                     "kind": kind.name.lower() if kind is not None else None})

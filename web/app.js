@@ -52,6 +52,9 @@ let menuUid = null;      // uid with an open action menu
 let menuRect = null;
 let focusUid = null;     // card shown in the info panel
 let logOpen = false;
+let logAll = false;      // show passes / auto-passes / zone picks too (drawer toggle)
+const QUIET = new Set(["pass", "auto_pass", "place"]);
+const shownEvents = () => (logAll ? events : events.filter((e) => !QUIET.has(e.kind)));
 let detail = null;       // card for the full-screen detail view
 let lobby = null;
 let lobbyPick = {you: null, bot: null, first: "rps", mode: "product"};
@@ -84,7 +87,7 @@ let bannerTimer = 0;
 
 // Overlay history (Android back closes the topmost overlay).
 let ovStack = [];
-let popGuard = false;
+let popGuard = 0;        // pops we triggered ourselves (history.back after an X/scrim close)
 function openOvNames() {
   const o = [];
   if (logOpen) o.push("log");
@@ -123,14 +126,13 @@ function closeOv(name) {
   ovStack.splice(i, 1);
   try {
     if (history.state && history.state.ov) {
-      popGuard = true;
+      popGuard += 1;
       history.back();
-      setTimeout(() => { popGuard = false; }, 800);
     }
-  } catch (e) { popGuard = false; }
+  } catch (e) { popGuard = 0; }
 }
 window.addEventListener("popstate", () => {
-  if (popGuard) return;
+  if (popGuard > 0) { popGuard -= 1; return; }
   const top = ovStack.pop();
   if (!top) return;
   closeState(top);
@@ -255,8 +257,10 @@ function queueNotices(added) {
     if (e.actor !== "bot") continue;
     if (e.kind === "activate" && e.card && !isHidden(e.card)) {
       revealQueue.push(e);
+      if (revealQueue.length > 2) revealQueue.shift();  // a long combo: show the latest, never a wall of reveals
     } else if (["summon", "spsummon", "attack", "mset", "sset"].includes(e.kind)) {
-      showBanner("ygo-zero " + (e.text || ""));
+      const t = e.text || "";
+      showBanner("ygo-zero " + t.charAt(0).toLowerCase() + t.slice(1));
     }
   }
   pumpReveal();
@@ -457,13 +461,13 @@ function renderGame() {
     const t = c && !isHidden(c) ? cardText(c.code) : null;
     info = {card: c, text: t && t.text, typeStr: t && t.type_str};
   }
-  h += '<div id="info" data-key="info">' + infoHTML(info, events, MOCK, hintFor(p)) + "</div>";
+  h += '<div id="info" data-key="info">' + infoHTML(info, shownEvents(), MOCK, hintFor(p)) + "</div>";
   h += '<div id="hand" data-key="hand" class="' + (locked ? "locked" : "") + '">' + handHTML(v.you.hand, act, MOCK, focusUid) + "</div>";
 
   const sheet = pileOpen ? pileSheetHTML(pileOpen, pileCards(pileOpen), MOCK)
     : (p && !msg.result ? sheetHTML(p, MOCK, sel, expanded) : "");
   if (pileOpen) h += '<div id="pscrim" data-key="pscrim" data-act="closepile"></div>';
-  if (sheet) h += '<div id="sheet" data-key="sheet" class="' + (locked && !pileOpen ? "locked" : "") + (pileOpen ? " pile" : "") + '">' + sheet + "</div>";
+  if (sheet) h += '<div id="sheet" data-key="sheet" class="' + (locked && !pileOpen ? "locked" : "") + (pileOpen ? " pilesheet" : "") + '">' + sheet + "</div>";
   const restore = saveScrolls(app, ["#sheet .sbody", "#info .ftext"]);
   morph(app, h);
   restore();
@@ -488,14 +492,19 @@ function renderGame() {
     requestAnimationFrame(step);
   }
 
-  const logh = logHTML(events, MOCK);
+  const logh = logHTML(shownEvents(), MOCK);
   morphBottom(logside,
     '<div class="sidecard" data-key="side">' + (info && info.card ? infoHTML(info, null, MOCK, "")
     : '<p class="emptytx">Tap any card to read it here.</p>') + "</div>" +
-    '<div class="loghead" data-key="lhead">Duel log</div><div class="loglist" data-key="llist">' + logh + "</div>",
+    '<div class="loghead" data-key="lhead">Duel log' + logAllBtn() + '</div><div class="loglist" data-key="llist">' + logh + "</div>",
     ".loglist");
   renderOverlays(logh);
   syncOv();
+}
+
+function logAllBtn() {
+  return '<button class="logall" data-act="logall" aria-pressed="' + logAll + '">' +
+    (logAll ? "Key moves" : "Show all") + "</button>";
 }
 
 function renderOverlays(logh) {
@@ -503,7 +512,7 @@ function renderOverlays(logh) {
   if (logOpen) {
     lh = '<div id="scrim" data-key="scrim" data-act="closelog"></div>' +
       '<div id="logdrawer" data-key="logdrawer" role="dialog" aria-label="Duel log">' +
-      '<div class="loghead">Duel log<button class="iconbtn" data-act="closelog" aria-label="Close log">' +
+      '<div class="loghead">Duel log' + logAllBtn() + '<button class="iconbtn" data-act="closelog" aria-label="Close log">' +
       '<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5 5l10 10M15 5 5 15"/></svg></button></div>' +
       '<div class="loglist">' + logh + "</div></div>";
   }
@@ -765,7 +774,7 @@ app.addEventListener("click", (ev) => {
   }
 });
 
-document.getElementById("layer").addEventListener("click", (ev) => {
+function onOverlayClick(ev) {
   const info = ev.target.closest("[data-detailcard], .infobtn");
   if (info && (info.getAttribute("data-detailcard") != null || info.getAttribute("data-detailuid") != null)) {
     if (onInfoBtn(info)) {
@@ -781,12 +790,25 @@ document.getElementById("layer").addEventListener("click", (ev) => {
   const det = ev.target.closest("[data-detailuid]");
   if (det) {
     const c = findCard(det.getAttribute("data-detailuid"));
-    if (c && !isHidden(c)) { detail = c; logOpen = false; render(); }
+    if (c && !isHidden(c)) {
+      detail = c;
+      if (logOpen) {  // the detail takes over the drawer's history entry (back closes the detail)
+        logOpen = false;
+        const i = ovStack.indexOf("log");
+        if (i >= 0) {
+          ovStack[i] = "detail";
+          try { history.replaceState({ov: "detail"}, ""); } catch (e) { /* ignore */ }
+        }
+      }
+      render();
+    }
     return;
   }
   const act = ev.target.closest("[data-act]");
   if (act) onAction(act.getAttribute("data-act"), act);
-});
+}
+document.getElementById("layer").addEventListener("click", onOverlayClick);
+logside.addEventListener("click", onOverlayClick);
 
 function sendGame(o) {
   inLobby = false;
@@ -809,7 +831,8 @@ function goLobby() {
 }
 
 function onAction(kind, el) {
-  if (kind === "log") logOpen = true;
+  if (kind === "logall") logAll = !logAll;
+  else if (kind === "log") logOpen = true;
   else if (kind === "closelog") { closeState("log"); render(); closeOv("log"); return; }
   else if (kind === "closepile") { closeState("pile"); render(); closeOv("pile"); return; }
   else if (kind === "unfocus") focusUid = null;
@@ -830,8 +853,7 @@ function onAction(kind, el) {
       clearTimeout(surrenderTimer);
       surrenderArm = false;
       gameMenu = false;
-      ovStack = ovStack.filter((n) => n !== "gamemenu");
-      try { if (history.state && history.state.ov === "gamemenu") { popGuard = true; history.back(); setTimeout(() => { popGuard = false; }, 800); } } catch (e) { popGuard = false; }
+      closeOv("gamemenu");
       if (!MOCK && ws) ws.send({t: "surrender"});
       else { msg = lobby || {t: "lobby", decks: []}; }
     }

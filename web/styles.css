@@ -244,7 +244,8 @@ svg { display: block; }
 }
 .ph .art { flex: 1; margin-top: 7cqw; border-radius: 2px; min-height: 0; box-shadow: inset 0 0 0 1px rgba(214, 207, 192, 0.06); background: rgba(214, 207, 192, 0.02); }
 
-/* card back: deep indigo, seigaiha waves in very low contrast, an enso-like open circle */
+/* card back: deep indigo, seigaiha waves in very low contrast, a small closed diamond
+   (static; an open circle read as a loading spinner on the phone) */
 .handcount i, .card.back, .thumb.back, .fan i {
   background-color: var(--indigo-2);
   background-image:
@@ -259,10 +260,10 @@ svg { display: block; }
   display: flex; align-items: center; justify-content: center;
 }
 .card.back::after, .thumb.back::after, .fan i::after {
-  content: ""; width: 30%; aspect-ratio: 1; border-radius: 50%;
-  border: 1.5px solid rgba(184, 154, 94, 0.45);
-  border-right-color: transparent;
-  transform: rotate(-30deg);
+  content: ""; width: 16%; aspect-ratio: 1;
+  border: 1px solid rgba(184, 154, 94, 0.42);
+  background: rgba(184, 154, 94, 0.10);
+  transform: rotate(45deg);
 }
 .stat {
   position: absolute; left: 50%; bottom: 2px; transform: translateX(-50%); z-index: 5;
@@ -381,7 +382,7 @@ svg { display: block; }
 .selectgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(72px, 1fr)); gap: 16px 10px; padding-top: 6px; }
 .selectgrid .cell { display: flex; flex-direction: column; gap: 6px; min-width: 0; text-align: center; }
 .selectgrid .cbox { position: relative; width: 100%; aspect-ratio: 59 / 86; }
-.selectgrid .cname { font-size: 11px; line-height: 1.3; color: var(--muted); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.selectgrid .cname { font-size: 10px; line-height: 1.25; color: var(--muted); display: -webkit-box; -webkit-line-clamp: 3; overflow-wrap: anywhere; -webkit-box-orient: vertical; overflow: hidden; }
 .selectgrid .cell:has(.selected) .cname { color: var(--text); }
 
 .posrow { display: flex; gap: 12px; justify-content: center; padding: 4px 0; }
@@ -575,10 +576,13 @@ details.ydk textarea {
 .infobtn:hover { color: var(--text); }
 .selectgrid .cbox, .poscard .pv { position: relative; }
 .selectgrid .cbox .infobtn, .poscard .infobtn {
-  position: absolute; top: 2px; right: 2px; z-index: 6; margin: 0;
+  position: absolute; bottom: 2px; right: 2px; z-index: 6; margin: 0;
+  width: 24px; height: 24px; padding: 0; font-size: 14px;
   background: rgba(15, 14, 12, 0.82); border-radius: 50%;
 }
-.poscard .infobtn { top: -4px; right: 2px; }
+.selectgrid .cbox .infobtn::after, .poscard .infobtn::after { inset: -10px; } /* 44px hit area */
+.poscard { position: relative; }
+.poscard .infobtn { top: 8px; right: 8px; bottom: auto; } /* a corner of the button, never its centre */
 
 /* ---------- bot reveal + banner ---------- */
 #reveal {
@@ -588,7 +592,7 @@ details.ydk textarea {
   padding: 24px; gap: 10px; text-align: center;
   animation: fade var(--t) var(--ease);
 }
-#reveal.leave { transition: opacity 200ms var(--ease), transform 200ms var(--ease); opacity: 0; }
+#reveal.leave { transition: opacity 200ms var(--ease), transform 200ms var(--ease); opacity: 0; pointer-events: none; }
 #reveal .rface {
   position: relative; overflow: hidden; border-radius: 8px; container-type: size;
   width: min(52vw, 260px); aspect-ratio: 59 / 86;
@@ -660,3 +664,12 @@ details.ydk textarea {
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; }
 }
+
+/* log filter toggle (passes and zone picks hidden by default) */
+.loghead .logall {
+  margin-left: auto; min-height: 44px; padding: 0 10px; background: none; border: 0;
+  color: var(--muted); font: inherit; font-size: 12px; letter-spacing: 0.04em; text-transform: none;
+  cursor: pointer;
+}
+.loghead .logall[aria-pressed="true"] { color: var(--accent); }
+.loghead .logall + .iconbtn { margin-left: 0; }

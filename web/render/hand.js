@@ -63,7 +63,7 @@ export function sheetHTML(prompt, mock, sel, expanded) {
       if (!base) return '<button class="bigbtn" data-opt="' + o.index + '">' + esc(o.label) + "</button>";
       const c = Object.assign({}, base, {pos: def ? "def" : "atk"});
       return '<button class="poscard" data-opt="' + o.index + '"><span class="pv">' +
-        '<span class="pcard' + (def ? " rot" : "") + '">' + cardHTML(c, {mock}) + "</span>" + infoBtn(o.index) + "</span>" +
+        '<span class="pcard' + (def ? " rot" : "") + '">' + cardHTML(c, {mock}) + "</span></span>" + infoBtn(o.index) +
         '<span class="plab">' + (def ? "Defense" : "Attack") + "<b>" + (def ? base.def : base.atk) + "</b></span></button>";
     }).join("");
     return headHTML(prompt, mock) + '<div class="sbody"><div class="posrow">' + cards + "</div></div>" + footHTML(prompt, sel);

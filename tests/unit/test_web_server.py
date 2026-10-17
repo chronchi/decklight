@@ -10,8 +10,9 @@
 """
 
 import json
-import time
 import random
+import re
+import time
 from pathlib import Path
 
 import numpy as np
@@ -108,7 +109,22 @@ def _check_card(card, where: str) -> None:
         _check_card(sub, f"{where}/overlay")
 
 
+_RAW_FMT = re.compile(r"%l|%d|%s")
+
+
+def _check_no_placeholders(msg: dict) -> None:
+    """EDOPro printf placeholders (%ls, %d, %s) never reach the player."""
+    texts = [e["text"] for e in msg["log"]]
+    if msg["prompt"] is not None:
+        p = msg["prompt"]
+        texts.append(p["text"])
+        texts += [o["label"] for o in p["options"]] + [o["effect"] or "" for o in p["options"]]
+    bad = [t for t in texts if _RAW_FMT.search(t)]
+    assert not bad, f"raw format placeholders shown: {bad[:3]}"
+
+
 def _check_state(msg: dict) -> None:
+    _check_no_placeholders(msg)
     assert msg["t"] == "state"
     view = msg["view"]
     assert set(view) == {"turn", "phase", "turn_player", "you", "bot", "chain"}
@@ -587,3 +603,39 @@ def test_choose_errors(tmp_path, engine):
         assert json.loads(ws.receive_text())["t"] == "error"  # illegal deck
         ws.send_json({"t": "bogus"})
         assert json.loads(ws.receive_text())["t"] == "error"  # unknown type
+
+
+# --- 7. prompt cards and texts on a real phone game (Mitsurugi, 2026-10-16) ---
+
+
+def test_user_record_prompts(engine):
+    """Replays the user's game through the builders: the position prompt shows the
+    Ritual monster (not the Ritual Spell on the chain), Deck searches send the
+    cards face-up with codes, and no raw %ls reaches any prompt."""
+    from ygo_zero.web.view import build_prompt
+
+    d = Path("tests/fixtures/web/mitsurugi-20261016")
+    rec = json.loads((d / "game.jsonl").read_text())
+    human, bot = load_ydk(d / "human.ydk"), load_ydk(d / "bot.ydk")
+    cfg = (DuelConfig(human, bot, seed=rec["seed"]) if rec["human_seat"] == 0
+           else DuelConfig(bot, human, seed=rec["seed"]))
+    env = PyEnv.replay(engine, cfg, [], auto_single=False)
+    hs = rec["human_seat"]
+    seen = set()
+    for choice in rec["choices"]:
+        p = build_prompt(env, hs, 1)
+        if p is not None:
+            texts = [p["text"]] + [o["label"] for o in p["options"]] + [o["effect"] or "" for o in p["options"]]
+            assert not [t for t in texts if _RAW_FMT.search(t)], texts
+            if p["kind"] == "position":
+                seen.add("position")
+                assert p["card"]["name"] != "Mitsurugi Mirror" and p["card"]["atk"] > 0, p["card"]
+            if p["kind"] == "card" and "add to your hand" in p["text"]:
+                seen.add("search")
+                for o in p["options"]:
+                    if o["verb"] == "select":
+                        assert o["card"]["code"] and o["card"]["faceup"], o["card"]
+            if p["kind"] == "effectyn":
+                seen.add("effectyn")
+        env.step(choice)
+    assert seen == {"position", "search", "effectyn"}, seen

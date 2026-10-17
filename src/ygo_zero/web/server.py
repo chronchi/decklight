@@ -302,6 +302,19 @@ class Server:
         through a thinking bot)."""
         self.advancing = True
         self._adv = asyncio.create_task(self.advance())
+        self._adv.add_done_callback(self._advance_done)
+
+    def _advance_done(self, task: asyncio.Task) -> None:
+        """A crash in the background advance must surface, never leave the client
+        waiting on a prompt that will not come (fail fast and loud)."""
+        if task.cancelled() or task.exception() is None:
+            return
+        import traceback
+
+        e = task.exception()
+        print("ALERT web: advance crashed:\n" + "".join(traceback.format_exception(e)), flush=True)
+        self.advancing = False
+        asyncio.get_running_loop().create_task(self._error(f"server error: {e!r} (see server log)"))
 
     def _drop_session(self, s) -> None:
         """Stop a session that may still have a bot step in flight; close it off-loop."""
@@ -524,10 +537,22 @@ def _type_str(type_: int) -> str:
     return f"type {type_:#x}"
 
 
+def _register_stack_dump() -> None:
+    """`kill -USR1 <server pid>` prints every thread's stack (stall diagnosis)."""
+    import faulthandler
+    import signal
+
+    try:
+        faulthandler.register(signal.SIGUSR1, all_threads=True)
+    except (AttributeError, ValueError):  # not on this platform / not the main thread
+        pass
+
+
 def create_app(*, token: str, engine=None, make_opponent=None,
                record_root: Path = ROOT / "runs" / "web",
                pics_dir: Path = PICS_DIR, opponent_default: str = "product",
                device: str = "cpu", replay_threads: int = 1) -> Starlette:
+    _register_stack_dump()
     srv = Server(token=token, engine=engine, make_opponent=make_opponent,
                  record_root=record_root, pics_dir=pics_dir,
                  opponent_default=opponent_default, device=device,
