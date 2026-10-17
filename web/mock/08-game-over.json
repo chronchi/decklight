@@ -56,8 +56,8 @@
   },
   "prompt": null,
   "log": [
-    {"n": 30, "actor": "you", "text": "Ame no Habakiri no Mitsurugi attacks directly for 2500", "card": {"uid": "ym3", "code": 13332685, "name": "Ame no Habakiri no Mitsurugi", "faceup": true, "pos": "atk", "atk": 2500, "def": 2500, "level": 8, "rank": 0, "link": 0, "counters": 0, "overlays": []}},
-    {"n": 31, "actor": "system", "text": "ygo-zero LP hit 0 — battle damage", "card": null}
+    {"n": 30, "actor": "you", "text": "Ame no Habakiri no Mitsurugi attacks directly for 2500", "card": {"uid": "ym3", "code": 13332685, "name": "Ame no Habakiri no Mitsurugi", "faceup": true, "pos": "atk", "atk": 2500, "def": 2500, "level": 8, "rank": 0, "link": 0, "counters": 0, "overlays": []}, "kind": "attack"},
+    {"n": 31, "actor": "system", "text": "ygo-zero LP hit 0 — battle damage", "card": null, "kind": null}
   ],
   "thinking": null,
   "result": {"winner": "you", "reason": "Battle damage — ygo-zero LP hit 0"}

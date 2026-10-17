@@ -91,6 +91,10 @@ class Server:
         self.end_reason = ""
         self._last_sig: tuple = ()
         self.user_decks: dict[str, str] = {}  # id -> ydk text (pasted this session)
+        self.chain_mode = "auto"  # "auto": skip quiet chain windows (session.auto_pass_index); "all"
+        self.auto_passed: set[int] = set()  # history numbers (1-based n) of auto-passes
+        self._adv: asyncio.Task | None = None
+        self.advancing = False
 
     # --- lazy resources ---
 
@@ -194,11 +198,14 @@ class Server:
         human = s.human_seat
         view = build_view(s.env, human)
         prompt = None
-        if s.need_human and not s.done:
+        if s.need_human and not s.done and not self.advancing:  # not one auto-pass may skip
             self.prompt_id = s.current_prompt_id()
             prompt = build_prompt(s.env, human, self.prompt_id)
         thinking = self.thinking_seconds()
         log = build_events(s.env, human, 0 if full_log else self.log_sent)
+        for e in log:
+            if e["n"] in self.auto_passed:
+                e["actor"], e["text"], e["card"], e["kind"] = "system", "(auto-passed)", None, "auto_pass"
         if not full_log and not peek:
             self.log_sent = len(s.env.history)
         result = None
@@ -242,38 +249,70 @@ class Server:
                 if s.done:
                     await self._finish(s, "")
                     return
-                if s.settle("all"):
-                    await self.send_state()
-                if gen != self.gen:
-                    return
+                moved = s.settle("all")
                 if s.done:
                     await self._finish(s, "")
                     return
+                if s.need_human and self.chain_mode == "auto":
+                    i = s.auto_pass_index()
+                    if i is not None:  # never shown: the client must not answer it
+                        try:
+                            s.step_human(i)
+                        except DriverDiverged as e:
+                            await self._diverged(s, e, gen)
+                            return
+                        self.auto_passed.add(len(s.env.history))
+                        continue
                 if s.need_human:
+                    self.advancing = False  # the client may answer as soon as it sees this
                     if self._sig() != self._last_sig:
                         await self.send_state()
+                    return
+                if moved:
+                    await self.send_state()
+                if gen != self.gen:
                     return
                 try:
                     await asyncio.to_thread(s.step_bot)
                 except DriverDiverged as e:
-                    print(f"ALERT web: product driver diverged: {e}", flush=True)
-                    res = s.surrender(by_human=True)
-                    res.diverged = True
-                    s.write_record(res)
-                    self.finished = True
-                    self.end_reason = "the bot diverged (see server log)"
-                    await self.send_state(full_log=True)
+                    await self._diverged(s, e, gen)
                     return
                 if gen != self.gen:
                     return
                 await self.send_state()
         finally:
+            if gen == self.gen:
+                self.advancing = False
             stop.set()
             await ticker
 
+    async def _diverged(self, s, e, gen: int) -> None:
+        if gen != self.gen:  # abandoned on purpose (surrender / new game): not a divergence
+            return
+        print(f"ALERT web: product driver diverged: {e}", flush=True)
+        res = s.surrender(by_human=True)
+        res.diverged = True
+        s.write_record(res)
+        self.finished = True
+        self.end_reason = "the bot diverged (see server log)"
+        await self.send_state(full_log=True)
+
+    def start_advance(self) -> None:
+        """Run `advance` as a task, so the socket keeps reading (surrender must cut
+        through a thinking bot)."""
+        self.advancing = True
+        self._adv = asyncio.create_task(self.advance())
+
+    def _drop_session(self, s) -> None:
+        """Stop a session that may still have a bot step in flight; close it off-loop."""
+        s.abandon()
+        task = asyncio.create_task(asyncio.to_thread(s.close))
+        task.add_done_callback(lambda t: t.exception())
+
     def _sig(self) -> tuple:
         s = self.session
-        return (len(s.env.history), s.env.duel.turn, s.env.duel.phase, s.done)
+        return (len(s.env.history), s.env.duel.turn, s.env.duel.phase, s.done,
+                s.need_human and not self.advancing)
 
     async def _think_loop(self, stop: asyncio.Event) -> None:
         while not stop.is_set():
@@ -351,8 +390,15 @@ class Server:
             return
         launcher = opp if hasattr(opp, "start_duel") else None
         bot = None if launcher is not None else opp
+        chain = msg.get("chain", self.chain_mode)
+        if chain in ("auto", "all"):
+            self.chain_mode = chain
+        meta = {"human_deck": deck_spec if isinstance(deck_spec, str) else "pasted",
+                "bot_deck": bot_spec if isinstance(bot_spec, str) else "pasted",
+                "mode": mode, "first": first, "chain": self.chain_mode}
         session = DuelSession(self.engine, cfg, human_seat, bot=bot, launcher=launcher,
-                              seed=seed, record_root=self.record_root, human_auto=True)
+                              seed=seed, record_root=self.record_root, human_auto=True,
+                              record_meta=meta)
         try:
             await asyncio.to_thread(session.reset)
         except Exception as e:  # noqa: BLE001
@@ -361,8 +407,9 @@ class Server:
             return
         # NOTE: the caller (ws_handler) already holds `srv.lock`; asyncio locks
         # are not reentrant, so this must not acquire it again.
+        self.gen += 1
         if self.session is not None:
-            self.session.close()
+            self._drop_session(self.session)
         self.session = session
         self.mode = mode
         self.prompt_id = 0
@@ -370,15 +417,15 @@ class Server:
         self.finished = False
         self.end_reason = ""
         self._last_sig = ()
-        self.gen += 1
-        await self.advance()
+        self.auto_passed = set()
+        self.start_advance()
 
     async def on_choose(self, msg: dict) -> None:
         s = self.session
         if s is None or (s.done and self.finished):
             await self._error("no active game (send new_game first)")
             return
-        if not s.need_human:
+        if not s.need_human or self.advancing:
             await self._error("no prompt is waiting for you right now")
             return
         if msg.get("prompt") != self.prompt_id:
@@ -394,18 +441,33 @@ class Server:
         except (IndexError, ValueError) as e:
             await self._error(f"illegal option: {e}")
             return
-        await self.advance()
+        self.start_advance()
 
     async def on_surrender(self) -> None:
         s = self.session
         if s is None or (s.done and self.finished):
             await self._error("no active game (send new_game first)")
             return
+        self.gen += 1  # stops a running advance; a bot step in flight is abandoned
+        thinking = s.thinking_since is not None
         s.surrender(by_human=True)
         s.write_record(s.result)
         self.finished = True
         self.end_reason = "surrender"
+        if thinking:
+            s.abandon()
         await self.send_state(full_log=True)
+
+    async def on_settings(self, msg: dict) -> None:
+        chain = msg.get("chain")
+        if chain not in ("auto", "all"):
+            await self._error("settings.chain must be auto|all")
+            return
+        self.chain_mode = chain
+        s = self.session
+        if chain == "auto" and s is not None and not self.finished and s.need_human \
+                and not self.advancing:
+            self.start_advance()  # a quiet window may be waiting right now
 
     async def _error(self, text: str) -> None:
         if self.ws is None:
@@ -537,8 +599,8 @@ def create_app(*, token: str, engine=None, make_opponent=None,
             while True:
                 try:
                     raw = await ws.receive_text()
-                except WebSocketDisconnect:
-                    break
+                except (WebSocketDisconnect, RuntimeError):
+                    break  # closed, or taken over (starlette: 'Need to call "accept" first')
                 try:
                     msg = json.loads(raw)
                 except json.JSONDecodeError:
@@ -546,14 +608,18 @@ def create_app(*, token: str, engine=None, make_opponent=None,
                     continue
                 if srv.ws is not ws:
                     break  # taken over by a newer connection
+                t = msg.get("t") if isinstance(msg, dict) else None
+                if t == "surrender":  # never waits behind the bot
+                    await srv.on_surrender()
+                    continue
+                if t == "settings":
+                    await srv.on_settings(msg)
+                    continue
                 async with srv.lock:
-                    t = msg.get("t")
                     if t == "new_game":
                         await srv.on_new_game(msg)
                     elif t == "choose":
                         await srv.on_choose(msg)
-                    elif t == "surrender":
-                        await srv.on_surrender()
                     elif t == "resync":
                         if srv.session is None:
                             await ws.send_json({"t": "lobby",

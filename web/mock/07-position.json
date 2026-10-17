@@ -56,7 +56,7 @@
     "max": 0
   },
   "log": [
-    {"n": 4, "actor": "you", "text": "Summoned Ame no Murakumo no Mitsurugi", "card": {"uid": "ym2", "code": 19899073, "name": "Ame no Murakumo no Mitsurugi", "faceup": true, "pos": "atk", "atk": 2500, "def": 800, "level": 8, "rank": 0, "link": 0, "counters": 0, "overlays": []}}
+    {"n": 4, "actor": "you", "text": "Summoned Ame no Murakumo no Mitsurugi", "card": {"uid": "ym2", "code": 19899073, "name": "Ame no Murakumo no Mitsurugi", "faceup": true, "pos": "atk", "atk": 2500, "def": 800, "level": 8, "rank": 0, "link": 0, "counters": 0, "overlays": []}, "kind": "summon"}
   ],
   "thinking": null,
   "result": null

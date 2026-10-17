@@ -69,8 +69,8 @@
     "max": 2
   },
   "log": [
-    {"n": 9, "actor": "you", "text": "Activates Pre-Preparation of Rites", "card": {"uid": "yg1", "code": 13048472, "name": "Pre-Preparation of Rites", "faceup": true, "pos": null, "atk": 0, "def": 0, "level": 0, "rank": 0, "link": 0, "counters": 0, "overlays": []}},
-    {"n": 10, "actor": "system", "text": "Resolving: select 1–2 cards", "card": null}
+    {"n": 9, "actor": "you", "text": "Activates Pre-Preparation of Rites", "card": {"uid": "yg1", "code": 13048472, "name": "Pre-Preparation of Rites", "faceup": true, "pos": null, "atk": 0, "def": 0, "level": 0, "rank": 0, "link": 0, "counters": 0, "overlays": []}, "kind": "activate"},
+    {"n": 10, "actor": "system", "text": "Resolving: select 1–2 cards", "card": null, "kind": null}
   ],
   "thinking": null,
   "result": null

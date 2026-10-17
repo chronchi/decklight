@@ -83,8 +83,8 @@
     "max": 0
   },
   "log": [
-    {"n": 6, "actor": "bot", "text": "Activates Diabellstar the Black Witch (C1)", "card": {"uid": "bm1", "code": 72270339, "name": "Diabellstar the Black Witch", "faceup": true, "pos": null, "atk": 2500, "def": 2000, "level": 7, "rank": 0, "link": 0, "counters": 0, "overlays": []}},
-    {"n": 7, "actor": "you", "text": "Chains Ash Blossom & Joyous Spring (C2)", "card": {"uid": "yh1", "code": 14558128, "name": "Ash Blossom & Joyous Spring", "faceup": true, "pos": null, "atk": 0, "def": 1800, "level": 3, "rank": 0, "link": 0, "counters": 0, "overlays": []}}
+    {"n": 6, "actor": "bot", "text": "Activates Diabellstar the Black Witch (C1)", "card": {"uid": "bm1", "code": 72270339, "name": "Diabellstar the Black Witch", "faceup": true, "pos": null, "atk": 2500, "def": 2000, "level": 7, "rank": 0, "link": 0, "counters": 0, "overlays": []}, "kind": "activate"},
+    {"n": 7, "actor": "you", "text": "Chains Ash Blossom & Joyous Spring (C2)", "card": {"uid": "yh1", "code": 14558128, "name": "Ash Blossom & Joyous Spring", "faceup": true, "pos": null, "atk": 0, "def": 1800, "level": 3, "rank": 0, "link": 0, "counters": 0, "overlays": []}, "kind": "activate"}
   ],
   "thinking": null,
   "result": null

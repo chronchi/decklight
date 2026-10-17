@@ -346,7 +346,7 @@
   "prompt": {
     "id": 11,
     "kind": "idle",
-    "text": "Your move \u2014 Main Phase 1",
+    "text": "Your move — Main Phase 1",
     "card": null,
     "options": [
       {
@@ -423,8 +423,9 @@
     {
       "n": 1,
       "actor": "system",
-      "text": "Turn 3 \u2014 your Main Phase 1",
-      "card": null
+      "text": "Turn 3 — your Main Phase 1",
+      "card": null,
+      "kind": null
     },
     {
       "n": 2,
@@ -443,13 +444,15 @@
         "link": 0,
         "counters": 0,
         "overlays": []
-      }
+      },
+      "kind": "summon"
     },
     {
       "n": 3,
       "actor": "bot",
       "text": "sets a card",
-      "card": null
+      "card": null,
+      "kind": "mset"
     }
   ],
   "thinking": null,

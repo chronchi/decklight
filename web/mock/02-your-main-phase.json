@@ -87,9 +87,9 @@
     "max": 0
   },
   "log": [
-    {"n": 1, "actor": "system", "text": "Turn 3 — your Main Phase 1", "card": null},
-    {"n": 2, "actor": "you", "text": "Normal Summoned Mitsurugi no Mikoto, Saji", "card": {"uid": "ym1", "code": 18176525, "name": "Mitsurugi no Mikoto, Saji", "faceup": true, "pos": "atk", "atk": 1200, "def": 600, "level": 4, "rank": 0, "link": 0, "counters": 0, "overlays": []}},
-    {"n": 3, "actor": "bot", "text": "sets a card", "card": null}
+    {"n": 1, "actor": "system", "text": "Turn 3 — your Main Phase 1", "card": null, "kind": null},
+    {"n": 2, "actor": "you", "text": "Normal Summoned Mitsurugi no Mikoto, Saji", "card": {"uid": "ym1", "code": 18176525, "name": "Mitsurugi no Mikoto, Saji", "faceup": true, "pos": "atk", "atk": 1200, "def": 600, "level": 4, "rank": 0, "link": 0, "counters": 0, "overlays": []}, "kind": "summon"},
+    {"n": 3, "actor": "bot", "text": "sets a card", "card": null, "kind": "mset"}
   ],
   "thinking": null,
   "result": null

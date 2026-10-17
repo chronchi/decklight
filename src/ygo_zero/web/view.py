@@ -576,5 +576,6 @@ def build_events(env, human_seat: int, since: int = 0) -> list[dict]:
             nm = names.get(code, f"#{code}") if code else ""
             text = f"{say} {nm}".strip()
             card = _named_card(code, f"e{n}") if code else None
-        out.append({"n": n, "actor": who, "text": text[:1].upper() + text[1:], "card": card})
+        out.append({"n": n, "actor": who, "text": text[:1].upper() + text[1:], "card": card,
+                    "kind": kind.name.lower() if kind is not None else None})
     return out

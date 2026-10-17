@@ -5,7 +5,7 @@ export function handHTML(hand, actionable, mock, focus) {
   return (hand || []).map((c) => {
     if (!c) return '<div class="hcard"><div class="card back"></div></div>';
     const act = !!(c.uid && actionable[c.uid] != null);
-    return '<div class="hcard' + (act ? " lift" : "") + '">' +
+    return '<div class="hcard' + (act ? " lift" : "") + '" data-key="hand:' + esc(c.uid) + '">' +
       cardHTML(c, {mock, actionable: act, focus: c.uid && c.uid === focus}) + "</div>";
   }).join("");
 }
@@ -24,6 +24,13 @@ export function actionableMap(prompt) {
 const PRIMARY = ["activate", "normal", "special", "attack", "direct", "yes", "set", "set_spell", "position"];
 const SECONDARY = ["pass", "to_battle", "to_main2", "end_turn", "no"];
 
+// A span, not a button: it lives inside the option's <button>, and nested
+// <button> would auto-close the outer one in the HTML parser. It still has a
+// 44px hit area and is reachable by the .infobtn selector.
+export function infoBtn(optIndex) {
+  return '<span class="infobtn" role="button" tabindex="0" data-detailcard="' + optIndex + '" aria-label="Card details">ⓘ</span>';
+}
+
 function rowHTML(opt, mock, selected, pickNo, expanded) {
   const cls = ["opt"];
   if (PRIMARY.includes(opt.verb)) cls.push("primary");
@@ -32,9 +39,10 @@ function rowHTML(opt, mock, selected, pickNo, expanded) {
   if (expanded) cls.push("open");
   const eff = opt.effect ? '<span class="ef">' + esc(opt.effect) + "</span>" : "";
   const th = opt.card ? thumbHTML(opt.card, mock) : "";
+  const info = opt.card && !isHidden(opt.card) ? infoBtn(opt.index) : "";
   return '<button class="' + cls.join(" ") + '" data-opt="' + opt.index + '">' + th +
     '<span class="tx"><span class="lb">' + esc(opt.label || opt.verb) + "</span>" + eff + "</span>" +
-    (pickNo ? '<span class="pick">' + pickNo + "</span>" : "") + "</button>";
+    (pickNo ? '<span class="pick">' + pickNo + "</span>" : "") + info + "</button>";
 }
 
 function headHTML(prompt, mock, sub) {
@@ -55,7 +63,7 @@ export function sheetHTML(prompt, mock, sel, expanded) {
       if (!base) return '<button class="bigbtn" data-opt="' + o.index + '">' + esc(o.label) + "</button>";
       const c = Object.assign({}, base, {pos: def ? "def" : "atk"});
       return '<button class="poscard" data-opt="' + o.index + '"><span class="pv">' +
-        '<span class="pcard' + (def ? " rot" : "") + '">' + cardHTML(c, {mock}) + "</span></span>" +
+        '<span class="pcard' + (def ? " rot" : "") + '">' + cardHTML(c, {mock}) + "</span>" + infoBtn(o.index) + "</span>" +
         '<span class="plab">' + (def ? "Defense" : "Attack") + "<b>" + (def ? base.def : base.atk) + "</b></span></button>";
     }).join("");
     return headHTML(prompt, mock) + '<div class="sbody"><div class="posrow">' + cards + "</div></div>" + footHTML(prompt, sel);
@@ -66,8 +74,9 @@ export function sheetHTML(prompt, mock, sel, expanded) {
     const sub = prompt.min === prompt.max ? "Pick " + prompt.min : "Pick " + prompt.min + "–" + prompt.max;
     const grid = picks.map((o) => {
       const at = done.indexOf(o.index);
+      const info = o.card && !isHidden(o.card) ? infoBtn(o.index) : "";
       return '<button class="cell" data-opt="' + o.index + '">' +
-        '<span class="cbox">' + cardHTML(o.card, {mock, selected: at >= 0, pick: at >= 0 ? at + 1 : null}) + "</span>" +
+        '<span class="cbox">' + cardHTML(o.card, {mock, selected: at >= 0, pick: at >= 0 ? at + 1 : null}) + info + "</span>" +
         '<span class="cname">' + esc((o.card && o.card.name) || o.label) + "</span></button>";
     }).join("");
     return headHTML(prompt, mock, sub) + '<div class="sbody"><div class="selectgrid">' + grid + "</div></div>" +
@@ -77,7 +86,7 @@ export function sheetHTML(prompt, mock, sel, expanded) {
   if (prompt.kind === "announce") {
     body = '<div class="announce"><input type="search" placeholder="Name a card…" aria-label="Name a card"></div>';
   }
-  body += opts.filter((o) => o.verb !== "finish" && !SECONDARY.includes(o.verb)).map((o) =>
+  body += opts.filter((o) => o.verb !== "finish" && o.verb !== "cancel" && !SECONDARY.includes(o.verb)).map((o) =>
     rowHTML(o, mock, sel.includes(o.index), sel.indexOf(o.index) + 1 || null, expanded === o.index)).join("");
   return headHTML(prompt, mock) + '<div class="sbody">' + body + "</div>" + footHTML(prompt, sel);
 }
@@ -86,9 +95,11 @@ function footHTML(prompt, sel) {
   const opts = prompt.options || [];
   const rest = opts.filter((o) => SECONDARY.includes(o.verb));
   const fin = opts.find((o) => o.verb === "finish");
-  if (!rest.length && !fin) return "";
+  const cancel = opts.find((o) => o.verb === "cancel");
+  if (!rest.length && !fin && !cancel) return "";
   let h = '<div class="sfoot">';
   for (const o of rest) h += '<button class="bigbtn" data-opt="' + o.index + '">' + esc(o.label) + "</button>";
+  if (cancel) h += '<button class="bigbtn" data-opt="' + cancel.index + '">' + esc(cancel.label || "Cancel") + "</button>";
   if (fin) {
     const n = opts.filter((o) => o.verb === "unselect").length;   // the env offers finish only when it is legal
     h += '<button class="bigbtn primary" data-opt="' + fin.index + '">Confirm' +
@@ -101,7 +112,9 @@ function footHTML(prompt, sel) {
 export function pileSheetHTML(pile, cards, mock) {
   const cells = (cards || []).slice().reverse().map((c) =>
     '<button class="cell" data-detailuid="' + esc(c ? c.uid : "") + '"><span class="cbox">' +
-    (c ? cardHTML(c, {mock}) : '<div class="card back"></div>') + "</span>" +
+    (c ? cardHTML(c, {mock}) : '<div class="card back"></div>') +
+    (c && !isHidden(c) ? '<span class="infobtn" role="button" tabindex="0" data-detailuid="' + esc(c.uid) + '" aria-label="Card details">ⓘ</span>' : "") +
+    "</span>" +
     '<span class="cname">' + esc((c && c.name) || "Face-down") + "</span></button>").join("");
   return '<div class="grab"></div><div class="stitle"><div class="tt"><span class="t">' + esc(pileTitle(pile)) +
     '</span><span class="sub">' + (cards || []).length + " cards · newest first</span></div></div>" +

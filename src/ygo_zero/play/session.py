@@ -19,8 +19,16 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
+from ygo_zero.engine.actions import Kind
 from ygo_zero.engine.duel import DuelConfig, Engine
 from ygo_zero.engine.env import PyEnv
+
+# Chain-window timings (EDOPro TIMING_*) that mark a bare phase-transition window.
+_T_PHASES = 0x1 | 0x2 | 0x4 | 0x8 | 0x10 | 0x20 | 0x1000000 | 0x4000000  # DP SP M-end BP-start/end EP, BP, BP-step-end
+_T_CHAIN_END = 0x8000
+_T_DRAW, _T_TOHAND = 0x10000, 0x200000
+# What may happen since the human's last decision for a window to stay "quiet".
+_QUIET_KINDS = {Kind.PASS, Kind.TO_BATTLE, Kind.TO_MAIN2, Kind.TO_END, Kind.NO}
 
 
 @dataclass
@@ -51,7 +59,7 @@ class DuelSession:
                  bot=None, launcher=None, seed: int | None = None,
                  human_side: tuple = (), human_name: str = "human",
                  record_root: Path = Path("runs/web"),
-                 human_auto: bool = False) -> None:
+                 human_auto: bool = False, record_meta: dict | None = None) -> None:
         if (bot is None) == (launcher is None):
             raise ValueError("DuelSession needs exactly one of bot= / launcher=")
         self.engine = engine
@@ -65,6 +73,7 @@ class DuelSession:
         self.human_name = human_name
         self.record_root = record_root
         self.human_auto = human_auto
+        self.record_meta = dict(record_meta or {})  # extra record fields (deck ids, mode, ...)
         self.env = PyEnv(engine, cfg, auto_single=False)
         self.driver = None
         self.product_info: dict | None = None
@@ -195,6 +204,64 @@ class DuelSession:
             self.prompt_id += 1
         return self.prompt_id
 
+    def auto_pass_index(self) -> int | None:
+        """The pass option of a quiet chain window, else None (the "Auto" chain setting).
+
+        Quiet = an optional SelectChain with an empty chain, opened only by a phase
+        transition (draw/standby/main-end/battle/end timings, the draw-phase draw, or a
+        chain end), with nothing but passes and phase moves since the human's last
+        decision. Windows after a summon, activation, attack, set or any other event keep
+        asking, and so do trigger windows (their timing carries the event bits)."""
+        from ygo_zero.engine import messages as M
+        from ygo_zero.engine.query import parse_chain
+
+        env = self.env
+        if not self.need_human:
+            return None
+        dec = env.pending_decision()
+        msg = dec.msg if dec is not None else None
+        if not isinstance(msg, M.SelectChain) or msg.forced or msg.spe_count:
+            return None
+        t = int(msg.hint_timing) | int(msg.hint_timing_other)
+        allowed = _T_PHASES | _T_CHAIN_END | ((_T_DRAW | _T_TOHAND) if t & _T_DRAW else 0)
+        if t == 0 or t & ~allowed:
+            return None
+        if parse_chain(env.duel.query_field()):
+            return None
+        last = -1
+        for i in range(len(env.history) - 1, -1, -1):
+            if env.history[i].actor == self.human_seat:
+                last = i
+                break
+        for e in env.history[last + 1:]:
+            try:
+                if Kind(e.row[0]) not in _QUIET_KINDS:
+                    return None
+            except ValueError:
+                return None
+        for i, o in enumerate(env.opts):
+            if o.kind == Kind.PASS:
+                return i
+        return None
+
+    def abandon(self) -> None:
+        """Make a blocked `step_bot` return at once (surrender / new game while the
+        product thinks): the driver's next_bot raises, its worker gets a poison pick.
+        The session must not be stepped afterwards."""
+        from ygo_zero.edopro.product_bot import DriverError
+
+        d = self.driver
+        if d is None:
+            return
+        try:
+            with d.cond:
+                if d.error is None:
+                    d.error = DriverError("abandoned by the host")
+                d.cond.notify_all()
+            d.human_q.put(-1)
+        except Exception:  # noqa: BLE001, S110 -- best effort; the duel is over either way
+            pass
+
     # --- ending ---
 
     def finish(self) -> DuelResult:
@@ -240,13 +307,14 @@ class DuelSession:
         return write_record(
             self.record_root, self.cfg, self.seed if seed is None else seed, result,
             human_seat=self.human_seat, human_side=self.human_side,
-            bot_name=bot_name, product_info=self.product_info)
+            bot_name=bot_name, product_info=self.product_info, meta=self.record_meta)
 
 
 def write_record(record_root: Path, cfg: DuelConfig, seed: int, result: DuelResult, *,
                  human_seat: int, human_side: tuple = (), bot_name: str = "bot",
-                 product_info: dict | None = None) -> Path:
-    """Write one duel's record directory (game.jsonl + human.ydk); returns game.jsonl."""
+                 product_info: dict | None = None, meta: dict | None = None) -> Path:
+    """Write one duel's record directory (game.jsonl + human.ydk + bot.ydk); returns
+    game.jsonl. `meta` adds fields (e.g. human_deck, bot_deck, mode, chain)."""
     ts = time.strftime("%Y%m%d-%H%M%S")
     outdir = record_root / ts
     for k in range(100):
@@ -267,12 +335,18 @@ def write_record(record_root: Path, cfg: DuelConfig, seed: int, result: DuelResu
     }
     if product_info is not None:
         rec["product"] = product_info
+    for k, v in (meta or {}).items():
+        rec.setdefault(k, v)
     (outdir / "game.jsonl").write_text(json.dumps(rec) + "\n")
     human = cfg.deck0 if human_seat == 0 else cfg.deck1
     ydk = "#main\n" + "".join(f"{c}\n" for c in human.main)
     ydk += "#extra\n" + "".join(f"{c}\n" for c in human.extra)
     ydk += "!side\n" + "".join(f"{c}\n" for c in human_side)
     (outdir / "human.ydk").write_text(ydk)
+    bot = cfg.deck1 if human_seat == 0 else cfg.deck0
+    bydk = "#main\n" + "".join(f"{c}\n" for c in bot.main)
+    bydk += "#extra\n" + "".join(f"{c}\n" for c in bot.extra)
+    (outdir / "bot.ydk").write_text(bydk)
     print(f"record -> {outdir / 'game.jsonl'} (winner seat {result.winner}, "
           f"{result.turns} turns)", flush=True)
     return outdir / "game.jsonl"

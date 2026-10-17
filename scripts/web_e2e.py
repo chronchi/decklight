@@ -4,6 +4,17 @@ Starts scripts/web_play.py, opens the page in Playwright Chromium at phone size,
 plays it by tapping like a person would (glowing cards, menu/sheet options, phase buttons) until the game-over modal.
 Saves screenshots to data/cache/web-e2e/. Exits non-zero on a page error, a stall, or no game over.
 
+Along the way (random mode) it checks the phase-3 UI behavior:
+  (a) while the bot is thinking, the log drawer survives re-renders (same
+      DOM node) and its X closes it;
+  (b) tapping a face-up non-actionable field monster opens the card detail,
+      and the detail X closes it;
+  (c) a sheet info button opens the detail without choosing, and the prompt
+      is still there afterwards.
+After game over it starts a second game, surrenders through the in-game menu
+and expects the game-over modal. With --surrender-thinking the second game
+uses mode fast and surrenders while the bot is thinking.
+
   uv run --with playwright python scripts/web_e2e.py [--mode random|fast|product] [--max-s 240]
 """
 from __future__ import annotations
@@ -19,9 +30,169 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
-from web_screens import launch_kwargs  # noqa: E402
+from web_screens import launch_kwargs
 
 OUT = ROOT / "data" / "cache" / "web-e2e"
+
+
+def modal_visible(page) -> bool:
+    return page.locator("[data-act=rematch]").count() > 0
+
+
+def tap(page, loc, timeout: int = 2000) -> bool:
+    """Click like a person: a bot-activation reveal covers the screen while it
+    shows, and a tap on it dismisses it first (then the tap is retried)."""
+    try:
+        loc.click(timeout=timeout)
+        return True
+    except Exception:  # noqa: BLE001, S110
+        pass
+    if page.locator("#reveal").count():
+        try:
+            page.locator("#reveal").click(timeout=1000)
+        except Exception:  # noqa: BLE001, S110
+            pass
+        page.wait_for_timeout(400)
+        try:
+            loc.click(timeout=timeout)
+            return True
+        except Exception:  # noqa: BLE001
+            return False
+    return False
+
+
+def check_a_log_drawer(page, errors: list[str], ran: dict) -> None:
+    """(a) Log drawer keeps its DOM node across re-renders while the bot plays.
+
+    The brief keys this on the thinking indicator, but the server only reports
+    thinking in driver (product/fast) mode -- in random mode it is never set
+    (session.py sets thinking_since only around driver.next_bot). So in random
+    mode the trigger is the bot's turn being active (states stream in either
+    way, which is what the check is about).
+    """
+    if ran["a"] or modal_visible(page):
+        return
+    thinking = page.locator(".pbar.bot .think").count() > 0
+    bot_turn = page.locator(".phase.bot").count() > 0
+    if not thinking and not bot_turn:
+        return
+    logbtns = [b for b in page.locator("[data-act=log]").all() if b.is_visible()]
+    if not logbtns:
+        return
+    try:
+        if not tap(page, logbtns[0]):
+            return  # drawer did not open; try again later
+        try:
+            page.wait_for_selector("#logdrawer", timeout=2000)
+        except Exception:  # noqa: BLE001
+            errors.append("(a) the log button did not open the drawer within 2 s")
+            return
+        ran["a"] = True
+        # Mark the live node with a JS expando (morph keeps the node itself;
+        # attributes are synced from the template, so dataset would not survive).
+        page.evaluate("document.querySelector('#logdrawer').__e2e = 1")
+        page.wait_for_timeout(1500)
+        same = page.evaluate(
+            "!!(document.querySelector('#logdrawer') && "
+            "document.querySelector('#logdrawer').__e2e === 1)")
+        if not same:
+            errors.append("(a) log drawer node was recreated while the bot played")
+            return
+        if modal_visible(page):
+            return  # game ended mid-check; the stability assertion already passed
+        if not tap(page, page.locator("#logdrawer [data-act=closelog]").first, timeout=3000):
+            errors.append("(a) log drawer X did not close the drawer")
+            return
+        page.wait_for_timeout(300)
+        if page.locator("#logdrawer").count() != 0:
+            errors.append("(a) log drawer X did not close the drawer")
+    except Exception as e:  # noqa: BLE001
+        errors.append(f"(a) log drawer check failed: {e}")
+
+
+def check_b_field_detail(page, errors: list[str], ran: dict) -> None:
+    """(b) Tapping a field monster opens the detail overlay."""
+    if ran["b"] or modal_visible(page):
+        return
+    cards = [c for c in page.locator(
+        ".field [data-row=mzone] .slot:not(.side) .card[data-uid]:not(.actionable):not(.back)").all() if c.is_visible()]
+    if not cards:
+        return
+    try:
+        if not tap(page, cards[0]):
+            return  # blocked (reveal/state change); try again later
+        page.wait_for_timeout(300)
+        ran["b"] = True
+        if page.locator("#detail").count() == 0:
+            errors.append("(b) tapping a field monster did not open the detail")
+            return
+        if not tap(page, page.locator("#detail .dx"), timeout=3000):
+            errors.append("(b) detail X did not close the detail")
+            return
+        page.wait_for_timeout(300)
+        if page.locator("#detail").count() != 0:
+            errors.append("(b) detail X did not close the detail")
+    except Exception as e:  # noqa: BLE001
+        errors.append(f"(b) field detail check failed: {e}")
+
+
+def check_c_sheet_info(page, errors: list[str], ran: dict) -> None:
+    """(c) A sheet info button opens the detail without choosing."""
+    if ran["c"] or modal_visible(page):
+        return
+    infos = [b for b in page.locator("#sheet .infobtn").all() if b.is_visible()]
+    if not infos:
+        return
+    try:
+        if not tap(page, infos[0]):
+            return  # blocked (reveal/state change); try again later
+        page.wait_for_timeout(300)
+        ran["c"] = True
+        if page.locator("#detail").count() == 0:
+            errors.append("(c) sheet info button did not open the detail")
+            return
+        if page.locator("#sheet").count() == 0:
+            errors.append("(c) prompt sheet went away after tapping the info button")
+        if not tap(page, page.locator("#detail .dx"), timeout=3000):
+            errors.append("(c) detail X did not close the detail")
+            return
+        page.wait_for_timeout(300)
+        if page.locator("#detail").count() != 0:
+            errors.append("(c) detail X did not close the detail")
+    except Exception as e:  # noqa: BLE001
+        errors.append(f"(c) sheet info check failed: {e}")
+
+
+def surrender_through_menu(page, errors: list[str], within_s: float, label: str) -> bool:
+    """Open the in-game menu and tap Surrender twice; wait for game over."""
+    try:
+        if not tap(page, page.locator("[data-act=gamemenu]").first, timeout=5000):
+            errors.append(f"{label}: game menu did not open")
+            return False
+        page.wait_for_timeout(300)
+        if page.locator("#gamemenu").count() == 0:
+            errors.append(f"{label}: game menu did not open")
+            return False
+        if not tap(page, page.locator("#gamemenu [data-act=surrender]"), timeout=3000):
+            errors.append(f"{label}: surrender tap failed")
+            return False
+        page.wait_for_timeout(300)
+        txt = page.locator("#gamemenu [data-act=surrender]").first.inner_text()
+        if "again" not in txt:
+            errors.append(f"{label}: surrender did not ask for confirmation (got {txt!r})")
+        if not tap(page, page.locator("#gamemenu [data-act=surrender]"), timeout=3000):
+            errors.append(f"{label}: surrender confirm tap failed")
+            return False
+        t0 = time.time()
+        while time.time() - t0 < within_s:
+            if modal_visible(page):
+                return True
+            page.wait_for_timeout(200)
+        errors.append(f"{label}: no game-over modal within {within_s:.0f} s of surrender")
+        return False
+    except Exception as e:  # noqa: BLE001
+        errors.append(f"{label}: surrender flow failed: {e}")
+        return False
 
 
 def main() -> int:
@@ -31,6 +202,8 @@ def main() -> int:
     ap.add_argument("--max-s", type=float, default=240)
     ap.add_argument("--shot-every", type=int, default=25)
     ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--surrender-thinking", action="store_true",
+                    help="second game uses mode fast and surrenders while the bot thinks")
     args = ap.parse_args()
     OUT.mkdir(parents=True, exist_ok=True)
     for old in OUT.glob("*.png"):
@@ -39,9 +212,10 @@ def main() -> int:
     tok = secrets.token_hex(8)
     url = f"http://127.0.0.1:{args.port}/?t={tok}"
     srv = subprocess.Popen([sys.executable, str(ROOT / "scripts" / "web_play.py"), "--port", str(args.port),
-                            "--token", tok], cwd=ROOT, stdout=open(OUT / "server.log", "w"),
+                            "--token", tok], cwd=ROOT, stdout=open(OUT / "server.log", "w"),  # noqa: SIM115 -- the server lives for the whole run
                            stderr=subprocess.STDOUT)
     errors: list[str] = []
+    ran = {"a": False, "b": False, "c": False}
     try:
         for _ in range(60):
             try:
@@ -72,8 +246,13 @@ def main() -> int:
             while time.time() - t0 < args.max_s:
                 if errors:
                     break
-                if page.locator("[data-act=rematch]").count():
+                if modal_visible(page):
                     over = True
+                    break
+                check_a_log_drawer(page, errors, ran)
+                check_b_field_detail(page, errors, ran)
+                check_c_sheet_info(page, errors, ran)
+                if errors:
                     break
                 html = page.inner_html("body")
                 if html != last_html:
@@ -91,22 +270,71 @@ def main() -> int:
                 if target is None:
                     page.wait_for_timeout(200)
                     continue
-                try:
-                    target.click(timeout=2000)
-                except Exception:  # the element went away under a new state: just retry
-                    continue
+                if not tap(page, target):
+                    continue  # went away, or a reveal took the tap: retry
                 clicks += 1
                 if clicks % args.shot_every == 0:
                     shots += 1
                     page.screenshot(path=str(OUT / f"{shots:02d}-play.png"))
                 page.wait_for_timeout(120)
             page.screenshot(path=str(OUT / "99-end.png"))
+            # Second game: in-game menu -> surrender -> game-over modal.
+            surrender_ok = False
+            lobby_ok = False
+            if over and not errors:
+                try:
+                    page.locator("[data-act=newgame]").click(timeout=5000)
+                    page.wait_for_selector("#startbtn", timeout=5000)
+                    if args.surrender_thinking:
+                        page.click("[data-mode=fast]")
+                    page.click("#startbtn")
+                    if args.surrender_thinking:
+                        t1 = time.time()
+                        while time.time() - t1 < 60:
+                            if page.locator(".pbar.bot .think").count():
+                                break
+                            page.wait_for_timeout(250)
+                        surrender_ok = surrender_through_menu(
+                            page, errors, 2, "surrender-while-thinking")
+                    else:
+                        page.wait_for_timeout(3000)
+                        surrender_ok = surrender_through_menu(page, errors, 3, "surrender")
+                    if surrender_ok:
+                        page.screenshot(path=str(OUT / "98-surrendered.png"))
+                        # Back to lobby from the game-over screen. The modal
+                        # covers the bars, so the in-game menu button is
+                        # unreachable behind it -- use the New game button.
+                        try:
+                            if modal_visible(page):
+                                if not tap(page, page.locator("[data-act=newgame]"), timeout=5000):
+                                    raise RuntimeError("newgame tap failed")
+                            elif page.locator("#gamemenu").count() == 0:
+                                if not tap(page, page.locator("[data-act=gamemenu]").first, timeout=5000):
+                                    raise RuntimeError("gamemenu tap failed")
+                                page.wait_for_timeout(300)
+                                if not tap(page, page.locator("#gamemenu [data-act=backlobby]"), timeout=5000):
+                                    raise RuntimeError("backlobby tap failed")
+                            else:
+                                if not tap(page, page.locator("#gamemenu [data-act=backlobby]"), timeout=5000):
+                                    raise RuntimeError("backlobby tap failed")
+                        except Exception as e:  # noqa: BLE001
+                            errors.append(f"back-to-lobby failed: {e}")
+                        page.wait_for_timeout(500)
+                        lobby_ok = page.locator("#startbtn").count() > 0
+                        if not lobby_ok:
+                            errors.append("no lobby (#startbtn) after Back to lobby")
+                except Exception as e:  # noqa: BLE001
+                    errors.append(f"second-game flow failed: {e}")
             (OUT / "last-frames.json").write_text("\n".join(str(f) for f in frames[-3:]))
             browser.close()
         print(f"clicks={clicks} over={over} seconds={time.time() - t0:.0f} shots={shots}")
+        print(f"checks ran: a-log-drawer={ran['a']} b-field-detail={ran['b']} c-sheet-info={ran['c']}")
+        print(f"surrender_ok={surrender_ok} lobby_ok={lobby_ok}")
         for e in errors[:10]:
             print("ERROR", e)
-        return 0 if over and not errors else 2
+        need_checks = args.mode == "random"
+        ok = over and not errors and surrender_ok and lobby_ok and (all(ran.values()) if need_checks else True)
+        return 0 if ok else 2
     finally:
         srv.terminate()
         srv.wait(timeout=10)

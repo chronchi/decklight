@@ -35,6 +35,8 @@ MOCKS = [
     ("12-menu", "1&menu=yh2"),
     ("13-lobby-picker", "0&picker=you"),
     ("14-select-picked", "3&sel=1,3"),
+    ("15-gamemenu", "1&gamemenu=1"),
+    ("16-reveal", "1&reveal=bm1"),
 ]
 
 
@@ -113,6 +115,23 @@ def main() -> int:
                     errors.append(f"horizontal overflow at 412px in {name}")
                 if name == "02-your-main-phase":
                     numbers["m412"] = page.evaluate(MEASURE_JS)
+                if name == "15-gamemenu" and not page.evaluate("!!document.querySelector('#gamemenu')"):
+                    errors.append("15-gamemenu has no game menu")
+                if name == "16-reveal" and not page.evaluate("!!document.querySelector('#reveal')"):
+                    errors.append("16-reveal has no reveal overlay")
+            # Detail overlay via a real tap (field monster -> detail X).
+            page.goto(f"{base}?mock=1&i=1", wait_until="networkidle")
+            page.wait_for_timeout(400)
+            card = page.locator(".field [data-row=mzone] .slot:not(.side) .card[data-uid]:not(.back):not(.actionable)").first
+            if card.count():
+                card.click()
+                page.wait_for_timeout(300)
+            page.screenshot(path=str(OUT / "17-detail-x.png"))
+            print("shot 17-detail-x.png", flush=True)
+            if page.evaluate("document.documentElement.scrollWidth > window.innerWidth"):
+                errors.append("horizontal overflow at 412px in 17-detail-x")
+            if not page.evaluate("!!document.querySelector('#detail .dx')"):
+                errors.append("17-detail-x has no detail overlay with an X button")
             ctx.close()
             # Small-phone variant of 02.
             ctx3 = browser.new_context(viewport={"width": 360, "height": 780},

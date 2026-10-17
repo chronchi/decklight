@@ -140,13 +140,15 @@ export function barHTML(side, who, opts) {
     }
     const n = (side.hand || []).length;
     right += '<span class="handcount" aria-label="Bot hand ' + n + '"><i></i><i></i><b>' + n + "</b></span>";
+    right += '<button class="iconbtn" data-act="gamemenu" aria-label="Game menu">' +
+      '<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 6h12M4 10h12M4 14h12"/></svg></button>';
   } else {
     right += opts.phaseBtns || "";
     right += '<button class="iconbtn" data-act="log" aria-label="Open log">' +
       '<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 5h12M4 10h12M4 15h8"/></svg></button>';
   }
   return (
-    '<div class="pbar ' + who + (opts.active ? " active" : "") + '">' +
+    '<div class="pbar ' + who + (opts.active ? " active" : "") + '" data-key="bar-' + who + '">' +
     '<div class="lpblock"><span class="pname">' + esc(name) + "</span>" +
     '<span class="lp" data-lp="' + side.lp + '">' + side.lp + "</span>" +
     '<span class="lpbar"><i style="width:' + Math.round(frac * 100) + '%"></i></span></div>' +

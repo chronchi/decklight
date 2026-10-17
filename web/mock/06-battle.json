@@ -80,8 +80,8 @@
     "max": 0
   },
   "log": [
-    {"n": 18, "actor": "system", "text": "Battle Phase", "card": null},
-    {"n": 19, "actor": "you", "text": "Ame no Murakumo no Mitsurugi attacks Snake-Eyes Flamberge Dragon", "card": {"uid": "ym2", "code": 19899073, "name": "Ame no Murakumo no Mitsurugi", "faceup": true, "pos": "atk", "atk": 2500, "def": 800, "level": 8, "rank": 0, "link": 0, "counters": 0, "overlays": []}}
+    {"n": 18, "actor": "system", "text": "Battle Phase", "card": null, "kind": null},
+    {"n": 19, "actor": "you", "text": "Ame no Murakumo no Mitsurugi attacks Snake-Eyes Flamberge Dragon", "card": {"uid": "ym2", "code": 19899073, "name": "Ame no Murakumo no Mitsurugi", "faceup": true, "pos": "atk", "atk": 2500, "def": 800, "level": 8, "rank": 0, "link": 0, "counters": 0, "overlays": []}, "kind": "attack"}
   ],
   "thinking": null,
   "result": null

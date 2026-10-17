@@ -372,7 +372,8 @@
         "link": 0,
         "counters": 0,
         "overlays": []
-      }
+      },
+      "kind": "activate"
     },
     {
       "n": 7,
@@ -391,7 +392,8 @@
         "link": 0,
         "counters": 0,
         "overlays": []
-      }
+      },
+      "kind": "activate"
     }
   ],
   "thinking": null,

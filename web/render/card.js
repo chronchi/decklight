@@ -70,9 +70,10 @@ export function cardHTML(card, opts) {
   if (opts.selected) cls.push("selected");
   if (opts.focus) cls.push("focus");
   const uid = card.uid ? ' data-uid="' + esc(card.uid) + '"' : "";
+  const key = card.uid ? ' data-key="' + esc(card.uid + ":" + (card.code || 0)) + '"' : "";
   const inner = hidden ? "" : faceHTML(card, opts.mock);
   const pick = opts.pick ? '<div class="pick">' + opts.pick + "</div>" : "";
-  return '<div class="' + cls.join(" ") + '"' + uid + ">" + inner + "</div>" +
+  return '<div class="' + cls.join(" ") + '"' + uid + key + ">" + inner + "</div>" +
     (opts.stat ? statHTML(card) : "") + badges(card) + pick;
 }
 

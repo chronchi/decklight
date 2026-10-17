@@ -10,6 +10,7 @@
 """
 
 import json
+import time
 import random
 from pathlib import Path
 
@@ -157,7 +158,7 @@ def _check_state(msg: dict) -> None:
             assert o["effect"] is None or isinstance(o["effect"], str)
     assert isinstance(msg["log"], list)
     for e in msg["log"]:
-        assert set(e) == {"n", "actor", "text", "card"}
+        assert set(e) == {"n", "actor", "text", "card", "kind"}
         assert e["actor"] in ("you", "bot", "system") and isinstance(e["text"], str)
         if e["card"] is not None:
             _check_card(e["card"], "log.card")
@@ -488,6 +489,89 @@ def test_surrender_resync_takeover(tmp_path, engine):
     assert len(subs) == 1
     rec = json.loads((subs[0] / "game.jsonl").read_text())
     assert rec["surrendered"] is True and rec["auto_single"] is False
+
+
+def _records(tmp_path) -> list[dict]:
+    root = tmp_path / "runs"
+    return [json.loads((p / "game.jsonl").read_text()) for p in sorted(root.iterdir()) if p.is_dir()]
+
+
+def test_chain_auto_vs_all(tmp_path, engine):
+    """Auto (default) skips quiet chain windows server-side (logged as system
+    "(auto-passed)"), All shows every one; both records replay and carry meta."""
+    from ygo_zero.decks import parse_ydk
+
+    human_text = (FIXTURES / "BlueEyes.ydk").read_text()
+    bot_text = (FIXTURES / "Branded.ydk").read_text()
+    out = {}
+    for chain in ("auto", "all"):
+        app = _make_app(tmp_path / chain, engine)
+        msgs: list[dict] = []
+        with _client(app).websocket_connect(f"/ws?t={TOKEN}") as ws:
+            ws.receive_text()
+            _new_game(ws, human_text, bot_text, chain=chain, seed=3)
+            last = _play_to_end(ws, random.Random(3), collect=msgs)
+        rec, _ = _replay_record(engine, tmp_path / chain / "runs", last,
+                                (parse_ydk(human_text), parse_ydk(bot_text)))
+        assert rec["chain"] == chain and rec["mode"] == "random"
+        assert rec["human_deck"] == "pasted" and rec["bot_deck"] == "pasted"
+        assert (next((tmp_path / chain / "runs").iterdir()) / "bot.ydk").is_file()
+        auto = [e for m in msgs for e in m["log"] if e["text"] == "(auto-passed)"]
+        assert all(e["actor"] == "system" and e["card"] is None for e in auto)
+        out[chain] = len(auto)
+    assert out["auto"] > 0, "auto never passed a quiet chain window"
+    assert out["all"] == 0
+
+
+class _SlowLauncher(_TinyLauncher):
+    def __init__(self, forward, delay: float) -> None:
+        def slow(obs_list):
+            time.sleep(delay)
+            return forward(obs_list)
+        super().__init__(slow)
+
+
+def test_surrender_while_bot_thinks(tmp_path, engine):
+    """Surrender cuts through a thinking product bot within ~1 s, and the abandoned
+    driver does not write a second (diverged) record."""
+    forward = _tiny_forward()
+    app = _make_app(tmp_path, engine, mode_factory=lambda m: _SlowLauncher(forward, 0.5))
+    human_text = (FIXTURES / "BlueEyes.ydk").read_text()
+    bot_text = (FIXTURES / "Branded.ydk").read_text()
+    with _client(app).websocket_connect(f"/ws?t={TOKEN}") as ws:
+        ws.receive_text()
+        _new_game(ws, human_text, bot_text, mode="product", first="bot")
+        for _ in range(2000):
+            m = json.loads(ws.receive_text())
+            assert m["t"] == "state" and m["result"] is None
+            if m["thinking"] is not None and m["prompt"] is None:
+                break
+        else:
+            raise AssertionError("bot never reported thinking")
+        t0 = time.monotonic()
+        ws.send_json({"t": "surrender"})
+        for _ in range(50):
+            m = json.loads(ws.receive_text())
+            if m.get("result") is not None:
+                break
+        dt = time.monotonic() - t0
+        assert m["result"] == {"winner": "bot", "reason": "surrender"}
+        assert dt < 1.5, f"surrender took {dt:.2f}s"
+    time.sleep(1.0)  # let the abandoned step unwind
+    recs = _records(tmp_path)
+    assert len(recs) == 1 and recs[0]["surrendered"] and not recs[0].get("diverged")
+    assert recs[0]["mode"] == "product"
+
+
+def test_settings_message(tmp_path, engine):
+    app = _make_app(tmp_path, engine)
+    with _client(app).websocket_connect(f"/ws?t={TOKEN}") as ws:
+        ws.receive_text()
+        ws.send_json({"t": "settings", "chain": "bogus"})
+        assert json.loads(ws.receive_text())["t"] == "error"
+        ws.send_json({"t": "settings", "chain": "all"})
+        ws.send_json({"t": "resync"})
+        assert json.loads(ws.receive_text())["t"] == "lobby"
 
 
 # --- 6. protocol errors ---
