@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Full puzzle mining (web-ux-plan step 5, item 8): one mine_puzzles.py process per games file (CPU fast-mode bot, no
 # CUDA), each keeping up to PER_FILE verified puzzles; the laptop merges them (scripts/merge_puzzles.py).
-# Sizing: procs = min(usable cores, RAM*0.8 / 1.8 GB) (measured on the laptop: one verifier ~1.3 GB RSS).
+# Sizing: procs = min(usable cores, RAM*0.8 / 0.6 GB): mine-puzzles-20261018-0321 ran 28 procs in 3 GB total (~0.1 GB
+# each on the box; the laptop estimate of 1.3 GB RSS was 10x high and capped it at 28 of 30 cores).
 # A file with too few games may legitimately yield 0 puzzles (exit 2); the job alerts when more than half the files fail.
 # Usage: bash scripts/vast_mine_puzzles.sh <name> <games dir>...  Results: runs/<name>/shards/*.json, PROGRESS, ALERT.
 set -uo pipefail
@@ -11,7 +12,7 @@ alert() { echo "ALERT $*" | tee -a "$OUT/ALERT"; }
 uv sync --group dev --group ml --group gauntlet -q || { alert "uv sync failed"; exit 3; }
 . scripts/cores.sh
 J=$(box_cores); RTOT=$(free -m | awk '/Mem/{print $2}')
-NP=$(python3 -c "print(max(1, min($J, int($RTOT*0.8/1800))))")
+NP=$(python3 -c "print(max(1, min($J, int($RTOT*0.8/600))))")
 echo "cores $J, ram ${RTOT}MB -> $NP procs" | tee "$OUT/sizing.txt"
 ( while true; do echo "$(date +%T) $(cut -d' ' -f1 /proc/loadavg) $(free -g | awk '/Mem/{print $3}')G"; sleep 30; done ) > "$OUT/usage.txt" 2>&1 &
 USAGE_PID=$!

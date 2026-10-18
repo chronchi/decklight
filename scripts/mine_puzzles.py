@@ -90,7 +90,9 @@ def main(argv=None) -> int:
         print("ALERT mine_puzzles: 0 candidates", flush=True)
         return 2
 
-    ordered = P.select(candidates, target=args.target)
+    # Variety order over ALL candidates; verification stops at --target verified. (Trimming to --target before
+    # verifying tried only 4 of 50-90 candidates per file in mine-puzzles-20261018-0321.)
+    ordered = P.select(candidates, target=len(candidates))
     if args.shard:
         try:
             i, n = (int(x) for x in args.shard.split("/"))
