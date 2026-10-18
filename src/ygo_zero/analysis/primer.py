@@ -118,12 +118,21 @@ def _signed(v: int) -> int:
     return v - (1 << 32) if v >= 1 << 31 else v
 
 
-def _summarize_game(engine: Engine, rec: dict, cards: dict, names: dict[int, str]) -> dict:
+def _summarize_game(
+    engine: Engine, rec: dict, cards: dict, names: dict[int, str], value_fn=None, calib=None
+) -> dict:
     """Replay one record; per-seat plays, summons, chains and hand-trap answers.
+
+    With ``value_fn`` + ``calib`` (see :func:`_replay_host_scored`) every step
+    dict also gets ``w`` (seat-0 win chance before the step) and ``credit``
+    (the play's win-chance gain, play steps only), and the summary gets
+    ``w_end`` (seat-0 win chance after the last step: 1/0 by the winner).
 
     Raises on a truncated record or a replay whose winner differs (like
     :func:`events`), so bad records fail loud at build time, never silently.
     """
+    if (value_fn is None) != (calib is None):
+        raise ValueError("primer scoring needs both value_fn and calib (or neither)")
     ev = events(rec, engine)  # validates winner + LP accounting; chain links + turns
     if any(not isinstance(d, str) for d in rec["decks"]):
         raise ValueError(f"game {rec.get('game_idx')}: primer needs named decks, got {rec['decks']!r}")
@@ -132,14 +141,20 @@ def _summarize_game(engine: Engine, rec: dict, cards: dict, names: dict[int, str
     # Host-space replay (auto_single=False, singletons included): kinds/codes of
     # every play for openers, plus first_player. Record choices are
     # auto_single=True-space; replay_false consumes them at multi-option prompts.
-    env, steps = replay_false(engine, cfg, [int(c) for c in rec["choices"]])
+    w_end: float | None = None
+    if value_fn is None:
+        env, steps = replay_false(engine, cfg, [int(c) for c in rec["choices"]])
+    else:
+        env, steps, w_end = _replay_host_scored(
+            engine, cfg, [int(c) for c in rec["choices"]], value_fn, calib
+        )
     if not env.done or env.winner != rec["winner"]:
         raise ValueError(f"game {rec.get('game_idx')}: host replay diverged from the record")
     first_player = int(env.duel.first_player)
 
     trace = env.duel.trace
     links, summons = _parse_trace(trace)  # engine-truth activations/summons with locations
-    return {
+    out = {
         "game_idx": rec.get("game_idx"),
         "seed": rec["seed"],
         "decks": list(rec["decks"]),
@@ -151,6 +166,162 @@ def _summarize_game(engine: Engine, rec: dict, cards: dict, names: dict[int, str
         "summons": summons,
         "steps": steps,
     }
+    if w_end is not None:
+        out["w_end"] = w_end
+    return out
+
+
+# --- value-head scoring (primer-impact) ---
+
+
+def _replay_host_scored(engine, cfg, true_choices, value_fn, calib):
+    """Like :func:`puzzles.replay_false` (one step dict per host step, singletons
+    included) plus both seats' win-chance observations before every step.
+
+    Before each step ``i`` the observation is built from **both** seats with
+    :func:`analysis.review.human_obs_dict`; all ``2n`` obs go through the value
+    net in batched calls of at most 512, each raw value is clipped to [-1, 1]
+    (like :func:`review.estimate_candidates`) and mapped with
+    ``calib.p(v, turn)``. Seat-0 win chance ``W[i] = (p_0 + (1 - p_1)) / 2``;
+    ``W[n]`` is 1.0 iff seat 0 won. Each step dict gets ``w`` (``W[i]``); each
+    play step also gets ``credit`` (its player's win-chance gain, see
+    :func:`_play_credits`). Returns ``(env, steps, w_end)``.
+    """
+    import math
+
+    import numpy as np
+
+    from ygo_zero.analysis.review import _batch, human_obs_dict
+    from ygo_zero.engine import query as Q
+    from ygo_zero.engine.env import PyEnv
+
+    def _signed_lps(env) -> tuple[int, int]:
+        raw = Q.lps(env.duel.query_field())
+        return tuple(v - (1 << 32) if v >= 1 << 31 else v for v in raw)
+
+    env = PyEnv(engine, cfg, auto_single=False)
+    env.reset()
+    steps: list[dict] = []
+    obs: list[dict] = []  # interleaved seat-0 / seat-1 obs, two per step
+    ti = 0
+    while not env.done:
+        obs.append(human_obs_dict(env, 0))
+        obs.append(human_obs_dict(env, 1))
+        opts = list(env.opts)
+        n = len(opts)
+        if n == 1:
+            step_ti = None
+            c = 0
+        else:
+            if ti >= len(true_choices):
+                raise ValueError("record ends before the duel does")
+            step_ti = ti
+            c = int(true_choices[ti])
+            ti += 1
+            if not 0 <= c < n:
+                raise ValueError(f"illegal choice {c} of {n}")
+        opt = opts[c]
+        try:
+            kind = opt.kind.name
+        except Exception:  # noqa: BLE001 -- defensive
+            kind = str(opt.kind)
+        code = int(env.board.option_code(opt))
+        steps.append(
+            {
+                "player": int(env.player),
+                "n_opts": n,
+                "kind": kind,
+                "code": code,
+                "turn": int(env.duel.turn),
+                "phase": int(env.duel.phase),
+                "turn_player": int(env.duel.turn_player),
+                "lp": _signed_lps(env),
+                "choice": c,
+                "ti": step_ti,
+            }
+        )
+        env.step(c)
+    if ti != len(true_choices):
+        raise ValueError(f"record overruns the duel ({len(true_choices) - ti} choices left)")
+    if obs:
+        vals = np.concatenate(
+            [np.ravel(np.asarray(value_fn(_batch(obs[k : k + 512])))) for k in range(0, len(obs), 512)]
+        )
+    else:
+        vals = np.zeros(0, np.float32)
+    if len(vals) != len(obs):
+        raise ValueError(f"value net returned {len(vals)} values for {len(obs)} obs")
+    w_end = 1.0 if env.winner == 0 else 0.0
+    for i, st in enumerate(steps):
+        v0 = float(np.clip(vals[2 * i], -1, 1))
+        v1 = float(np.clip(vals[2 * i + 1], -1, 1))
+        p0 = float(calib.p(v0, st["turn"]))
+        p1 = float(calib.p(v1, st["turn"]))
+        w = (p0 + (1.0 - p1)) / 2.0
+        if math.isnan(w) or not 0.0 <= w <= 1.0:  # NaN or out of range: fail loud, never silently
+            raise ValueError(f"bad win chance w={w} at step {i}")
+        st["w"] = w
+    for i, c in _play_credits(steps, w_end).items():
+        steps[i]["credit"] = c
+    return env, steps, w_end
+
+
+def _play_index(steps: Sequence[dict]) -> list[int]:
+    """Host-step indices that are plays (a SUMMON/SPSUMMON/ACTIVATE with a nonzero code)."""
+    return [i for i, st in enumerate(steps) if st.get("kind") in PLAY_KINDS and st.get("code")]
+
+
+def _answer_pairs(steps: Sequence[dict]) -> list[tuple[int, int]]:
+    """(answered, answering) play-step pairs: a play step ``j`` answers the play
+    step ``i`` immediately before it (no play step between) when ``j``'s player
+    differs and both are in the same turn. The answering play's credit is its
+    player's gain — what the answered deck lost."""
+    play = _play_index(steps)
+    out = []
+    for k in range(1, len(play)):
+        i, j = play[k - 1], play[k]
+        if steps[j].get("player") != steps[i].get("player") and steps[j].get("turn") == steps[i].get("turn"):
+            out.append((i, j))
+    return out
+
+
+# Steps that close a play's credit window: the next play, set, attack or phase move (or a turn change). Without the
+# phase/attack/turn bounds the last play of a turn collected the battle, the end phase and the opponent's draw
+# (smoke: play steps held only 0.21 of total |dW|, yet one late Chundra summon got +23.7 pts).
+BOUNDARY_KINDS = frozenset(PLAY_KINDS) | {"MSET", "SSET", "ATTACK", "TO_BATTLE", "TO_MAIN2", "TO_END"}
+# Steps credited to a card: plays, and attacks (credited to the attacking monster).
+CREDIT_KINDS = frozenset(PLAY_KINDS) | {"ATTACK"}
+
+
+def _credit_index(steps: Sequence[dict]) -> list[int]:
+    return [i for i, st in enumerate(steps) if st.get("kind") in CREDIT_KINDS and st.get("code")]
+
+
+def _window_end(steps: Sequence[dict], i: int) -> int:
+    """First step after ``i`` that is a boundary kind or in a later turn (``len(steps)`` at the end)."""
+    t = steps[i].get("turn")
+    for j in range(i + 1, len(steps)):
+        if steps[j].get("turn") != t or steps[j].get("kind") in BOUNDARY_KINDS:
+            return j
+    return len(steps)
+
+
+def _play_credits(steps: Sequence[dict], w_end: float) -> dict[int, float]:
+    """Credit per play/attack step from the seat-0 win-chance curve ``W`` (steps' ``w`` plus terminal ``w_end``): for
+    step ``i`` by player ``p``, ``W[j] - W[i]`` from ``p``'s side, ``j`` = :func:`_window_end` (next play, set, attack,
+    phase move or turn change). A game-ending window runs to the outcome."""
+    W = [float(st["w"]) for st in steps] + [float(w_end)]
+    out = {}
+    for i in _credit_index(steps):
+        j = _window_end(steps, i)
+        out[i] = W[j] - W[i] if steps[i].get("player") == 0 else W[i] - W[j]
+    return out
+
+
+def _is_scored(s: dict) -> bool:
+    """A summary carries a full win-chance curve (every step has ``w`` plus ``w_end``)."""
+    steps = s.get("steps")
+    return bool(steps) and "w_end" in s and all("w" in st for st in steps)
 
 
 def _parse_trace(trace: Sequence[bytes]) -> tuple[list[dict], list[dict]]:
@@ -373,6 +544,18 @@ def aggregate(
                 "resp_neg": Counter(),  # card code -> answers that negated it
                 "hand_traps": Counter(),  # opp hand card -> times vs this deck
                 "ht_answers": Counter(),  # (ht code, deck card) -> times
+                # value-head scoring (only scored summaries contribute):
+                "scored_games": 0,  # scored games this deck played
+                "credit_sum": Counter(),  # code -> summed play credits (this deck's plays)
+                "credit_plays": Counter(),  # code -> play count
+                "credit_games": Counter(),  # code -> scored games with a play
+                "answer_cost": Counter(),  # answered code -> summed answering credits
+                "answered_n": Counter(),  # answered code -> times answered
+                "ht_gain": Counter(),  # answering ht code -> summed credits vs this deck
+                "ht_gain_n": Counter(),  # answering ht code -> answering-play count
+                "ht_hit_gain": Counter(),  # (ht code, deck card) -> summed credits
+                "ht_hit_gain_n": Counter(),  # (ht code, deck card) -> count
+                "opener_w": {},  # first-3-plays tuple -> [summed owner w at turn 2, n]
             }
         return e
 
@@ -467,8 +650,63 @@ def aggregate(
             answered = _answered_card(s, l, tp)
             if answered:
                 e["ht_answers"][(l["code"], answered)] += 1
+        # value-head scoring: credits, answers and opener win chances
+        if _is_scored(s):
+            _aggregate_scored(s, decks, hashes)
 
     return {"decks": _finalize(decks, cards, names, overrides), "negated_by": negated_by}
+
+
+def _aggregate_scored(s: dict, decks: dict[str, dict], hashes: list[str]) -> None:
+    """Fold one scored summary's win-chance curve into its two decks (codes are
+    already canon-folded by :func:`_canon_summary`). Credits are recomputed
+    from ``w``/``w_end`` (the stored per-step ``credit`` is informational)."""
+    steps = s["steps"]
+    W = [float(st["w"]) for st in steps] + [float(s["w_end"])]
+    credits = _play_credits(steps, float(s["w_end"]))
+    for seat in (0, 1):
+        decks[hashes[seat]]["scored_games"] += 1
+    seen: dict[int, set[int]] = {0: set(), 1: set()}
+    for i in _credit_index(steps):  # plays and attacks
+        st = steps[i]
+        seat = int(st["player"])
+        e = decks[hashes[seat]]
+        e["credit_sum"][st["code"]] += credits[i]
+        e["credit_plays"][st["code"]] += 1
+        seen[seat].add(st["code"])
+    for seat in (0, 1):
+        e = decks[hashes[seat]]
+        for code in seen[seat]:
+            e["credit_games"][code] += 1
+    for i, j in _answer_pairs(steps):
+        a, b = steps[i], steps[j]
+        e = decks[hashes[int(a["player"])]]  # the answered deck: q's gain is its loss
+        e["answer_cost"][a["code"]] += credits[j]
+        e["answered_n"][a["code"]] += 1
+        e["ht_gain"][b["code"]] += credits[j]
+        e["ht_gain_n"][b["code"]] += 1
+        e["ht_hit_gain"][(b["code"], a["code"])] += credits[j]
+        e["ht_hit_gain_n"][(b["code"], a["code"])] += 1
+    # opener win-after: the opener owner's win chance at turn 2's first step
+    k2 = next((k for k, st in enumerate(steps) if st.get("turn") == 2), None)
+    if k2 is None:
+        return
+    for seat in (0, 1):
+        if s["first_player"] != seat:
+            continue
+        seq = [
+            st["code"]
+            for st in steps
+            if st["player"] == seat and st["turn"] == 1 and st["kind"] in PLAY_KINDS and st["code"]
+        ][:3]
+        if not seq:
+            continue
+        w_owner = W[k2] if seat == 0 else 1.0 - W[k2]
+        e = decks[hashes[seat]]
+        acc = e["opener_w"].get(tuple(seq), [0.0, 0])
+        acc[0] += w_owner
+        acc[1] += 1
+        e["opener_w"][tuple(seq)] = acc
 
 
 def _answered_card(s: dict, link: dict, seat: int) -> int | None:
@@ -491,55 +729,99 @@ def _finalize(
     df = set_doc_freq([e["main"] for e in decks.values()], cards)
     for h, e in decks.items():
         games = e["games"]
-        key_cards = [
-            {
-                "code": c,
-                "name": names.get(c, f"#{c}"),
-                "games": n,
-                "per_game": round(n / games, 3),
-            }
-            for c, n in e["plays"].most_common(8)
-        ]
-        openers = [
-            {
+        scored = e["scored_games"] > 0
+        sg = e["scored_games"]
+        if scored:
+            # Ranked by impact (mean win-chance points per game), not frequency.
+            ranked = sorted(e["credit_games"], key=lambda c: (-e["credit_sum"][c], c))
+            key_cards = [
+                {
+                    "code": c,
+                    "name": names.get(c, f"#{c}"),
+                    "games": e["credit_games"][c],
+                    "per_game": round(e["plays"].get(c, 0) / games, 3) if games else 0.0,
+                    "impact": round(e["credit_sum"][c] / sg * 100, 1),
+                    "per_play": round(e["credit_sum"][c] / e["credit_plays"][c] * 100, 1),
+                }
+                for c in ranked
+                if e["credit_games"][c] >= 3
+            ][:8]
+        else:
+            key_cards = [
+                {
+                    "code": c,
+                    "name": names.get(c, f"#{c}"),
+                    "games": n,
+                    "per_game": round(n / games, 3),
+                }
+                for c, n in e["plays"].most_common(8)
+            ]
+        openers = []
+        for seq, n in e["openers"].most_common(3):
+            o = {
                 "plays": list(seq),
                 "names": [names.get(c, f"#{c}") for c in seq],
                 "games": n,
                 "share": round(n / e["openers_n"], 3) if e["openers_n"] else 0.0,
             }
-            for seq, n in e["openers"].most_common(3)
-        ]
-        chokes = sorted(e["responses"], key=lambda c: (-e["responses"][c], c))
-        chokepoints = [
-            {
-                "code": c,
-                "name": names.get(c, f"#{c}"),
-                "responses": e["responses"][c],
-                "negated": e["resp_neg"].get(c, 0),
-                "response_rate": round(e["responses"][c] / games, 3),
-            }
-            for c in chokes[:8]
-        ]
+            acc = e["opener_w"].get(tuple(seq))
+            if acc:
+                o["w_after"] = round(acc[0] / acc[1] * 100, 1)
+            openers.append(o)
+        if scored:
+            # Ranked by cost (mean points per game the deck loses when answered).
+            ranked_ch = sorted(e["answered_n"], key=lambda c: (-e["answer_cost"][c], c))
+            chokepoints = [
+                {
+                    "code": c,
+                    "name": names.get(c, f"#{c}"),
+                    "responses": e["responses"].get(c, 0),
+                    "negated": e["resp_neg"].get(c, 0),
+                    "response_rate": round(e["responses"].get(c, 0) / games, 3) if games else 0.0,
+                    "answered": e["answered_n"][c],
+                    "cost": round(e["answer_cost"][c] / sg * 100, 1),
+                    "per_answer": round(e["answer_cost"][c] / e["answered_n"][c] * 100, 1),
+                }
+                for c in ranked_ch
+                if e["answered_n"][c] >= 3
+            ][:8]
+        else:
+            chokes = sorted(e["responses"], key=lambda c: (-e["responses"][c], c))
+            chokepoints = [
+                {
+                    "code": c,
+                    "name": names.get(c, f"#{c}"),
+                    "responses": e["responses"][c],
+                    "negated": e["resp_neg"].get(c, 0),
+                    "response_rate": round(e["responses"][c] / games, 3),
+                }
+                for c in chokes[:8]
+            ]
         hts = sorted(e["hand_traps"], key=lambda c: (-e["hand_traps"][c], c))
         hand_traps = []
         for c in hts[:12]:
-            answered = [
-                {
+            answered = []
+            for dc in sorted({dc for (hc, dc) in e["ht_answers"] if hc == c}):
+                a = {
                     "code": dc,
                     "name": names.get(dc, f"#{dc}"),
                     "times": e["ht_answers"][(c, dc)],
                 }
-                for dc in sorted({dc for (hc, dc) in e["ht_answers"] if hc == c})
-            ]
+                n_hit = e["ht_hit_gain_n"].get((c, dc), 0)
+                if n_hit:
+                    a["gain"] = round(e["ht_hit_gain"][(c, dc)] / n_hit * 100, 1)
+                answered.append(a)
             answered.sort(key=lambda d: (-d["times"], d["code"]))
-            hand_traps.append(
-                {
-                    "code": c,
-                    "name": names.get(c, f"#{c}"),
-                    "times": e["hand_traps"][c],
-                    "answered": answered[:6],
-                }
-            )
+            ht = {
+                "code": c,
+                "name": names.get(c, f"#{c}"),
+                "times": e["hand_traps"][c],
+                "answered": answered[:6],
+            }
+            n_gain = e["ht_gain_n"].get(c, 0)
+            if n_gain:
+                ht["gain"] = round(e["ht_gain"][c] / n_gain * 100, 1)
+            hand_traps.append(ht)
         out[h] = {
             "hash": h,
             "files": sorted(e["files"]),
@@ -592,7 +874,10 @@ def primer_for(store: Mapping, bot_deck, my_deck) -> dict | None:
         if c not in ht_global and not neg_victims:
             continue
         if hits:
-            answers.append({"code": c, "name": names_of(store, c), "hits": hits})
+            a = {"code": c, "name": names_of(store, c), "hits": hits}
+            if here.get("gain") is not None:
+                a["gain"] = here["gain"]
+            answers.append(a)
         elif neg_victims:
             victims = [
                 {"code": int(v), "name": names_of(store, int(v)), "times": n}
@@ -619,7 +904,10 @@ def names_of(store: Mapping, code: int) -> str:
             for item in d.get(section, []):
                 if item.get("code") == code:
                     return item.get("name", f"#{code}")
-                for sub in item.get("answered", []):
+                subs = item.get("answered", [])
+                if not isinstance(subs, list):  # scored chokepoints carry an `answered` count
+                    continue
+                for sub in subs:
                     if sub.get("code") == code:
                         return sub.get("name", f"#{code}")
     try:  # cards only seen as a key of negated_by: take the name from the card database

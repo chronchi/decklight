@@ -325,6 +325,7 @@ class Server:
                     "name": c.get("name", ""),
                     "games": int(c.get("games", 0)),
                     "per_game": c.get("per_game", 0.0),
+                    **({k: c[k] for k in ("impact", "per_play") if k in c}),
                 }
                 for c in p.get("key_cards", [])[:8]
             ],
@@ -333,18 +334,12 @@ class Server:
                     "plays": list(o.get("plays", [])),
                     "names": list(o.get("names", [])),
                     "games": int(o.get("games", 0)),
+                    **({"w_after": o["w_after"]} if "w_after" in o else {}),
                 }
                 for o in p.get("openers", [])
             ],
-            "chokepoints": [
-                {
-                    "code": c.get("code"),
-                    "name": c.get("name", ""),
-                    "responses": int(c.get("responses", 0)),
-                    "negated": int(c.get("negated", 0)),
-                }
-                for c in p.get("chokepoints", [])[:8]
-            ],
+            # No chokepoints and no answer gains: neither ranking validated on held-out games (user chose to hide
+            # "Where it gets stopped", NOTEBOOK 2026-10-18 primer comparison).
             "your_answers": [
                 {
                     "code": a.get("code"),

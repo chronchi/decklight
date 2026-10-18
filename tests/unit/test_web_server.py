@@ -1948,7 +1948,7 @@ def test_primer_lobby(tmp_path, engine, monkeypatch):
         assert p is not None
         assert p["archetype"] == "Blue-Eyes" and p["games"] == 24
         assert p["key_cards"] and p["key_cards"][0]["code"] == code
-        assert p["openers"] and p["chokepoints"]
+        assert p["openers"] and "chokepoints" not in p  # hidden: did not validate held-out
         assert p["your_answers"], "the human deck's matching card must be listed"
         assert p["your_answers"][0]["code"] == code
         # Trimmed for the sheet: no files and no bot-vs-bot win rates.
@@ -1973,6 +1973,60 @@ def test_primer_thin_and_missing(tmp_path, engine, monkeypatch):
         ws.send_json({"t": "primer", "deck": "blue-eyes", "my_deck": "blue-eyes"})
         m = _recv_type(ws, "primer")
         assert m["t"] == "primer" and m["primer"] is None
+
+
+def test_primer_trim_passes_impact_fields():
+    import ygo_zero.web.server as S
+
+    p = {
+        "archetype": "X",
+        "games": 10,
+        "key_cards": [
+            {"code": 1, "name": "A", "games": 5, "per_game": 0.5, "impact": 6.2, "per_play": 12.4},
+        ],
+        "openers": [{"plays": [1], "names": ["A"], "games": 3, "w_after": 55.0}],
+        "chokepoints": [
+            {
+                "code": 1,
+                "name": "A",
+                "responses": 4,
+                "negated": 1,
+                "answered": 3,
+                "cost": 6.2,
+                "per_answer": 12.4,
+            },
+        ],
+        "your_answers": [
+            {
+                "code": 2,
+                "name": "B",
+                "gain": 3.1,
+                "hits": [{"code": 1, "name": "A", "times": 2, "gain": 6.2}],
+            },
+        ],
+    }
+    t = S.Server._trim_primer(p)
+    assert t["key_cards"][0]["impact"] == 6.2 and t["key_cards"][0]["per_play"] == 12.4
+    assert t["key_cards"][0]["per_game"] == 0.5
+    assert t["openers"][0]["w_after"] == 55.0
+    # Chokepoints and answer gains are dropped (neither validated held-out; user chose to hide them).
+    assert "chokepoints" not in t
+    assert "gain" not in t["your_answers"][0] and "gain" not in t["your_answers"][0]["hits"][0]
+    # Without impact fields the trim keeps today's shape exactly.
+    p2 = {
+        "archetype": "X",
+        "games": 10,
+        "key_cards": [{"code": 1, "name": "A", "games": 5, "per_game": 0.5}],
+        "openers": [{"plays": [1], "names": ["A"], "games": 3}],
+        "chokepoints": [{"code": 1, "name": "A", "responses": 4, "negated": 1}],
+        "your_answers": [{"code": 2, "name": "B", "hits": [{"code": 1, "name": "A", "times": 2}]}],
+    }
+    t2 = S.Server._trim_primer(p2)
+    assert set(t2["key_cards"][0]) == {"code", "name", "games", "per_game"}
+    assert set(t2["openers"][0]) == {"plays", "names", "games"}
+    assert "chokepoints" not in t2
+    assert set(t2["your_answers"][0]["hits"][0]) == {"code", "name", "times"}
+    assert S.Server._trim_primer(None) is None
 
 
 def test_primer_in_game_uses_current_decks(tmp_path, engine, monkeypatch):

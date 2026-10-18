@@ -36,6 +36,17 @@ def parse_args(argv=None):
     ap.add_argument("--max-games", type=int, default=0, help="cap games read (0 = all)")
     ap.add_argument("--min-games", type=int, default=20)
     ap.add_argument(
+        "--score",
+        action="store_true",
+        help="score every game with the product value net (win chance per step -> impact-ranked primers)",
+    )
+    ap.add_argument("--procs", type=int, default=4, help="replay workers (default 4 = laptop cap)")
+    ap.add_argument(
+        "--device",
+        default=None,
+        help="score device: cpu|cuda (default: cuda if available, else cpu)",
+    )
+    ap.add_argument(
         "--summaries",
         type=Path,
         default=ROOT / "data" / "primers" / "summaries.json.gz",
@@ -59,19 +70,35 @@ def parse_args(argv=None):
 _W: dict = {}
 
 
-def _summarize_file(job: tuple[str, int]) -> tuple[str, list[dict], list[str], int]:
+def _summarize_file(job: tuple) -> tuple[str, list[dict], list[str], int, int]:
     """Worker: summarize every record of one games file (engine and card tables built once per process)."""
     from ygo_zero.analysis.primer import _summarize_game
 
+    if len(job) == 2:
+        fname, cap = job
+        score, device = False, "cpu"
+    else:
+        fname, cap, score, device = job
     if not _W:
         from ygo_zero.engine.duel import Engine
         from ygo_zero.engine.resources import load_cards
         from ygo_zero.web.view import DB
 
         _W.update(engine=Engine(), cards=load_cards(), names=DB.names())
-    fname, cap = job
+    value_fn = calib = None
+    if score and "value_fn" not in _W:
+        from ygo_zero.eval.winchance import load_calib
+        from ygo_zero.search.product import load_value, resolve_product_paths
+
+        _, value_p, emb_p = resolve_product_paths()
+        _W["value_fn"] = load_value(value_p, emb_p, device=device)
+        _W["calib"] = load_calib()
+    if score:
+        value_fn, calib = _W["value_fn"], _W["calib"]
+    fname = str(fname)
     out: list[dict] = []
     probs: list[str] = []
+    bad_w = 0
     n = 0
     for line in Path(fname).read_text(encoding="utf-8").splitlines():
         line = line.strip()
@@ -82,10 +109,18 @@ def _summarize_file(job: tuple[str, int]) -> tuple[str, list[dict], list[str], i
         n += 1
         try:
             rec = json.loads(line)
-            out.append(_summarize_game(_W["engine"], rec, _W["cards"], _W["names"]))
+            s = _summarize_game(_W["engine"], rec, _W["cards"], _W["names"], value_fn, calib)
+            if score and (
+                sum(1 for st in s["steps"] if "w" in st) < len(s["steps"])
+                or "w_end" not in s
+                or any(not 0.0 <= float(st["w"]) <= 1.0 or st["w"] != st["w"] for st in s["steps"])
+            ):
+                bad_w += 1
+            else:
+                out.append(s)
         except Exception as e:  # noqa: BLE001 -- reported by the parent with the file name
             probs.append(f"game {n - 1}: {type(e).__name__}: {e}")
-    return fname, out, probs, n
+    return fname, out, probs, n, bad_w
 
 
 def main(argv=None) -> int:
@@ -133,28 +168,54 @@ def main(argv=None) -> int:
             print(f"ALERT build_primers: no {args.pattern} in {[str(d) for d in dirs]}", flush=True)
             return 2
 
-        # One process per games file (4 at most: the laptop's core cap); problems are printed as each file finishes, so a
+        # One process per games file (the laptop's core cap by default); problems are printed as each file finishes, so a
         # replay bug shows in minutes, not at the end (the first full build ran 112 min serially, then failed on 7 games).
         from concurrent.futures import ProcessPoolExecutor
 
+        device = args.device
+        if args.score and device is None:
+            try:
+                import torch
+
+                device = "cuda" if torch.cuda.is_available() else "cpu"
+            except ImportError:
+                device = "cpu"
         # --max-games (smoke): the first 4 files, each capped, then trimmed to the budget in order
         jobs = [(str(f), args.max_games) for f in (files[:4] if args.max_games else files)]
+        if args.score:
+            jobs = [(f, c, True, device) for f, c in jobs]
+            print(f"primers: scoring with the product value net on {device}", flush=True)
         summaries: list[dict] = []
         problems: list[str] = []
         n_read = 0
-        with ProcessPoolExecutor(max_workers=min(4, len(jobs))) as ex:
-            for fname, s_list, probs, n in ex.map(_summarize_file, jobs):
+        n_bad_w = 0
+        with ProcessPoolExecutor(max_workers=min(args.procs, len(jobs))) as ex:
+            for fname, s_list, probs, n, bad_w in ex.map(_summarize_file, jobs):
+                print(f"PROGRESS {Path(fname).name} {len(s_list)}", flush=True)
                 if args.max_games and n_read >= args.max_games:
                     continue
                 take = s_list[: args.max_games - n_read] if args.max_games else s_list
                 summaries.extend(take)
                 n_read += n if not args.max_games else min(n, args.max_games - n_read)
+                n_bad_w += bad_w
                 for pr in probs:
-                    print(f"ALERT build_primers: {Path(fname).name}: {pr}", flush=True)
+                    tag = "ALERT" if not args.score else "note"
+                    print(f"{tag} build_primers: {Path(fname).name}: {pr}", flush=True)
                 problems.extend(f"{Path(fname).name}: {pr}" for pr in probs)
-        if problems:
+        if args.score and n_bad_w:
+            print(
+                f"ALERT build_primers: {n_bad_w} scored games have bad/missing w (NaN or outside [0, 1])",
+                flush=True,
+            )
+            return 2
+        if problems and (not args.score or len(problems) / max(1, n_read) > 0.01):
             print(f"ALERT build_primers: {len(problems)} records failed to replay", flush=True)
             return 2
+        if problems:
+            print(
+                f"build_primers: {len(problems)} records failed (within the 1% budget, dropped)",
+                flush=True,
+            )
         if n_read == 0:
             print("ALERT build_primers: 0 games read", flush=True)
             return 2
@@ -168,6 +229,8 @@ def main(argv=None) -> int:
     cards = load_cards()
     names = DB.names()
     store = aggregate(summaries, cards, names, overrides)
+    if args.score:
+        _print_impact_sanity(summaries, store, names)
     payload = json.dumps(store)
     args.out.parent.mkdir(parents=True, exist_ok=True)
     args.out.write_text(payload + "\n", encoding="utf-8")
@@ -217,6 +280,44 @@ def main(argv=None) -> int:
             return 2
     _ = names_of
     return 0
+
+
+def _print_impact_sanity(summaries: list[dict], store: dict, names: dict) -> None:
+    """Sanity numbers for a scored run: impact coverage, top cards, credit scale."""
+    import math
+
+    decks = store.get("decks", {})
+    n_impact = sum(
+        1 for d in decks.values() if d.get("key_cards") and any("impact" in c for c in d["key_cards"])
+    )
+    top: list[tuple[float, str, str]] = []
+    for h, d in decks.items():
+        for c in d.get("key_cards", []):
+            if "impact" in c:
+                top.append((c["impact"], c.get("name", f"#{c['code']}"), d.get("archetype", h[:8])))
+    top.sort(key=lambda t: -t[0])
+    print(f"impact: {n_impact} decks with impact key cards", flush=True)
+    for v, nm, arch in top[:10]:
+        print(f"impact: {v:+.1f} pts/game {nm} ({arch})", flush=True)
+    play_abs = play_n = var_play = var_all = 0.0
+    for s in summaries:
+        steps = s.get("steps", [])
+        if not steps or not all("w" in st for st in steps) or "w_end" not in s:
+            continue
+        W = [float(st["w"]) for st in steps] + [float(s["w_end"])]
+        if any(math.isnan(v) or not 0.0 <= v <= 1.0 for v in W):
+            continue
+        from ygo_zero.analysis.primer import _play_credits
+
+        for c in _play_credits(steps, float(s["w_end"])).values():
+            play_abs += abs(c)
+            play_n += 1
+            var_play += abs(c)
+        var_all += sum(abs(W[i + 1] - W[i]) for i in range(len(steps)))
+    mean_abs = play_abs / play_n * 100 if play_n else math.nan
+    share = var_play / var_all if var_all else math.nan
+    print(f"impact: mean |credit| per play {mean_abs:.2f} pts over {int(play_n)} plays", flush=True)
+    print(f"impact: play steps carry {share:.3f} of total |ΔW|", flush=True)
 
 
 if __name__ == "__main__":

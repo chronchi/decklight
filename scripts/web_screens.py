@@ -567,9 +567,11 @@ def main() -> int:
                         errors.append(f"{name}: no primer sheet on screen")
                     sheet = page.evaluate("document.querySelector('#primersheet').textContent")
                     if name in ("67-primer-lobby", "69-primer-game"):
-                        for want in ("Key cards", "How it opens", "Where it gets stopped", "Your answers"):
+                        for want in ("Key cards", "How it opens", "Your answers", "pts a game"):
                             if want not in sheet:
-                                errors.append(f"{name}: no {want!r} section")
+                                errors.append(f"{name}: no {want!r} in the sheet")
+                        if "Where it gets stopped" in sheet:  # hidden: not validated held-out (user, 2026-10-18)
+                            errors.append(f"{name}: 'Where it gets stopped' is back")
                         if "Ash Blossom & Joyous Spring" not in sheet:
                             errors.append(f"{name}: no matching hand trap in Your answers")
                         if "win_rate" in sheet or "Win rate" in sheet:

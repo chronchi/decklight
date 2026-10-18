@@ -1102,10 +1102,17 @@ function primerSheetHTML() {
     const p = primer;
     body += '<p class="prsub">' + esc(p.archetype || "Unknown") + " · from " + esc(String(p.games || 0)) +
       " bot games</p>";
+    const scored = (p.key_cards || []).some((c) => c.impact != null);
+    if (scored) body += '<p class="prnote">Ranked by how much the bot\'s win-chance estimate moves.</p>';
     if ((p.key_cards || []).length) {
       body += "<h3>Key cards</h3><ul class=\"prlist\">" + p.key_cards.map((c) => {
         const n = Math.round((c.per_game || 0) * 10);
-        return "<li>" + primerCardHTML(c.code, c.name) + ' <span class="prmeta">in ' + n + " of 10 games</span></li>";
+        if (c.impact == null) {
+          return "<li>" + primerCardHTML(c.code, c.name) + ' <span class="prmeta">in ' + n + " of 10 games</span></li>";
+        }
+        const s = (c.impact >= 0 ? "+" : "") + Number(c.impact).toFixed(1);
+        return "<li>" + primerCardHTML(c.code, c.name) + " " + esc(s) + " pts a game<br>" +
+          ' <span class="prmeta">in ' + n + " of 10 games</span></li>";
       }).join("") + "</ul>";
     }
     if ((p.openers || []).length) {
@@ -1116,13 +1123,8 @@ function primerSheetHTML() {
           return "<li>" + seq + ' <span class="prmeta">' + esc(String(o.games || 0)) + " games</span></li>";
         }).join("") + "</ul>";
     }
-    if ((p.chokepoints || []).length) {
-      body += "<h3>Where it gets stopped</h3><ul class=\"prlist\">" + p.chokepoints.map((c) => {
-        let line = primerCardHTML(c.code, c.name) + ' <span class="prmeta">answered ' + esc(String(c.responses || 0)) + " times";
-        if (c.negated > 0) line += ", negated " + esc(String(c.negated));
-        return "<li>" + line + "</span></li>";
-      }).join("") + "</ul>";
-    }
+    // "Where it gets stopped" is hidden (user, 2026-10-18): neither the frequency nor the value-head chokepoint
+    // ranking predicted anything on held-out games (NOTEBOOK 2026-10-18 primer comparison).
     body += "<h3>Your answers</h3>";
     const answers = p.your_answers || [];
     if (!answers.length) {
@@ -1820,18 +1822,14 @@ function mockPrimer() {
     archetype: "Tenpai Dragon",
     games: 48,
     key_cards: [
-      {code: 91810826, name: "Tenpai Dragon Chundra", games: 45, per_game: 0.938},
-      {code: 39931513, name: "Tenpai Dragon Paidra", games: 43, per_game: 0.896},
-      {code: 66730191, name: "Sangen Kaimen", games: 39, per_game: 0.813},
-      {code: 65326118, name: "Tenpai Dragon Fadra", games: 33, per_game: 0.688},
+      {code: 82570174, name: "Sangenpai Bident Dragion", games: 40, per_game: 0.833, impact: 8.4},
+      {code: 91810826, name: "Tenpai Dragon Chundra", games: 45, per_game: 0.938, impact: 7.3},
+      {code: 39931513, name: "Tenpai Dragon Paidra", games: 43, per_game: 0.896, impact: 4.7},
+      {code: 30336082, name: "Sangen Summoning", games: 37, per_game: 0.771, impact: 4.5},
     ],
     openers: [
       {plays: [66730191, 39931513, 91810826], names: ["Sangen Kaimen", "Tenpai Dragon Paidra", "Tenpai Dragon Chundra"], games: 14},
       {plays: [39931513, 91800273, 91810826], names: ["Tenpai Dragon Paidra", "Dimension Shifter", "Tenpai Dragon Chundra"], games: 9},
-    ],
-    chokepoints: [
-      {code: 39931513, name: "Tenpai Dragon Paidra", responses: 12, negated: 10},
-      {code: 82570174, name: "Sangenpai Bident Dragion", responses: 6, negated: 0},
     ],
     your_answers: [
       {code: 14558127, name: "Ash Blossom & Joyous Spring", hits: [

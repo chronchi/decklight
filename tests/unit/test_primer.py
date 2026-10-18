@@ -43,6 +43,25 @@ def _summary(winner=0, first=0, links=(), summons=(), steps=(), turns=()):
     }
 
 
+def _wstep(player, kind, code, turn, w):
+    return {
+        "player": player,
+        "n_opts": 2,
+        "kind": kind,
+        "code": code,
+        "turn": turn,
+        "phase": int(C.PHASE_MAIN1),
+        "turn_player": 0,
+        "w": w,
+    }
+
+
+def _scored(steps, w_end, winner=0, first=0):
+    s = _summary(winner=winner, first=first, steps=steps, turns=[{"turn": 1, "turn_player": 0}])
+    s["w_end"] = w_end
+    return s
+
+
 def _link(controller, code, group=0, count=1, negated=False, hloc=0):
     return {
         "turn": 1,
@@ -129,6 +148,93 @@ def test_counting_on_synthetic_chain_links():
     # Global negator index: B's card negated A's activation.
     assert store["negated_by"][str(b_code)][str(a_code)] == 25
     _ = hb
+
+
+def test_credit_and_answer_rules():
+    """A play moving seat-0 win chance 0.5 -> 0.7 credits +20; seat 1's answer
+    back to 0.55 credits +15 (its side) and is charged to the answered card."""
+    cards, names = _cards_names()
+    steps = [
+        _wstep(0, "ACTIVATE", 11, 1, 0.5),
+        _wstep(1, "ACTIVATE", 99, 1, 0.7),
+        _wstep(1, "TO_BATTLE", 0, 2, 0.55),  # turn-2 marker for the opener's w_after
+    ]
+    links = [
+        _link(0, 11, group=0, count=1),
+        _link(1, 99, group=0, count=2, hloc=HAND),
+    ]
+    s = _scored(steps, 0.55)
+    s["links"] = links
+    store = aggregate([s] * 25, cards, names)
+    ha, hb = hash_of(_deck(DECK_A)), hash_of(_deck(DECK_B))
+    key_a = {c["code"]: c for c in store["decks"][ha]["key_cards"]}
+    assert key_a[11]["impact"] == 20.0
+    assert key_a[11]["per_play"] == 20.0
+    assert key_a[11]["games"] == 25
+    key_b = {c["code"]: c for c in store["decks"][hb]["key_cards"]}
+    assert key_b[99]["impact"] == 15.0
+    assert key_b[99]["per_play"] == 15.0
+    choke = {c["code"]: c for c in store["decks"][ha]["chokepoints"]}
+    assert choke[11]["answered"] == 25
+    assert choke[11]["cost"] == 15.0
+    assert choke[11]["per_answer"] == 15.0
+    ht = store["decks"][ha]["hand_traps_seen"][0]
+    assert ht["code"] == 99 and ht["gain"] == 15.0
+    assert ht["answered"][0]["code"] == 11 and ht["answered"][0]["gain"] == 15.0
+    opener = store["decks"][ha]["openers"][0]
+    assert opener["plays"] == [11] and opener["w_after"] == 55.0
+    # primer_for passes the gains through to your_answers hits.
+    from ygo_zero.decks import parse_ydk
+
+    human_ht = parse_ydk("#main\n99\n!side\n", "human")
+    p = primer_for(store, _deck(DECK_A), human_ht)
+    assert p is not None
+    ans = {a["code"]: a for a in p["your_answers"]}
+    assert ans[99]["hits"][0]["gain"] == 15.0
+
+
+def test_impact_ranks_rare_big_card_above_frequent_zero():
+    cards, names = _cards_names()
+    rare = _scored([_wstep(0, "ACTIVATE", 11, 1, 0.3), _wstep(0, "SUMMON", 23, 1, 0.8)], 0.8)  # 11: +50 pts
+    flat = _scored([_wstep(0, "ACTIVATE", 22, 1, 0.5), _wstep(0, "SUMMON", 23, 1, 0.5)], 0.5)  # 22, 23: 0 pts
+    store = aggregate([rare] * 3 + [flat] * 10, cards, names)
+    ha = hash_of(_deck(DECK_A))
+    kc = store["decks"][ha]["key_cards"]
+    assert kc[0]["code"] == 11
+    assert kc[0]["impact"] == round(1.5 / 13 * 100, 1)
+    assert {c["code"] for c in kc} >= {11, 22}
+
+
+def test_unscored_caches_keep_frequency_fields():
+    """Summaries without w aggregate exactly like before (old caches still build)."""
+    cards, names = _cards_names()
+    s = _summary(
+        links=[_link(0, 100, group=0, count=1, negated=True), _link(1, 200, group=0, count=2)],
+        steps=[
+            {
+                "player": 0,
+                "n_opts": 3,
+                "kind": "ACTIVATE",
+                "code": 100,
+                "turn": 1,
+                "phase": int(C.PHASE_MAIN1),
+                "turn_player": 0,
+            }
+        ],
+    )
+    assert "w_end" not in s
+    store = aggregate([s] * 5, cards, names)
+    for d in store["decks"].values():
+        for c in d["key_cards"]:
+            assert set(c) == {"code", "name", "games", "per_game"}
+        for c in d["chokepoints"]:
+            assert set(c) == {"code", "name", "responses", "negated", "response_rate"}
+        for h in d["hand_traps_seen"]:
+            assert "gain" not in h
+            for a in h["answered"]:
+                assert "gain" not in a
+        for o in d["openers"]:
+            assert "w_after" not in o
 
 
 def test_hand_trap_seen_and_primer_for():
