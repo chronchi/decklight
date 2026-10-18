@@ -6,6 +6,7 @@ import {LOG_TABS, tabStripHTML, tabPanelOpen, statsPanelHTML, cardsPanelHTML, re
 import {esc, imgUrl, isHidden, phHTML} from "./render/card.js";
 import {morph} from "./render/morph.js";
 import {createCuePlayer, recapItem, chainTracker, planSteps, stepText} from "./cues.js";
+import {kwHTML, glossaryEntry} from "./glossary.js";
 
 const MOCKS = [
   "mock/01-lobby.json",
@@ -76,6 +77,7 @@ const ovDetail = ov("ov-detail");
 const ovReveal = ov("ov-reveal");
 const ovOver = ov("ov-over");
 const ovCues = ov("ov-cues");
+const ovKw = ov("ov-kw");
 
 let msg = null;          // latest server/mock message
 let locked = false;      // input disabled until the next state
@@ -161,6 +163,16 @@ let hintLoading = false;
 let hintPrompt = null;     // prompt id the current hint belongs to
 let whatIf = null;         // {"source","k","option","turn"} for a what-if game
 
+// Rules in context (step 5, item 6) + undo (item 9).
+let kwPop = null;          // {"id","term","long"} for the open keyword popover, or null
+let kwOpener = null;       // the keyword element to return focus to on close
+let ruleNotesOn = true;    // "Rule notes" switch (cue notes), on by default
+try {
+  ruleNotesOn = localStorage.getItem("ygo-rule-notes") !== "0";
+} catch (e) { /* private mode: stay on */ }
+let canUndo = false;       // the server says a practice undo is possible right now
+let undoPending = false;   // an undo was sent: announce it when the rewind state lands
+
 // Bot activation reveal queue + top-of-board banner.
 let revealQueue = [];
 let revealCur = null;
@@ -180,6 +192,7 @@ function openOvNames() {
   if (gameMenu) o.push("gamemenu");
   if (pileOpen) o.push("pile");
   if (detail) o.push("detail");
+  if (kwPop) o.push("kw");
   if (revealCur) o.push("reveal");
   return o;
 }
@@ -200,7 +213,8 @@ function closeState(name) {
   else if (name === "menu") menuUid = null;
   else if (name === "gamemenu") { gameMenu = false; surrenderArm = false; }
   else if (name === "pile") pileOpen = null;
-  else if (name === "detail") detail = null;
+  else if (name === "detail") { detail = null; kwPop = null; }
+  else if (name === "kw") kwPop = null;
   else if (name === "reveal") dismissReveal();
 }
 // X/scrim close: update state, then pop our own history entry so a later
@@ -316,9 +330,10 @@ function detailCardForOpt(index) {
 
 // Card text from the server's /card/{code} endpoint, cached by code.
 function cardText(code) {
-  if (!code || MOCK || IS_REPLAY) return null;
+  if (!code || IS_REPLAY) return null;
   const t = texts.get(code);
   if (t) return typeof t === "object" ? t : null;
+  if (MOCK) return null;   // mock text (if any) is preloaded from mock/card-text.json
   texts.set(code, "pending");
   fetch("/card/" + code + (TOKEN ? "?t=" + encodeURIComponent(TOKEN) : ""))
     .then((r) => (r.ok ? r.json() : Promise.reject(r.status)))
@@ -445,6 +460,22 @@ function onOption(index) {
   choose(index);
 }
 
+// Practice-mode undo: rewrite to the previous decision; the server re-sends the
+// log and cues from the rewound position (see web/server.py `on_undo`).
+function doUndo() {
+  if (!msg || msg.result || !practiceMode || !canUndo || locked || msg.thinking) return;
+  if (MOCK) { say("Undid your last decision"); return; }
+  if (!ws) return;
+  undoPending = true;
+  events = [];
+  hint = null;
+  hintLoading = false;
+  hintPrompt = null;
+  resetCues();
+  render();
+  ws.send({t: "undo"});
+}
+
 // ---- motion ----
 function snapshotRects() {
   const m = new Map();
@@ -548,6 +579,37 @@ function recapHTML(hint) {
     '<div class="rlist">' + rows + "</div>" + (hint ? '<div class="hint">' + esc(hint) + "</div>" : "") + "</div>";
 }
 
+// Rule popover: the glossary `long` text, stacked above the card detail dialog.
+function kwPopHTML() {
+  if (!kwPop) return "";
+  return '<div id="kwscrim" data-key="kwscrim" data-act="closekw"></div>' +
+    '<div id="kwpop" data-key="kwpop" role="dialog" aria-modal="true" tabindex="-1" aria-label="' +
+    esc("Rule: " + kwPop.term) + '">' +
+    '<div class="mhead">' + esc(kwPop.term) + '<button class="iconbtn" data-act="closekw" aria-label="Close rule">' +
+    '<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5 5l10 10M15 5 5 15"/></svg></button></div>' +
+    '<div class="mbody"><p>' + esc(kwPop.long) + '</p></div></div>';
+}
+
+function openKw(id, el) {
+  const g = glossaryEntry(id);
+  if (!g) return;
+  kwOpener = el || null;
+  kwPop = {id: g.id, term: g.term, long: g.long};
+  render();
+}
+
+function closeKw() {
+  if (!kwPop) return;
+  const back = kwOpener;
+  const id = kwPop.id;
+  kwPop = null;
+  kwOpener = null;
+  render();
+  let el = back && back.isConnected && visible(back) ? back : null;
+  if (!el) el = [...document.querySelectorAll('[data-act="kw"][data-kw="' + id + '"]')].find(visible) || null;
+  if (el) el.focus({preventScroll: true});
+}
+
 function gameMenuHTML() {
   const seg = (v, label) =>
     '<button role="radio" aria-checked="' + (chainMode === v) + '" class="' + (chainMode === v ? "sel" : "") +
@@ -576,6 +638,7 @@ function gameMenuHTML() {
     '<div class="seg" role="radiogroup" aria-labelledby="gm-pace">' + speedSeg("1", "1×") + speedSeg("2", "2×") + speedSeg("instant", "Instant") + "</div>" +
     toggleRow("cuepause", cuePause, "Pause after each bot action", "Tap anywhere or press Enter to continue.") +
     toggleRow("cuerecap", cueRecap, "Turn recap", "What the bot did, at the start of your turn.") +
+    toggleRow("rulenotes", ruleNotesOn, "Rule notes", "A one-line rule tip on the first of each kind of play.") +
     '<div class="msep"></div>' +
     '<div class="mrow disabled" aria-disabled="true">Sound<span class="sub">Off</span></div>' +
     "</div></div>";
@@ -595,8 +658,7 @@ function captionHTML(m) {
 
 // "Ask the bot" hint maps for the current prompt: by option index (sheets,
 // phase buttons) and by card uid (idle/battle glowing cards).
-function hintMaps(p) {
-  const byIndex = {}, byUid = {};
+function hintMaps(p) {  const byIndex = {}, byUid = {};
   if (!hint || !p || hintPrompt !== p.id) return {byIndex, byUid};
   const opts = p.options || [];
   (hint.options || []).forEach((ho, i) => {
@@ -611,12 +673,10 @@ function hintMaps(p) {
 }
 
 // Hint bar: the returned top picks in words (badges on the options carry them
-// visually). The Hint button lives in the sheet header (sheet prompts) or in
-// your bar (idle/battle); the info copy carries no button. Idle prompts show
-// the bar only once asked (the bar is always visible, never under a fold).
-function hintBarHTML(p, withButton, idle) {
+// visually). Sheet prompts keep Hint/Undo in the sheet header; idle/battle
+// prompts get them in this row under your bar, which is always visible.
+function hintBarHTML(p, withButton, idle, undo) {
   if (!practiceMode || !p || msg.result || IS_REPLAY) return "";
-  if (idle && !hintLoading && !(hint && hintPrompt === p.id)) return "";
   let inner = "";
   if (hintLoading) {
     inner = '<span class="hintwait" role="status">Asking the bot…</span>';
@@ -632,10 +692,15 @@ function hintBarHTML(p, withButton, idle) {
   } else {
     inner = '<span class="hintsub">bot\u2019s top picks</span>';
   }
+  // Idle/battle prompts: Hint + Undo sit in this row under your bar (the bar
+  // itself has no room for them next to the phase buttons at phone width).
+  const undoBtn = undo && undo.show
+    ? '<button class="hintbtn" data-act="undo" aria-label="Undo your last decision"' +
+      (undo.enabled ? "" : ' disabled aria-disabled="true"') + ">Undo</button>" : "";
   return '<div class="hintbar" data-key="hintbar">' +
     (withButton ? '<button class="hintbtn" data-act="hint"' +
-      ' aria-label="Ask the bot for a hint"' + (hintLoading ? " disabled" : "") + ">Hint</button>" : "") +
-    inner + "</div>";
+      ' aria-label="Ask the bot for a hint"' + (hintLoading || locked ? " disabled" : "") + ">Hint</button>" : "") +
+    undoBtn + inner + "</div>";
 }
 
 function renderGame() {
@@ -643,6 +708,10 @@ function renderGame() {
   const p = msg.prompt;
   const act = locked ? {} : actionableMap(p);
   const hm = hintMaps(p);
+  const undo = {
+    show: practiceMode && !msg.result,
+    enabled: practiceMode && canUndo && !locked && !msg.thinking && !msg.result,
+  };
   app.classList.toggle("replay", IS_REPLAY);
   if (focusUid && !findCard(focusUid)) focusUid = null;
   const yourTurn = v.turn_player === "you";
@@ -663,8 +732,7 @@ function renderGame() {
   h += "</div>";
   h += '<div class="field you">' + sideHTML(v.you, {mirror: false, mock: MOCK, actionable: act, focus: focusUid, hint: hm.byUid}) + "</div>";
   h += "</div>";
-  const isIdle = p && (p.kind === "idle" || p.kind === "battle");
-  h += barHTML(v.you, "you", {phaseBtns: phaseBtnsHTML(p, locked, hm.byIndex, practiceMode && isIdle && !msg.result), active: yourTurn, name: replayName("you")});
+  h += barHTML(v.you, "you", {phaseBtns: phaseBtnsHTML(p, locked, hm.byIndex, false, null), active: yourTurn, name: replayName("you")});
 
   let info = null;
   let sheet = "";
@@ -682,14 +750,14 @@ function renderGame() {
       info = {card: c, text: t && t.text, typeStr: t && t.type_str};
     }
     const isSheet = p && p.kind !== "idle" && p.kind !== "battle";
-    h += '<div id="info" data-key="info">' + hintBarHTML(p, false, !isSheet) +
+    h += '<div id="info" data-key="info">' + (isSheet ? "" : hintBarHTML(p, true, true, undo)) +
       (recap && !info ? recapHTML(hintFor(p))
       : infoHTML(info, shownEvents(), MOCK, hintFor(p), msg.names || null)) + "</div>";
     h += '<div id="hand" data-key="hand" class="' + (locked ? "locked" : "") + '">' + handHTML(v.you.hand, act, MOCK, focusUid, hm.byUid) + "</div>";
 
     sheet = pileOpen ? pileSheetHTML(pileOpen, pileCards(pileOpen), MOCK)
       : (p && !msg.result && isSheet
-        ? sheetHTML(p, MOCK, sel, expanded, {hintByIndex: hm.byIndex, showHint: practiceMode}) + hintBarHTML(p, false)
+        ? sheetHTML(p, MOCK, sel, expanded, {hintByIndex: hm.byIndex, showHint: practiceMode, showUndo: undo.show, undoEnabled: undo.enabled}) + hintBarHTML(p, false)
         : "");
   }
   if (pileOpen) h += '<div id="pscrim" data-key="pscrim" data-act="closepile"></div>';
@@ -814,10 +882,12 @@ function renderOverlays(logh) {
       '<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5 5l10 10M15 5 5 15"/></svg></button>' + face +
       "<h2>" + esc(c.name || "Hidden card") + "</h2>" +
       (meta ? '<div class="typeline">' + esc(meta) + "</div>" : "") +
-      '<div class="dtext">' + esc((t && t.text) || (MOCK ? "Card text loads from the server in a live game." : "")) + "</div>" +
+      '<div class="dtext">' + kwHTML(esc((t && t.text) || (MOCK ? "Card text loads from the server in a live game." : ""))) + "</div>" +
       '<div class="dclose" aria-hidden="true">Tap anywhere to close</div></div>';
   }
   morph(ovDetail, dh);
+
+  morph(ovKw, kwPopHTML());
 
   if (!revealLeaving) morph(ovReveal, revealCur ? revealHTML(revealCur) : "");
 
@@ -1036,6 +1106,12 @@ app.addEventListener("click", (ev) => {
     if (onInfoBtn(info)) return;
   }
   if (onRecapRow(t)) return;
+  const kw = t.closest('[data-act="kw"]');
+  if (kw) {
+    // A keyword inside an option row: open the rule, never choose the option.
+    openKw(kw.getAttribute("data-kw"), kw);
+    return;
+  }
   const ef = t.closest(".opt .ef");
   if (ef) {
     // Tapping the effect text expands it; tapping the rest of the row chooses.
@@ -1265,9 +1341,17 @@ function onAction(kind, el) {
     detail = findCard(el.getAttribute("data-uid"));
     closeState("menu");
     ovStack = ovStack.filter((n) => n !== "menu");
-  } else if (kind === "closedetail") { closeState("detail"); render(); closeOv("detail"); return; }
+  }   else if (kind === "closedetail") { closeState("detail"); render(); closeOv("detail"); return; }
   else if (kind === "closereveal") { dismissReveal(); return; }
-  else if (kind === "gamemenu") { gameMenu = true; surrenderArm = false; }
+  else if (kind === "kw") { openKw(el.getAttribute("data-kw"), el); return; }
+  else if (kind === "closekw") { closeKw(); return; }
+  else if (kind === "rulenotes") {
+    ruleNotesOn = !ruleNotesOn;
+    saveSetting("ygo-rule-notes", ruleNotesOn ? "1" : "0");
+  } else if (kind === "undo") {
+    doUndo();
+    return;
+  } else if (kind === "gamemenu") { gameMenu = true; surrenderArm = false; }
   else if (kind === "closegamemenu") { closeState("gamemenu"); render(); closeOv("gamemenu"); return; }
   else if (kind === "surrender") {
     if (!surrenderArm) {
@@ -1469,7 +1553,7 @@ const FOCUSABLE = 'button:not([disabled]), [href], input, textarea, select, summ
 const visible = (el) => !!el && el.getClientRects().length > 0 && getComputedStyle(el).visibility !== "hidden";
 function topModal() {
   if (IS_REPLAY) return null;
-  for (const sel of ["#detail", "#menu", "#gamemenu", "#sheet.pilesheet", "#reviewframe", "#logdrawer", "#gameover[role=alertdialog]"]) {
+  for (const sel of ["#kwpop", "#detail", "#menu", "#gamemenu", "#sheet.pilesheet", "#reviewframe", "#logdrawer", "#gameover[role=alertdialog]"]) {
     const el = document.querySelector(sel);
     if (el && visible(el)) return el;
   }
@@ -1518,6 +1602,7 @@ function manageFocus() {
   }
 }
 function closeTop() {
+  if (kwPop) { closeKw(); return true; }
   if (menuUid) { closeState("menu"); render(); closeOv("menu"); return true; }
   if (detail) { closeState("detail"); render(); closeOv("detail"); return true; }
   if (reviewFrame) { reviewFrame = null; render(); return true; }
@@ -1534,6 +1619,14 @@ document.addEventListener("keydown", (ev) => {
   const typing = t.matches && t.matches("input, textarea");
   if (ev.key === "Escape") {
     if (closeTop()) ev.preventDefault();
+    return;
+  }
+  // Practice undo: "u" when no dialog is open.
+  if ((ev.key === "u" || ev.key === "U") && !typing && !ev.ctrlKey && !ev.metaKey && !ev.altKey &&
+      !topModal() && msg && msg.t === "state" && msg.prompt && !msg.result && practiceMode &&
+      canUndo && !locked && !msg.thinking) {
+    ev.preventDefault();
+    doUndo();
     return;
   }
   // "Pause after each bot action": Enter continues, like a tap.
@@ -1599,6 +1692,7 @@ const cue = createCuePlayer({
   pause: () => cuePause && !IS_REPLAY,
   announce: (t) => say(t),
   reduced: () => reducedMotion() && !IS_REPLAY,
+  ruleNotes: () => ruleNotesOn,
   textFor: (code) => {
     const t = cardText(code);
     return t && t.text ? t.text : null;
@@ -1728,7 +1822,12 @@ function applyState(m) {
     if (!m.result) { hint = null; hintLoading = false; hintPrompt = null; }
   }
   practiceMode = !!m.practice;
+  canUndo = !!m.can_undo;
   whatIf = m.what_if || null;
+  if (undoPending) {
+    say("Undid your last decision");
+    undoPending = false;
+  }
   // A cue-aware server replaces the old reveal/banner notices.
   addEvents(m.log, false, !("cues" in m));
   markNegations(m);
@@ -1750,6 +1849,12 @@ async function loadMock(i) {
     msg = {t: "error", text: "mock load failed: " + MOCKS[mockIdx]};
   }
   if (msg.t === "lobby") lobby = msg;
+  // Mock screenshots of rules-in-context need real card text (the live path
+  // fetches /card/{code}; mocks preload a small map instead).
+  try {
+    const ct = await (await fetch("mock/card-text.json?v=2")).json();
+    for (const [code, v] of Object.entries(ct)) texts.set(Number(code), v);
+  } catch (e) { /* no mock card text */ }
   if (msg.t === "state") addEvents(msg.log, true);
   resetCues();
   locked = false;
@@ -1792,6 +1897,23 @@ async function loadMock(i) {
     if (qs.get("log") === "1") logOpen = true;
     // Screenshot hook for the win-chance switch: ?winchance=1 turns it on.
     if (qs.get("winchance") === "1") winChance = true;
+    // Rules-in-context screenshots: ?detail=<uid> / ?detailcode=<code> open the
+    // card detail, ?kw=<id> opens its rule popover, ?canundo=1 shows Undo ready.
+    if (qs.get("detail")) {
+      const c = findCard(qs.get("detail"));
+      if (c && !isHidden(c)) detail = c;
+    }
+    if (qs.get("detailcode")) {
+      const code = parseInt(qs.get("detailcode"), 10);
+      const ct = texts.get(code);
+      detail = {uid: "mock:" + code, code, name: (ct && ct.name) || ("#" + code), faceup: true, pos: null,
+        atk: 0, def: 0, level: 0, rank: 0, link: 0, counters: 0, overlays: []};
+    }
+    if (qs.get("kw")) {
+      const g = glossaryEntry(qs.get("kw"));
+      if (g) kwPop = {id: g.id, term: g.term, long: g.long};
+    }
+    if (qs.get("canundo") === "1") { practiceMode = true; canUndo = true; }
     // Screenshot hooks for the review tab: ?review=1 loads mock/review.json,
     // ?reviewfilter=mistakes|missed picks the filter, ?reviewframe=1 opens the decision board.
     if (qs.get("review") === "1") {
@@ -2034,6 +2156,7 @@ async function boot() {
         locked = false;
         setTimeout(() => { banner.hidden = true; }, 4000);
       } else {
+        if (m.t === "error") undoPending = false;   // the undo was refused: don't announce it
         msg = m;
       }
       render();

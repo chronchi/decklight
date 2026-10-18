@@ -49,6 +49,13 @@ MOCKS = [
     ("51-hint-cards", "3&hint=1"),
     ("52-hint-idle", "1&hint=1"),
     ("53-whatif-banner", "1&whatif=1"),
+    # Rules in context + undo (step 5, items 6 and 9): card text with tappable
+    # keywords, the keyword popover over it, the Rule notes switch, the practice
+    # prompt bar with Hint + Undo.
+    ("58-keywords-detail", "1&detailcode=14558128"),
+    ("59-kw-popover", "1&detailcode=14558128&kw=quick-effect"),
+    ("60-rule-notes-menu", "1&gamemenu=1"),
+    ("61-practice-undo", "1&hint=1&canundo=1"),
 ]
 
 # Pacing cues frozen mid-scene: ?cue=K&t=F freezes visible scene K at fraction F
@@ -72,6 +79,8 @@ CUE_SHOTS = [
     ("35-cue-added", "14&cue=1&t=0.6"),
     ("36-cue-confirm", "14&cue=2&t=0.6"),
     ("37-cue-mill", "14&cue=4&t=0.5"),
+    # A cue with a glossary rule note (chain link 2 on the activate scene).
+    ("62-cue-rule-note", "11&cue=3&t=0.6"),
 ]
 
 
@@ -241,6 +250,39 @@ def whatif_topmost(page) -> str:
     return page.evaluate(WHATIF_TOPMOST_JS)
 
 
+KW_TOPMOST_JS = """() => {
+  // The keyword popover and the Undo button must be uncovered: at each centre
+  // the topmost element stays inside the popover / on the button.
+  const out = [];
+  const pop = document.querySelector('#kwpop');
+  if (pop) {
+    const r = pop.getBoundingClientRect();
+    const el = document.elementFromPoint(
+      Math.min(innerWidth - 1, Math.max(0, r.left + r.width / 2)),
+      Math.min(innerHeight - 1, Math.max(0, r.top + r.height / 2)));
+    if (!el || !(el === pop || pop.contains(el) || el.contains(pop))) {
+      out.push('popover-covered-by:' + (el && (el.id || el.className || el.tagName)));
+    }
+  }
+  const undoBtn = document.querySelector('[data-act="undo"]');
+  if (undoBtn) {
+    const r = undoBtn.getBoundingClientRect();
+    const el = document.elementFromPoint(
+      Math.min(innerWidth - 1, Math.max(0, r.left + r.width / 2)),
+      Math.min(innerHeight - 1, Math.max(0, r.top + r.height / 2)));
+    if (!el || !(el === undoBtn || undoBtn.contains(el) || el.contains(undoBtn))) {
+      out.push('undo-covered-by:' + (el && (el.id || el.className || el.tagName)));
+    }
+  }
+  return out.length ? out.slice(0, 3).join(',') : 'ok';
+}"""
+
+
+def kw_topmost(page) -> str:
+    """Topmost check for the keyword popover and the Undo button (KW_TOPMOST_JS)."""
+    return page.evaluate(KW_TOPMOST_JS)
+
+
 def launch_kwargs():
     """Point at the pre-installed Chromium (brief: already in ~/.cache/ms-playwright)."""
     env = os.environ.get("CHROME_EXE")
@@ -361,6 +403,35 @@ def main() -> int:
                     top = whatif_topmost(page)
                     if top != "ok":
                         errors.append(f"53-whatif-banner: what-if banner covered ({top})")
+                if name == "58-keywords-detail" and not page.evaluate(
+                    "document.querySelectorAll('#detail .dtext .kw').length"
+                ):
+                    errors.append("58-keywords-detail: no tappable keywords in the card text")
+                if name == "59-kw-popover":
+                    if not page.evaluate("!!document.querySelector('#kwpop')"):
+                        errors.append("59-kw-popover: no rule popover on screen")
+                    if not page.evaluate("!!document.querySelector('#detail')"):
+                        errors.append("59-kw-popover: the card detail closed under the popover")
+                    top = kw_topmost(page)
+                    if top != "ok":
+                        errors.append(f"59-kw-popover: popover covered ({top})")
+                if name == "60-rule-notes-menu":
+                    if not page.evaluate(
+                        "/Rule notes/.test(document.querySelector('#gamemenu').textContent)"
+                    ):
+                        errors.append("60-rule-notes-menu: no Rule notes switch")
+                    if not page.evaluate("!!document.querySelector('[data-act=rulenotes]')"):
+                        errors.append("60-rule-notes-menu: no Rule notes toggle control")
+                if name == "61-practice-undo":
+                    if not page.evaluate("!!document.querySelector('[data-act=undo]')"):
+                        errors.append("61-practice-undo: no Undo button on screen")
+                    if not page.evaluate("!!document.querySelector('.hintbar [data-act=hint] ~ [data-act=undo]')"):
+                        errors.append("61-practice-undo: no Hint button next to Undo")
+                    if page.evaluate("!!document.querySelector('.phasebtns [data-act=hint], .phasebtns [data-act=undo]')"):
+                        errors.append("61-practice-undo: Hint/Undo back in the bar (no room at phone width)")
+                    top = kw_topmost(page)
+                    if top != "ok":
+                        errors.append(f"61-practice-undo: Undo button covered ({top})")
             for name, i in CUE_SHOTS:
                 page.goto(f"{base}?mock=1&i={i}", wait_until="networkidle")
                 page.wait_for_timeout(250)
@@ -381,6 +452,11 @@ def main() -> int:
                         "/negated/i.test(document.querySelector('#ov-cues .cue-neg').textContent)"
                     ):
                         errors.append("26-cue-negated: no 'negated' text label")
+                if name == "62-cue-rule-note" and not page.evaluate(
+                    "document.querySelector('#ov-cues .cue-rule.on') && "
+                    "document.querySelector('#ov-cues .cue-rule').textContent.trim().length > 0"
+                ):
+                    errors.append("62-cue-rule-note: no rule note shown on the cue")
             # Duel-log sheet tabs (Log | Stats | Cards) against the stats mock.
             for name, i in LOG_SHOTS:
                 page.goto(f"{base}?mock=1&i={i}", wait_until="networkidle")

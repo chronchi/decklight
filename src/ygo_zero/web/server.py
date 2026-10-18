@@ -109,6 +109,10 @@ class Server:
         self.auto_passed: set[int] = set()  # history numbers (1-based n) of auto-passes
         self.practice = False  # practice mode: hints allowed, excluded from human stats
         self.hints_used = 0  # hints asked this game (recorded in the record)
+        self.undos = 0  # practice undos this game (recorded in the record)
+        # Host choice index of each real (multi-option) human decision this game,
+        # in order; undo rewinds to the last one (auto-passed windows are not here).
+        self.human_decisions: list[int] = []
         self.what_if: dict | None = None  # {"source","k","option","turn"} for a what-if game
         self.record_path: Path | None = None  # game.jsonl of the live/finished game
         self._review_task: asyncio.Task | None = None
@@ -250,6 +254,7 @@ class Server:
             "thinking": {"seconds": thinking} if thinking is not None else None,
             "result": result,
             "practice": self.practice,
+            "can_undo": bool(self.practice and not self.advancing and s.need_human and self.human_decisions),
             "what_if": self.what_if,
         }
 
@@ -544,6 +549,8 @@ class Server:
         self.mode = mode
         self.practice = practice
         self.hints_used = 0
+        self.undos = 0
+        self.human_decisions = []
         self.what_if = None
         self.prompt_id = 0
         self.log_sent = 0
@@ -588,7 +595,9 @@ class Server:
             used = bool(
                 is_chain and 0 <= index < len(s.env.opts) and s.env.opts[index].kind.name == "ACTIVATE"
             )
+            before = len(s.env.choices)  # this decision's host index (for undo)
             s.step_human(index)
+            self.human_decisions.append(before)
         except (IndexError, ValueError) as e:
             await self._error(f"illegal option: {e}")
             return
@@ -868,6 +877,151 @@ class Server:
         except (WebSocketDisconnect, RuntimeError):
             pass
 
+    async def _restart_from(
+        self,
+        prefix_host,
+        *,
+        mode: str,
+        apply_option: int | None = None,
+        what_if: dict | None = None,
+        undos: int | None = None,
+        hints_used: int = 0,
+    ) -> bool:
+        """Rebuild the live session from a host prefix (shared by what-if and undo).
+
+        Replays `prefix_host` into a fresh `DuelSession` (the product driver
+        replays the prefix verbatim, never re-searching it), swaps it in and
+        starts `advance`. With `apply_option` set, that option is applied at the
+        resulting prompt (what-if); otherwise the human's prompt at the prefix end
+        is re-presented (undo). Every check is kept (driver lockstep divergence);
+        on any failure it ALERTs and keeps the current session. Returns True on
+        success.
+        """
+        from ygo_zero.engine.env import PyEnv
+        from ygo_zero.play.session import DuelSession
+
+        s = self.session
+        if s is None:
+            return False
+        prefix_host = [int(c) for c in prefix_host]
+        env = PyEnv(self.engine, s.cfg, auto_single=False)
+        env.reset()
+        prefix_decisions: list[dict] = []
+        for c in prefix_host:
+            if env.done:
+                break
+            if len(env.opts) > 1:
+                prefix_decisions.append({"player": int(env.player), "n_options": len(env.opts)})
+            env.step(int(c))
+        if env.done:
+            await self._error("the position is already game over")
+            return False
+        pre = (int(env.player), len(env.opts))
+        turn = int(env.duel.turn)
+        if what_if is not None and "turn" not in what_if:
+            what_if = dict(what_if, turn=turn)
+        from ygo_zero.edopro.product_bot import host_to_product
+
+        try:
+            product_prefix = [int(c) for c in host_to_product(self.engine, s.cfg, prefix_host)]
+        except ValueError as e:
+            await self._error(f"replay failed: {e}")
+            return False
+        if len(product_prefix) != len(prefix_decisions):
+            await self._error(
+                f"replay failed: {len(prefix_decisions)} host decisions vs "
+                f"{len(product_prefix)} product decisions"
+            )
+            return False
+        try:
+            opp = await asyncio.to_thread(self._make_opponent, mode)
+        except Exception as e:  # noqa: BLE001
+            await self._error(f"could not start the {mode} opponent: {e}")
+            return False
+        launcher = opp if hasattr(opp, "start_duel") else None
+        bot = None if launcher is not None else opp
+        meta = dict(s.record_meta or {})
+        meta.update({"mode": mode, "practice": True, "what_if": what_if, "hints_used": hints_used})
+        if undos is None:
+            meta.pop("undos", None)
+        else:
+            meta["undos"] = int(undos)
+        session = DuelSession(
+            self.engine,
+            s.cfg,
+            s.human_seat,
+            bot=bot,
+            launcher=launcher,
+            seed=s.seed,
+            record_root=self.record_root,
+            human_auto=True,
+            record_meta=meta,
+            driver_prefix=product_prefix,
+            driver_prefix_decisions=prefix_decisions,
+        )
+        try:
+            await asyncio.to_thread(session.reset)
+        except Exception as e:  # noqa: BLE001
+            session.close()
+            await self._error(f"could not start the replay game: {e}")
+            return False
+        try:
+            for c in prefix_host:
+                if session.env.done:
+                    break
+                session.env.step(int(c))
+            if session.env.done:
+                raise ValueError("the replay position is already game over")
+            if (int(session.env.player), len(session.env.opts)) != pre:
+                raise ValueError(
+                    f"replay diverged: host (player={session.env.player}, "
+                    f"options={len(session.env.opts)}) vs prefix (player={pre[0]}, options={pre[1]})"
+                )
+            if apply_option is not None:
+                if not 0 <= int(apply_option) < len(session.env.opts):
+                    raise ValueError(f"illegal option {apply_option} of {len(session.env.opts)}")
+                session.env.step(int(apply_option))
+                session.prod_len = len(product_prefix) + 1
+                if session.driver is not None:
+                    session.driver.feed_human([int(apply_option)])
+                    session.check_driver_step(len(product_prefix), pre)
+            else:
+                if not session.need_human:
+                    raise ValueError("the rewind position is not a human prompt")
+                session.prod_len = len(product_prefix)
+                if session.driver is not None:
+                    session.check_driver_step(len(product_prefix), pre)
+        except Exception as e:  # noqa: BLE001 -- ALERT, keep the current game
+            print(f"ALERT web: replay failed: {e}", flush=True)
+            session.close()
+            await self._error(f"replay failed: {e}")
+            return False
+        self.gen += 1
+        if self.session is not None:
+            self._drop_session(self.session)
+        self.session = session
+        self.practice = True
+        self.hints_used = int(hints_used)
+        self.what_if = what_if
+        self.prompt_id = 0
+        self.log_sent = 0
+        self.cue_sent = 0
+        self.finished = False
+        self.end_reason = ""
+        self._last_sig = ()
+        self.winchance = None
+        self._wc_n = 0
+        self.auto_passed = set()
+        self.record_path = None
+        if self._review_task is not None and not self._review_task.done():
+            self._review_task.cancel()
+            self._review_task = None
+        from ygo_zero.web.stats import DuelStats
+
+        self.stats = DuelStats(session.human_seat)
+        self.start_advance()
+        return True
+
     async def on_whatif(self, msg: dict) -> None:
         """Start a new practice game from a reviewed decision with another option.
 
@@ -875,9 +1029,6 @@ class Server:
         then continues live against the product bot. Valid after game over when
         a review exists.
         """
-        from ygo_zero.engine.env import PyEnv
-        from ygo_zero.play.session import DuelSession
-
         s = self.session
         if s is None or not self.finished or s.result is None:
             await self._error("no finished game to review (finish a game first)")
@@ -906,123 +1057,70 @@ class Server:
         if not 0 <= k < len(dlist):
             await self._error(f"unknown decision {k}")
             return
-        prefix_host = [int(c) for c in dlist[k]["prefix"]]
-        env = PyEnv(self.engine, s.cfg, auto_single=False)
-        env.reset()
-        prefix_decisions: list[dict] = []
-        for c in prefix_host:
-            if env.done:
-                break
-            if len(env.opts) > 1:
-                prefix_decisions.append({"player": int(env.player), "n_options": len(env.opts)})
-            env.step(int(c))
-        if env.done or not 0 <= option < len(env.opts):
-            await self._error(f"illegal option {option} of {len(env.opts) if not env.done else 0}")
-            return
-        pre = (int(env.player), len(env.opts))
-        turn = int(env.duel.turn)
-        from ygo_zero.edopro.product_bot import host_to_product
-
-        try:
-            product_prefix = [int(c) for c in host_to_product(self.engine, s.cfg, prefix_host)]
-        except ValueError as e:
-            await self._error(f"what-if replay failed: {e}")
-            return
-        if len(product_prefix) != len(prefix_decisions):
-            await self._error(
-                f"what-if replay failed: {len(prefix_decisions)} host decisions vs "
-                f"{len(product_prefix)} product decisions"
-            )
-            return
         mode = rec.get("mode", self.mode)
         if mode not in ("product", "fast"):
             await self._error("What-if needs the full bot")
             return
-        try:
-            opp = await asyncio.to_thread(self._make_opponent, mode)
-        except Exception as e:  # noqa: BLE001
-            await self._error(f"could not start the {mode} opponent: {e}")
-            return
-        launcher = opp if hasattr(opp, "start_duel") else None
-        bot = None if launcher is not None else opp
-        hs = int(rec["human_seat"])
+        prefix_host = [int(c) for c in dlist[k]["prefix"]]
         source = self.record_path.parent.name if self.record_path is not None else ""
-        what_if = {"source": source, "k": int(k), "option": int(option), "turn": turn}
-        meta = {
-            "human_deck": rec.get("human_deck", "pasted"),
-            "bot_deck": rec.get("bot_deck", "pasted"),
-            "mode": mode,
-            "first": rec.get("first", "rps"),
-            "chain": rec.get("chain", self.chain_mode),
-            "practice": True,
-            "hints_used": 0,
-            "what_if": what_if,
-        }
-        session = DuelSession(
-            self.engine,
-            s.cfg,
-            hs,
-            bot=bot,
-            launcher=launcher,
-            seed=s.seed,
-            record_root=self.record_root,
-            human_auto=True,
-            record_meta=meta,
-            driver_prefix=product_prefix,
-            driver_prefix_decisions=prefix_decisions,
+        ok = await self._restart_from(
+            prefix_host,
+            mode=mode,
+            apply_option=option,
+            what_if={"source": source, "k": int(k), "option": int(option)},
+            undos=None,
+            hints_used=0,
         )
-        try:
-            await asyncio.to_thread(session.reset)
-        except Exception as e:  # noqa: BLE001
-            session.close()
-            await self._error(f"could not start the what-if game: {e}")
-            return
-        try:
-            for c in prefix_host:
-                if session.env.done:
-                    break
-                session.env.step(int(c))
-            if session.env.done:
-                raise ValueError("the what-if position is already game over")
-            if int(session.env.player) != hs or len(session.env.opts) != pre[1]:
-                raise ValueError(
-                    f"what-if replay diverged: host (player={session.env.player}, "
-                    f"options={len(session.env.opts)}) vs record (player={pre[0]}, options={pre[1]})"
-                )
-            session.env.step(int(option))
-            session.prod_len = len(product_prefix) + 1
-            if session.driver is not None:
-                session.driver.feed_human([int(option)])
-                session.check_driver_step(len(product_prefix), pre)
-        except Exception as e:  # noqa: BLE001 -- ALERT, keep the finished game
-            print(f"ALERT web: what-if replay failed: {e}", flush=True)
-            session.close()
-            await self._error(f"what-if replay failed: {e}")
-            return
-        self.gen += 1
-        if self.session is not None:
-            self._drop_session(self.session)
-        self.session = session
-        self.practice = True
-        self.hints_used = 0
-        self.what_if = what_if
-        self.prompt_id = 0
-        self.log_sent = 0
-        self.cue_sent = 0
-        self.finished = False
-        self.end_reason = ""
-        self._last_sig = ()
-        self.winchance = None
-        self._wc_n = 0
-        self.auto_passed = set()
-        self.record_path = None
-        if self._review_task is not None and not self._review_task.done():
-            self._review_task.cancel()
-            self._review_task = None
-        from ygo_zero.web.stats import DuelStats
+        if ok:
+            self.human_decisions = []
+            self.undos = 0
 
-        self.stats = DuelStats(session.human_seat)
-        self.start_advance()
+    async def on_undo(self) -> None:
+        """Practice-mode undo: rewind to the human's previous real decision.
+
+        Valid only in practice mode, while a human prompt waits (not while the bot
+        thinks), with at least one real decision already made. Re-presents the
+        previous real decision; the bot's choices before it are replayed, never
+        re-searched (`_restart_from`). The record keeps its meta and gains
+        `undos: <count>`, which carries across undos.
+        """
+        s = self.session
+        if not self.practice:
+            await self._error("Undo is only in practice mode")
+            return
+        if s is None or s.done:
+            await self._error("no active game (send new_game first)")
+            return
+        if getattr(s, "launcher", None) is None:
+            await self._error("Undo needs the full bot")
+            return
+        if self.advancing or s.thinking_since is not None:
+            await self._error("Wait for the bot to finish")
+            return
+        if not s.need_human:
+            await self._error("no prompt is waiting for you right now")
+            return
+        if not self.human_decisions:
+            await self._error("Nothing to undo")
+            return
+        target = int(self.human_decisions[-1])
+        prefix_host = [int(c) for c in s.env.choices[:target]]
+        what_if = (s.record_meta or {}).get("what_if")
+        n = int((s.record_meta or {}).get("undos", 0)) + 1
+        # Auto-passes before the rewind point stay in the record (review's missed responses).
+        kept_auto = {i for i in self.auto_passed if i <= target}
+        ok = await self._restart_from(
+            prefix_host,
+            mode=(s.record_meta or {}).get("mode") or self.mode,
+            apply_option=None,
+            what_if=what_if,
+            undos=n,
+            hints_used=self.hints_used,
+        )
+        if ok:
+            self.human_decisions.pop()
+            self.undos = n
+            self.auto_passed = kept_auto
 
     async def _error(self, text: str) -> None:
         if self.ws is None:
@@ -1228,6 +1326,8 @@ def create_app(
                         await srv.on_new_game(msg)
                     elif t == "whatif":
                         await srv.on_whatif(msg if isinstance(msg, dict) else {})
+                    elif t == "undo":
+                        await srv.on_undo()
                     elif t == "choose":
                         await srv.on_choose(msg)
                     elif t == "resync":

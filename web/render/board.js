@@ -138,14 +138,18 @@ export function winchanceHTML(wc) {
 // Phase buttons inside your bar (idle and battle prompts only).
 // hintByIndex: {index: {rank, pct, est}} from "Ask the bot"; showHint adds the
 // Hint button here (idle/battle have no sheet, and the bar is always visible).
-export function phaseBtnsHTML(prompt, locked, hintByIndex, showHint) {
+// undo: {show, enabled} for the practice "Undo your last decision" button.
+export function phaseBtnsHTML(prompt, locked, hintByIndex, showHint, undo) {
   if (!prompt || (prompt.kind !== "idle" && prompt.kind !== "battle")) return "";
   const hb = hintByIndex || {};
   const btns = (prompt.options || []).filter((o) => ["to_battle", "to_main2", "end_turn"].includes(o.verb));
-  if (!btns.length && !showHint) return "";
-  return '<span class="phasebtns">' +
+  if (!btns.length && !showHint && !(undo && undo.show)) return "";
+  const practice = showHint || (undo && undo.show) ? " practice" : "";
+  return '<span class="phasebtns' + practice + '">' +
     (showHint ? '<button class="hintbtn sm" data-act="hint" aria-label="Ask the bot for a hint"' +
       (locked ? " disabled" : "") + ">Hint</button>" : "") +
+    (undo && undo.show ? '<button class="hintbtn sm" data-act="undo" aria-label="Undo your last decision"' +
+      (undo.enabled ? "" : ' disabled aria-disabled="true"') + ">Undo</button>" : "") +
     btns.map((o) => {
     const hint = hb[o.index] || null;
     const aria = hint

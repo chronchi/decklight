@@ -83,6 +83,13 @@ STATES = [
     ("hint-small", "2&hint=1", "small"),
     ("whatif-banner", "1&whatif=1", "phone"),
     ("review-whatif", "7&log=1&logtab=review&review=1&reviewframe=1", "phone"),
+    # Rules in context + undo (step 5, items 6 and 9).
+    ("keywords-detail", "1&detailcode=14558128", "phone"),
+    ("kw-popover", "1&detailcode=14558128&kw=quick-effect", "phone"),
+    ("rule-notes-menu", "1&gamemenu=1", "phone"),
+    ("practice-undo", "1&hint=1&canundo=1", "phone"),
+    ("cue-rule-note", "11&cue=3&t=0.6", "phone"),
+    ("keywords-small", "1&detailcode=14558128", "small"),
 ]
 VIEWPORTS = {
     "phone": {
@@ -252,6 +259,8 @@ TARGETS_JS = r"""() => {
     if (!r.width || !r.height) continue;
     const cs = getComputedStyle(el);
     if (cs.visibility === 'hidden' || +cs.opacity === 0 || cs.pointerEvents === 'none') continue;
+    // WCAG 2.5.8 inline exception: a keyword inside a sentence of card text
+    if (el.classList.contains('kw') && cs.display.startsWith('inline')) continue;
     // pseudo-element hit areas count (e.g. .pile::after); use the larger box
     let w = r.width, h = r.height;
     for (const ps of ['::before', '::after']) {

@@ -1,6 +1,7 @@
 // Hand, prompt sheet, pile sheet and info panel builders.
 import {cardHTML, thumbHTML, esc, isHidden, isMonster} from "./card.js";
 import {negTag} from "./log.js";
+import {kwHTML} from "../glossary.js";
 
 export function handHTML(hand, actionable, mock, focus, hintByUid) {
   return (hand || []).map((c) => {
@@ -52,7 +53,9 @@ function rowHTML(opt, mock, selected, pickNo, expanded, hint) {
   if (selected) cls.push("sel");
   if (expanded) cls.push("open");
   if (hint) cls.push("hinted");
-  const eff = opt.effect ? '<span class="ef">' + esc(opt.effect) + "</span>" : "";
+  // Option rows are themselves <button>s, so keywords here are spans (nested
+  // buttons are invalid and break the row); tapping one opens the rule popover.
+  const eff = opt.effect ? '<span class="ef">' + kwHTML(esc(opt.effect), "span") + "</span>" : "";
   const th = opt.card ? thumbHTML(opt.card, mock) : "";
   const info = opt.card && !isHidden(opt.card) ? infoBtn(opt.index, opt.card.name) : "";
   const aria = hintAriaLabel(opt, hint);
@@ -79,9 +82,13 @@ export function sheetHTML(prompt, mock, sel, expanded, extra) {
   const opts = prompt.options || [];
   const ex = extra || {};
   const hintByIndex = ex.hintByIndex || {};
-  const hintBtn = ex.showHint
+  const hintBtn = (ex.showHint
     ? '<button class="hintbtn" data-act="hint" aria-label="Ask the bot for a hint">Hint</button>'
-    : "";
+    : "") +
+    (ex.showUndo
+      ? '<button class="hintbtn" data-act="undo" aria-label="Undo your last decision"' +
+        (ex.undoEnabled ? "" : ' disabled aria-disabled="true"') + ">Undo</button>"
+      : "");
   if (prompt.kind === "position") {
     const cards = opts.filter((o) => o.verb !== "pass").map((o) => {
       const def = /def/i.test(o.label || "");

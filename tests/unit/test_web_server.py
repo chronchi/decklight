@@ -1353,3 +1353,129 @@ def test_whatif_after_review_replays_prefix(tmp_path, engine):
     assert new["practice"] is True
     assert new["what_if"]["k"] == k and new["what_if"]["option"] == alt
     assert new["seed"] == rec["seed"]
+
+
+# --- 12. undo in practice mode (step 5, item 9) ---
+
+
+def _prompt_sig(m: dict) -> tuple:
+    p = (m or {}).get("prompt") or {}
+    opts = p.get("options") or []
+    return (
+        p.get("text"),
+        [(o.get("label"), (o.get("card") or {}).get("code")) for o in opts],
+    )
+
+
+def _active_choice(m: dict) -> int:
+    """A choice that keeps the turn going (not a pass / phase move), else 0."""
+    idle = {"pass", "end_turn", "to_battle", "to_main2", "no", "cancel"}
+    for o in m["prompt"]["options"]:
+        if o.get("verb") not in idle:
+            return int(o["index"])
+    return 0
+
+
+def test_undo_duel_mode_rejected(tmp_path, engine):
+    """Undo is practice-only: a duel-mode game refuses it."""
+    forward = _tiny_forward()
+    app = _make_app(tmp_path, engine, mode_factory=lambda mode: _TinyLauncher(forward))
+    human_text = (FIXTURES / "BlueEyes.ydk").read_text()
+    bot_text = (FIXTURES / "Branded.ydk").read_text()
+    with _client(app).websocket_connect(f"/ws?t={TOKEN}") as ws:
+        ws.receive_text()
+        _new_game(ws, human_text, bot_text, mode="product", first="me")
+        _wait_prompt(ws)
+        ws.send_json({"t": "undo"})
+        err = json.loads(ws.receive_text())
+        assert err["t"] == "error" and err["text"] == "Undo is only in practice mode"
+
+
+def test_undo_before_any_decision_errors(tmp_path, engine):
+    """A practice game with no human decision yet has nothing to undo."""
+    forward = _tiny_forward()
+    app = _make_app(tmp_path, engine, mode_factory=lambda mode: _TinyLauncher(forward))
+    human_text = (FIXTURES / "BlueEyes.ydk").read_text()
+    bot_text = (FIXTURES / "Branded.ydk").read_text()
+    with _client(app).websocket_connect(f"/ws?t={TOKEN}") as ws:
+        ws.receive_text()
+        ws.send_json(
+            {
+                "t": "new_game",
+                "deck": {"ydk": human_text},
+                "bot_deck": {"ydk": bot_text},
+                "first": "me",
+                "mode": "product",
+                "practice": True,
+            }
+        )
+        first = _wait_prompt(ws)
+        assert first.get("can_undo") is False
+        ws.send_json({"t": "undo"})
+        err = json.loads(ws.receive_text())
+        assert err["t"] == "error" and err["text"] == "Nothing to undo"
+
+
+def test_undo_rewinds_practice_game(tmp_path, engine):
+    """Two human decisions; each undo re-presents the previous prompt, and the
+    record carries undos=2."""
+    forward = _tiny_forward()
+    app = _make_app(tmp_path, engine, mode_factory=lambda mode: _TinyLauncher(forward))
+    human_text = (FIXTURES / "BlueEyes.ydk").read_text()
+    bot_text = (FIXTURES / "Branded.ydk").read_text()
+    with _client(app).websocket_connect(f"/ws?t={TOKEN}") as ws:
+        ws.receive_text()
+        ws.send_json(
+            {
+                "t": "new_game",
+                "deck": {"ydk": human_text},
+                "bot_deck": {"ydk": bot_text},
+                "first": "me",
+                "mode": "product",
+                "practice": True,
+            }
+        )
+        seen: list[dict] = []
+        for _ in range(2):
+            m = _wait_prompt(ws)
+            assert m.get("practice") is True
+            seen.append(m)
+            ws.send_json({"t": "choose", "prompt": m["prompt"]["id"], "index": _active_choice(m)})
+        third = _wait_prompt(ws)  # the prompt we will undo away from
+        assert third.get("can_undo") is True
+
+        # Undo 1: back to the 2nd decision's prompt.
+        ws.send_json({"t": "undo"})
+        u1 = _wait_prompt(ws)
+        assert _prompt_sig(u1) == _prompt_sig(seen[1])
+        assert u1["view"] == seen[1]["view"]
+        assert u1.get("can_undo") is True
+
+        # Undo 2: back to the 1st decision's prompt.
+        ws.send_json({"t": "undo"})
+        u2 = _wait_prompt(ws)
+        assert _prompt_sig(u2) == _prompt_sig(seen[0])
+        assert u2["view"] == seen[0]["view"]
+        assert u2.get("can_undo") is False
+
+        # Nothing left: a third undo is refused.
+        ws.send_json({"t": "undo"})
+        err = json.loads(ws.receive_text())
+        assert err["t"] == "error" and err["text"] == "Nothing to undo"
+
+        ws.send_json({"t": "surrender"})
+        end = None
+        for _ in range(50):
+            m = json.loads(ws.receive_text())
+            if m.get("t") == "state" and m.get("result") is not None:
+                end = m
+                break
+        assert end is not None
+    recs = [
+        json.loads((p / "game.jsonl").read_text())
+        for p in sorted((tmp_path / "runs").iterdir())
+        if p.is_dir()
+    ]
+    assert len(recs) == 1
+    assert recs[0]["practice"] is True
+    assert recs[0]["undos"] == 2

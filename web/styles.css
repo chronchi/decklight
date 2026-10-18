@@ -126,7 +126,7 @@ html.short #app { height: var(--app-h); }
 .iconbtn:hover { color: var(--text); }
 .iconbtn svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.4; stroke-linecap: round; }
 .iconbtn.sm { margin: -8px -8px 0 0; }
-.phasebtns { display: flex; gap: 6px; }
+.phasebtns { display: flex; gap: 5px; }
 .phbtn {
   min-height: 44px; padding: 0 14px; border-radius: 10px;
   font-size: 14px; font-weight: 400; letter-spacing: 0.02em; white-space: nowrap;
@@ -1004,9 +1004,14 @@ details.ydk textarea {
 /* ---------- practice hints + what-if (step 4) ---------- */
 #whatifbanner { display: flex; align-items: center; justify-content: center; min-height: 24px; padding: 3px 12px; font-size: 12px; color: var(--accent); background: var(--accent-tint); border-bottom: 1px solid var(--line); }
 .hintbtn { flex: none; min-height: 44px; min-width: 76px; padding: 0 16px; border-radius: 10px; border: 1px solid rgba(184, 154, 94, 0.6); background: var(--accent-tint); color: var(--accent); font-size: 15px; }
-.phasebtns .hintbtn.sm { min-width: 0; padding: 0 12px; font-size: 14px; }
-.stitle .hintbtn { margin-left: auto; }
-.hintbar { display: flex; align-items: center; gap: 10px; padding: 8px 14px 4px; }
+.phasebtns .hintbtn.sm { min-width: 0; padding: 0 7px; font-size: 14px; }
+/* At phone widths, keep the phase buttons on screen next to practice Hint+Undo. */
+@media (max-width: 430px) {
+  .phasebtns.practice .phbtn { padding: 0 10px; font-size: 13px; }
+}
+.stitle button.hintbtn:first-of-type { margin-left: auto; }
+.hintbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; padding: 8px 14px 4px; }
+.hintbar .hintlist { flex-basis: 100%; }
 #info .hintbar { padding: 8px 0 0; }
 .hintbar .hintsub { font-size: 12px; color: var(--muted); }
 .hintwait { font-size: 13px; color: var(--muted); }
@@ -1027,3 +1032,40 @@ details.ydk textarea {
 #reviewframe .whead { font-size: 12px; color: var(--muted); margin: 12px 0 8px; }
 #reviewframe .wlist { display: flex; flex-direction: column; gap: 6px; }
 #reviewframe .wopt { min-height: 44px; padding: 8px 12px; border-radius: 10px; border: 1px solid var(--line-2); text-align: left; font-size: 14px; color: var(--text); background: none; }
+
+/* ---------- rules in context (step 5, item 6): keywords, popover, cue notes ---------- */
+/* Tappable glossary keyword in card text and option effect text: a dotted
+   underline in the text colour (night design: no new colour). Inline targets in a
+   sentence are exempt from the 24 px size rule (WCAG 2.5.8), so no padding: it
+   would open gaps in the sentence. */
+.kw {
+  font: inherit; color: inherit; background: none; border: 0; padding: 0; margin: 0;
+  display: inline; line-height: inherit; cursor: pointer;
+  text-decoration: underline dotted; text-decoration-color: var(--muted);
+  text-decoration-thickness: 1.5px; text-underline-offset: 4px;
+}
+.kw:hover { color: var(--text); }
+/* The rule popover stacks above the card detail dialog and never closes it. */
+#kwscrim { position: fixed; inset: 0; z-index: 90; }
+#kwpop {
+  position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%);
+  width: min(400px, calc(100vw - 32px)); max-height: 70vh; overflow-y: auto;
+  background: var(--sheet); border: 1px solid var(--line-2); border-radius: 12px; z-index: 91;
+}
+#kwpop .mhead {
+  display: flex; align-items: center; min-height: 48px; padding: 4px 6px 4px 16px;
+  font-size: 15px; color: var(--text); border-bottom: 1px solid var(--line);
+}
+#kwpop .mhead button { margin-left: auto; }
+#kwpop .mbody { padding: 12px 16px 16px; }
+#kwpop .mbody p { margin: 0; font-size: 14px; line-height: 1.6; color: var(--text); }
+/* One-line rule note attached to a cue (glossary `short`); fades like cue text. */
+#ov-cues .cue-rule {
+  position: absolute; left: 50%; bottom: calc(62px + env(safe-area-inset-bottom)); transform: translateX(-50%);
+  max-width: min(360px, calc(100vw - 40px)); text-align: center;
+  font-size: 12.5px; line-height: 1.4; color: var(--text);
+  padding: 7px 14px; border-radius: 12px; opacity: 0; pointer-events: none;
+  background: rgba(20, 19, 16, 0.94); border: 1px solid var(--line-2);
+  transition: opacity 400ms var(--ease);
+}
+#ov-cues .cue-rule.on { opacity: 1; }

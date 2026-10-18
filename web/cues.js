@@ -11,6 +11,7 @@
 // and cards that leave are hidden, so the board looks progressive; the real
 // snapshot replaces all of that when the segment ends (correct by construction).
 import {esc, imgUrl, phHTML} from "./render/card.js";
+import {ruleShort} from "./glossary.js";
 
 // Scene lengths at 1x (ms). 2x halves them; "instant" plays nothing.
 export const DUR = {
@@ -193,6 +194,26 @@ export function planSteps(cues, baseChain) {
   return steps;
 }
 const DIMMED = new Set(["activate", "solve", "negate", "confirm"]);
+
+// The glossary term a scene teaches (step 5, item 6), or null. `turnPlayer` is
+// the board's turn_player ("you"/"bot") before the scene: a hand trap is the
+// opponent activating a monster from the hand during your turn.
+export function ruleNoteFor(step, turnPlayer) {
+  const c = (step.cues && step.cues[0]) || {};
+  if (step.kind === "activate" && (step.link || 1) >= 2) return "chain";
+  if (step.kind === "negate") return c.t === "chain_disabled" ? "negate-effect" : "negate-activation";
+  if (step.kind === "moves" && step.reason === "banished") return "banish";
+  if (step.kind === "attack" && (step.cues || []).some((x) => x.t === "battle")) return "damage-step";
+  if (
+    step.kind === "activate" &&
+    c.card && c.card.owner === "opp" &&
+    c.card.zone && c.card.zone.loc === "hand" &&
+    turnPlayer === "you"
+  ) {
+    return "hand-trap";
+  }
+  return null;
+}
 
 export function planDurations(cues, baseChain) {
   return planSteps(cues, baseChain).filter((s) => s.dur > 0).map((s) => s.dur);
@@ -456,11 +477,12 @@ export function createCuePlayer(opts) {
   const layer = opts.layer;
   layer.setAttribute("aria-hidden", "true");   // visual only: the live region speaks each scene
   layer.innerHTML = '<div class="cue-ghosts"></div><div class="cue-dim"></div><div class="cue-stage"></div>' +
-    '<div class="cue-hint"></div>';
+    '<div class="cue-hint"></div><div class="cue-rule"></div>';
   const ghostsEl = layer.querySelector(".cue-ghosts");
   const dimEl = layer.querySelector(".cue-dim");
   const stage = layer.querySelector(".cue-stage");
   const hintEl = layer.querySelector(".cue-hint");
+  const ruleEl = layer.querySelector(".cue-rule");
   let hideStyle = document.getElementById("cue-hide");
   if (!hideStyle) {
     hideStyle = document.createElement("style");
@@ -471,7 +493,25 @@ export function createCuePlayer(opts) {
   const st = {
     queue: [], cur: null, steps: null, si: -1, scene: null, t0: 0, raf: 0,
     waiting: false, ghosts: new Map(), hidden: new Set(), lp: {}, frozen: null,
+    rules: new Set(),   // glossary ids already taught this game (rule notes)
   };
+
+  const ruleOn = () => (opts.ruleNotes ? !!opts.ruleNotes() : false);
+  function setRule(text) {
+    ruleEl.textContent = text || "";
+    ruleEl.classList.toggle("on", !!text);
+  }
+  // The rule note for a live step: at most once per game per term (teaches, then
+  // gets out of the way). Returns the note text to append to the announcement.
+  function noteStep(step) {
+    if (!ruleOn()) { setRule(""); return null; }
+    const gid = ruleNoteFor(step, (opts.getView() || {}).turn_player);
+    if (!gid || st.rules.has(gid)) { setRule(""); return null; }
+    st.rules.add(gid);
+    const short = ruleShort(gid);
+    setRule(short);
+    return short;
+  }
 
   // ----- persistent board patches (cleared when a snapshot applies) -----
   function hideUid(uid) {
@@ -1134,7 +1174,8 @@ export function createCuePlayer(opts) {
     const step = st.steps[st.si];
     st.scene = mount(step);
     st.t0 = performance.now();
-    if (opts.announce) opts.announce(stepText(step, opts.names && opts.names()));
+    const note = noteStep(step);
+    if (opts.announce) opts.announce(stepText(step, opts.names && opts.names()) + (note ? ". " + note : ""));
     // Reduced motion: each scene is shown settled (its frame at HOLD) and only fades in and out.
     const still = opts.reduced && opts.reduced();
     stage.style.opacity = "";
@@ -1154,6 +1195,7 @@ export function createCuePlayer(opts) {
     const seg = st.cur;
     st.cur = null;
     st.steps = null;
+    setRule("");
     opts.apply(seg.msg);
     clearPatches();
     const m = seg.msg || {};
@@ -1214,6 +1256,7 @@ export function createCuePlayer(opts) {
       st.steps = null;
       st.waiting = false;
       hintEl.classList.remove("on");
+      setRule("");
       layer.classList.remove("waiting", "playing");
       clearPatches();
       for (const s of segs) opts.apply(s.msg);
@@ -1226,7 +1269,9 @@ export function createCuePlayer(opts) {
       st.steps = null;
       st.waiting = false;
       st.frozen = null;
+      st.rules.clear();
       hintEl.classList.remove("on");
+      setRule("");
       layer.classList.remove("waiting", "playing");
       clearPatches();
     },
@@ -1260,6 +1305,10 @@ export function createCuePlayer(opts) {
       }
       const step = fz.steps[vis[k]];
       fz.scene.at(Math.max(0, Math.min(1, f)) * step.dur);
+      // Deterministic screenshots: show the current scene's rule note if the
+      // switch is on (the once-per-game set only applies to live playback).
+      const gid = ruleOn() ? ruleNoteFor(step, (opts.getView() || {}).turn_player) : null;
+      setRule(gid ? ruleShort(gid) : "");
       return vis.length;
     },
     // Real-time playback of one cue list over the current board (replay showFrame).
