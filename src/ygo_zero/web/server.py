@@ -107,6 +107,9 @@ class Server:
         self._wc_map = None  # lazy CalibMap (False = unavailable, ALERTed)
         self._wc_ms = 0.0  # last value-forward wall ms (CPU)
         self.auto_passed: set[int] = set()  # history numbers (1-based n) of auto-passes
+        self.practice = False  # practice mode: hints allowed, excluded from human stats
+        self.hints_used = 0  # hints asked this game (recorded in the record)
+        self.what_if: dict | None = None  # {"source","k","option","turn"} for a what-if game
         self.record_path: Path | None = None  # game.jsonl of the live/finished game
         self._review_task: asyncio.Task | None = None
         self.stats = None  # DuelStats | None (one per game, viewer = human seat)
@@ -246,6 +249,8 @@ class Server:
             "winchance": self.winchance if self.winchance_on else None,
             "thinking": {"seconds": thinking} if thinking is not None else None,
             "result": result,
+            "practice": self.practice,
+            "what_if": self.what_if,
         }
 
     async def send_state(self, *, full_log: bool = False, peek: bool = False) -> None:
@@ -441,11 +446,13 @@ class Server:
             print(f"ALERT web: product driver diverged at finish: {e}", flush=True)
             res = s.surrender(by_human=True)
             res.diverged = True
+            s.record_meta["hints_used"] = self.hints_used
             self.record_path = s.write_record(res, auto_passed=self.auto_passed)
             self.finished = True
             self.end_reason = "the bot diverged (see server log)"
             await self.send_state(full_log=True)
             return
+        s.record_meta["hints_used"] = self.hints_used
         self.record_path = s.write_record(s.result, auto_passed=self.auto_passed)
         self.finished = True
         self.end_reason = reason
@@ -486,6 +493,10 @@ class Server:
         else:
             await self._error(f"unknown first {first!r} (rps|me|bot)")
             return
+        practice = msg.get("practice", False)
+        if not isinstance(practice, bool):
+            await self._error("practice must be true|false")
+            return
         seed = random.Random().getrandbits(63)
         cfg = DuelConfig(_DeckLike(first_deck), _DeckLike(second_deck), seed=seed)
         try:
@@ -504,6 +515,8 @@ class Server:
             "mode": mode,
             "first": first,
             "chain": self.chain_mode,
+            "practice": practice,
+            "hints_used": 0,
         }
         session = DuelSession(
             self.engine,
@@ -529,6 +542,9 @@ class Server:
             self._drop_session(self.session)
         self.session = session
         self.mode = mode
+        self.practice = practice
+        self.hints_used = 0
+        self.what_if = None
         self.prompt_id = 0
         self.log_sent = 0
         self.cue_sent = 0
@@ -588,6 +604,7 @@ class Server:
         self.gen += 1  # stops a running advance; a bot step in flight is abandoned
         thinking = s.thinking_since is not None
         s.surrender(by_human=True)
+        s.record_meta["hints_used"] = self.hints_used
         self.record_path = s.write_record(s.result, auto_passed=self.auto_passed)
         self.finished = True
         self.end_reason = "surrender"
@@ -785,6 +802,228 @@ class Server:
         except (WebSocketDisconnect, RuntimeError):
             pass
 
+    async def on_hint(self) -> None:
+        """Practice-mode "Ask the bot": top-3 policy options + lookahead estimates.
+
+        Computed only from the human's observation (the review's fairness rule).
+        Rejected outside practice mode; counted in the record (`hints_used`).
+        """
+        if not self.practice:
+            await self._error("Hints are only in practice mode")
+            return
+        s = self.session
+        if s is None or s.done or not s.need_human or self.advancing:
+            await self._error("no prompt is waiting for you right now")
+            return
+        launcher = getattr(s, "launcher", None)
+        if launcher is None or not (hasattr(launcher, "base_logits") or hasattr(launcher, "forward")):
+            await self._error("Hints need the full bot")
+            return
+        calib = None
+        if self.winchance_on:
+            if self._wc_map is None:
+                try:
+                    from ygo_zero.eval.winchance import load_calib
+
+                    self._wc_map = load_calib()
+                except Exception as e:  # noqa: BLE001 -- map missing: answer without estimates
+                    print(f"ALERT web: hint calib unavailable: {e}", flush=True)
+                    self._wc_map = False
+            if self._wc_map is not False:
+                calib = self._wc_map
+        try:
+            from ygo_zero.analysis.hints import compute_hint
+            from ygo_zero.web.view import build_prompt
+
+            out = await asyncio.to_thread(
+                compute_hint, self.engine, s.cfg, s.env, s.human_seat, launcher, calib
+            )
+            prompt = build_prompt(s.env, s.human_seat, self.prompt_id)
+            labels = {o["index"]: o for o in (prompt["options"] if prompt else [])}
+            options = [
+                {
+                    "index": int(o["index"]),
+                    "label": str(labels.get(int(o["index"]), {}).get("label", f"option {o['index']}")),
+                    "p": float(o["p"]),
+                    "est": (float(o["est"]) if o["est"] is not None else None),
+                }
+                for o in out["options"]
+            ]
+            ms = float(out["ms"])
+        except ValueError as e:
+            await self._error(f"hint failed: {e}")
+            return
+        except Exception as e:  # noqa: BLE001 -- fail loud, keep playing
+            import traceback
+
+            print("ALERT web: hint crashed:\n" + "".join(traceback.format_exception(e)), flush=True)
+            await self._error(f"hint failed: {e!r} (see server log)")
+            return
+        self.hints_used += 1
+        s.record_meta["hints_used"] = self.hints_used
+        if self.ws is None:
+            return
+        try:
+            await self.ws.send_json({"t": "hint", "prompt": self.prompt_id, "options": options, "ms": ms})
+        except (WebSocketDisconnect, RuntimeError):
+            pass
+
+    async def on_whatif(self, msg: dict) -> None:
+        """Start a new practice game from a reviewed decision with another option.
+
+        Replays the record's choices up to human decision k, applies `option`,
+        then continues live against the product bot. Valid after game over when
+        a review exists.
+        """
+        from ygo_zero.engine.env import PyEnv
+        from ygo_zero.play.session import DuelSession
+
+        s = self.session
+        if s is None or not self.finished or s.result is None:
+            await self._error("no finished game to review (finish a game first)")
+            return
+        cache = self._review_cache_path()
+        if cache is None or not cache.is_file():
+            await self._error("no review yet (send review first)")
+            return
+        try:
+            k = int(msg.get("k"))
+        except (TypeError, ValueError):
+            await self._error("whatif.k must be a decision number")
+            return
+        try:
+            option = int(msg.get("option"))
+        except (TypeError, ValueError):
+            await self._error("whatif.option must be an option number")
+            return
+        if self.record_path is None:
+            await self._error("no finished game to review (finish a game first)")
+            return
+        rec = json.loads(self.record_path.read_text())
+        from ygo_zero.analysis.review import collect_human_decisions
+
+        dlist = collect_human_decisions(self.engine, s.cfg, rec)
+        if not 0 <= k < len(dlist):
+            await self._error(f"unknown decision {k}")
+            return
+        prefix_host = [int(c) for c in dlist[k]["prefix"]]
+        env = PyEnv(self.engine, s.cfg, auto_single=False)
+        env.reset()
+        prefix_decisions: list[dict] = []
+        for c in prefix_host:
+            if env.done:
+                break
+            if len(env.opts) > 1:
+                prefix_decisions.append({"player": int(env.player), "n_options": len(env.opts)})
+            env.step(int(c))
+        if env.done or not 0 <= option < len(env.opts):
+            await self._error(f"illegal option {option} of {len(env.opts) if not env.done else 0}")
+            return
+        pre = (int(env.player), len(env.opts))
+        turn = int(env.duel.turn)
+        from ygo_zero.edopro.product_bot import host_to_product
+
+        try:
+            product_prefix = [int(c) for c in host_to_product(self.engine, s.cfg, prefix_host)]
+        except ValueError as e:
+            await self._error(f"what-if replay failed: {e}")
+            return
+        if len(product_prefix) != len(prefix_decisions):
+            await self._error(
+                f"what-if replay failed: {len(prefix_decisions)} host decisions vs "
+                f"{len(product_prefix)} product decisions"
+            )
+            return
+        mode = rec.get("mode", self.mode)
+        if mode not in ("product", "fast"):
+            await self._error("What-if needs the full bot")
+            return
+        try:
+            opp = await asyncio.to_thread(self._make_opponent, mode)
+        except Exception as e:  # noqa: BLE001
+            await self._error(f"could not start the {mode} opponent: {e}")
+            return
+        launcher = opp if hasattr(opp, "start_duel") else None
+        bot = None if launcher is not None else opp
+        hs = int(rec["human_seat"])
+        source = self.record_path.parent.name if self.record_path is not None else ""
+        what_if = {"source": source, "k": int(k), "option": int(option), "turn": turn}
+        meta = {
+            "human_deck": rec.get("human_deck", "pasted"),
+            "bot_deck": rec.get("bot_deck", "pasted"),
+            "mode": mode,
+            "first": rec.get("first", "rps"),
+            "chain": rec.get("chain", self.chain_mode),
+            "practice": True,
+            "hints_used": 0,
+            "what_if": what_if,
+        }
+        session = DuelSession(
+            self.engine,
+            s.cfg,
+            hs,
+            bot=bot,
+            launcher=launcher,
+            seed=s.seed,
+            record_root=self.record_root,
+            human_auto=True,
+            record_meta=meta,
+            driver_prefix=product_prefix,
+            driver_prefix_decisions=prefix_decisions,
+        )
+        try:
+            await asyncio.to_thread(session.reset)
+        except Exception as e:  # noqa: BLE001
+            session.close()
+            await self._error(f"could not start the what-if game: {e}")
+            return
+        try:
+            for c in prefix_host:
+                if session.env.done:
+                    break
+                session.env.step(int(c))
+            if session.env.done:
+                raise ValueError("the what-if position is already game over")
+            if int(session.env.player) != hs or len(session.env.opts) != pre[1]:
+                raise ValueError(
+                    f"what-if replay diverged: host (player={session.env.player}, "
+                    f"options={len(session.env.opts)}) vs record (player={pre[0]}, options={pre[1]})"
+                )
+            session.env.step(int(option))
+            session.prod_len = len(product_prefix) + 1
+            if session.driver is not None:
+                session.driver.feed_human([int(option)])
+                session.check_driver_step(len(product_prefix), pre)
+        except Exception as e:  # noqa: BLE001 -- ALERT, keep the finished game
+            print(f"ALERT web: what-if replay failed: {e}", flush=True)
+            session.close()
+            await self._error(f"what-if replay failed: {e}")
+            return
+        self.gen += 1
+        if self.session is not None:
+            self._drop_session(self.session)
+        self.session = session
+        self.practice = True
+        self.hints_used = 0
+        self.what_if = what_if
+        self.prompt_id = 0
+        self.log_sent = 0
+        self.cue_sent = 0
+        self.finished = False
+        self.end_reason = ""
+        self._last_sig = ()
+        self.winchance = None
+        self._wc_n = 0
+        self.auto_passed = set()
+        self.record_path = None
+        if self._review_task is not None and not self._review_task.done():
+            self._review_task.cancel()
+            self._review_task = None
+        from ygo_zero.web.stats import DuelStats
+
+        self.stats = DuelStats(session.human_seat)
+        self.start_advance()
+
     async def _error(self, text: str) -> None:
         if self.ws is None:
             return
@@ -981,9 +1220,14 @@ def create_app(
                 if t == "review_frame":
                     await srv.on_review_frame(msg if isinstance(msg, dict) else {})
                     continue
+                if t == "hint":  # read-only: answered from the waiting prompt
+                    await srv.on_hint()
+                    continue
                 async with srv.lock:
                     if t == "new_game":
                         await srv.on_new_game(msg)
+                    elif t == "whatif":
+                        await srv.on_whatif(msg if isinstance(msg, dict) else {})
                     elif t == "choose":
                         await srv.on_choose(msg)
                     elif t == "resync":

@@ -49,6 +49,7 @@ class DriverError(RuntimeError):
 
 # --- auto_single mapping (the one place) ---
 
+
 def _replay_lens(engine: Engine, config: DuelConfig, host_choices: Sequence[int]) -> list[int]:
     """`len(env.opts)` before each step of replaying `host_choices` on PyEnv(auto_single=False)."""
     env = PyEnv(engine, config, auto_single=False)
@@ -103,7 +104,28 @@ def product_to_host(engine: Engine, config: DuelConfig, product_choices: Sequenc
     return out
 
 
+def _replay_prefix_decisions(engine: Engine, config: DuelConfig, product_prefix: Sequence[int]) -> list[dict]:
+    """Per-outer-decision (player, n_options) for a product-space prefix.
+
+    Replays the product env (CppEnv, auto_single=True — singletons are not
+    outer decisions) so a what-if driver started with ``prefix`` can pre-fill
+    its decision log without re-searching the prefix.
+    """
+    from ygo_zero.engine.cpp_env import CppEnv
+
+    env = CppEnv(engine, config, True)
+    obs = env.reset()
+    out: list[dict] = []
+    for i, c in enumerate(product_prefix):
+        if obs is None:
+            raise ValueError(f"product prefix overruns the duel at step {i}")
+        out.append({"player": int(seat_of(obs)), "n_options": int(obs["action_mask"].sum())})
+        obs = env.step(int(c))
+    return out
+
+
 # --- the launcher (loads P + value once, spawns one driver per duel) ---
+
 
 class ProductLauncher:
     """`--opponent product`: holds the loaded product; `start_duel` spawns its driver.
@@ -137,28 +159,53 @@ class ProductLauncher:
 
         return np.asarray(self.policy.logits(_batch(obs_list)))
 
-    def start_duel(self, engine: Engine, config: DuelConfig, bot_seat: int,
-                   *, game_seed: int, ws_seed: int,
-                    human_fn: Callable[[dict], int] | None = None) -> ProductDriver:
+    def start_duel(
+        self,
+        engine: Engine,
+        config: DuelConfig,
+        bot_seat: int,
+        *,
+        game_seed: int,
+        ws_seed: int,
+        human_fn: Callable[[dict], int] | None = None,
+        prefix: Sequence[int] = (),
+        prefix_decisions: Sequence[dict] | None = None,
+    ) -> ProductDriver:
         return ProductDriver(
-            engine, config, bot_seat=bot_seat, base_logits=self.base_logits,
-            value=self.value, search_kwargs=self.search_kwargs,
-            game_seed=game_seed, ws_seed=ws_seed, fast=self.fast,
-            replay_threads=self.replay_threads, human_fn=human_fn).start()
+            engine,
+            config,
+            bot_seat=bot_seat,
+            base_logits=self.base_logits,
+            value=self.value,
+            search_kwargs=self.search_kwargs,
+            game_seed=game_seed,
+            ws_seed=ws_seed,
+            fast=self.fast,
+            replay_threads=self.replay_threads,
+            human_fn=human_fn,
+            prefix=prefix,
+            prefix_decisions=prefix_decisions,
+        ).start()
 
     def record_info(self, seed: int) -> dict:
         """Product settings for the duel record, so a game can be re-run."""
         return {
-            "ckpt": str(self.ckpt), "ckpt_sha256": self.ckpt_sha,
-            "value": str(self.value_ckpt), "value_sha256": self.value_sha,
-            "emb": str(self.emb), "device": self.device,
-            "game_seed": int(seed), "ws_seed": int(seed), "fast": self.fast,
+            "ckpt": str(self.ckpt),
+            "ckpt_sha256": self.ckpt_sha,
+            "value": str(self.value_ckpt),
+            "value_sha256": self.value_sha,
+            "emb": str(self.emb),
+            "device": self.device,
+            "game_seed": int(seed),
+            "ws_seed": int(seed),
+            "fast": self.fast,
             "replay_threads": self.replay_threads,
             "search": product_search_kwargs(fast=self.fast) | dict(self.search_kwargs),
         }
 
 
 # --- the driver ---
+
 
 class ProductDriver:
     """One duel's product search (S = `bot_seat`, R = the human seat), in a worker thread.
@@ -174,16 +221,44 @@ class ProductDriver:
     the game; `res`/`error` hold the outcome. `close()` frees the replay pool.
     """
 
-    def __init__(self, engine: Engine, config: DuelConfig, *, bot_seat: int,
-                 base_logits: Callable[[list[dict]], np.ndarray], value=None,
-                 search_kwargs: dict | None = None, game_seed: int = 0, ws_seed: int = 0,
-                 fast: bool = False, replay_threads: int = 1,
-                 human_fn: Callable[[dict], int] | None = None) -> None:
+    def __init__(
+        self,
+        engine: Engine,
+        config: DuelConfig,
+        *,
+        bot_seat: int,
+        base_logits: Callable[[list[dict]], np.ndarray],
+        value=None,
+        search_kwargs: dict | None = None,
+        game_seed: int = 0,
+        ws_seed: int = 0,
+        fast: bool = False,
+        replay_threads: int = 1,
+        human_fn: Callable[[dict], int] | None = None,
+        prefix: Sequence[int] = (),
+        prefix_decisions: Sequence[dict] | None = None,
+    ) -> None:
         self.engine, self.config, self.bot_seat = engine, config, bot_seat
         self.base_logits = base_logits
         self.value = None if fast else value
         self.human_fn = human_fn
         self.fast = fast
+        # What-if prefix (product-space outer choices): replayed verbatim by
+        # search_game_gen before the first live decision, never re-searched.
+        self._prefix = tuple(int(c) for c in (prefix or ()))
+        if prefix_decisions is not None:
+            if len(prefix_decisions) != len(self._prefix):
+                raise ValueError(
+                    f"prefix_decisions has {len(prefix_decisions)} entries "
+                    f"for {len(self._prefix)} prefix choices"
+                )
+            self._prefix_decisions = [
+                {"player": int(d["player"]), "n_options": int(d["n_options"])} for d in prefix_decisions
+            ]
+        elif self._prefix:
+            self._prefix_decisions = _replay_prefix_decisions(engine, config, self._prefix)
+        else:
+            self._prefix_decisions = []
         kw = dict(product_search_kwargs(fast=fast))
         kw.update(search_kwargs or {})
         # Split: search construction takes k/horizon/samples/rollout_temp; the game takes the rest.
@@ -204,7 +279,9 @@ class ProductDriver:
         self.human_q: queue.Queue[int] = queue.Queue()
         self.cond = threading.Condition()
         self.played: list[tuple[int, int]] = []  # (choice, actor) in decision order (mirror)
-        self.decision_log: list[dict] = []  # per outer decision: player/n_options/searched/wall
+        # What-if prefix decisions are known before the thread starts (replayed,
+        # never re-searched); live outer decisions append in _forward.
+        self.decision_log: list[dict] = [dict(d) for d in self._prefix_decisions]
         self.lat = {"t0": 0.0, "outer": None}  # pending outer decision start
         self._rollouts_used = 0  # rollout batches yielded since the pending outer decision
         self._rollouts_calls = 0  # rollouts_gen calls since the pending outer decision
@@ -398,7 +475,7 @@ class ProductDriver:
                 self.engine, self.config, self.search, self.bot_seat, argmax_select,
                 game_seed=self.game_seed, guard_mode="per_seat",
                 unguarded_seat=1 - self.bot_seat, latency=True,
-                inflight=self._inflight, **self.gen_kwargs,
+                inflight=self._inflight, prefix=self._prefix, **self.gen_kwargs,
             ), self.route)  # fmt: skip
             req = next(gen)
             while True:

@@ -75,6 +75,14 @@ STATES = [
     ("review-frame", "7&log=1&logtab=review&review=1&reviewframe=1", "phone"),
     ("review-small", "7&log=1&logtab=review&review=1", "small"),
     ("gameover-review", "7&review=1", "phone"),
+    # Practice hints + what-if (step 4): lobby switch, badged prompts, banner.
+    ("practice-lobby", "0&play=practice", "phone"),
+    ("hint-prompt", "2&hint=1", "phone"),
+    ("hint-cards", "3&hint=1", "phone"),
+    ("hint-idle", "1&hint=1", "phone"),
+    ("hint-small", "2&hint=1", "small"),
+    ("whatif-banner", "1&whatif=1", "phone"),
+    ("review-whatif", "7&log=1&logtab=review&review=1&reviewframe=1", "phone"),
 ]
 VIEWPORTS = {
     "phone": {

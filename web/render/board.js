@@ -54,9 +54,11 @@ function extraHTML(side, who) {
 }
 
 // One side's two rows. `mirror` = bot (point-symmetric).
+// opts.hint: {uid: {rank, pct}} from "Ask the bot" (idle/battle: cards glow instead of a sheet).
 export function sideHTML(side, opts) {
   opts = opts || {};
   const act = opts.actionable || {};
+  const hb = opts.hint || {};
   const who = opts.mirror ? "bot" : "you";
   const ctx = (c, zone) => ({
     mock: opts.mock,
@@ -65,6 +67,7 @@ export function sideHTML(side, opts) {
     rot: zone === "m" && (c && (c.pos === "def" || c.pos === "set")),
     stat: zone === "m",
     kb: true,
+    hint: (c && c.uid && hb[c.uid]) || null,
   });
   const m = side.mzone.map((c) => slotHTML(c, ctx(c, "m")));
   const s = side.szone.map((c) => slotHTML(c, ctx(c, "s")));
@@ -99,11 +102,13 @@ export function midHTML(view, opts) {
   const name = at >= 0 ? PHASES[at][1] : view.phase;
   const emzSlot = (mine, theirs) => {
     const c = mine || theirs;
+    const hb = opts.hint || {};
     const ctx = {
       mock: opts.mock, stat: true, kb: true,
       actionable: !!(c && c.uid && (opts.actionable || {})[c.uid] != null),
       focus: !!(c && c.uid && c.uid === opts.focus),
       rot: !!(c && (c.pos === "def" || c.pos === "set")),
+      hint: (c && c.uid && hb[c.uid]) || null,
     };
     return slotHTML(c, ctx, "emz" + (theirs && !mine ? " bot" : ""));
   };
@@ -131,15 +136,28 @@ export function winchanceHTML(wc) {
 }
 
 // Phase buttons inside your bar (idle and battle prompts only).
-export function phaseBtnsHTML(prompt, locked) {
+// hintByIndex: {index: {rank, pct, est}} from "Ask the bot"; showHint adds the
+// Hint button here (idle/battle have no sheet, and the bar is always visible).
+export function phaseBtnsHTML(prompt, locked, hintByIndex, showHint) {
   if (!prompt || (prompt.kind !== "idle" && prompt.kind !== "battle")) return "";
+  const hb = hintByIndex || {};
   const btns = (prompt.options || []).filter((o) => ["to_battle", "to_main2", "end_turn"].includes(o.verb));
-  if (!btns.length) return "";
-  return '<span class="phasebtns">' + btns.map((o) =>
-    '<button class="phbtn' + (o.verb === "end_turn" ? "" : " primary") + '" data-opt="' + o.index + '"' +
-    (locked ? " disabled" : "") + ' aria-label="' + esc(o.label) + '">' +
-    esc({to_battle: "Battle", to_main2: "Main 2", end_turn: "End turn"}[o.verb] || o.label) + "</button>"
-  ).join("") + "</span>";
+  if (!btns.length && !showHint) return "";
+  return '<span class="phasebtns">' +
+    (showHint ? '<button class="hintbtn sm" data-act="hint" aria-label="Ask the bot for a hint"' +
+      (locked ? " disabled" : "") + ">Hint</button>" : "") +
+    btns.map((o) => {
+    const hint = hb[o.index] || null;
+    const aria = hint
+      ? "Hint " + hint.rank + ", " + o.label + ", bot's confidence " + hint.pct + "%"
+      : o.label;
+    return '<button class="phbtn' + (o.verb === "end_turn" ? "" : " primary") + (hint ? " hinted" : "") +
+      '" data-opt="' + o.index + '"' +
+      (locked ? " disabled" : "") + ' aria-label="' + esc(aria) + '">' +
+      esc({to_battle: "Battle", to_main2: "Main 2", end_turn: "End turn"}[o.verb] || o.label) +
+      (hint ? '<span class="hintbadge" aria-hidden="true">' + hint.rank + " · " + hint.pct + "%</span>" : "") +
+      "</button>";
+  }).join("") + "</span>";
 }
 
 export function barHTML(side, who, opts) {

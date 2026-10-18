@@ -2,12 +2,13 @@
 import {cardHTML, thumbHTML, esc, isHidden, isMonster} from "./card.js";
 import {negTag} from "./log.js";
 
-export function handHTML(hand, actionable, mock, focus) {
+export function handHTML(hand, actionable, mock, focus, hintByUid) {
   return (hand || []).map((c) => {
     if (!c) return '<div class="hcard"><div class="card back"></div></div>';
     const act = !!(c.uid && actionable[c.uid] != null);
+    const hint = hintByUid && c.uid ? hintByUid[c.uid] : null;
     return '<div class="hcard' + (act ? " lift" : "") + '" data-key="hand:' + esc(c.uid) + '">' +
-      cardHTML(c, {mock, actionable: act, focus: c.uid && c.uid === focus, kb: true}) + "</div>";
+      cardHTML(c, {mock, actionable: act, focus: c.uid && c.uid === focus, kb: true, hint}) + "</div>";
   }).join("");
 }
 
@@ -32,44 +33,72 @@ export function infoBtn(optIndex, name) {
     '<span aria-hidden="true">ⓘ</span></button>';
 }
 
-function rowHTML(opt, mock, selected, pickNo, expanded) {
+export function hintBadgeHTML(hint) {
+  if (!hint) return "";
+  return '<span class="hintbadge" aria-hidden="true">' + hint.rank + " · " + hint.pct + "%</span>";
+}
+
+export function hintAriaLabel(opt, hint) {
+  if (!hint) return null;
+  const pct = hint.pct + "%";
+  const est = hint.est != null ? ", win chance " + Math.round(hint.est * 100) + "%" : "";
+  return "Hint " + hint.rank + ", " + (opt.label || opt.verb) + ", bot's confidence " + pct + est;
+}
+
+function rowHTML(opt, mock, selected, pickNo, expanded, hint) {
   const cls = ["opt"];
   if (PRIMARY.includes(opt.verb)) cls.push("primary");
   if (SECONDARY.includes(opt.verb)) cls.push("secondary");
   if (selected) cls.push("sel");
   if (expanded) cls.push("open");
+  if (hint) cls.push("hinted");
   const eff = opt.effect ? '<span class="ef">' + esc(opt.effect) + "</span>" : "";
   const th = opt.card ? thumbHTML(opt.card, mock) : "";
   const info = opt.card && !isHidden(opt.card) ? infoBtn(opt.index, opt.card.name) : "";
+  const aria = hintAriaLabel(opt, hint);
   return '<div class="optw' + (info ? " hasinfo" : "") + '"><button class="' + cls.join(" ") + '" data-opt="' + opt.index + '"' +
-    (selected ? ' aria-pressed="true"' : "") + ">" + th +
+    (selected ? ' aria-pressed="true"' : "") +
+    (aria ? ' aria-label="' + esc(aria) + '"' : "") + ">" + th +
     '<span class="tx"><span class="lb">' + esc(opt.label || opt.verb) + "</span>" + eff + "</span>" +
+    hintBadgeHTML(hint) +
     (pickNo ? '<span class="pick"><span class="sr-only">picked </span>' + pickNo + "</span>" : "") + "</button>" + info + "</div>";
 }
 
-function headHTML(prompt, mock, sub) {
+function headHTML(prompt, mock, sub, hintBtn) {
   const ask = prompt.card ? thumbHTML(prompt.card, mock, "ask") : "";
   return '<div class="grab"></div><div class="stitle">' + ask + '<div class="tt"><span class="t">' +
-    esc(prompt.text || "") + "</span>" + (sub ? '<span class="sub">' + esc(sub) + "</span>" : "") + "</div></div>";
+    esc(prompt.text || "") + "</span>" + (sub ? '<span class="sub">' + esc(sub) + "</span>" : "") + "</div>" +
+    (hintBtn || "") + "</div>";
 }
 
 // Bottom-sheet body per prompt kind. Returns "" for idle/battle (no sheet: cards glow instead).
-export function sheetHTML(prompt, mock, sel, expanded) {
+// extra: {hintByIndex ({index: {rank, pct, est}}), showHint (practice prompt: render the Hint button)}.
+export function sheetHTML(prompt, mock, sel, expanded, extra) {
   if (!prompt || prompt.kind === "idle" || prompt.kind === "battle") return "";
   sel = sel || [];
   const opts = prompt.options || [];
+  const ex = extra || {};
+  const hintByIndex = ex.hintByIndex || {};
+  const hintBtn = ex.showHint
+    ? '<button class="hintbtn" data-act="hint" aria-label="Ask the bot for a hint">Hint</button>'
+    : "";
   if (prompt.kind === "position") {
     const cards = opts.filter((o) => o.verb !== "pass").map((o) => {
       const def = /def/i.test(o.label || "");
       const base = o.card || prompt.card;
-      if (!base) return '<button class="bigbtn" data-opt="' + o.index + '">' + esc(o.label) + "</button>";
+      const hint = hintByIndex[o.index] || null;
+      const aria = hintAriaLabel(o, hint);
+      if (!base) return '<button class="bigbtn" data-opt="' + o.index + '"' +
+        (aria ? ' aria-label="' + esc(aria) + '"' : "") + ">" + esc(o.label) + hintBadgeHTML(hint) + "</button>";
       const c = Object.assign({}, base, {pos: def ? "def" : "atk"});
-      return '<div class="posw"><button class="poscard" data-opt="' + o.index + '"><span class="pv" aria-hidden="true">' +
+      return '<div class="posw"><button class="poscard' + (hint ? " hinted" : "") + '" data-opt="' + o.index + '"' +
+        (aria ? ' aria-label="' + esc(aria) + '"' : "") + '><span class="pv" aria-hidden="true">' +
         '<span class="pcard' + (def ? " rot" : "") + '">' + cardHTML(c, {mock}) + "</span></span>" +
-        '<span class="plab">' + (def ? "Defense" : "Attack") + "<b>" + (def ? base.def : base.atk) + "</b></span></button>" +
+        '<span class="plab">' + (def ? "Defense" : "Attack") + "<b>" + (def ? base.def : base.atk) + "</b></span>" +
+        hintBadgeHTML(hint) + "</button>" +
         infoBtn(o.index, base.name) + "</div>";
     }).join("");
-    return headHTML(prompt, mock) + '<div class="sbody"><div class="posrow">' + cards + "</div></div>" + footHTML(prompt, sel);
+    return headHTML(prompt, mock, "", hintBtn) + '<div class="sbody"><div class="posrow">' + cards + "</div></div>" + footHTML(prompt, sel, hintByIndex);
   }
   if (prompt.kind === "card") {
     const picks = opts.filter((o) => o.verb === "select" || o.verb === "unselect");
@@ -78,32 +107,43 @@ export function sheetHTML(prompt, mock, sel, expanded) {
     const grid = picks.map((o) => {
       const at = done.indexOf(o.index);
       const info = o.card && !isHidden(o.card) ? infoBtn(o.index, o.card.name) : "";
-      return '<div class="cellw"><button class="cell" data-opt="' + o.index + '" aria-pressed="' + (at >= 0) + '">' +
-        '<span class="cbox" aria-hidden="true">' + cardHTML(o.card, {mock, selected: at >= 0, pick: at >= 0 ? at + 1 : null}) + "</span>" +
-        '<span class="cname">' + esc((o.card && o.card.name) || o.label) + (at >= 0 ? '<span class="sr-only">, picked ' + (at + 1) + "</span>" : "") +
+      const hint = hintByIndex[o.index] || null;
+      const aria = hintAriaLabel(o, hint);
+      const sr = (at >= 0 ? '<span class="sr-only">, picked ' + (at + 1) + "</span>" : "") +
+        (aria ? '<span class="sr-only">, ' + esc(aria) + "</span>" : "");
+      return '<div class="cellw"><button class="cell' + (hint ? " hinted" : "") + '" data-opt="' + o.index + '" aria-pressed="' + (at >= 0) + '">' +
+        '<span class="cbox" aria-hidden="true">' + cardHTML(o.card, {mock, selected: at >= 0, pick: at >= 0 ? at + 1 : null}) + hintBadgeHTML(hint) + "</span>" +
+        '<span class="cname">' + esc((o.card && o.card.name) || o.label) + sr +
         "</span></button>" + info + "</div>";
     }).join("");
-    return headHTML(prompt, mock, sub) + '<div class="sbody"><div class="selectgrid">' + grid + "</div></div>" +
-      footHTML(prompt, sel);
+    return headHTML(prompt, mock, sub, hintBtn) + '<div class="sbody"><div class="selectgrid">' + grid + "</div></div>" +
+      footHTML(prompt, sel, hintByIndex);
   }
   let body = "";
   if (prompt.kind === "announce") {
     body = '<div class="announce"><input type="search" placeholder="Name a card…" aria-label="Name a card"></div>';
   }
   body += opts.filter((o) => o.verb !== "finish" && o.verb !== "cancel" && !SECONDARY.includes(o.verb)).map((o) =>
-    rowHTML(o, mock, sel.includes(o.index), sel.indexOf(o.index) + 1 || null, expanded === o.index)).join("");
-  return headHTML(prompt, mock) + '<div class="sbody">' + body + "</div>" + footHTML(prompt, sel);
+    rowHTML(o, mock, sel.includes(o.index), sel.indexOf(o.index) + 1 || null, expanded === o.index, hintByIndex[o.index] || null)).join("");
+  return headHTML(prompt, mock, "", hintBtn) + '<div class="sbody">' + body + "</div>" + footHTML(prompt, sel, hintByIndex);
 }
 
-function footHTML(prompt, sel) {
+function footHTML(prompt, sel, hintByIndex) {
   const opts = prompt.options || [];
+  const hb = hintByIndex || {};
   const rest = opts.filter((o) => SECONDARY.includes(o.verb));
   const fin = opts.find((o) => o.verb === "finish");
   const cancel = opts.find((o) => o.verb === "cancel");
   if (!rest.length && !fin && !cancel) return "";
+  const obtn = (o) => {
+    const hint = hb[o.index] || null;
+    const aria = hintAriaLabel(o, hint);
+    return '<button class="bigbtn' + (hint ? " hinted" : "") + '" data-opt="' + o.index + '"' +
+      (aria ? ' aria-label="' + esc(aria) + '"' : "") + ">" + esc(o.label) + hintBadgeHTML(hint) + "</button>";
+  };
   let h = '<div class="sfoot">';
-  for (const o of rest) h += '<button class="bigbtn" data-opt="' + o.index + '">' + esc(o.label) + "</button>";
-  if (cancel) h += '<button class="bigbtn" data-opt="' + cancel.index + '">' + esc(cancel.label || "Cancel") + "</button>";
+  for (const o of rest) h += obtn(o);
+  if (cancel) h += obtn({index: cancel.index, label: cancel.label || "Cancel", verb: "cancel"});
   if (fin) {
     const n = opts.filter((o) => o.verb === "unselect").length;   // the env offers finish only when it is legal
     h += '<button class="bigbtn primary" data-opt="' + fin.index + '">Confirm' +

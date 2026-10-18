@@ -75,12 +75,14 @@ export function cardLabel(card, opts) {
   if (card.counters) parts.push(card.counters + (card.counters === 1 ? " counter" : " counters"));
   if (opts.selected) parts.push("selected");
   if (opts.actionable) parts.push("can act");
+  if (opts.hint) parts.push("hint " + opts.hint.rank + ", bot's confidence " + opts.hint.pct + "%");
   return parts.join(", ");
 }
 
 // A card filling its container (slot, hand cell, grid cell).
 // opts: {mock, actionable, selected, pick, rot (defense: rotate 90deg), stat, focus, bot,
-//        kb (board/hand: the card itself is the control, reachable by Tab, named for screen readers)}
+//        kb (board/hand: the card itself is the control, reachable by Tab, named for screen readers),
+//        hint ({rank, pct}: "Ask the bot" badge + spoken hint rank/confidence)}
 export function cardHTML(card, opts) {
   opts = opts || {};
   if (!card) return "";
@@ -91,15 +93,19 @@ export function cardHTML(card, opts) {
   if (opts.actionable) cls.push("actionable");
   if (opts.selected) cls.push("selected");
   if (opts.focus) cls.push("focus");
+  if (opts.hint) cls.push("hinted");
   const uid = card.uid ? ' data-uid="' + esc(card.uid) + '"' : "";
   const key = card.uid ? ' data-key="' + esc(card.uid + ":" + (card.code || 0)) + '"' : "";
   const inner = hidden ? "" : faceHTML(card, opts.mock);
   const pick = opts.pick ? '<div class="pick" aria-hidden="true">' + opts.pick + "</div>" : "";
+  const hb = opts.hint
+    ? '<span class="hintbadge" aria-hidden="true">' + opts.hint.rank + " · " + opts.hint.pct + "%</span>"
+    : "";
   // Controls only where tapping does something: actionable, or face-up (opens the details).
   const a11y = opts.kb && (opts.actionable || !hidden)
     ? ' role="button" tabindex="0" aria-label="' + esc(cardLabel(card, opts)) + '"' + (opts.actionable ? ' aria-haspopup="menu"' : "")
     : opts.kb ? ' role="img" aria-label="' + esc(cardLabel(card, opts)) + '"' : "";
-  return '<div class="' + cls.join(" ") + '"' + uid + key + a11y + ">" + inner + "</div>" +
+  return '<div class="' + cls.join(" ") + '"' + uid + key + a11y + ">" + inner + hb + "</div>" +
     (opts.stat ? statHTML(card) : "") + badges(card) + pick;
 }
 

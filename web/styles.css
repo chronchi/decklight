@@ -1001,3 +1001,29 @@ details.ydk textarea {
 #reviewframe .opt.agent { border-left: 3px solid var(--accent); }
 #reviewframe .opt .tag { display: inline-block; font-size: 11px; color: var(--muted); border: 1px solid var(--line-2); border-radius: 12px; padding: 1px 8px; margin-left: 8px; }
 #rscrim { position: fixed; inset: 0; z-index: 76; }
+/* ---------- practice hints + what-if (step 4) ---------- */
+#whatifbanner { display: flex; align-items: center; justify-content: center; min-height: 24px; padding: 3px 12px; font-size: 12px; color: var(--accent); background: var(--accent-tint); border-bottom: 1px solid var(--line); }
+.hintbtn { flex: none; min-height: 44px; min-width: 76px; padding: 0 16px; border-radius: 10px; border: 1px solid rgba(184, 154, 94, 0.6); background: var(--accent-tint); color: var(--accent); font-size: 15px; }
+.phasebtns .hintbtn.sm { min-width: 0; padding: 0 12px; font-size: 14px; }
+.stitle .hintbtn { margin-left: auto; }
+.hintbar { display: flex; align-items: center; gap: 10px; padding: 8px 14px 4px; }
+#info .hintbar { padding: 8px 0 0; }
+.hintbar .hintsub { font-size: 12px; color: var(--muted); }
+.hintwait { font-size: 13px; color: var(--muted); }
+.hintlist { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; flex: 1; min-width: 0; }
+.hintlist li { font-size: 13px; color: var(--text); display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.hintconf { color: var(--accent); font-variant-numeric: tabular-nums; }
+.hintest { color: var(--muted); font-size: 12px; }
+.hintbadge { display: inline-flex; align-items: center; justify-content: center; min-width: 24px; min-height: 24px; padding: 0 6px; border-radius: 12px; font-size: 12px; font-weight: 700; line-height: 24px; background: var(--accent); color: #141310; flex: none; }
+.card .hintbadge { position: absolute; left: 2px; top: 2px; z-index: 3; box-shadow: 0 0 0 1px rgba(20, 19, 16, 0.6); }
+.card.hinted { box-shadow: 0 0 0 2px var(--accent); }
+.opt.hinted { border-left: 3px solid var(--accent); }
+.opt .hintbadge, .cell .hintbadge, .poscard .hintbadge, .phbtn .hintbadge, .bigbtn .hintbadge { margin-left: 8px; position: static; }
+.cell .cbox { position: relative; }
+.cell .cbox .hintbadge { position: absolute; left: 2px; top: 2px; }
+.poscard { position: relative; }
+.poscard .hintbadge { position: absolute; left: 6px; top: 6px; }
+.phbtn { position: relative; }
+#reviewframe .whead { font-size: 12px; color: var(--muted); margin: 12px 0 8px; }
+#reviewframe .wlist { display: flex; flex-direction: column; gap: 6px; }
+#reviewframe .wopt { min-height: 44px; padding: 8px 12px; border-radius: 10px; border: 1px solid var(--line-2); text-align: left; font-size: 14px; color: var(--text); background: none; }

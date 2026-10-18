@@ -42,6 +42,13 @@ MOCKS = [
     ("19-winchance-board", "18&winchance=1"),
     ("20-winchance-stats", "19&winchance=1"),
     ("21-winchance-menu", "1&gamemenu=1&winchance=1"),
+    # Practice + hints + what-if (step 4): the lobby switch preselected to
+    # Practice, chain/grid/idle prompts with hint badges, the what-if banner.
+    ("49-practice-lobby", "0&play=practice"),
+    ("50-hint-prompt", "2&hint=1"),
+    ("51-hint-cards", "3&hint=1"),
+    ("52-hint-idle", "1&hint=1"),
+    ("53-whatif-banner", "1&whatif=1"),
 ]
 
 # Pacing cues frozen mid-scene: ?cue=K&t=F freezes visible scene K at fraction F
@@ -165,6 +172,75 @@ def review_topmost(page) -> str:
     return page.evaluate(REVIEW_TOPMOST_JS)
 
 
+HINT_TOPMOST_JS = """() => {
+  // Every VISIBLE hint badge's centre must land on its own option (never
+  // covered). Badges on board cards behind an open sheet are covered by
+  // design (the sheet itself is modal), so only the sheet's badges count
+  // then; badges clipped away by an overflow container do not count either.
+  const sheet = document.querySelector('#sheet:not(.pilesheet)');
+  const vis = (r) => r.width > 2 && r.height > 2 && r.bottom > 0 && r.top < innerHeight;
+  let badges = [...document.querySelectorAll('.hintbadge')].filter((b) => vis(b.getBoundingClientRect()));
+  if (sheet) badges = badges.filter((b) => sheet.contains(b));
+  badges = badges.filter((b) => {
+    const clip = b.closest('#info');
+    if (!clip) return true;
+    const r = b.getBoundingClientRect(), c = clip.getBoundingClientRect();
+    return r.top >= c.top - 1 && r.bottom <= c.bottom + 1;
+  });
+  if (!badges.length) return 'no-badges';
+  const bad = [];
+  for (const b of badges) {
+    const r = b.getBoundingClientRect();
+    const x = Math.min(window.innerWidth - 1, Math.max(0, r.left + r.width / 2));
+    const y = Math.min(window.innerHeight - 1, Math.max(0, r.top + r.height / 2));
+    const el = document.elementFromPoint(x, y);
+    if (!el) { bad.push('no-element'); continue; }
+    const host = b.closest('[data-opt], .card, .hintbar, .hintlist, .phasebtns');
+    if (el === b || (host && (host.contains(el) || el.contains(host) || el === host))) continue;
+    bad.push(el.id || el.className || el.tagName);
+  }
+  return bad.length ? 'covered-by:' + bad.slice(0, 3).join(',') : 'ok:' + badges.length;
+}"""
+
+
+WHATIF_TOPMOST_JS = """() => {
+  // The what-if banner and every "Try another move" button must be uncovered:
+  // at each centre the topmost element stays inside the banner / the dialog.
+  const out = [];
+  const banner = document.querySelector('#whatifbanner');
+  if (banner) {
+    const r = banner.getBoundingClientRect();
+    const el = document.elementFromPoint(
+      Math.min(window.innerWidth - 1, Math.max(0, r.left + r.width / 2)),
+      Math.min(window.innerHeight - 1, Math.max(0, r.top + r.height / 2)));
+    if (!el || (!banner.contains(el) && el !== banner)) out.push('banner-covered-by:' + (el && (el.id || el.className || el.tagName)));
+  }
+  const btns = [...document.querySelectorAll('#reviewframe .wopt')].filter((b) => {
+    const r = b.getBoundingClientRect();
+    return r.width > 2 && r.height > 2 && r.bottom > 0 && r.top < innerHeight;
+  });
+  for (const b of btns) {
+    const r = b.getBoundingClientRect();
+    const el = document.elementFromPoint(
+      Math.min(window.innerWidth - 1, Math.max(0, r.left + r.width / 2)),
+      Math.min(window.innerHeight - 1, Math.max(0, r.top + r.height / 2)));
+    if (!el || !(el === b || b.contains(el) || el.contains(b))) out.push('wopt-covered-by:' + (el && (el.id || el.className || el.tagName)));
+  }
+  if (!banner && !btns.length) return 'none-present';
+  return out.length ? out.slice(0, 3).join(',') : 'ok';
+}"""
+
+
+def hint_topmost(page) -> str:
+    """Topmost check for hint badges (see HINT_TOPMOST_JS)."""
+    return page.evaluate(HINT_TOPMOST_JS)
+
+
+def whatif_topmost(page) -> str:
+    """Topmost check for the what-if banner and option list (see WHATIF_TOPMOST_JS)."""
+    return page.evaluate(WHATIF_TOPMOST_JS)
+
+
 def launch_kwargs():
     """Point at the pre-installed Chromium (brief: already in ~/.cache/ms-playwright)."""
     env = os.environ.get("CHROME_EXE")
@@ -267,6 +343,24 @@ def main() -> int:
                     errors.append("19-winchance-board: bar aria-label is not 'Win chance 62%'")
                 if name == "16-reveal" and not page.evaluate("!!document.querySelector('#reveal')"):
                     errors.append("16-reveal has no reveal overlay")
+                if name == "49-practice-lobby" and not page.evaluate(
+                    "!!document.querySelector('[data-play=\\'practice\\'].sel')"
+                ):
+                    errors.append("49-practice-lobby: Practice is not selected")
+                if name in ("50-hint-prompt", "51-hint-cards", "52-hint-idle"):
+                    if not page.evaluate("!!document.querySelector('.hintbadge')"):
+                        errors.append(f"{name}: no hint badges on screen")
+                    if not page.evaluate("!!document.querySelector('[data-act=hint]')"):
+                        errors.append(f"{name}: no Hint button on screen")
+                    top = hint_topmost(page)
+                    if not top.startswith("ok:"):
+                        errors.append(f"{name}: hint badges not topmost at their centre ({top})")
+                if name == "53-whatif-banner":
+                    if not page.evaluate("!!document.querySelector('#whatifbanner')"):
+                        errors.append("53-whatif-banner: no what-if banner on screen")
+                    top = whatif_topmost(page)
+                    if top != "ok":
+                        errors.append(f"53-whatif-banner: what-if banner covered ({top})")
             for name, i in CUE_SHOTS:
                 page.goto(f"{base}?mock=1&i={i}", wait_until="networkidle")
                 page.wait_for_timeout(250)
@@ -330,6 +424,12 @@ def main() -> int:
                     "!!document.querySelector('#reviewframe')"
                 ):
                     errors.append("47-review-frame: no decision board on screen")
+                if name == "47-review-frame":
+                    if page.evaluate("document.querySelectorAll('#reviewframe .wopt').length") < 2:
+                        errors.append("47-review-frame: no 'Try another move' options")
+                    top = whatif_topmost(page)
+                    if top != "ok":
+                        errors.append(f"47-review-frame: what-if list covered ({top})")
                 if name in ("45-review-tab", "46-review-mistakes", "47-review-frame"):
                     top = review_topmost(page)
                     if top not in ("ok", "ok-frame"):

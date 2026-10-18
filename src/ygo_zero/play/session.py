@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import json
 import time
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -71,6 +72,8 @@ class DuelSession:
         record_root: Path = Path("runs/web"),
         human_auto: bool = False,
         record_meta: dict | None = None,
+        driver_prefix: Sequence[int] = (),
+        driver_prefix_decisions: Sequence[dict] | None = None,
     ) -> None:
         if (bot is None) == (launcher is None):
             raise ValueError("DuelSession needs exactly one of bot= / launcher=")
@@ -86,6 +89,12 @@ class DuelSession:
         self.record_root = record_root
         self.human_auto = human_auto
         self.record_meta = dict(record_meta or {})  # extra record fields (deck ids, mode, ...)
+        # What-if prefix (product-space outer choices + host-verified decisions):
+        # the driver replays it verbatim instead of re-searching it.
+        self.driver_prefix = tuple(int(c) for c in (driver_prefix or ()))
+        self.driver_prefix_decisions = (
+            [dict(d) for d in driver_prefix_decisions] if driver_prefix_decisions is not None else None
+        )
         self.env = PyEnv(engine, cfg, auto_single=False)
         self.driver = None
         self.product_info: dict | None = None
@@ -107,9 +116,22 @@ class DuelSession:
         self.driver = None
         self.product_info = None
         if self.launcher is not None:
-            self.driver = self.launcher.start_duel(
-                self.engine, self.cfg, self.bot_seat, game_seed=self.seed, ws_seed=self.seed
-            )
+            try:
+                self.driver = self.launcher.start_duel(
+                    self.engine,
+                    self.cfg,
+                    self.bot_seat,
+                    game_seed=self.seed,
+                    ws_seed=self.seed,
+                    prefix=self.driver_prefix,
+                    prefix_decisions=self.driver_prefix_decisions,
+                )
+            except TypeError:  # test stubs without prefix support: plain start
+                if self.driver_prefix:
+                    raise
+                self.driver = self.launcher.start_duel(
+                    self.engine, self.cfg, self.bot_seat, game_seed=self.seed, ws_seed=self.seed
+                )
             self.product_info = self.launcher.record_info(self.seed)
 
     def close(self) -> None:

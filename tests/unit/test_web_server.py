@@ -63,7 +63,9 @@ class _TinyLauncher:
         self.forward = forward
         self.value = None  # fast mode: no value net (winchance stays null)
 
-    def start_duel(self, engine, config, bot_seat, *, game_seed, ws_seed, human_fn=None):
+    def start_duel(
+        self, engine, config, bot_seat, *, game_seed, ws_seed, human_fn=None, prefix=(), prefix_decisions=None
+    ):
         return ProductDriver(
             engine,
             config,
@@ -75,6 +77,8 @@ class _TinyLauncher:
             ws_seed=ws_seed,
             fast=True,
             human_fn=human_fn,
+            prefix=prefix,
+            prefix_decisions=prefix_decisions,
         ).start()
 
     def record_info(self, seed: int) -> dict:
@@ -1108,3 +1112,244 @@ def test_review_after_tiny_product_game(tmp_path, engine):
         )
         n_multi = want
         assert n_multi is not None
+
+
+# --- 10. practice hints (step 4): top-3, practice-only gate ---
+
+
+def _wait_prompt(ws, limit=2000):
+    for _ in range(limit):
+        m = json.loads(ws.receive_text())
+        assert m.get("t") == "state", m.get("t")
+        if m["prompt"] is not None:
+            return m
+    raise AssertionError("no human prompt arrived")
+
+
+def test_hint_practice_game(tmp_path, engine):
+    """A practice-game hint returns <= 3 options with probabilities summing to <= 1."""
+    forward = _tiny_forward()
+    app = _make_app(tmp_path, engine, mode_factory=lambda mode: _TinyLauncher(forward))
+    human_text = (FIXTURES / "BlueEyes.ydk").read_text()
+    bot_text = (FIXTURES / "Branded.ydk").read_text()
+    with _client(app).websocket_connect(f"/ws?t={TOKEN}") as ws:
+        ws.receive_text()
+        ws.send_json(
+            {
+                "t": "new_game",
+                "deck": {"ydk": human_text},
+                "bot_deck": {"ydk": bot_text},
+                "first": "me",
+                "mode": "product",
+                "practice": True,
+            }
+        )
+        first = _wait_prompt(ws)
+        assert first.get("practice") is True
+        ws.send_json({"t": "hint"})
+        hm = json.loads(ws.receive_text())
+        assert hm["t"] == "hint" and hm["prompt"] == first["prompt"]["id"]
+        assert 1 <= len(hm["options"]) <= 3
+        assert sum(o["p"] for o in hm["options"]) <= 1.0 + 1e-6
+        for o in hm["options"]:
+            assert set(o) >= {"index", "label", "p", "est"} and o["label"]
+            assert 0 <= o["index"] < len(first["prompt"]["options"])
+
+
+def test_hint_duel_mode_rejected(tmp_path, engine):
+    """A duel-mode hint is rejected (hints are practice only)."""
+    forward = _tiny_forward()
+    app = _make_app(tmp_path, engine, mode_factory=lambda mode: _TinyLauncher(forward))
+    human_text = (FIXTURES / "BlueEyes.ydk").read_text()
+    bot_text = (FIXTURES / "Branded.ydk").read_text()
+    with _client(app).websocket_connect(f"/ws?t={TOKEN}") as ws:
+        ws.receive_text()
+        ws.send_json(
+            {
+                "t": "new_game",
+                "deck": {"ydk": human_text},
+                "bot_deck": {"ydk": bot_text},
+                "first": "me",
+                "mode": "product",
+            }
+        )
+        _wait_prompt(ws)
+        ws.send_json({"t": "hint"})
+        err = json.loads(ws.receive_text())
+        assert err["t"] == "error" and err["text"] == "Hints are only in practice mode"
+
+
+# --- 11. what-if from the review (step 4) ---
+
+
+def test_whatif_before_review_errors(tmp_path, engine):
+    forward = _tiny_forward()
+    launcher = _tiny_review_launcher(forward)
+    app = _make_app(tmp_path, engine, mode_factory=lambda mode: launcher)
+    human_text = (FIXTURES / "BlueEyes.ydk").read_text()
+    bot_text = (FIXTURES / "Branded.ydk").read_text()
+    with _client(app).websocket_connect(f"/ws?t={TOKEN}") as ws:
+        ws.receive_text()
+        _new_game(ws, human_text, bot_text, mode="product", first="me")
+        rng = random.Random(0)
+        last = None
+        n_human = 0
+        for _ in range(2000):
+            m = json.loads(ws.receive_text())
+            if m.get("t") in ("review_progress", "review", "review_frame"):
+                continue
+            assert m.get("t") == "state"
+            if m["result"] is not None:
+                last = m
+                break
+            if m["prompt"] is not None:
+                ws.send_json(
+                    {
+                        "t": "choose",
+                        "prompt": m["prompt"]["id"],
+                        "index": rng.randrange(len(m["prompt"]["options"])),
+                    }
+                )
+                n_human += 1
+                if n_human >= 4:
+                    ws.send_json({"t": "surrender"})
+                    for _ in range(50):
+                        m2 = json.loads(ws.receive_text())
+                        if m2.get("t") == "state" and m2.get("result") is not None:
+                            last = m2
+                            break
+                    break
+        assert last is not None and last["result"] is not None
+        ws.send_json({"t": "whatif", "k": 0, "option": 0})
+        err = json.loads(ws.receive_text())
+        assert err["t"] == "error" and err["text"] == "no review yet (send review first)"
+
+
+def test_whatif_after_review_replays_prefix(tmp_path, engine):
+    """What-if replays the prefix (board at k matches), then continues to a prompt
+    as a new practice game carrying the what_if record field."""
+    from ygo_zero.analysis.review import collect_human_decisions
+    from ygo_zero.engine.env import PyEnv
+    from ygo_zero.web.view import build_view
+
+    forward = _tiny_forward()
+    launcher = _tiny_review_launcher(forward)
+    app = _make_app(tmp_path, engine, mode_factory=lambda mode: launcher)
+    human_text = (FIXTURES / "BlueEyes.ydk").read_text()
+    bot_text = (FIXTURES / "Branded.ydk").read_text()
+    with _client(app).websocket_connect(f"/ws?t={TOKEN}") as ws:
+        ws.receive_text()
+        _new_game(ws, human_text, bot_text, mode="product", first="me")
+        rng = random.Random(0)
+        last = None
+        n_human = 0
+        for _ in range(2000):
+            m = json.loads(ws.receive_text())
+            if m.get("t") in ("review_progress", "review", "review_frame"):
+                continue
+            assert m.get("t") == "state"
+            if m["result"] is not None:
+                last = m
+                break
+            if m["prompt"] is not None:
+                ws.send_json(
+                    {
+                        "t": "choose",
+                        "prompt": m["prompt"]["id"],
+                        "index": rng.randrange(len(m["prompt"]["options"])),
+                    }
+                )
+                n_human += 1
+                if n_human >= 4:
+                    ws.send_json({"t": "surrender"})
+                    for _ in range(50):
+                        m2 = json.loads(ws.receive_text())
+                        if m2.get("t") == "state" and m2.get("result") is not None:
+                            last = m2
+                            break
+                    break
+        assert last is not None and last["result"] is not None
+        ws.send_json({"t": "review"})
+        review = None
+        for _ in range(600):
+            m = json.loads(ws.receive_text())
+            if m.get("t") == "review_progress":
+                continue
+            if m.get("t") == "review":
+                review = m
+                break
+        assert review is not None and review["decisions"]
+        recs = [
+            json.loads((p / "game.jsonl").read_text())
+            for p in sorted((tmp_path / "runs").iterdir())
+            if p.is_dir()
+        ]
+        assert len(recs) == 1
+        rec = recs[0]
+        from ygo_zero.decks import parse_ydk
+
+        human, bot = parse_ydk(human_text), parse_ydk(bot_text)
+        cfg = (
+            DuelConfig(human, bot, seed=rec["seed"])
+            if rec["human_seat"] == 0
+            else DuelConfig(bot, human, seed=rec["seed"])
+        )
+        dlist = collect_human_decisions(engine, cfg, rec)
+        assert dlist, "no human decisions to branch from"
+        k = 0
+        prefix = [int(c) for c in dlist[k]["prefix"]]
+        env0 = PyEnv(engine, cfg, auto_single=False)
+        env0.reset()
+        for c in prefix:
+            env0.step(int(c))
+        n_opts = len(env0.opts)
+        assert n_opts > 1
+        alt = (int(rec["choices"][len(prefix)]) + 1) % n_opts
+        # The boards after the shared prefix match (host replay vs the same
+        # replay the what-if game starts from).
+        want_view = build_view(env0, int(rec["human_seat"]))
+        ws.send_json({"t": "whatif", "k": k, "option": alt})
+        branched = None
+        for _ in range(3000):
+            m = json.loads(ws.receive_text())
+            if m.get("t") in ("review_progress", "review", "review_frame"):
+                continue
+            assert m.get("t") == "state", m.get("t")
+            if m.get("what_if") is not None:
+                branched = m
+                if m["prompt"] is not None:
+                    break
+            elif branched is not None and m["prompt"] is not None:
+                branched = m
+                break
+        assert branched is not None, "no what-if game started"
+        assert branched.get("practice") is True
+        assert branched.get("what_if", {}).get("k") == k
+        assert branched.get("what_if", {}).get("option") == alt
+        assert branched["prompt"] is not None, "the what-if game did not reach a prompt"
+        # Prefix equality at the mechanism level: the same host replay the
+        # server runs reaches the same board (build_view compares equal).
+        env1 = PyEnv(engine, cfg, auto_single=False)
+        env1.reset()
+        for c in prefix:
+            env1.step(int(c))
+        assert build_view(env1, int(rec["human_seat"])) == want_view
+        # The branch is a new practice game on its own: surrender writes a record.
+        ws.send_json({"t": "surrender"})
+        end = None
+        for _ in range(50):
+            m = json.loads(ws.receive_text())
+            if m.get("t") == "state" and m.get("result") is not None:
+                end = m
+                break
+        assert end is not None and end["result"] is not None
+    all_recs = [
+        json.loads((p / "game.jsonl").read_text())
+        for p in sorted((tmp_path / "runs").iterdir())
+        if p.is_dir()
+    ]
+    assert len(all_recs) == 2
+    new = all_recs[-1]
+    assert new["practice"] is True
+    assert new["what_if"]["k"] == k and new["what_if"]["option"] == alt
+    assert new["seed"] == rec["seed"]

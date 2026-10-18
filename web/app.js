@@ -100,7 +100,7 @@ function setLogTab(t) {
 }
 let detail = null;       // card for the full-screen detail view
 let lobby = null;
-let lobbyPick = {you: null, bot: null, first: "rps", mode: "product"};
+let lobbyPick = {you: null, bot: null, first: "rps", mode: "product", play: "duel"};
 let pickerOpen = null;   // "you" | "bot" | null
 let pileOpen = null;     // "gy:you" | "banished:bot" | "extra:you" ...
 let ws = null;
@@ -153,6 +153,13 @@ let reviewProgress = null; // {done, total}
 let reviewFilter = "all";  // "all" | "mistakes" | "missed"
 let reviewFrame = null;    // {"k","view","options","entry"} for the tapped decision
 let overDismissed = false; // "Review game" dismisses the game-over card; "Result" brings it back
+
+// Practice mode + "Ask the bot" hints + what-if (step 4).
+let practiceMode = false;  // the running game is practice (hints allowed)
+let hint = null;           // the server's {"prompt","options":[{index,label,p,est}],"ms"} or null
+let hintLoading = false;
+let hintPrompt = null;     // prompt id the current hint belongs to
+let whatIf = null;         // {"source","k","option","turn"} for a what-if game
 
 // Bot activation reveal queue + top-of-board banner.
 let revealQueue = [];
@@ -586,30 +593,78 @@ function captionHTML(m) {
     esc(c.actor ? c.actor + " — " + (c.text || "") : (c.text || "")) + "</span></div></div>";
 }
 
+// "Ask the bot" hint maps for the current prompt: by option index (sheets,
+// phase buttons) and by card uid (idle/battle glowing cards).
+function hintMaps(p) {
+  const byIndex = {}, byUid = {};
+  if (!hint || !p || hintPrompt !== p.id) return {byIndex, byUid};
+  const opts = p.options || [];
+  (hint.options || []).forEach((ho, i) => {
+    const rank = i + 1;
+    const pct = Math.round((ho.p || 0) * 100);
+    const entry = {rank, pct, est: ho.est != null ? ho.est : null, label: ho.label || ""};
+    byIndex[ho.index] = entry;
+    const o = opts.find((x) => x.index === ho.index);
+    if (o && o.card && o.card.uid) byUid[o.card.uid] = entry;
+  });
+  return {byIndex, byUid};
+}
+
+// Hint bar: the returned top picks in words (badges on the options carry them
+// visually). The Hint button lives in the sheet header (sheet prompts) or in
+// your bar (idle/battle); the info copy carries no button. Idle prompts show
+// the bar only once asked (the bar is always visible, never under a fold).
+function hintBarHTML(p, withButton, idle) {
+  if (!practiceMode || !p || msg.result || IS_REPLAY) return "";
+  if (idle && !hintLoading && !(hint && hintPrompt === p.id)) return "";
+  let inner = "";
+  if (hintLoading) {
+    inner = '<span class="hintwait" role="status">Asking the bot…</span>';
+  } else if (hint && hintPrompt === p.id && (hint.options || []).length) {
+    inner = '<ol class="hintlist">' + hint.options.map((ho, i) => {
+      const pct = Math.round((ho.p || 0) * 100);
+      return '<li><span class="hintbadge" aria-hidden="true">' + (i + 1) + "</span> " +
+        esc(ho.label || ("Option " + ho.index)) +
+        ' <span class="hintconf">' + pct + "%</span><span class=\"sr-only\">, bot's confidence " +
+        pct + " percent" + (ho.est != null ? ", win chance " + Math.round(ho.est * 100) + " percent" : "") + "</span>" +
+        (ho.est != null ? '<span class="hintest"> · win ' + Math.round(ho.est * 100) + "%</span>" : "") + "</li>";
+    }).join("") + "</ol>";
+  } else {
+    inner = '<span class="hintsub">bot\u2019s top picks</span>';
+  }
+  return '<div class="hintbar" data-key="hintbar">' +
+    (withButton ? '<button class="hintbtn" data-act="hint"' +
+      ' aria-label="Ask the bot for a hint"' + (hintLoading ? " disabled" : "") + ">Hint</button>" : "") +
+    inner + "</div>";
+}
+
 function renderGame() {
   const v = msg.view;
   const p = msg.prompt;
   const act = locked ? {} : actionableMap(p);
+  const hm = hintMaps(p);
   app.classList.toggle("replay", IS_REPLAY);
   if (focusUid && !findCard(focusUid)) focusUid = null;
   const yourTurn = v.turn_player === "you";
 
   let h = barHTML(v.bot, "bot", {thinking: msg.thinking, active: !yourTurn, name: replayName("bot")});
+  if (whatIf) h += '<div id="whatifbanner" data-key="whatifbanner">What if · from turn ' + esc(String(whatIf.turn != null ? whatIf.turn : "?")) + "</div>";
   if (IS_REPLAY) {
     // Spectator: seat 1's hand face-up under the top header (frames are reveal_all).
     h += '<div id="thand" data-key="thand">' + handHTML(v.bot.hand, {}, MOCK, null) + "</div>";
   }
   if (bannerText) h += '<div id="botbanner" data-key="botbanner">' + esc(bannerText) + "</div>";
   h += '<div id="board" data-key="board">';
-  h += '<div class="field bot">' + sideHTML(v.bot, {mirror: true, mock: MOCK, actionable: act, focus: focusUid}) + "</div>";
-  h += '<div id="mid"><div id="midstrip" class="zrow">' + midHTML(v, {mock: MOCK, actionable: act, focus: focusUid, names: msg.names || null}) + "</div>";
+  h += '<div class="field bot">' + sideHTML(v.bot, {mirror: true, mock: MOCK, actionable: act, focus: focusUid, hint: hm.byUid}) + "</div>";
+  h += '<div id="mid"><div id="midstrip" class="zrow">' + midHTML(v, {mock: MOCK, actionable: act, focus: focusUid, names: msg.names || null, hint: hm.byUid}) + "</div>";
   if (winChance && msg.winchance) h += winchanceHTML(msg.winchance);
   const chain = chainHTML(v.chain, MOCK, chainNeg);
   if (chain) h += '<div id="chain">' + chain + "</div>";
   h += "</div>";
-  h += '<div class="field you">' + sideHTML(v.you, {mirror: false, mock: MOCK, actionable: act, focus: focusUid}) + "</div>";
+  h += '<div class="field you">' + sideHTML(v.you, {mirror: false, mock: MOCK, actionable: act, focus: focusUid, hint: hm.byUid}) + "</div>";
   h += "</div>";
-  h += barHTML(v.you, "you", {phaseBtns: phaseBtnsHTML(p, locked), active: yourTurn, name: replayName("you")});
+  const isIdle = p && (p.kind === "idle" || p.kind === "battle");
+  h += barHTML(v.you, "you", {phaseBtns: phaseBtnsHTML(p, locked, hm.byIndex, practiceMode && isIdle && !msg.result), active: yourTurn, name: replayName("you")});
 
   let info = null;
   let sheet = "";
@@ -626,12 +681,16 @@ function renderGame() {
       const t = c && !isHidden(c) ? cardText(c.code) : null;
       info = {card: c, text: t && t.text, typeStr: t && t.type_str};
     }
-    h += '<div id="info" data-key="info">' + (recap && !info ? recapHTML(hintFor(p))
+    const isSheet = p && p.kind !== "idle" && p.kind !== "battle";
+    h += '<div id="info" data-key="info">' + hintBarHTML(p, false, !isSheet) +
+      (recap && !info ? recapHTML(hintFor(p))
       : infoHTML(info, shownEvents(), MOCK, hintFor(p), msg.names || null)) + "</div>";
-    h += '<div id="hand" data-key="hand" class="' + (locked ? "locked" : "") + '">' + handHTML(v.you.hand, act, MOCK, focusUid) + "</div>";
+    h += '<div id="hand" data-key="hand" class="' + (locked ? "locked" : "") + '">' + handHTML(v.you.hand, act, MOCK, focusUid, hm.byUid) + "</div>";
 
     sheet = pileOpen ? pileSheetHTML(pileOpen, pileCards(pileOpen), MOCK)
-      : (p && !msg.result ? sheetHTML(p, MOCK, sel, expanded) : "");
+      : (p && !msg.result && isSheet
+        ? sheetHTML(p, MOCK, sel, expanded, {hintByIndex: hm.byIndex, showHint: practiceMode}) + hintBarHTML(p, false)
+        : "");
   }
   if (pileOpen) h += '<div id="pscrim" data-key="pscrim" data-act="closepile"></div>';
   if (sheet) {
@@ -809,6 +868,10 @@ function renderOverlays(logh) {
       '<span class="tx"><span class="lb">' + esc(o.label || "") + "</span></span>" +
       (o.label === (e.your && e.your.label) ? '<span class="tag">You</span>' : "") +
       (o.label === (e.agent && e.agent.label) ? '<span class="tag">Agent</span>' : "") + "</div>").join("");
+    const whatif = (reviewFrame.options || []).map((o) =>
+      '<div role="listitem"><button class="wopt" data-act="whatif" data-k="' + reviewFrame.k + '" data-option="' + o.index + '"' +
+      ' aria-label="Try another move: ' + esc(o.label || ("option " + o.index)) + '">' +
+      esc(o.label || ("Option " + o.index)) + "</button></div>").join("");
     rh = '<div id="rscrim" data-key="rscrim" data-act="closereviewframe"></div>' +
       '<div id="reviewframe" data-key="reviewframe" role="dialog" aria-modal="true" tabindex="-1" aria-label="' +
       esc("Decision " + reviewFrame.k + ": " + (e.mark || "")) + '">' +
@@ -817,7 +880,9 @@ function renderOverlays(logh) {
       '<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5 5l10 10M15 5 5 15"/></svg></button></div>' +
       '<div class="mbody"><div class="rduo"><span>You: ' + esc((e.your && e.your.label) || "") + "</span>" +
       "<span>Agent: " + esc((e.agent && e.agent.label) || "") + "</span></div>" +
-      '<div class="sbody">' + opts + "</div></div></div>";
+      '<div class="sbody">' + opts + "</div>" +
+      '<div class="whead">Try another move</div><div class="wlist" role="list" aria-label="Try another move">' +
+      whatif + "</div></div></div>";
   }
   let rEl = document.getElementById("ov-review");
   if (!rEl) {
@@ -876,6 +941,7 @@ function renderLobby() {
   h += '<h2 class="sr-only">New duel</h2>';
   h += pickerHTML(decks, "you", "Your deck");
   h += pickerHTML(decks, "bot", "ygo-zero plays");
+  h += segHTML("Mode", "play", [["duel", "Duel"], ["practice", "Practice"]]);
   h += segHTML("Going first", "first", [["rps", "Rock-paper-scissors"], ["me", "Me"], ["bot", "Bot"]]);
   h += segHTML("Bot strength", "mode", [["product", "Full"], ["fast", "Fast"], ["random", "Random"]]);
   h += '<details class="ydk"><summary>Paste a .ydk instead<svg class="chev" viewBox="0 0 20 20" aria-hidden="true"><path d="M5 8l5 5 5-5"/></svg></summary>' +
@@ -1020,7 +1086,7 @@ app.addEventListener("click", (ev) => {
       return;
     }
   }
-  for (const key of ["first", "mode"]) {
+  for (const key of ["first", "mode", "play"]) {
     const el = t.closest("[data-" + key + "]");
     if (el) {
       lobbyPick[key] = el.getAttribute("data-" + key);
@@ -1179,6 +1245,11 @@ function goLobby() {
   reviewProgress = null;
   reviewFrame = null;
   overDismissed = false;
+  practiceMode = false;
+  hint = null;
+  hintLoading = false;
+  hintPrompt = null;
+  whatIf = null;
   inLobby = true;
   resetCues();
   render();
@@ -1254,10 +1325,16 @@ function onAction(kind, el) {
     reviewProgress = null;
     reviewFrame = null;
     overDismissed = false;
+    hint = null;
+    hintLoading = false;
+    hintPrompt = null;
+    whatIf = null;
     gameMode = lobbyPick.mode;
+    practiceMode = lobbyPick.play === "practice";
     resetCues();
     sendGame({t: "new_game", deck: ydk ? {ydk} : lobbyPick.you, bot_deck: lobbyPick.bot,
-      first: lobbyPick.first, mode: lobbyPick.mode, chain: chainMode});
+      first: lobbyPick.first, mode: lobbyPick.mode, chain: chainMode,
+      practice: lobbyPick.play === "practice"});
     return;
   } else if (kind === "newgame") {
     goLobby();
@@ -1290,6 +1367,50 @@ function onAction(kind, el) {
   } else if (kind === "closereviewframe") {
     reviewFrame = null;
     render();
+    return;
+  } else if (kind === "hint") {
+    if (!msg || !msg.prompt || hintLoading) return;
+    if (MOCK) {
+      const opts = (msg.prompt.options || []).slice(0, 3);
+      const ps = [0.62, 0.25, 0.08];
+      hint = {t: "hint", prompt: msg.prompt.id,
+        options: opts.map((o, i) => ({index: o.index, label: o.label, p: ps[i] || 0.05, est: null})),
+        ms: 12.3};
+      hintPrompt = msg.prompt.id;
+      say("Hint 1, " + (opts[0] ? opts[0].label : "no option") + ", bot's confidence 62%.");
+      render();
+      return;
+    }
+    if (!ws || !practiceMode) return;
+    hintLoading = true;
+    render();
+    ws.send({t: "hint"});
+    return;
+  } else if (kind === "whatif") {
+    const k = el.getAttribute("data-k");
+    const option = el.getAttribute("data-option");
+    if (k == null || option == null) return;
+    if (MOCK) {
+      reviewFrame = null;
+      render();
+      return;
+    }
+    if (!ws) return;
+    reviewFrame = null;
+    events = [];
+    revealQueue = [];
+    revealCur = null;
+    bannerText = null;
+    review = null;
+    reviewLoading = false;
+    reviewProgress = null;
+    overDismissed = false;
+    hint = null;
+    hintLoading = false;
+    hintPrompt = null;
+    inLobby = false;
+    render();
+    ws.send({t: "whatif", k: parseInt(k, 10), option: parseInt(option, 10)});
     return;
   } else return;
   render();
@@ -1598,8 +1719,16 @@ function applyState(m) {
   if (msg && msg.t === "state" && msg.prompt && (!m.prompt || m.prompt.id !== msg.prompt.id)) {
     sel = [];
     expanded = null;
+    hint = null;
+    hintLoading = false;
+    hintPrompt = null;
   }
-  if (!m.prompt) sel = [];
+  if (!m.prompt) {
+    sel = [];
+    if (!m.result) { hint = null; hintLoading = false; hintPrompt = null; }
+  }
+  practiceMode = !!m.practice;
+  whatIf = m.what_if || null;
   // A cue-aware server replaces the old reveal/banner notices.
   addEvents(m.log, false, !("cues" in m));
   markNegations(m);
@@ -1639,6 +1768,11 @@ async function loadMock(i) {
   reviewFilter = "all";
   reviewFrame = null;
   overDismissed = false;
+  practiceMode = false;
+  hint = null;
+  hintLoading = false;
+  hintPrompt = null;
+  whatIf = null;
   focusUid = qs.get("focus") || null;
   pileOpen = msg.openPile || qs.get("pile") || null;
   if (qs.get("menu") && msg.t === "state") {
@@ -1649,6 +1783,7 @@ async function loadMock(i) {
   }
   if (qs.get("sel") && msg.t === "state") sel = qs.get("sel").split(",").map(Number);
   if (qs.get("picker") && msg.t === "lobby") pickerOpen = qs.get("picker");
+  if (qs.get("play") === "practice" && msg.t === "lobby") lobbyPick.play = "practice";
   if (qs.get("gamemenu") && msg.t === "state") gameMenu = true;
   // Screenshot hooks for the duel-log sheet: ?log=1 opens it, ?logtab=log|stats|cards|review picks the tab.
   if (msg.t === "state") {
@@ -1683,9 +1818,25 @@ async function loadMock(i) {
       } catch (e) { /* leave empty */ }
     }
   }
+  // Screenshot hooks for practice hints + the what-if banner (mock state only).
+  if (msg.t === "state") {
+    if (qs.get("whatif") === "1") {
+      practiceMode = true;
+      whatIf = {source: "mock", k: 1, option: 1, turn: msg.view ? msg.view.turn : 2};
+    }
+    if (qs.get("hint") === "1" && msg.prompt) practiceMode = true;
+  }
   render();
   if (msg.t === "state" && !(Array.isArray(msg.cues) && msg.cues.length)) announceState(null, msg);
   if (msg.t === "state" && Array.isArray(msg.cues) && msg.cues.length) mockCues();
+  if (qs.get("hint") === "1" && msg.t === "state" && msg.prompt) {
+    const opts = (msg.prompt.options || []).slice(0, 3);
+    const ps = [0.62, 0.25, 0.08];
+    hint = {t: "hint", prompt: msg.prompt.id,
+      options: opts.map((o, i) => ({index: o.index, label: o.label, p: ps[i] || 0.05, est: null})), ms: 12.3};
+    hintPrompt = msg.prompt.id;
+    render();
+  }
   if (qs.get("reveal") && msg.t === "state") {
     const c = findCard(qs.get("reveal"));
     if (c && !isHidden(c)) {
@@ -1861,6 +2012,17 @@ async function boot() {
         return;
       } else if (m.t === "review_frame") {
         reviewFrame = m;
+        render();
+        return;
+      } else if (m.t === "hint") {
+        hint = m;
+        hintLoading = false;
+        hintPrompt = (msg && msg.prompt) ? msg.prompt.id : (m.prompt != null ? m.prompt : null);
+        const first = (m.options || [])[0];
+        if (first) {
+          const pct = Math.round((first.p || 0) * 100);
+          say("Hint 1, " + (first.label || "option") + ", bot's confidence " + pct + "%.");
+        }
         render();
         return;
       } else if (m.t === "state") {
