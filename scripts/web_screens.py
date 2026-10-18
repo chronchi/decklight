@@ -62,6 +62,11 @@ MOCKS = [
     ("64-puzzle-banner", "1&puzzlebanner=1"),
     ("65-puzzle-solved", "1&puzzlesolved=1"),
     ("66-puzzle-failed", "1&puzzlefailed=1"),
+    # Opponent deck primer (step 5, item 7): lobby sheet, not-enough-games
+    # sheet, and the in-game sheet from the game menu.
+    ("67-primer-lobby", "0&primer=1"),
+    ("68-primer-empty", "0&primer=null"),
+    ("69-primer-game", "1&primer=1"),
 ]
 
 # Pacing cues frozen mid-scene: ?cue=K&t=F freezes visible scene K at fraction F
@@ -344,6 +349,36 @@ def puzzle_dialog_topmost(page) -> str:
     return page.evaluate(PUZZLE_DIALOG_TOPMOST_JS)
 
 
+PRIMER_TOPMOST_JS = """() => {
+  // The primer sheet's close button and its last section must be uncovered.
+  // Scroll the body first so the last section is in view even on a short phone.
+  const sheet = document.querySelector('#primersheet');
+  if (!sheet) return 'none-present';
+  const out = [];
+  const check = (el, label) => {
+    if (!el) { out.push(label + '-missing'); return; }
+    const r = el.getBoundingClientRect();
+    const x = Math.min(innerWidth - 1, Math.max(0, r.left + r.width / 2));
+    const y = Math.min(innerHeight - 1, Math.max(0, r.top + r.height / 2));
+    const top = document.elementFromPoint(x, y);
+    if (!top || !(top === el || el.contains(top) || top.contains(el))) {
+      out.push(label + '-covered-by:' + (top && (top.id || top.className || top.tagName)));
+    }
+  };
+  check(sheet.querySelector('[data-act="closeprimer"]'), 'close');
+  const body = sheet.querySelector('.mbody');
+  const heads = sheet.querySelectorAll('.mbody h3');
+  if (body) body.scrollTop = body.scrollHeight;
+  const last = heads.length ? heads[heads.length - 1] : (body ? body.querySelector(':scope > :last-child') : null);
+  check(last, 'last-section');
+  return out.length ? out.slice(0, 3).join(',') : 'ok';
+}"""
+
+
+def primer_topmost(page) -> str:
+    return page.evaluate(PRIMER_TOPMOST_JS)
+
+
 def launch_kwargs():
     """Point at the pre-installed Chromium (brief: already in ~/.cache/ms-playwright)."""
     env = os.environ.get("CHROME_EXE")
@@ -527,6 +562,67 @@ def main() -> int:
                     top = puzzle_dialog_topmost(page)
                     if top != "ok":
                         errors.append(f"{name}: puzzle dialog not topmost ({top})")
+                if name in ("67-primer-lobby", "68-primer-empty", "69-primer-game"):
+                    if not page.evaluate("!!document.querySelector('#primersheet')"):
+                        errors.append(f"{name}: no primer sheet on screen")
+                    sheet = page.evaluate("document.querySelector('#primersheet').textContent")
+                    if name in ("67-primer-lobby", "69-primer-game"):
+                        for want in ("Key cards", "How it opens", "Where it gets stopped", "Your answers"):
+                            if want not in sheet:
+                                errors.append(f"{name}: no {want!r} section")
+                        if "Ash Blossom & Joyous Spring" not in sheet:
+                            errors.append(f"{name}: no matching hand trap in Your answers")
+                        if "win_rate" in sheet or "Win rate" in sheet:
+                            errors.append(f"{name}: bot win rate leaked into the sheet")
+                    if name == "68-primer-empty":
+                        if "Not enough bot games with this deck yet." not in sheet:
+                            errors.append("68-primer-empty: no not-enough-games line")
+                        if page.evaluate("document.querySelectorAll('#primersheet h3').length"):
+                            errors.append("68-primer-empty: empty sheet still shows sections")
+                    if name == "69-primer-game" and page.evaluate("!!document.querySelector('#gamemenu')"):
+                        errors.append("69-primer-game: the game menu is still open under the primer")
+                    top = primer_topmost(page)
+                    if top != "ok":
+                        errors.append(f"{name}: primer close/last section not topmost ({top})")
+                    if name in ("67-primer-lobby", "69-primer-game"):
+                        # A card name opens the card detail; Escape returns to the sheet.
+                        page.locator("#primersheet .pname").first.click()
+                        page.wait_for_timeout(300)
+                        if not page.evaluate("!!document.querySelector('#detail')"):
+                            errors.append(f"{name}: tapping a card name opened no detail")
+                        page.keyboard.press("Escape")
+                        page.wait_for_timeout(300)
+                        if page.evaluate("!!document.querySelector('#detail')"):
+                            errors.append(f"{name}: Escape did not close the card detail")
+                        if not page.evaluate("!!document.querySelector('#primersheet')"):
+                            errors.append(f"{name}: the primer sheet closed with the detail")
+                        if not page.evaluate(
+                            "!!(document.activeElement && document.activeElement.closest('#primersheet'))"
+                        ):
+                            errors.append(f"{name}: focus left the primer sheet")
+                    if name == "67-primer-lobby":
+                        # Opened by a real tap (not the query hook): focus moves in,
+                        # Escape closes, and focus returns to the About button.
+                        page.keyboard.press("Escape")
+                        page.wait_for_timeout(250)
+                        if page.evaluate("!!document.querySelector('#primersheet')"):
+                            errors.append("67-primer-lobby: Escape did not close the primer sheet")
+                        page.locator('[data-act="primer"]').click()
+                        page.wait_for_timeout(300)
+                        if not page.evaluate("!!document.querySelector('#primersheet')"):
+                            errors.append("67-primer-lobby: About this deck opened no sheet")
+                        if not page.evaluate(
+                            "!!(document.activeElement && document.activeElement.closest('#primersheet'))"
+                        ):
+                            errors.append("67-primer-lobby: focus did not move into the sheet")
+                        page.keyboard.press("Escape")
+                        page.wait_for_timeout(300)
+                        if page.evaluate("!!document.querySelector('#primersheet')"):
+                            errors.append("67-primer-lobby: Escape did not close the primer sheet")
+                        if not page.evaluate(
+                            "!!(document.activeElement && document.activeElement.getAttribute('data-act') === 'primer')"
+                        ):
+                            errors.append("67-primer-lobby: focus did not return to the About button")
             for name, i in CUE_SHOTS:
                 page.goto(f"{base}?mock=1&i={i}", wait_until="networkidle")
                 page.wait_for_timeout(250)

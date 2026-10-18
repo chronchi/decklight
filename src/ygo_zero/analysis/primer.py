@@ -37,6 +37,9 @@ from ygo_zero.engine import constants as C
 from ygo_zero.engine.duel import DuelConfig, Engine
 
 MIN_GAMES = 20  # a primer with fewer games is not served (primer_for -> None)
+# A card counts as a negate for ``your_answers`` from this many credited negations (1-2 are attribution noise:
+# Sky Striker Ace - Raye and S:P Little Knight had 1 each in the full build, Ash Blossom 2,837).
+MIN_NEGATIONS = 3
 
 OTHER_DECKS_NOTE = "used against other decks"
 
@@ -63,13 +66,49 @@ def hash_of(deck) -> str:
     return deck_hash(deck, ())
 
 
+_ALIAS: dict[int, int] | None = None
+
+
+def canon(code: int) -> int:
+    """The original card of an alternate artwork (its cdb ``alias``), else the code itself. Alt arts would otherwise
+    split one card into two entries (Ash Blossom 14558127 / 14558128 in the first full build)."""
+    global _ALIAS
+    if _ALIAS is None:
+        from ygo_zero.engine.resources import load_cards
+
+        _ALIAS = {c: d.alias for c, d in load_cards().items() if d.alias}
+    return _ALIAS.get(int(code), int(code))
+
+
 def codes_of(deck) -> set[int]:
-    """All card codes of a Deck / mapping / flat list (for ``your_answers`` matching)."""
+    """All card codes (alt arts folded, see :func:`canon`) of a Deck / mapping / flat list (for ``your_answers``)."""
     if isinstance(deck, Mapping):
-        return {int(c) for c in (*deck.get("main", ()), *deck.get("extra", ()))}
-    if hasattr(deck, "main"):
-        return {int(c) for c in (*deck.main, *getattr(deck, "extra", ()))}
-    return {int(c) for c in deck}
+        raw = (*deck.get("main", ()), *deck.get("extra", ()))
+    elif hasattr(deck, "main"):
+        raw = (*deck.main, *getattr(deck, "extra", ()))
+    else:
+        raw = deck
+    return {canon(c) for c in raw}
+
+
+def _canon_summary(s: dict) -> dict:
+    """A per-game summary with every card code folded by :func:`canon` (in place; returns it)."""
+    for l in s["links"]:
+        if l.get("code"):
+            l["code"] = canon(l["code"])
+        sm = l.get("answers_summon")
+        if sm and sm.get("code"):
+            sm["code"] = canon(sm["code"])
+    for sm in s["summons"]:
+        if sm.get("code"):
+            sm["code"] = canon(sm["code"])
+        ans = sm.get("answered_by")
+        if ans and ans.get("code"):
+            ans["code"] = canon(ans["code"])
+    for st in s["steps"]:
+        if st.get("code"):
+            st["code"] = canon(st["code"])
+    return s
 
 
 # --- per-game extraction ---
@@ -212,18 +251,88 @@ def _parse_trace(trace: Sequence[bytes]) -> tuple[list[dict], list[dict]]:
 # --- aggregation ---
 
 
+_SETNAMES: dict[int, str] | None = None
+
+
+def _base_sets(code: int, cards: dict) -> set[int]:
+    cd = cards.get(int(code))
+    return {sc & 0x0FFF for sc in cd.setcodes if sc} if cd is not None and cd.setcodes else set()
+
+
+def set_doc_freq(mains: Iterable[Sequence[int]], cards: dict) -> tuple[Counter, int]:
+    """(base setcode -> number of decks using it, number of decks): the idf side of :func:`_archetype`."""
+    df: Counter = Counter()
+    n = 0
+    for main in mains:
+        n += 1
+        df.update(set().union(*(_base_sets(c, cards) for c in main)) if main else set())
+    return df, n
+
+
+def _display_setname(setname: str, card_names: Sequence[str]) -> str:
+    """Some ``!setname`` entries are name-search substrings, not names ("lswarm", "Qli", "True Draco|True King"):
+    keep the first alternative, and when it is not a whole word of the group's card names, use the most common
+    card-name word that contains it (Evilswarm, Qliphort)."""
+    key = setname.split("|")[0].strip()
+    words = [w.strip(",.\"'") for nm in card_names for w in nm.split()]
+    if not key or key in words or " " in key:
+        return key or setname
+    hits = Counter(w for w in words if key.lower() in w.lower())
+    return hits.most_common(1)[0][0] if hits else key
+
+
 def _archetype(
-    main: Sequence[int], cards: dict, names: dict[int, str], overrides: Mapping[str, str], h: str
+    main: Sequence[int],
+    cards: dict,
+    names: dict[int, str],
+    overrides: Mapping[str, str],
+    h: str,
+    df: tuple[Counter, int] | None = None,
 ) -> str:
+    """The official archetype name (``!setname`` in edopro-strings.conf) of the main deck's best base-setcode group;
+    sub-archetypes (0x1115 Sky Striker Ace) count toward their base (0x115 Sky Striker). Groups are scored by cards
+    in the deck x log(decks / decks using the set) over ``df`` (:func:`set_doc_freq` of every deck in the store), so
+    a splashed staple package (Mulcharmy, Dominus: 3-ofs in many decks) does not outscore the deck's own engine; raw
+    counts named 15 of 220 decks "Mulcharmy". A winning setcode missing from the strings file (newer archetypes) is
+    named by the most common first word of its card names (that rule alone named 4 decks "The")."""
+    global _SETNAMES
+    import math
+
     if h in overrides:
         return overrides[h]
+    if _SETNAMES is None:
+        from ygo_zero.cards.effect_strings import set_names
+
+        try:
+            _SETNAMES = set_names()
+        except OSError:
+            _SETNAMES = {}
     groups: dict[int, list[int]] = {}
     for c in main:
-        cd = cards.get(int(c))
-        if cd is None or not cd.setcodes:
-            continue
-        groups.setdefault(cd.setcodes[0], []).append(int(c))
-    pool = max(groups.values(), key=len) if groups else [int(c) for c in main]
+        for sc in _base_sets(c, cards):
+            groups.setdefault(sc, []).append(int(c))
+    if groups:
+        freq, n = df if df is not None and df[1] else (Counter(), 1)
+
+        def score(sc: int) -> tuple[float, int]:
+            k = len(groups[sc])
+            return (k * math.log((n + 1) / (freq.get(sc, 0) + 1)) if freq else k), -sc
+
+        best = max(groups, key=score)
+        # Label: the group's most common full setcode with a name (Spellbook 0x106e, Traptrix 0x108a), else the base
+        # (whose names can be odd: 0x6e "Prophecy", 0x8a "Envy").
+        full: Counter = Counter()
+        for c in groups[best]:
+            cd = cards.get(int(c))
+            full.update(sc for sc in cd.setcodes if sc and sc & 0x0FFF == best and sc in _SETNAMES)
+        label = max(full, key=lambda sc: (full[sc], sc == best, -sc)) if full else best
+        if label in _SETNAMES:
+            return _display_setname(_SETNAMES[label], [names.get(c, "") for c in groups[best]])
+        pool = groups[
+            best
+        ]  # a setcode newer than edopro-strings.conf (Elfnote, Angelechy): name it from its cards
+    else:
+        pool = [int(c) for c in main]
     if not pool:
         return "unknown"
     words = Counter()
@@ -268,6 +377,7 @@ def aggregate(
         return e
 
     for s in summaries:
+        _canon_summary(s)
         deck_names = s["decks"]
         loaded = [load_ydk(deck_path(d)) for d in deck_names]
         hashes = [hash_of(d) for d in loaded]
@@ -322,9 +432,10 @@ def aggregate(
                 if l["negated"]:
                     e["resp_neg"][l["code"]] += 1
                 _ = rsp
-                # Global negator index: the answering link negates the link it
-                # answers when that link is marked negated.
-                if l["negated"] and rsp["code"]:
+                # Global negator index: credit the answering link only when it is the chain's last link and
+                # directly follows the negated one, so nothing later could have negated it. (Crediting any next
+                # opponent link listed Sky Striker Ace - Raye as a negate in the first full build.)
+                if l["negated"] and rsp["code"] and rsp is ls[-1] and ls[i + 1] is rsp:
                     negated_by.setdefault(str(rsp["code"]), {}).setdefault(str(l["code"]), 0)
                     negated_by[str(rsp["code"])][str(l["code"])] += 1
         # chokepoints, summon half: first opponent activation after a summon
@@ -377,6 +488,7 @@ def _finalize(
     decks: dict[str, dict], cards: dict, names: dict[int, str], overrides: Mapping[str, str]
 ) -> dict[str, dict]:
     out: dict[str, dict] = {}
+    df = set_doc_freq([e["main"] for e in decks.values()], cards)
     for h, e in decks.items():
         games = e["games"]
         key_cards = [
@@ -439,7 +551,7 @@ def _finalize(
             "went_first_win_rate": (
                 round(e["went_first_wins"] / e["went_first_games"], 3) if e["went_first_games"] else 0.0
             ),
-            "archetype": _archetype(e["main"], cards, names, overrides, h),
+            "archetype": _archetype(e["main"], cards, names, overrides, h, df),
             "key_cards": key_cards,
             "openers": openers,
             "chokepoints": chokepoints,
@@ -475,6 +587,8 @@ def primer_for(store: Mapping, bot_deck, my_deck) -> dict | None:
         here = ht_here.get(c)
         hits = here["answered"] if here else []
         neg_victims = negated_by.get(str(c), {})
+        if sum(neg_victims.values()) < MIN_NEGATIONS:
+            neg_victims = {}
         if c not in ht_global and not neg_victims:
             continue
         if hits:
@@ -508,12 +622,20 @@ def names_of(store: Mapping, code: int) -> str:
                 for sub in item.get("answered", []):
                     if sub.get("code") == code:
                         return sub.get("name", f"#{code}")
-    return f"#{code}"
+    try:  # cards only seen as a key of negated_by: take the name from the card database
+        from ygo_zero.web.view import DB
+
+        nm = DB.names().get(int(code))
+    except Exception:  # noqa: BLE001 -- no card db: keep the code
+        nm = None
+    return nm or f"#{code}"
 
 
 def load_store(path) -> dict:
-    """Load a primers JSON file (``{"decks", "negated_by"}``)."""
+    """Load a primers JSON file (``{"decks", "negated_by"}``); ``.gz`` files are gzip (the committed web copy)."""
+    import gzip
     import json
     from pathlib import Path
 
-    return json.loads(Path(path).read_text(encoding="utf-8"))
+    raw = Path(path).read_bytes()
+    return json.loads(gzip.decompress(raw) if str(path).endswith(".gz") else raw)

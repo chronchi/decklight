@@ -30,6 +30,7 @@ ROOT = Path(__file__).resolve().parents[3]
 DECK_DIRS = (("pool", ROOT / "decks" / "pool"), ("newcards", ROOT / "decks" / "newcards"))
 PICS_DIR = ROOT / "data" / "cache" / "pics"
 PUZZLES_PATH = ROOT / "src" / "ygo_zero" / "web" / "puzzles.json"
+PRIMERS_PATH = ROOT / "src" / "ygo_zero" / "web" / "primers.json.gz"  # scripts/build_primers.py --commit-copy
 
 IMG_URLS = {
     "small": "https://images.ygoprodeck.com/images/cards_small/{code}.jpg",
@@ -117,6 +118,10 @@ class Server:
         self.what_if: dict | None = None  # {"source","k","option","turn"} for a what-if game
         self.puzzle: dict | None = None  # {"id","start_turn","goal","status"} for a puzzle game
         self._puzzles_cache: list[dict] | None = None
+        self._primers_cache: dict | None = None
+        # Decks of the live game, kept for the in-game opponent primer.
+        self.game_decks: dict | None = None  # {"human": Deck, "bot": Deck}
+        self.game_deck_names: dict = {}  # {"human": str, "bot": str}
         self.record_path: Path | None = None  # game.jsonl of the live/finished game
         self._review_task: asyncio.Task | None = None
         self.stats = None  # DuelStats | None (one per game, viewer = human seat)
@@ -288,6 +293,84 @@ class Server:
             "goal": str(p.get("goal", "")),
             "n_plays": int(p.get("n_plays", p.get("n_moves", 0))),
         }
+
+    def get_primers(self) -> dict:
+        """Opponent primers from primers.json, loaded once; missing file -> empty store."""
+        if self._primers_cache is not None:
+            return self._primers_cache
+        from ygo_zero.analysis.primer import load_store
+
+        try:
+            data = load_store(PRIMERS_PATH)
+            out = data if isinstance(data, dict) else {}
+        except (OSError, ValueError):
+            out = {}
+        if not isinstance(out.get("decks"), dict):
+            out = {"decks": {}, "negated_by": {}}
+        out.setdefault("negated_by", {})
+        self._primers_cache = out
+        return self._primers_cache
+
+    @staticmethod
+    def _trim_primer(p: dict | None) -> dict | None:
+        """What the client sheet shows (no files, no bot-vs-bot win rates)."""
+        if p is None:
+            return None
+        return {
+            "archetype": p.get("archetype", ""),
+            "games": int(p.get("games", 0)),
+            "key_cards": [
+                {
+                    "code": c.get("code"),
+                    "name": c.get("name", ""),
+                    "games": int(c.get("games", 0)),
+                    "per_game": c.get("per_game", 0.0),
+                }
+                for c in p.get("key_cards", [])[:8]
+            ],
+            "openers": [
+                {
+                    "plays": list(o.get("plays", [])),
+                    "names": list(o.get("names", [])),
+                    "games": int(o.get("games", 0)),
+                }
+                for o in p.get("openers", [])
+            ],
+            "chokepoints": [
+                {
+                    "code": c.get("code"),
+                    "name": c.get("name", ""),
+                    "responses": int(c.get("responses", 0)),
+                    "negated": int(c.get("negated", 0)),
+                }
+                for c in p.get("chokepoints", [])[:8]
+            ],
+            "your_answers": [
+                {
+                    "code": a.get("code"),
+                    "name": a.get("name", ""),
+                    "hits": [
+                        {
+                            "code": h.get("code"),
+                            "name": h.get("name", ""),
+                            "times": int(h.get("times", 0)),
+                        }
+                        for h in a.get("hits", [])
+                    ],
+                    **({"note": a["note"]} if a.get("note") else {}),
+                }
+                for a in p.get("your_answers", [])
+            ],
+        }
+
+    def _remember_decks(self, human_deck, bot_deck, human_spec=None, bot_spec=None) -> None:
+        """Keep the live game's Deck objects for the in-game opponent primer."""
+
+        def name(spec):
+            return _pretty_deck_name(spec) if isinstance(spec, str) and spec != "pasted" else "Pasted deck"
+
+        self.game_decks = {"human": human_deck, "bot": bot_deck}
+        self.game_deck_names = {"human": name(human_spec), "bot": name(bot_spec)}
 
     async def send_state(self, *, full_log: bool = False, peek: bool = False) -> None:
         if self.ws is None:
@@ -636,6 +719,7 @@ class Server:
             self._drop_session(self.session)
         self.session = session
         self.mode = mode
+        self._remember_decks(deck, bot_deck, deck_spec, bot_spec)
         self.practice = practice
         self.hints_used = 0
         self.undos = 0
@@ -717,6 +801,48 @@ class Server:
             return
         try:
             await self.ws.send_json({"t": "puzzles", "items": items})
+        except (WebSocketDisconnect, RuntimeError):
+            pass
+
+    async def on_primer(self, msg: dict) -> None:
+        """The opponent deck's primer (lobby: explicit decks; in game: the live ones)."""
+        from ygo_zero.analysis.primer import primer_for
+
+        store = self.get_primers()
+        spec = msg.get("deck")
+        if spec is not None:
+            bot_deck, berr = self.resolve_deck(spec)
+            if berr is not None:
+                await self._error(berr)
+                return
+            my_spec = msg.get("my_deck")
+            if my_spec is not None:
+                my_deck, merr = self.resolve_deck(my_spec)
+                if merr is not None:
+                    await self._error(merr)
+                    return
+            elif self.game_decks is not None:
+                my_deck = self.game_decks["human"]
+            else:
+                await self._error("primer needs my_deck")
+                return
+            bot_name = _pretty_deck_name(spec) if isinstance(spec, str) else "Pasted deck"
+        else:
+            if self.game_decks is None:
+                await self._error("no active game (send new_game first)")
+                return
+            bot_deck = self.game_decks["bot"]
+            my_deck = self.game_decks["human"]
+            bot_name = self.game_deck_names.get("bot", "Opponent")
+        reply = {
+            "t": "primer",
+            "deck": bot_name,
+            "primer": self._trim_primer(primer_for(store, bot_deck, my_deck)),
+        }
+        if self.ws is None:
+            return
+        try:
+            await self.ws.send_json(reply)
         except (WebSocketDisconnect, RuntimeError):
             pass
 
@@ -827,6 +953,12 @@ class Server:
         self.mode = "fast"
         self.practice = True
         self.hints_used = 0
+        self._remember_decks(
+            decks[seat],
+            decks[1 - seat],
+            found["decks"][seat] if seat < len(found["decks"]) else "puzzle",
+            found["decks"][1 - seat] if len(found["decks"]) > 1 else "puzzle",
+        )
         self.undos = 0
         self.human_decisions = []
         self.what_if = None
@@ -1284,6 +1416,13 @@ class Server:
         self.practice = True
         self.hints_used = int(hints_used)
         self.what_if = what_if
+        decks = (s.cfg.deck0, s.cfg.deck1)
+        self._remember_decks(
+            decks[s.human_seat],
+            decks[1 - s.human_seat],
+            meta.get("human_deck"),
+            meta.get("bot_deck"),
+        )
         self.prompt_id = 0
         self.log_sent = 0
         self.cue_sent = 0
@@ -1611,6 +1750,9 @@ def create_app(
                     continue
                 if t == "puzzles":  # read-only list
                     await srv.on_puzzles()
+                    continue
+                if t == "primer":  # read-only deck primer
+                    await srv.on_primer(msg if isinstance(msg, dict) else {})
                     continue
                 if t == "puzzle_solution":  # read-only replay frames
                     await srv.on_puzzle_solution(msg if isinstance(msg, dict) else {})

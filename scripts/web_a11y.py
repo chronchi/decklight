@@ -96,6 +96,11 @@ STATES = [
     ("puzzle-solved", "1&puzzlesolved=1", "phone"),
     ("puzzle-failed", "1&puzzlefailed=1", "phone"),
     ("puzzle-list-small", "0&puzzles=1", "small"),
+    # Opponent deck primer (step 5, item 7): lobby, not-enough-games, in game.
+    ("primer-lobby", "0&primer=1", "phone"),
+    ("primer-empty", "0&primer=null", "phone"),
+    ("primer-game", "1&primer=1", "phone"),
+    ("primer-small", "0&primer=1", "small"),
 ]
 VIEWPORTS = {
     "phone": {

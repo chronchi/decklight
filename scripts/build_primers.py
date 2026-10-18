@@ -17,7 +17,9 @@ DEFAULT_DIRS = [
     ROOT / "runs" / "value-p2-20261015-2044" / "hppo-p",
     ROOT / "runs" / "value-p2-20261015-2044" / "hppo-p2",
 ]
-COMMIT_COPY = ROOT / "src" / "ygo_zero" / "web" / "primers.json"
+# Committed copy: compact gzip without the per-deck file lists (the full store is ~840 KB of JSON for 220 decks;
+# gzip brings it to ~110 KB). The web server reads this file.
+COMMIT_COPY = ROOT / "src" / "ygo_zero" / "web" / "primers.json.gz"
 COMMIT_LIMIT = 300 * 1024
 
 
@@ -34,10 +36,23 @@ def parse_args(argv=None):
     ap.add_argument("--max-games", type=int, default=0, help="cap games read (0 = all)")
     ap.add_argument("--min-games", type=int, default=20)
     ap.add_argument(
+        "--summaries",
+        type=Path,
+        default=ROOT / "data" / "primers" / "summaries.json.gz",
+        help="per-game summaries cache: written after replaying, read instead of replaying with --from-summaries",
+    )
+    ap.add_argument(
+        "--from-summaries",
+        action="store_true",
+        help="aggregate the --summaries cache (no replay, ~1 min vs ~50)",
+    )
+    ap.add_argument(
         "--archetype", action="append", default=[], help="manual archetype override HASH:NAME (repeatable)"
     )
     ap.add_argument("--out", type=Path, default=ROOT / "data" / "primers" / "primers.json")
-    ap.add_argument("--commit-copy", action="store_true", help=f"also write {COMMIT_COPY} when <= 300 KB")
+    ap.add_argument(
+        "--commit-copy", action="store_true", help=f"also write {COMMIT_COPY} (gzip) when <= 300 KB"
+    )
     return ap.parse_args(argv)
 
 
@@ -95,42 +110,60 @@ def main(argv=None) -> int:
         overrides[h] = name
     P.MIN_GAMES = args.min_games
 
-    dirs = args.games or DEFAULT_DIRS
-    files: list[Path] = []
-    for d in dirs:
-        if not d.is_dir():
-            print(f"ALERT build_primers: games dir missing: {d}", flush=True)
+    import gzip
+
+    if args.from_summaries:
+        if not args.summaries.is_file():
+            print(f"ALERT build_primers: no summaries cache {args.summaries}", flush=True)
             return 2
-        files += sorted(d.glob(args.pattern))
-    if not files:
-        print(f"ALERT build_primers: no {args.pattern} in {[str(d) for d in dirs]}", flush=True)
-        return 2
+        summaries = json.loads(gzip.decompress(args.summaries.read_bytes()))
+        n_read = len(summaries)
+        if n_read == 0:
+            print("ALERT build_primers: 0 games in the summaries cache", flush=True)
+            return 2
+    else:
+        dirs = args.games or DEFAULT_DIRS
+        files: list[Path] = []
+        for d in dirs:
+            if not d.is_dir():
+                print(f"ALERT build_primers: games dir missing: {d}", flush=True)
+                return 2
+            files += sorted(d.glob(args.pattern))
+        if not files:
+            print(f"ALERT build_primers: no {args.pattern} in {[str(d) for d in dirs]}", flush=True)
+            return 2
 
-    # One process per games file (4 at most: the laptop's core cap); problems are printed as each file finishes, so a
-    # replay bug shows in minutes, not at the end (the first full build ran 112 min serially, then failed on 7 games).
-    from concurrent.futures import ProcessPoolExecutor
+        # One process per games file (4 at most: the laptop's core cap); problems are printed as each file finishes, so a
+        # replay bug shows in minutes, not at the end (the first full build ran 112 min serially, then failed on 7 games).
+        from concurrent.futures import ProcessPoolExecutor
 
-    # --max-games (smoke): the first 4 files, each capped, then trimmed to the budget in order
-    jobs = [(str(f), args.max_games) for f in (files[:4] if args.max_games else files)]
-    summaries: list[dict] = []
-    problems: list[str] = []
-    n_read = 0
-    with ProcessPoolExecutor(max_workers=min(4, len(jobs))) as ex:
-        for fname, s_list, probs, n in ex.map(_summarize_file, jobs):
-            if args.max_games and n_read >= args.max_games:
-                continue
-            take = s_list[: args.max_games - n_read] if args.max_games else s_list
-            summaries.extend(take)
-            n_read += n if not args.max_games else min(n, args.max_games - n_read)
-            for pr in probs:
-                print(f"ALERT build_primers: {Path(fname).name}: {pr}", flush=True)
-            problems.extend(f"{Path(fname).name}: {pr}" for pr in probs)
-    if problems:
-        print(f"ALERT build_primers: {len(problems)} records failed to replay", flush=True)
-        return 2
-    if n_read == 0:
-        print("ALERT build_primers: 0 games read", flush=True)
-        return 2
+        # --max-games (smoke): the first 4 files, each capped, then trimmed to the budget in order
+        jobs = [(str(f), args.max_games) for f in (files[:4] if args.max_games else files)]
+        summaries: list[dict] = []
+        problems: list[str] = []
+        n_read = 0
+        with ProcessPoolExecutor(max_workers=min(4, len(jobs))) as ex:
+            for fname, s_list, probs, n in ex.map(_summarize_file, jobs):
+                if args.max_games and n_read >= args.max_games:
+                    continue
+                take = s_list[: args.max_games - n_read] if args.max_games else s_list
+                summaries.extend(take)
+                n_read += n if not args.max_games else min(n, args.max_games - n_read)
+                for pr in probs:
+                    print(f"ALERT build_primers: {Path(fname).name}: {pr}", flush=True)
+                problems.extend(f"{Path(fname).name}: {pr}" for pr in probs)
+        if problems:
+            print(f"ALERT build_primers: {len(problems)} records failed to replay", flush=True)
+            return 2
+        if n_read == 0:
+            print("ALERT build_primers: 0 games read", flush=True)
+            return 2
+        if not args.max_games:
+            args.summaries.parent.mkdir(parents=True, exist_ok=True)
+            args.summaries.write_bytes(
+                gzip.compress(json.dumps(summaries, separators=(",", ":")).encode(), 6)
+            )
+            print(f"primers: {n_read} summaries -> {args.summaries}", flush=True)
 
     cards = load_cards()
     names = DB.names()
@@ -167,14 +200,21 @@ def main(argv=None) -> int:
             flush=True,
         )
     if args.commit_copy:
-        if len(payload.encode()) <= COMMIT_LIMIT:
-            COMMIT_COPY.write_text(payload + "\n", encoding="utf-8")
-            print(f"primers: committed copy -> {COMMIT_COPY}", flush=True)
+        import gzip
+
+        slim = {
+            **store,
+            "decks": {h: {k: v for k, v in e.items() if k != "files"} for h, e in store["decks"].items()},
+        }
+        blob = gzip.compress(json.dumps(slim, separators=(",", ":")).encode(), 9, mtime=0)
+        if len(blob) <= COMMIT_LIMIT:
+            COMMIT_COPY.write_bytes(blob)
+            print(f"primers: committed copy {len(blob)} B -> {COMMIT_COPY}", flush=True)
         else:
             print(
-                f"ALERT build_primers: payload {len(payload.encode())} B > 300 KB, committed copy skipped",
-                flush=True,
+                f"ALERT build_primers: gzip copy {len(blob)} B > 300 KB, committed copy skipped", flush=True
             )
+            return 2
     _ = names_of
     return 0
 

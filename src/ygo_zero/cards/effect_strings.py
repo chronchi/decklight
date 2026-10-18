@@ -61,6 +61,20 @@ def system_strings(path: Path = STRINGS_CONF) -> dict[int, str]:
     return out
 
 
+def set_names(path: Path = STRINGS_CONF) -> dict[int, str]:
+    """setcode -> archetype name of every `!setname 0x<code> <name>` line."""
+    out: dict[int, str] = {}
+    for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+        if line.startswith("!setname "):
+            parts = line.split(" ", 2)
+            if len(parts) == 3 and parts[2].strip():
+                try:
+                    out[int(parts[1], 16)] = parts[2].split("\t")[0].strip()
+                except ValueError:
+                    continue
+    return out
+
+
 def all_strings() -> dict[int, str]:
     return {**system_strings(), **card_strings()}
 

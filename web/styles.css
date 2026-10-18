@@ -703,7 +703,7 @@ details.ydk textarea {
   font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   text-align: center;
 }
-#gamemenu, #puzzlesheet {
+#gamemenu, #puzzlesheet, #primersheet {
   position: fixed; left: 50%; bottom: 0; transform: translateX(-50%); z-index: 72;
   width: min(100%, 420px);
   background: var(--sheet); border-radius: 16px 16px 0 0;
@@ -711,13 +711,13 @@ details.ydk textarea {
   animation: up 240ms var(--ease);
   display: flex; flex-direction: column; padding-bottom: calc(12px + env(safe-area-inset-bottom));
 }
-#gamemenu .mhead, #puzzlesheet .mhead {
+#gamemenu .mhead, #puzzlesheet .mhead, #primersheet .mhead {
   display: flex; align-items: center; min-height: 52px; padding: 4px 6px 4px 18px;
   font-size: 14px; color: var(--muted); font-variant-caps: all-small-caps; letter-spacing: 0.14em;
   border-bottom: 1px solid var(--line);
 }
-#gamemenu .mhead button, #puzzlesheet .mhead button { margin-left: auto; }
-#gamemenu .mbody, #puzzlesheet .mbody { display: flex; flex-direction: column; gap: 2px; padding: 8px 10px; }
+#gamemenu .mhead button, #puzzlesheet .mhead button, #primersheet .mhead button { margin-left: auto; }
+#gamemenu .mbody, #puzzlesheet .mbody, #primersheet .mbody { display: flex; flex-direction: column; gap: 2px; padding: 8px 10px; }
 #gamemenu .mrow, #puzzlesheet .mrow {
   display: flex; align-items: center; gap: 12px; width: 100%;
   min-height: 48px; padding: 0 12px; border-radius: 10px; text-align: left; font-size: 15px;
@@ -735,8 +735,8 @@ details.ydk textarea {
 #gamemenu .seg button.sel { color: var(--accent); border-color: rgba(184, 154, 94, 0.6); background: var(--accent-tint); }
 #gamemenu .mhint { font-size: 12px; color: var(--muted); padding: 0 24px 4px; }
 #gamemenu .msep, #puzzlesheet .msep { height: 1px; background: var(--line); margin: 6px 12px; }
-#gamemenu, #puzzlesheet { max-height: 92dvh; }
-#gamemenu .mbody, #puzzlesheet .mbody { overflow-y: auto; min-height: 0; }
+#gamemenu, #puzzlesheet, #primersheet { max-height: 92dvh; }
+#gamemenu .mbody, #puzzlesheet .mbody, #primersheet .mbody { overflow-y: auto; min-height: 0; }
 #gamemenu .mrow.tog { justify-content: space-between; padding-top: 6px; padding-bottom: 6px; }
 #gamemenu .tog .tl { display: flex; flex-direction: column; gap: 2px; }
 #gamemenu .tog .th { font-size: 12px; color: var(--muted); }
@@ -751,15 +751,44 @@ details.ydk textarea {
 .prow .ptitle { font-size: 15px; }
 .prow .psub { font-size: 12px; color: var(--muted); }
 .prow .psolved { flex: 0 0 auto; font-size: 12px; color: var(--muted); border: 1px solid var(--line-2); border-radius: 999px; padding: 2px 8px; }
+
+/* Lobby quiet text button (opponent primer). */
+.aboutrow { padding: 0 2px 10px; }
+.linkbtn {
+  min-height: 32px; padding: 4px 2px; font-size: 13px; color: var(--muted);
+  text-decoration: underline; text-underline-offset: 3px; text-decoration-color: var(--line-2);
+}
+.linkbtn:active { color: var(--text); }
+
+/* Opponent deck primer sheet: scrolls inside, header stays put. */
+#primersheet .mtitle { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#primersheet .mbody.primer { gap: 2px; padding: 10px 18px 18px; }
+#primersheet .prsub { margin: 0 0 4px; font-size: 12.5px; color: var(--muted); }
+#primersheet h3 {
+  margin: 12px 0 2px; font-size: 12px; font-variant-caps: all-small-caps;
+  letter-spacing: 0.14em; font-weight: 500; color: var(--muted);
+}
+#primersheet .prnote { margin: 0 0 4px; font-size: 12px; line-height: 1.5; color: var(--muted); }
+#primersheet .prlist { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+#primersheet .prlist li { font-size: 14px; line-height: 1.5; }
+#primersheet .prmeta { font-size: 12.5px; color: var(--muted); }
+#primersheet .pname {
+  display: inline-block; min-height: 24px; padding: 1.5px 2px; margin: -1.5px -2px;
+  border-radius: 4px; color: var(--text); text-align: left;
+  text-decoration: underline dotted rgba(184, 154, 94, 0.55); text-underline-offset: 3px;
+}
+#primersheet .pname:active { background: var(--raise); }
+
 .solbar { display: flex; justify-content: center; padding: 6px 0; }
 .sw { position: relative; flex: 0 0 auto; width: 34px; height: 20px; border-radius: 10px; box-shadow: inset 0 0 0 1px rgba(214, 207, 192, 0.42); transition: background var(--t) var(--ease), box-shadow var(--t) var(--ease); }
 .sw i { position: absolute; top: 4px; left: 4px; width: 12px; height: 12px; border-radius: 50%; background: var(--muted); transition: transform var(--t) var(--ease), background var(--t) var(--ease); }
 .sw.on { background: var(--accent-tint); box-shadow: inset 0 0 0 1px rgba(184, 154, 94, 0.55); }
 .sw.on i { transform: translateX(14px); background: var(--accent); }
 
-#gscrim, #pscrim { position: absolute; inset: 0; background: rgba(10, 9, 7, 0.55); animation: fade var(--t); }
+#gscrim, #pscrim, #prscrim { position: absolute; inset: 0; background: rgba(10, 9, 7, 0.55); animation: fade var(--t); }
 #gscrim { position: fixed; z-index: 71; }
 #pscrim { z-index: 45; }
+#prscrim { z-index: 45; }
 
 /* detail close X */
 #detail .dx {

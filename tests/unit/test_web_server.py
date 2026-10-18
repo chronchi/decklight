@@ -1865,3 +1865,134 @@ def test_puzzle_solution_frames(tmp_path, engine, monkeypatch):
         assert m["t"] == "puzzle_solution" and m["id"] == p["id"]
         assert len(m["frames"]) == len(p["solution"]) + 1 or len(m["frames"]) > 2
         assert m["frames"][-1].get("result") is not None
+
+
+# --- 14. opponent deck primers (step 5, item 7) ---
+
+
+def _primer_fixture(tmp_path):
+    """A one-deck primers store keyed by a real pool deck (blue-eyes)."""
+    from ygo_zero.analysis import primer as P
+    from ygo_zero.analysis.events import deck_path
+    from ygo_zero.decks import load_ydk
+
+    bot = load_ydk(deck_path("blue-eyes"))
+    h = P.hash_of(bot)
+    code = int(bot.main[0])
+    entry = {
+        "hash": h,
+        "files": ["blue-eyes"],
+        "main_size": len(bot.main),
+        "extra_size": len(bot.extra),
+        "games": 24,
+        "win_rate": 0.58,
+        "went_first_games": 12,
+        "went_first_win_rate": 0.66,
+        "archetype": "Blue-Eyes",
+        "key_cards": [
+            {"code": code, "name": "Blue-Eyes White Dragon", "games": 20, "per_game": 0.833},
+            {"code": int(bot.main[1]), "name": "Sage with Eyes of Blue", "games": 12, "per_game": 0.5},
+        ],
+        "openers": [
+            {
+                "plays": [code, int(bot.main[1])],
+                "names": ["Blue-Eyes White Dragon", "Sage with Eyes of Blue"],
+                "games": 6,
+                "share": 0.25,
+            },
+        ],
+        "chokepoints": [
+            {
+                "code": code,
+                "name": "Blue-Eyes White Dragon",
+                "responses": 7,
+                "negated": 4,
+                "response_rate": 0.29,
+            },
+        ],
+        "hand_traps_seen": [
+            {
+                "code": code,
+                "name": "Blue-Eyes White Dragon",
+                "times": 4,
+                "answered": [{"code": int(bot.main[1]), "name": "Sage with Eyes of Blue", "times": 3}],
+            },
+        ],
+    }
+    store = {"decks": {h: entry}, "negated_by": {str(code): {str(code): 5}}}
+    pj = tmp_path / "primers.json"
+    pj.write_text(json.dumps(store))
+    return bot, h, pj, code
+
+
+def _recv_type(ws, kind: str, limit: int = 400) -> dict:
+    for _ in range(limit):
+        m = json.loads(ws.receive_text())
+        if m.get("t") == kind:
+            return m
+    raise AssertionError(f"no {kind!r} message arrived")
+
+
+def test_primer_lobby(tmp_path, engine, monkeypatch):
+    import ygo_zero.web.server as S
+
+    _bot, _h, pj, code = _primer_fixture(tmp_path)
+    monkeypatch.setattr(S, "PRIMERS_PATH", pj)
+    app = _make_app(tmp_path, engine)
+    with _client(app).websocket_connect(f"/ws?t={TOKEN}") as ws:
+        ws.receive_text()  # lobby
+        ws.send_json({"t": "primer", "deck": "blue-eyes", "my_deck": "blue-eyes"})
+        m = _recv_type(ws, "primer")
+        assert m["deck"] == "Blue Eyes"
+        p = m["primer"]
+        assert p is not None
+        assert p["archetype"] == "Blue-Eyes" and p["games"] == 24
+        assert p["key_cards"] and p["key_cards"][0]["code"] == code
+        assert p["openers"] and p["chokepoints"]
+        assert p["your_answers"], "the human deck's matching card must be listed"
+        assert p["your_answers"][0]["code"] == code
+        # Trimmed for the sheet: no files and no bot-vs-bot win rates.
+        assert "files" not in p and "win_rate" not in p and "went_first_win_rate" not in p
+
+
+def test_primer_thin_and_missing(tmp_path, engine, monkeypatch):
+    import ygo_zero.web.server as S
+
+    _bot, _h, pj, _code = _primer_fixture(tmp_path)
+    monkeypatch.setattr(S, "PRIMERS_PATH", pj)
+    app = _make_app(tmp_path, engine)
+    with _client(app).websocket_connect(f"/ws?t={TOKEN}") as ws:
+        ws.receive_text()
+        ws.send_json({"t": "primer", "deck": "branded", "my_deck": "blue-eyes"})
+        m = _recv_type(ws, "primer")
+        assert m["primer"] is None
+    monkeypatch.setattr(S, "PRIMERS_PATH", tmp_path / "no-such.json")
+    app = _make_app(tmp_path, engine)
+    with _client(app).websocket_connect(f"/ws?t={TOKEN}") as ws:
+        ws.receive_text()
+        ws.send_json({"t": "primer", "deck": "blue-eyes", "my_deck": "blue-eyes"})
+        m = _recv_type(ws, "primer")
+        assert m["t"] == "primer" and m["primer"] is None
+
+
+def test_primer_in_game_uses_current_decks(tmp_path, engine, monkeypatch):
+    import ygo_zero.web.server as S
+
+    _bot, _h, pj, _code = _primer_fixture(tmp_path)
+    monkeypatch.setattr(S, "PRIMERS_PATH", pj)
+    app = _make_app(tmp_path, engine)
+    with _client(app).websocket_connect(f"/ws?t={TOKEN}") as ws:
+        ws.receive_text()  # lobby
+        ws.send_json(
+            {
+                "t": "new_game",
+                "deck": "blue-eyes",
+                "bot_deck": "blue-eyes",
+                "first": "me",
+                "mode": "random",
+            }
+        )
+        ws.send_json({"t": "primer"})
+        m = _recv_type(ws, "primer")
+        assert m["deck"] == "Blue Eyes"
+        assert m["primer"] is not None and m["primer"]["key_cards"]

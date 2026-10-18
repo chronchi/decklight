@@ -184,6 +184,12 @@ let inSolution = false;
 let liveEnd = null;       // the puzzle end state saved while showing the solution
 let hidePuzzleResult = false; // suppress the Solved/Not-solved dialog during solution playback
 
+// Opponent deck primer (step 5, item 7): the sheet, its deck name, and loading.
+let primerOpen = false;
+let primer = null;         // trimmed primer reply, or null (not enough games)
+let primerDeck = "";       // pretty bot deck name shown as the title
+let primerLoading = false;
+
 // Rules in context (step 5, item 6) + undo (item 9).
 let kwPop = null;          // {"id","term","long"} for the open keyword popover, or null
 let kwOpener = null;       // the keyword element to return focus to on close
@@ -211,6 +217,7 @@ function openOvNames() {
   if (logOpen) o.push("log");
   if (menuUid) o.push("menu");
   if (gameMenu) o.push("gamemenu");
+  if (primerOpen) o.push("primer");
   if (pileOpen) o.push("pile");
   if (detail) o.push("detail");
   if (kwPop) o.push("kw");
@@ -233,6 +240,7 @@ function closeState(name) {
   if (name === "log") logOpen = false;
   else if (name === "menu") menuUid = null;
   else if (name === "gamemenu") { gameMenu = false; surrenderArm = false; }
+  else if (name === "primer") { primerOpen = false; }
   else if (name === "pile") pileOpen = null;
   else if (name === "detail") { detail = null; kwPop = null; }
   else if (name === "kw") kwPop = null;
@@ -646,6 +654,7 @@ function gameMenuHTML() {
     '<button class="mrow danger' + (surrenderArm ? " confirm" : "") + '" data-act="surrender">' +
     (surrenderArm ? "Tap again to surrender" : "Surrender") + "</button>" +
     '<button class="mrow" data-act="backlobby">Back to lobby</button>' +
+    "<button class=\"mrow\" data-act=\"primer\">Opponent's deck</button>" +
     '<div class="msep"></div>' +
     toggleRow("winchanceset", winChance, "Show win chance",
       "The bot's estimate of your chance to win, calibrated on ~3,000 games. Off by default so it doesn't steer your play.") +
@@ -859,6 +868,24 @@ function sidePanelInner(which, logh) {
   return '<div class="loghead" data-key="lhead">Duel log' + logAllBtn() + '</div><div class="loglist" data-key="llist">' + logh + "</div>";
 }
 
+function detailHTML() {
+  if (!detail) return "";
+  const c = detail;
+  const t = cardText(c.code);
+  const face = !MOCK && c.code
+    ? '<div class="dface">' + phHTML(c) + '<img alt="" src="' + imgUrl(c.code, "full") + '" onerror="this.remove()"></div>'
+    : '<div class="dface">' + phHTML(c) + "</div>";
+  const meta = [t && t.type_str, statsLine(c)].filter(Boolean).join(" · ");
+  return '<div id="detail" data-key="detail" data-act="closedetail" role="dialog" aria-modal="true" tabindex="-1" aria-label="' +
+    esc("Card details: " + (c.name || "hidden card")) + '">' +
+    '<button class="dx" data-act="closedetail" aria-label="Close card details">' +
+    '<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5 5l10 10M15 5 5 15"/></svg></button>' + face +
+    "<h2>" + esc(c.name || "Hidden card") + "</h2>" +
+    (meta ? '<div class="typeline">' + esc(meta) + "</div>" : "") +
+    '<div class="dtext">' + kwHTML(esc((t && t.text) || (MOCK ? "Card text loads from the server in a live game." : ""))) + "</div>" +
+    '<div class="dclose" aria-hidden="true">Tap anywhere to close</div></div>';
+}
+
 function renderOverlays(logh) {
   let lh = "";
   if (logOpen) {
@@ -890,26 +917,9 @@ function renderOverlays(logh) {
   }
   morph(ovMenu, mh);
 
-  morph(ovGame, gameMenu ? gameMenuHTML() : "");
+  morph(ovGame, primerSheetHTML() + (gameMenu ? gameMenuHTML() : ""));
 
-  let dh = "";
-  if (detail) {
-    const c = detail;
-    const t = cardText(c.code);
-    const face = !MOCK && c.code
-      ? '<div class="dface">' + phHTML(c) + '<img alt="" src="' + imgUrl(c.code, "full") + '" onerror="this.remove()"></div>'
-      : '<div class="dface">' + phHTML(c) + "</div>";
-    const meta = [t && t.type_str, statsLine(c)].filter(Boolean).join(" · ");
-    dh = '<div id="detail" data-key="detail" data-act="closedetail" role="dialog" aria-modal="true" tabindex="-1" aria-label="' +
-      esc("Card details: " + (c.name || "hidden card")) + '">' +
-      '<button class="dx" data-act="closedetail" aria-label="Close card details">' +
-      '<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5 5l10 10M15 5 5 15"/></svg></button>' + face +
-      "<h2>" + esc(c.name || "Hidden card") + "</h2>" +
-      (meta ? '<div class="typeline">' + esc(meta) + "</div>" : "") +
-      '<div class="dtext">' + kwHTML(esc((t && t.text) || (MOCK ? "Card text loads from the server in a live game." : ""))) + "</div>" +
-      '<div class="dclose" aria-hidden="true">Tap anywhere to close</div></div>';
-  }
-  morph(ovDetail, dh);
+  morph(ovDetail, detailHTML());
 
   morph(ovKw, kwPopHTML());
 
@@ -1073,6 +1083,71 @@ function puzzlesSheetHTML() {
     '<div class="mbody">' + body + "</div></div>";
 }
 
+// Opponent deck primer (step 5, item 7). One sheet for the lobby and the game
+// menu; the header (title + close) stays put while the body scrolls.
+function primerCardHTML(code, name) {
+  if (!code) return esc(name);
+  return '<button class="pname" data-primercode="' + esc(code) + '" data-primername="' +
+    esc(name) + '">' + esc(name) + "</button>";
+}
+
+function primerSheetHTML() {
+  if (!primerOpen) return "";
+  let body = "";
+  if (primerLoading) {
+    body = '<p class="emptytx">Loading the primer…</p>';
+  } else if (!primer) {
+    body = '<p class="emptytx">Not enough bot games with this deck yet.</p>';
+  } else {
+    const p = primer;
+    body += '<p class="prsub">' + esc(p.archetype || "Unknown") + " · from " + esc(String(p.games || 0)) +
+      " bot games</p>";
+    if ((p.key_cards || []).length) {
+      body += "<h3>Key cards</h3><ul class=\"prlist\">" + p.key_cards.map((c) => {
+        const n = Math.round((c.per_game || 0) * 10);
+        return "<li>" + primerCardHTML(c.code, c.name) + ' <span class="prmeta">in ' + n + " of 10 games</span></li>";
+      }).join("") + "</ul>";
+    }
+    if ((p.openers || []).length) {
+      body += '<h3>How it opens</h3><p class="prnote">Going first, first three plays</p>' +
+        '<ul class="prlist">' + p.openers.map((o) => {
+          const names = o.names || [];
+          const seq = names.map((nm, i) => primerCardHTML((o.plays || [])[i], nm)).join(" → ");
+          return "<li>" + seq + ' <span class="prmeta">' + esc(String(o.games || 0)) + " games</span></li>";
+        }).join("") + "</ul>";
+    }
+    if ((p.chokepoints || []).length) {
+      body += "<h3>Where it gets stopped</h3><ul class=\"prlist\">" + p.chokepoints.map((c) => {
+        let line = primerCardHTML(c.code, c.name) + ' <span class="prmeta">answered ' + esc(String(c.responses || 0)) + " times";
+        if (c.negated > 0) line += ", negated " + esc(String(c.negated));
+        return "<li>" + line + "</span></li>";
+      }).join("") + "</ul>";
+    }
+    body += "<h3>Your answers</h3>";
+    const answers = p.your_answers || [];
+    if (!answers.length) {
+      body += '<p class="prnote">No hand traps or negates in your deck were seen against this deck.</p>';
+    } else {
+      body += '<ul class="prlist">' + answers.map((a) => {
+        const hits = a.hits || [];
+        if (hits.length) {
+          return "<li>" + primerCardHTML(a.code, a.name) + " — hit " +
+            hits.map((h) => primerCardHTML(h.code, h.name)).join(", ") + "</li>";
+        }
+        return "<li>" + primerCardHTML(a.code, a.name) + " — used against other decks</li>";
+      }).join("") + "</ul>";
+    }
+  }
+  const title = primerDeck || "Opponent's deck";
+  return '<div id="prscrim" data-key="prscrim" data-act="closeprimer"></div>' +
+    '<div id="primersheet" data-key="primersheet" role="dialog" aria-modal="true" tabindex="-1" aria-label="' +
+    esc("Deck primer: " + title) + '">' +
+    '<div class="mhead"><span class="mtitle">' + esc(title) + "</span>" +
+    '<button class="iconbtn" data-act="closeprimer" aria-label="Close deck primer">' +
+    '<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5 5l10 10M15 5 5 15"/></svg></button></div>' +
+    '<div class="mbody primer">' + body + "</div></div>";
+}
+
 function renderLobby() {
   const decks = (lobby && lobby.decks) || [];
   if (!lobbyPick.you && decks.length) lobbyPick.you = decks[0].id;
@@ -1083,6 +1158,7 @@ function renderLobby() {
   h += '<h2 class="sr-only">New duel</h2>';
   h += pickerHTML(decks, "you", "Your deck");
   h += pickerHTML(decks, "bot", "ygo-zero plays");
+  h += '<div class="aboutrow"><button class="linkbtn" data-act="primer">About this deck</button></div>';
   h += segHTML("Mode", "play", [["duel", "Duel"], ["practice", "Practice"]]);
   h += segHTML("Going first", "first", [["rps", "Rock-paper-scissors"], ["me", "Me"], ["bot", "Bot"]]);
   h += segHTML("Bot strength", "mode", [["product", "Full"], ["fast", "Fast"], ["random", "Random"]]);
@@ -1099,11 +1175,12 @@ function renderLobby() {
   logside.innerHTML = '<div class="loghead">Duel log</div><div class="loglist"><p class="emptytx">No duel yet.</p></div>';
   morph(ovLog, "");
   morph(ovMenu, "");
-  morph(ovGame, puzzlesSheetHTML());
+  morph(ovGame, primerSheetHTML() + puzzlesSheetHTML());
   morph(ovDetail, "");
   morph(ovReveal, "");
   morph(ovOver, "");
   ovStack = [];
+  syncOv();
 }
 
 function render() {
@@ -1285,6 +1362,21 @@ function statName(code) {
   return "";
 }
 
+function openCodeDetail(code, name) {
+  if (!code) return;
+  detail = {uid: "code:" + code, code, name: name || ("#" + code),
+    faceup: true, pos: null, atk: 0, def: 0, level: 0, rank: 0, link: 0,
+    counters: 0, overlays: []};
+  if (msg && msg.t === "state") {
+    render();
+    return;
+  }
+  // The lobby does not rebuild overlays in renderLobby, so paint the detail here.
+  morph(ovDetail, detailHTML());
+  syncOv();
+  manageFocus();
+}
+
 function openStatDetail(code) {
   if (!code) return;
   detail = {uid: "stat:" + code, code, name: statName(code) || ("#" + code),
@@ -1302,6 +1394,11 @@ function openStatDetail(code) {
 }
 
 function onOverlayClick(ev) {
+  const pc = ev.target.closest("[data-primercode]");
+  if (pc) {
+    openCodeDetail(parseInt(pc.getAttribute("data-primercode"), 10), pc.getAttribute("data-primername"));
+    return;
+  }
   const tab = ev.target.closest("[data-logtab]");
   if (tab) {
     setLogTab(tab.getAttribute("data-logtab"));
@@ -1404,6 +1501,10 @@ function goLobby() {
   whatIf = null;
   puzzle = null;
   puzzlesOpen = false;
+  primerOpen = false;
+  primer = null;
+  primerLoading = false;
+  primerDeck = "";
   inSolution = false;
   solutionFrames = null;
   solutionIdx = -1;
@@ -1498,6 +1599,10 @@ function onAction(kind, el) {
     whatIf = null;
     gameMode = lobbyPick.mode;
     practiceMode = lobbyPick.play === "practice";
+    puzzlesOpen = false;
+    primerOpen = false;
+    primer = null;
+    primerLoading = false;
     resetCues();
     sendGame({t: "new_game", deck: ydk ? {ydk} : lobbyPick.you, bot_deck: lobbyPick.bot,
       first: lobbyPick.first, mode: lobbyPick.mode, chain: chainMode,
@@ -1581,6 +1686,7 @@ function onAction(kind, el) {
     return;
   } else if (kind === "puzzles") {
     puzzlesOpen = true;
+    primerOpen = false;
     if (MOCK && puzzles === null) puzzles = mockPuzzles();
     if (!MOCK && puzzles === null && ws) ws.send({t: "puzzles"});
     render();
@@ -1588,6 +1694,32 @@ function onAction(kind, el) {
   } else if (kind === "closepuzzles") {
     puzzlesOpen = false;
     render();
+    return;
+  } else if (kind === "primer") {
+    primerOpen = true;
+    primerLoading = !MOCK && !!ws;
+    primer = null;
+    gameMenu = false;
+    puzzlesOpen = false;
+    opener = describe(el) || opener;  // focus returns here when the sheet closes
+    if (msg && msg.t === "lobby") {
+      primerDeck = deckName((lobby && lobby.decks) || [], lobbyPick.bot);
+      if (MOCK) {
+        primerDeck = "Tenpai Dragon";
+      } else if (ws) {
+        const el = document.getElementById("ydk");
+        const ydk = ((el && el.value) || "").trim();
+        ws.send({t: "primer", deck: lobbyPick.bot, my_deck: ydk ? {ydk} : lobbyPick.you});
+      }
+    } else {
+      primerDeck = "Opponent's deck";
+      if (!MOCK && ws) ws.send({t: "primer"});
+    }
+    if (MOCK) { primer = mockPrimer(); primerDeck = "Tenpai Dragon"; primerLoading = false; }
+  } else if (kind === "closeprimer") {
+    closeState("primer");
+    render();
+    closeOv("primer");
     return;
   } else if (kind === "puzzlestart") {
     const id = el.getAttribute("data-id");
@@ -1682,6 +1814,35 @@ function mockPuzzles() {
   ];
 }
 
+// Mock primer for screenshots (shape of the server's trimmed reply).
+function mockPrimer() {
+  return {
+    archetype: "Tenpai Dragon",
+    games: 48,
+    key_cards: [
+      {code: 91810826, name: "Tenpai Dragon Chundra", games: 45, per_game: 0.938},
+      {code: 39931513, name: "Tenpai Dragon Paidra", games: 43, per_game: 0.896},
+      {code: 66730191, name: "Sangen Kaimen", games: 39, per_game: 0.813},
+      {code: 65326118, name: "Tenpai Dragon Fadra", games: 33, per_game: 0.688},
+    ],
+    openers: [
+      {plays: [66730191, 39931513, 91810826], names: ["Sangen Kaimen", "Tenpai Dragon Paidra", "Tenpai Dragon Chundra"], games: 14},
+      {plays: [39931513, 91800273, 91810826], names: ["Tenpai Dragon Paidra", "Dimension Shifter", "Tenpai Dragon Chundra"], games: 9},
+    ],
+    chokepoints: [
+      {code: 39931513, name: "Tenpai Dragon Paidra", responses: 12, negated: 10},
+      {code: 82570174, name: "Sangenpai Bident Dragion", responses: 6, negated: 0},
+    ],
+    your_answers: [
+      {code: 14558127, name: "Ash Blossom & Joyous Spring", hits: [
+        {code: 39931513, name: "Tenpai Dragon Paidra", times: 5},
+        {code: 30336082, name: "Sangen Summoning", times: 2},
+      ]},
+      {code: 23434538, name: "Maxx \"C\"", note: "used against other decks", hits: []},
+    ],
+  };
+}
+
 function startSolution(frames) {
   if (!Array.isArray(frames) || !frames.length) return;
   liveEnd = msg;
@@ -1765,7 +1926,7 @@ const FOCUSABLE = 'button:not([disabled]), [href], input, textarea, select, summ
 const visible = (el) => !!el && el.getClientRects().length > 0 && getComputedStyle(el).visibility !== "hidden";
 function topModal() {
   if (IS_REPLAY) return null;
-  for (const sel of ["#kwpop", "#detail", "#menu", "#gamemenu", "#puzzlesheet", "#sheet.pilesheet", "#reviewframe", "#logdrawer", "#puzzleresult[role=alertdialog]", "#gameover[role=alertdialog]"]) {
+  for (const sel of ["#kwpop", "#detail", "#menu", "#gamemenu", "#puzzlesheet", "#primersheet", "#sheet.pilesheet", "#reviewframe", "#logdrawer", "#puzzleresult[role=alertdialog]", "#gameover[role=alertdialog]"]) {
     const el = document.querySelector(sel);
     if (el && visible(el)) return el;
   }
@@ -1779,7 +1940,7 @@ let modalTop = null;
 let opener = null;
 function describe(el) {
   if (!el || el === document.body) return null;
-  for (const a of ["data-uid", "data-act", "data-pile", "data-opt", "data-pickopen", "data-recap"]) {
+  for (const a of ["data-uid", "data-act", "data-pile", "data-opt", "data-pickopen", "data-recap", "data-primercode"]) {
     const v = el.getAttribute(a);
     if (v != null) return {el, sel: "[" + a + '="' + CSS.escape(v) + '"]'};
   }
@@ -1819,6 +1980,7 @@ function closeTop() {
   if (detail) { closeState("detail"); render(); closeOv("detail"); return true; }
   if (reviewFrame) { reviewFrame = null; render(); return true; }
   if (gameMenu) { closeState("gamemenu"); render(); closeOv("gamemenu"); return true; }
+  if (primerOpen) { closeState("primer"); render(); closeOv("primer"); return true; }
   if (puzzlesOpen) { puzzlesOpen = false; render(); return true; }
   if (inSolution) { exitSolution(); return true; }
   if (pileOpen) { closeState("pile"); render(); closeOv("pile"); return true; }
@@ -2086,6 +2248,10 @@ async function loadMock(i) {
   menuUid = null;
   detail = null;
   gameMenu = false;
+  primerOpen = false;
+  primer = null;
+  primerLoading = false;
+  primerDeck = "";
   surrenderArm = false;
   revealCur = null;
   revealQueue = [];
@@ -2194,6 +2360,14 @@ async function loadMock(i) {
       if (!solvedIds["p-easy"]) { solvedIds["p-easy"] = true; }
     } catch (e) { /* ignore */ }
     puzzlesOpen = true;
+  }
+  // Primer screenshots: ?primer=1 (a primer) or ?primer=null (not enough games),
+  // in the lobby or over a game.
+  if (qs.get("primer") === "1" || qs.get("primer") === "null") {
+    primerOpen = true;
+    primerLoading = false;
+    primer = qs.get("primer") === "null" ? null : mockPrimer();
+    primerDeck = "Tenpai Dragon";
   }
   render();
   if (msg.t === "state" && !(Array.isArray(msg.cues) && msg.cues.length)) announceState(null, msg);
@@ -2399,6 +2573,14 @@ async function boot() {
         puzzles = Array.isArray(m.items) ? m.items : [];
         render();
         return;
+      } else if (m.t === "primer") {
+        primer = m.primer || null;
+        primerDeck = m.deck || "Opponent's deck";
+        primerLoading = false;
+        primerOpen = true;
+        gameMenu = false;
+        render();
+        return;
       } else if (m.t === "puzzle_solution") {
         startSolution(m.frames || []);
         return;
@@ -2411,7 +2593,7 @@ async function boot() {
         locked = false;
         setTimeout(() => { banner.hidden = true; }, 4000);
       } else {
-        if (m.t === "error") undoPending = false;   // the undo was refused: don't announce it
+        if (m.t === "error") { undoPending = false; primerLoading = false; }   // the request was refused
         msg = m;
       }
       render();
