@@ -302,7 +302,7 @@ def main() -> None:
     ap.add_argument("--out", type=Path, default=None)
     ap.add_argument("--games-limit", type=int, default=0, help="debug: cap the total games")
     ap.add_argument("--pairs", default="",
-                    help="explicit deck pairs 'a:b,c:d' (seat 0 deck first) from decks/pool, or decks/newcards with "
+                    help="explicit deck pairs 'a:b,c:d' or @file (one or more per line; seat 0 deck first) from decks/pool, or decks/newcards with "
                          "--deck-set newcards; showcase games")
     ap.add_argument("--both-search", type=int, choices=(0, 1), default=0,
                     help="--opp self: both seats search (the product vs itself); log entries carry the seat")
@@ -457,7 +457,8 @@ def main() -> None:
         sched = train_schedule(names, args.games, args.seed_base, hold)
     else:
         if args.pairs:
-            want = [tuple(x.split(":")) for x in args.pairs.split(",")]
+            spec = Path(args.pairs[1:]).read_text() if args.pairs.startswith("@") else args.pairs  # @file: long lists
+            want = [tuple(x.strip().split(":")) for x in spec.replace("\n", ",").split(",") if x.strip()]
             names = sorted({d for pr in want for d in pr})
             if args.deck_set == "newcards":  # --pairs from decks/newcards instead of the pool
                 deck_dir = ROOT / "decks" / "newcards"
