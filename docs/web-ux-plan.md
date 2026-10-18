@@ -70,3 +70,21 @@ Negation cues (the user: "for negation it's too faint"):
 - the negated link stays marked until the chain ends;
 - held about 1.6 s at 1×.
 Cue lines are about 1.5–2× heavier, at least 2 px at 412 px width.
+
+## 4. Decisions, 2026-10-17 (after the stats mockups in docs/mockups/stats/)
+- The user, on the mockups: "I think a mixture of a to c actually, I like the option of the duel log, stats and other
+  things at the top".
+  - The log sheet gets tabs at the top (Log | Stats | Cards), taken from C.
+  - The Stats tab mixes C's tiles, B's LP chart and key moments, and A's ledger table.
+- Win chance gets a "Show win chance" switch in the game menu, off by default. While it's off, the chance appears
+  nowhere: no bar, no chart line, no percentages in key moments or the review. It ships only after a calibration check
+  on recorded games.
+- Order confirmed ("Yeah order is right"):
+  1. stats and tabs;
+  2. the win-chance switch, after calibration;
+  3. post-game review and missed-response alerts;
+  4. hints and what-if;
+  5. rules, primer, puzzles and undo.
+- Delegation (the user): "delegate as much possible to muse and then verify yourself the work, only delegate to opus
+  visual tasks but try to delegate more to muse". When a mockup already fixes the design, muse implements it and Claude
+  verifies the screenshots.
