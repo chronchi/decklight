@@ -185,6 +185,17 @@ def _check_state(msg: dict) -> None:
         set(msg["result"]) == {"winner", "reason"}
         and msg["result"]["winner"] in ("you", "bot")
         and isinstance(msg["result"]["reason"], str))
+    st = msg.get("stats")
+    if st is not None:
+        for k in ("turn", "lp_you", "lp_bot", "dealt_you", "dealt_bot",
+                  "adv_you", "adv_bot", "adv_diff", "windows_used",
+                  "windows_total", "neg_you", "neg_were_you", "neg_bot",
+                  "neg_were_bot", "chart_labels", "chart_you", "chart_bot",
+                  "moments", "ledger", "opp_seen", "you_used"):
+            assert k in st, f"stats missing {k}"
+        assert st["windows_used"] <= st["windows_total"]
+        assert len(st["chart_labels"]) == len(st["chart_you"]) == len(st["chart_bot"])
+        assert len(st["moments"]) <= 5
 
 
 def _codes_in_state(msg: dict) -> tuple[set[int], str]:
@@ -213,6 +224,11 @@ def _codes_in_state(msg: dict) -> tuple[set[int], str]:
             walk(o["card"])
     for e in msg["log"]:
         walk(e["card"])
+    st = msg.get("stats") or {}
+    for lst_key in ("opp_seen", "you_used"):
+        for e in st.get(lst_key) or []:
+            if isinstance(e, dict) and e.get("code"):
+                codes.add(int(e["code"]))
     # Name checks scan everything except effect descriptions: a public card's effect text may name a hidden card
     # ("... using \"Fallen of Albaz\" as material") without revealing it (NOTEBOOK 2026-10-17).
     def strip(x):

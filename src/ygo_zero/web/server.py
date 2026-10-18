@@ -94,6 +94,7 @@ class Server:
         self.user_decks: dict[str, str] = {}  # id -> ydk text (pasted this session)
         self.chain_mode = "auto"  # "auto": skip quiet chain windows (session.auto_pass_index); "all"
         self.auto_passed: set[int] = set()  # history numbers (1-based n) of auto-passes
+        self.stats = None  # DuelStats | None (one per game, viewer = human seat)
         self._adv: asyncio.Task | None = None
         self.advancing = False
 
@@ -192,12 +193,15 @@ class Server:
 
     def state_message(self, *, full_log: bool = False, peek: bool = False) -> dict:
         from ygo_zero.web.cues import build_cues
+        from ygo_zero.web.stats import DuelStats
         from ygo_zero.web.view import build_events, build_prompt, build_view
 
         s = self.session
         if s is None:
             return {"t": "lobby", "decks": self.list_decks()}
         human = s.human_seat
+        if self.stats is None or getattr(self.stats, "viewer", human) != human:
+            self.stats = DuelStats(human)
         view = build_view(s.env, human)
         prompt = None
         if s.need_human and not s.done and not self.advancing:  # not one auto-pass may skip
@@ -210,8 +214,10 @@ class Server:
                 e["actor"], e["text"], e["card"], e["kind"] = "system", "(auto-passed)", None, "auto_pass"
         if not peek:
             cues, self.cue_sent = build_cues(s.env, human, since=self.cue_sent)
+            self.stats.feed_cues(cues)
         else:
             cues = []  # thinking ticker: transient cues wait for the real send
+        self.stats.note_view(view)
         if not full_log and not peek:
             self.log_sent = len(s.env.history)
         result = None
@@ -219,7 +225,7 @@ class Server:
             winner = "you" if s.result.winner == human else "bot"
             result = {"winner": winner, "reason": self.end_reason or "win"}
         return {"t": "state", "view": view, "prompt": prompt,
-                "log": log, "cues": cues,
+                "log": log, "cues": cues, "stats": self.stats.stats_message(),
                 "thinking": {"seconds": thinking} if thinking is not None else None,
                 "result": result}
 
@@ -263,10 +269,13 @@ class Server:
                     i = s.auto_pass_index()
                     if i is not None:  # never shown: the client must not answer it
                         try:
+                            had = any(o.kind.name == "ACTIVATE" for o in s.env.opts)
                             s.step_human(i)
                         except DriverDiverged as e:
                             await self._diverged(s, e, gen)
                             return
+                        if self.stats is not None:
+                            self.stats.note_chain_window(had, False)
                         self.auto_passed.add(len(s.env.history))
                         continue
                 if s.need_human:
@@ -438,6 +447,9 @@ class Server:
         self.end_reason = ""
         self._last_sig = ()
         self.auto_passed = set()
+        from ygo_zero.web.stats import DuelStats
+
+        self.stats = DuelStats(session.human_seat)
         self.start_advance()
 
     async def on_choose(self, msg: dict) -> None:
@@ -457,10 +469,20 @@ class Server:
             await self._error("index must be an option number")
             return
         try:
+            from ygo_zero.engine import messages as M
+
+            dec = s.env.pending_decision()
+            is_chain = dec is not None and isinstance(dec.msg, M.SelectChain) \
+                and s.env.player == s.human_seat
+            had = bool(is_chain) and any(o.kind.name == "ACTIVATE" for o in s.env.opts)
+            used = bool(is_chain and 0 <= index < len(s.env.opts)
+                        and s.env.opts[index].kind.name == "ACTIVATE")
             s.step_human(index)
         except (IndexError, ValueError) as e:
             await self._error(f"illegal option: {e}")
             return
+        if self.stats is not None and had:
+            self.stats.note_chain_window(True, used)
         self.start_advance()
 
     async def on_surrender(self) -> None:

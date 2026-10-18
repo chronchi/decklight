@@ -15,6 +15,7 @@ from collections.abc import Sequence
 from ygo_zero.engine.duel import DuelConfig, Engine
 from ygo_zero.engine.env import PyEnv
 from ygo_zero.web.cues import build_cues
+from ygo_zero.web.stats import DuelStats
 from ygo_zero.web.view import build_events, build_prompt, build_view
 
 # Narration-free log kinds in a video: the caption bar already says which
@@ -66,6 +67,7 @@ def replay_frames(
     env = PyEnv(engine, cfg, auto_single=auto_single)
     env.reset()
     frames: list[dict] = []
+    stats = DuelStats(0, lp0=getattr(cfg, "lp", 8000))
     prev_len = 0
     prev_trace = 0
     for k, idx in enumerate(choices):
@@ -84,12 +86,15 @@ def replay_frames(
         view = build_view(env, 0, reveal_all=True)
         log = _replay_log(env, prev_len)
         cues, _ = build_cues(env, 0, since=prev_trace, reveal_all=True)
+        stats.feed_cues(cues)
+        stats.note_view(view)
         frame: dict = {
             "t": "state",
             "view": view,
             "prompt": None,
             "log": log,
             "cues": cues,
+            "stats": stats.stats_message(),
             "thinking": None,
             "result": None,
             # Frame 0 is the title card: no caption bar over it. The first
@@ -119,6 +124,8 @@ def replay_frames(
     view = build_view(env, 0, reveal_all=True)
     log = _replay_log(env, prev_len)
     final_cues, _ = build_cues(env, 0, since=prev_trace, reveal_all=True)
+    stats.feed_cues(final_cues)
+    stats.note_view(view)
     frames.append(
         {
             "t": "state",
@@ -126,6 +133,7 @@ def replay_frames(
             "prompt": None,
             "log": log,
             "cues": final_cues,
+            "stats": stats.stats_message(),
             "thinking": None,
             "result": {"winner": names[winner], "reason": reason},
             "caption": {"actor": names[winner], "text": "Wins the duel"},

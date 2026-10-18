@@ -37,6 +37,8 @@ MOCKS = [
     ("14-select-picked", "3&sel=1,3"),
     ("15-gamemenu", "1&gamemenu=1"),
     ("16-reveal", "1&reveal=bm1"),
+    ("17-duel-stats", 16),
+    ("18-duel-early", 17),
 ]
 
 # Pacing cues frozen mid-scene: ?cue=K&t=F freezes visible scene K at fraction F
@@ -60,6 +62,16 @@ CUE_SHOTS = [
     ("35-cue-added", "14&cue=1&t=0.6"),
     ("36-cue-confirm", "14&cue=2&t=0.6"),
     ("37-cue-mill", "14&cue=4&t=0.5"),
+]
+
+
+# Duel-log sheet tabs (mock 17 carries realistic stats): Log, Stats (top and
+# scrolled to bottom) and Cards, opened with ?log=1&logtab=.
+LOG_SHOTS = [
+    ("39-log-tab", "16&log=1&logtab=log"),
+    ("40-stats-tab", "16&log=1&logtab=stats"),
+    ("41-stats-bottom", "16&log=1&logtab=stats"),
+    ("42-cards-tab", "16&log=1&logtab=cards"),
 ]
 
 
@@ -211,6 +223,32 @@ def main() -> int:
                         errors.append(f"26-cue-negated: negation mark contrast below 3:1 ({nc})")
                     if not page.evaluate("/negated/i.test(document.querySelector('#ov-cues .cue-neg').textContent)"):
                         errors.append("26-cue-negated: no 'negated' text label")
+            # Duel-log sheet tabs (Log | Stats | Cards) against the stats mock.
+            for name, i in LOG_SHOTS:
+                page.goto(f"{base}?mock=1&i={i}", wait_until="networkidle")
+                page.wait_for_timeout(400)
+                if not page.evaluate("!!document.querySelector('#logdrawer')"):
+                    errors.append(f"{name}: no log drawer on screen")
+                if name == "41-stats-bottom":
+                    page.evaluate("document.querySelector('#logdrawer .dbody').scrollTop = 1e6")
+                    page.wait_for_timeout(200)
+                page.screenshot(path=str(OUT / f"{name}.png"))
+                print(f"shot {name}.png", flush=True)
+                if page.evaluate("document.documentElement.scrollWidth > window.innerWidth"):
+                    errors.append(f"horizontal overflow at 412px in {name}")
+                if name == "40-stats-tab" and not page.evaluate(
+                        "!!document.querySelector('#logdrawer .dtiles')"):
+                    errors.append("40-stats-tab: no stat tiles on screen")
+                if name == "42-cards-tab":
+                    if not page.evaluate("!!document.querySelector('#logdrawer .dcards')"):
+                        errors.append("42-cards-tab: no card lists on screen")
+                    # Tapping a cards-tab cell opens that card's details.
+                    page.locator("#logdrawer .dcell").first.click()
+                    page.wait_for_timeout(300)
+                    if not page.evaluate("!!document.querySelector('#detail')"):
+                        errors.append("42-cards-tab: tapping a card opened no detail")
+                    page.locator("#detail .dx").first.click()
+                    page.wait_for_timeout(300)
             # A negated link stays marked in the chain strip (shape + word, not colour alone).
             neg_html = page.evaluate("""async () => { const m = await import('./render/board.js');
               return m.chainHTML([{card: {name: 'A'}, controller: 'bot'}, {card: {name: 'B'}, controller: 'you'}],
@@ -255,13 +293,17 @@ def main() -> int:
             s.on("pageerror", lambda e: errors.append(f"pageerror-small: {e}"))
             s.on("console", lambda m: errors.append(f"console-small-{m.type}: {m.text}")
                    if m.type in ("error",) else None)
-            for nm, i in [("02-small", 1), ("03-small", 2), ("01-small", 0), ("07-small", 6)]:
+            for nm, i in [("02-small", 1), ("03-small", 2), ("01-small", 0), ("07-small", 6),
+                           ("40-small-stats", "16&log=1&logtab=stats")]:
                 s.goto(f"{base}?mock=1&i={i}", wait_until="networkidle")
                 s.wait_for_timeout(400)
                 s.screenshot(path=str(OUT / f"{nm}.png"))
                 print(f"shot {nm}.png", flush=True)
                 if nm == "02-small":
                     numbers["m360"] = s.evaluate(MEASURE_JS)
+                if nm == "40-small-stats" and not s.evaluate(
+                        "!!document.querySelector('#logdrawer .dtiles')"):
+                    errors.append("40-small-stats: no stat tiles on screen")
                 if s.evaluate("document.documentElement.scrollWidth > window.innerWidth"):
                     errors.append(f"horizontal overflow at 360px in {nm}")
             for nm, i in CUE_SHOTS_360:
@@ -290,6 +332,13 @@ def main() -> int:
             d.wait_for_timeout(400)
             d.screenshot(path=str(OUT / "09-desktop.png"))
             print("shot 09-desktop.png", flush=True)
+            # Desktop side panel with the Stats tab (the drawer stays shut on desktop).
+            d.goto(f"{base}?mock=1&i=16&logtab=stats", wait_until="networkidle")
+            d.wait_for_timeout(400)
+            d.screenshot(path=str(OUT / "43-desktop-stats.png"))
+            print("shot 43-desktop-stats.png", flush=True)
+            if not d.evaluate("!!document.querySelector('#logside .dtiles')"):
+                errors.append("43-desktop-stats: no stat tiles in the side panel")
             ctx2.close()
             browser.close()
     finally:
@@ -304,7 +353,7 @@ def main() -> int:
         for e in errors:
             print(f"  {e}", flush=True)
         return 1
-    print(f"ok: {len(MOCKS) + len(CUE_SHOTS) + len(CUE_SHOTS_360) + 6} PNGs in {OUT}", flush=True)
+    print(f"ok: {len(MOCKS) + len(CUE_SHOTS) + len(LOG_SHOTS) + len(CUE_SHOTS_360) + 8} PNGs in {OUT}", flush=True)
     return 0
 
 

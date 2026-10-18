@@ -2,6 +2,7 @@ import {connectWS} from "./ws.js";
 import {barHTML, sideHTML, midHTML, phaseBtnsHTML, chainHTML} from "./render/board.js";
 import {handHTML, sheetHTML, pileSheetHTML, infoHTML, actionableMap, statsLine, pileTitle} from "./render/hand.js";
 import {logHTML} from "./render/log.js";
+import {LOG_TABS, tabStripHTML, tabPanelOpen, statsPanelHTML, cardsPanelHTML} from "./render/stats.js";
 import {esc, imgUrl, isHidden, phHTML} from "./render/card.js";
 import {morph} from "./render/morph.js";
 import {createCuePlayer, recapItem, chainTracker, planSteps, stepText} from "./cues.js";
@@ -23,6 +24,8 @@ const MOCKS = [
   "mock/14-cues-battle.json",
   "mock/15-cues-moves.json",
   "mock/16-cues-recap.json",
+  "mock/17-duel-stats.json",
+  "mock/18-duel-early.json",
 ];
 
 const qs = new URLSearchParams(location.search);
@@ -83,6 +86,16 @@ let logOpen = false;
 let logAll = false;      // show passes / auto-passes / zone picks too (drawer toggle)
 const QUIET = new Set(["pass", "auto_pass", "place"]);
 const shownEvents = () => (logAll ? events : events.filter((e) => !QUIET.has(e.kind)));
+let logTab = "log";      // "log" | "stats" | "cards" (the duel-log sheet tabs)
+try {
+  const savedTab = localStorage.getItem("ygo-logtab");
+  if (savedTab === "log" || savedTab === "stats" || savedTab === "cards") logTab = savedTab;
+} catch (e) { /* private mode: stay on log */ }
+function setLogTab(t) {
+  if (t !== "log" && t !== "stats" && t !== "cards") return;
+  logTab = t;
+  try { localStorage.setItem("ygo-logtab", t); } catch (e) { /* ignore */ }
+}
 let detail = null;       // card for the full-screen detail view
 let lobby = null;
 let lobbyPick = {you: null, bot: null, first: "rps", mode: "product"};
@@ -633,11 +646,17 @@ function renderGame() {
   }
 
   const logh = logHTML(shownEvents(), MOCK);
-  morphBottom(logside,
+  const sideTabs = tabStripHTML(logTab, "s");
+  const sideBody = tabPanelOpen("s", logTab) + sidePanelInner(logTab, logh) + "</div>";
+  morph(logside,
     '<div class="sidecard" data-key="side">' + (info && info.card ? infoHTML(info, null, MOCK, "")
     : recap && !IS_REPLAY ? recapHTML("") : '<p class="emptytx">Tap any card to read it here.</p>') + "</div>" +
-    '<div class="loghead" data-key="lhead">Duel log' + logAllBtn() + '</div><div class="loglist" data-key="llist">' + logh + "</div>",
-    ".loglist");
+    sideTabs + sideBody);
+  // Keep the desktop log list pinned to the bottom only while on the Log tab.
+  if (logTab === "log") {
+    const sc = logside.querySelector("#spanel-log .loglist");
+    if (sc) sc.scrollTop = sc.scrollHeight;
+  }
   renderOverlays(logh);
   syncOv();
 }
@@ -647,16 +666,26 @@ function logAllBtn() {
     (logAll ? "Key moves" : "Show all") + "</button>";
 }
 
+// Inner HTML of one duel-log tab panel (the tab strip lives outside).
+function sidePanelInner(which, logh) {
+  const st = msg && msg.stats;
+  if (which === "stats") return statsPanelHTML(st, MOCK);
+  if (which === "cards") return cardsPanelHTML(st, MOCK);
+  return '<div class="loghead" data-key="lhead">Duel log' + logAllBtn() + '</div><div class="loglist" data-key="llist">' + logh + "</div>";
+}
+
 function renderOverlays(logh) {
   let lh = "";
   if (logOpen) {
+    const body = tabPanelOpen("d", logTab) + sidePanelInner(logTab, logh) + "</div>";
     lh = '<div id="scrim" data-key="scrim" data-act="closelog"></div>' +
-      '<div id="logdrawer" data-key="logdrawer" role="dialog" aria-modal="true" aria-label="Duel log" tabindex="-1">' +
-      '<div class="loghead">Duel log' + logAllBtn() + '<button class="iconbtn" data-act="closelog" aria-label="Close log">' +
+      '<div id="logdrawer" data-key="logdrawer" role="dialog" aria-modal="true" aria-label="This duel" tabindex="-1">' +
+      '<div class="dhead">This duel<button class="iconbtn" data-act="closelog" aria-label="Close duel log">' +
       '<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5 5l10 10M15 5 5 15"/></svg></button></div>' +
-      '<div class="loglist">' + logh + "</div></div>";
+      tabStripHTML(logTab, "d") + body + "</div>";
   }
-  morphBottom(ovLog, lh, "#logdrawer .loglist");
+  if (logTab === "log") morphBottom(ovLog, lh, "#logdrawer .dbody");
+  else morph(ovLog, lh);
 
   let mh = "";
   if (menuUid && !locked) {
@@ -959,7 +988,44 @@ function onRecapRow(target) {
   return true;
 }
 
+// A stats-cards cell opens that card's details (synthetic card: code + name).
+function statName(code) {
+  const st = msg && msg.stats;
+  if (!st) return "";
+  for (const e of [...(st.opp_seen || []), ...(st.you_used || [])]) {
+    if (e && e.code === code) return e.name || "";
+  }
+  return "";
+}
+
+function openStatDetail(code) {
+  if (!code) return;
+  detail = {uid: "stat:" + code, code, name: statName(code) || ("#" + code),
+    faceup: true, pos: null, atk: 0, def: 0, level: 0, rank: 0, link: 0,
+    counters: 0, overlays: []};
+  if (logOpen) {  // the detail takes over the drawer's history entry (back closes the detail)
+    logOpen = false;
+    const i = ovStack.indexOf("log");
+    if (i >= 0) {
+      ovStack[i] = "detail";
+      try { history.replaceState({ov: "detail"}, ""); } catch (e) { /* ignore */ }
+    }
+  }
+  render();
+}
+
 function onOverlayClick(ev) {
+  const tab = ev.target.closest("[data-logtab]");
+  if (tab) {
+    setLogTab(tab.getAttribute("data-logtab"));
+    render();
+    return;
+  }
+  const sc = ev.target.closest("[data-statcode]");
+  if (sc) {
+    openStatDetail(parseInt(sc.getAttribute("data-statcode"), 10));
+    return;
+  }
   const info = ev.target.closest("[data-detailcard], .infobtn");
   if (info && (info.getAttribute("data-detailcard") != null || info.getAttribute("data-detailuid") != null)) {
     if (onInfoBtn(info)) {
@@ -1231,6 +1297,26 @@ document.addEventListener("keydown", (ev) => {
     if (n) { ev.preventDefault(); n.focus(); }
     return;
   }
+  // Duel-log tabs: arrow keys move between Log | Stats | Cards (ARIA tabs pattern).
+  if ((ev.key === "ArrowRight" || ev.key === "ArrowLeft" || ev.key === "Home" || ev.key === "End") &&
+      t.getAttribute && t.getAttribute("role") === "tab" && t.closest && t.closest(".dtabs")) {
+    const tabs = [...t.closest(".dtabs").querySelectorAll('[role="tab"]')];
+    let i = tabs.indexOf(t);
+    if (ev.key === "Home") i = 0;
+    else if (ev.key === "End") i = tabs.length - 1;
+    else i = (i + (ev.key === "ArrowRight" ? 1 : -1) + tabs.length) % tabs.length;
+    ev.preventDefault();
+    const next = tabs[i];
+    if (next) {
+      setLogTab(next.getAttribute("data-logtab"));
+      render();
+      const id = next.id;
+      const el = (id && document.getElementById(id)) ||
+        [...document.querySelectorAll('[data-logtab="' + next.getAttribute("data-logtab") + '"]')].find(visible);
+      if (el) el.focus({preventScroll: true});
+    }
+    return;
+  }
   // Non-native controls (cards, log lines): Enter and Space activate, as on a button.
   if ((ev.key === "Enter" || ev.key === " ") && !typing && t.getAttribute && t.getAttribute("role") === "button" &&
       !t.matches("button, summary, a")) {
@@ -1411,6 +1497,12 @@ async function loadMock(i) {
   if (qs.get("sel") && msg.t === "state") sel = qs.get("sel").split(",").map(Number);
   if (qs.get("picker") && msg.t === "lobby") pickerOpen = qs.get("picker");
   if (qs.get("gamemenu") && msg.t === "state") gameMenu = true;
+  // Screenshot hooks for the duel-log sheet: ?log=1 opens it, ?logtab=log|stats|cards picks the tab.
+  if (msg.t === "state") {
+    const lt = qs.get("logtab");
+    if (lt === "log" || lt === "stats" || lt === "cards") setLogTab(lt);
+    if (qs.get("log") === "1") logOpen = true;
+  }
   render();
   if (msg.t === "state" && !(Array.isArray(msg.cues) && msg.cues.length)) announceState(null, msg);
   if (msg.t === "state" && Array.isArray(msg.cues) && msg.cues.length) mockCues();

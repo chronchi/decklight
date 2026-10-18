@@ -60,6 +60,11 @@ STATES = [
     ("lobby-zoom200", "0", "zoom200"),
     ("main-bigtext", "1", "bigtext"),
     ("select-bigtext", "3", "bigtext"),
+    ("log-tab", "16&log=1&logtab=log", "phone"),
+    ("stats-tab", "16&log=1&logtab=stats", "phone"),
+    ("cards-tab", "16&log=1&logtab=cards", "phone"),
+    ("stats-small", "16&log=1&logtab=stats", "small"),
+    ("stats-desktop", "16&logtab=stats", "desktop"),
 ]
 VIEWPORTS = {
     "phone": {"viewport": {"width": 412, "height": 915}, "device_scale_factor": 2, "is_mobile": True, "has_touch": True},
@@ -168,6 +173,7 @@ MARKS = [
     ("negated tag mark", ".negtag i", "shadow"),
     ("cue target ring", "#ov-cues .ring", "stroke"),
     ("cue negation mark", "#ov-cues .negmark .mark", "stroke"),
+    ("duel tabs: selected underline", ".dtabs [role=tab].on", "shadow"),
 ]
 
 MARKS_JS = r"""(marks) => {
