@@ -67,6 +67,33 @@ export function chartHTML(st) {
   if (hi - lo < 1000) { hi += 500; lo = Math.max(0, lo - 500); }
   const py = chartPoints(you, W, H, PAD, lo, hi).join(" ");
   const pb = chartPoints(bot, W, H, PAD, lo, hi).join(" ");
+  // The calibrated win-chance line (dashed kincha, own 0-100% scale): one point
+  // per chart label, carrying the last sample at or before that turn forward.
+  let winPath = "", winLegend = "", winCol = null, winSummary = "";
+  const hist = st.winchance && Array.isArray(st.winchance.history) ? st.winchance.history : null;
+  if (hist && hist.length) {
+    const turnOf = (label) => {
+      const m = /^T(\d+)$/.exec(label || "");
+      return m ? parseInt(m[1], 10) : Infinity;   // "now" takes the latest sample
+    };
+    const pts = [];
+    const col = [];
+    labels.forEach((label, i) => {
+      let p = null;
+      for (const [t, v] of hist) if (t <= turnOf(label)) p = v;
+      col.push(p);
+      if (p == null) return;
+      const n = labels.length;
+      const x = (PAD + (W - 2 * PAD) * (n === 1 ? 0.5 : i / (n - 1))).toFixed(1);
+      const y = (PAD + (H - 2 * PAD) * (1 - p)).toFixed(1);
+      pts.push((pts.length ? "L" : "M") + " " + x + "," + y);
+    });
+    if (pts.length > 1) winPath = '<path d="' + pts.join(" ") + '" class="ln win" fill="none"/>';
+    else if (pts.length === 1) winPath = '<path d="' + pts[0] + '" class="ln win" fill="none"/>';
+    winLegend = '<span><i class="sw win" aria-hidden="true"></i>Win chance</span>';
+    winCol = col;
+    winSummary = " Win chance: " + col.map((p) => (p == null ? "—" : Math.round(p * 100) + "%")).join(", ") + ".";
+  }
   const dot = (vals, cls) => {
     const n = vals.length, span = hi - lo || 1;
     return vals.map((v, i) => {
@@ -77,23 +104,27 @@ export function chartHTML(st) {
         : '<rect x="' + (+x - 3.5).toFixed(1) + '" y="' + (+y - 3.5).toFixed(1) + '" width="7" height="7" class="mk bot"/>';
     }).join("");
   };
-  const summary = "Life points by turn. You: " + you.join(", ") + ". Bot: " + bot.join(", ") + ".";
+  const summary = "Life points by turn. You: " + you.join(", ") + ". Bot: " + bot.join(", ") + "." + winSummary;
   const ticks = labels.map((l) => "<span>" + esc(l) + "</span>").join("");
   const rows = labels.map((l, i) =>
     "<tr><th scope=\"row\">" + esc(l) + "</th><td>" + (you[i] != null ? you[i] : "—") +
-    "</td><td>" + (bot[i] != null ? bot[i] : "—") + "</td></tr>").join("");
+    "</td><td>" + (bot[i] != null ? bot[i] : "—") + "</td>" +
+    (winCol ? "<td>" + (winCol[i] != null ? Math.round(winCol[i] * 100) + "%" : "—") + "</td>" : "") +
+    "</tr>").join("");
   return '<section class="dsec" aria-label="Life points chart"><div class="dsechead">Life points</div>' +
     '<div class="dchart"><svg viewBox="0 0 ' + W + " " + H + '" preserveAspectRatio="none" role="img" aria-label="' + esc(summary) + '">' +
     '<g class="grid" aria-hidden="true"><line x1="0" y1="' + (H / 2) + '" x2="' + W + '" y2="' + (H / 2) + '"/></g>' +
     '<path d="' + py + '" class="ln you" fill="none"/>' +
     '<path d="' + pb + '" class="ln bot" fill="none"/>' +
+    winPath +
     dot(you, "you") + dot(bot, "bot") +
     "</svg>" +
     '<div class="dticks" aria-hidden="true">' + ticks + "</div></div>" +
     '<div class="dlegend"><span><i class="sw you" aria-hidden="true"></i>Your LP (round marks)</span>' +
-    '<span><i class="sw bot" aria-hidden="true"></i>Bot LP (square marks)</span></div>' +
+    '<span><i class="sw bot" aria-hidden="true"></i>Bot LP (square marks)</span>' + winLegend + "</div>" +
     '<table class="sr-only"><caption>Life points by turn</caption>' +
-    "<thead><tr><th scope=\"col\">Turn</th><th scope=\"col\">Your LP</th><th scope=\"col\">Bot LP</th></tr></thead>" +
+    "<thead><tr><th scope=\"col\">Turn</th><th scope=\"col\">Your LP</th><th scope=\"col\">Bot LP</th>" +
+    (winCol ? "<th scope=\"col\">Win chance</th>" : "") + "</tr></thead>" +
     "<tbody>" + rows + "</tbody></table></section>";
 }
 

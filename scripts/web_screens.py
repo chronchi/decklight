@@ -39,6 +39,9 @@ MOCKS = [
     ("16-reveal", "1&reveal=bm1"),
     ("17-duel-stats", 16),
     ("18-duel-early", 17),
+    ("19-winchance-board", "18&winchance=1"),
+    ("20-winchance-stats", "19&winchance=1"),
+    ("21-winchance-menu", "1&gamemenu=1&winchance=1"),
 ]
 
 # Pacing cues frozen mid-scene: ?cue=K&t=F freezes visible scene K at fraction F
@@ -72,6 +75,8 @@ LOG_SHOTS = [
     ("40-stats-tab", "16&log=1&logtab=stats"),
     ("41-stats-bottom", "16&log=1&logtab=stats"),
     ("42-cards-tab", "16&log=1&logtab=cards"),
+    # Win chance on (mock 20): the Stats tab with the dashed kincha line.
+    ("44-winchance-line", "19&log=1&logtab=stats&winchance=1"),
 ]
 
 
@@ -205,6 +210,17 @@ def main() -> int:
                     numbers["m412"] = page.evaluate(MEASURE_JS)
                 if name == "15-gamemenu" and not page.evaluate("!!document.querySelector('#gamemenu')"):
                     errors.append("15-gamemenu has no game menu")
+                if name == "21-winchance-menu":
+                    if not page.evaluate("!!document.querySelector('#gamemenu')"):
+                        errors.append("21-winchance-menu has no game menu")
+                    if not page.evaluate("/Show win chance/.test(document.querySelector('#gamemenu').textContent)"):
+                        errors.append("21-winchance-menu: no win-chance switch")
+                if name == "19-winchance-board" and not page.evaluate("!!document.querySelector('#winchance')"):
+                    errors.append("19-winchance-board has no win-chance bar")
+                if name == "19-winchance-board" and page.evaluate(
+                        "document.querySelector('#winchance') && "
+                        "document.querySelector('#winchance').getAttribute('aria-label')") != "Win chance 62%":
+                    errors.append("19-winchance-board: bar aria-label is not 'Win chance 62%'")
                 if name == "16-reveal" and not page.evaluate("!!document.querySelector('#reveal')"):
                     errors.append("16-reveal has no reveal overlay")
             for name, i in CUE_SHOTS:

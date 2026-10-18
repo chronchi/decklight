@@ -61,6 +61,7 @@ class DuelStats:
         self.were_negated = {"me": 0, "opp": 0}
         self.windows_total = 0
         self.windows_used = 0
+        self.win_hist: list[list] = []  # [turn, p] per human decision (only when the switch is on)
         self.chart_labels: list[str] = []
         self.chart_me: list[int] = []
         self.chart_opp: list[int] = []
@@ -299,6 +300,18 @@ class DuelStats:
         if used:
             self.windows_used += 1
 
+    def note_winchance(self, turn: int, p: float) -> None:
+        """One calibrated win chance at a human decision (the server calls this
+        only while the client's win-chance switch is on)."""
+        self.win_hist.append([int(turn), float(p)])
+
+    def _new_moment(self, turn: int, kind: str, text: str, sub: str) -> dict:
+        """A key moment stamped with the win chance then known, so the message
+        can carry "you were 61%, then 38%" once a later sample arrives."""
+        return {"turn": turn, "kind": kind, "text": text, "sub": sub,
+                "_w0": self.win_hist[-1][1] if self.win_hist else None,
+                "_widx": len(self.win_hist)}
+
     def note_view(self, view: dict | None) -> None:
         self._view = view
 
@@ -327,7 +340,7 @@ class DuelStats:
             text = f"{name or 'A card'} was negated"
         by_name = (by or {}).get("name") if by else ""
         sub = f"by {by_name}" if by_name else ("effect negated" if disabled else "activation negated")
-        self.moments.append({"turn": self.turn or 1, "kind": "negation", "text": text, "sub": sub})
+        self.moments.append(self._new_moment(self.turn or 1, "negation", text, sub))
 
     def _damage_moment(self, c: dict, amount: int) -> None:
         atk = None
@@ -349,14 +362,15 @@ class DuelStats:
             else:
                 text = f"Bot took {amount} damage"
             sub = ""
-        self.moments.append({"turn": self.turn or 1, "kind": "damage", "text": text, "sub": sub})
+        self.moments.append(self._new_moment(self.turn or 1, "damage", text, sub))
 
     def _wipe(self, key: tuple[int, str], n: int) -> None:
         turn, side = key
         ent = self._wipe_moment.get(key)
         text = f"You lost {n} cards from the field" if side == "me" else f"Bot lost {n} cards from the field"
         if ent is None:
-            ent = {"turn": turn, "kind": "wipe", "text": text, "sub": "", "_seq": self._wipe_seq}
+            ent = self._new_moment(turn, "wipe", text, "")
+            ent["_seq"] = self._wipe_seq
             self._wipe_seq += 1
             self._wipe_moment[key] = ent
             self.moments.append(ent)
@@ -412,7 +426,7 @@ class DuelStats:
             "damage": self.dealt[key],
         }
 
-    def stats_message(self) -> dict:
+    def stats_message(self, *, winchance_on: bool = True) -> dict:
         you = self._ledger_side(self._view, "you")
         bot = self._ledger_side(self._view, "bot")
         # live LP wins over the cue tally (identical unless a cue was missed)
@@ -431,10 +445,20 @@ class DuelStats:
             cbot = [*cbot, bot["lp"]]
         # Newest first; inside one turn the latest event is first (moments
         # are appended chronologically, re-wipes move to the end).
-        moments = [{k: v for k, v in m.items() if not k.startswith("_")} for m in reversed(self.moments)][:5]
+        moments = []
+        show_wc = bool(winchance_on) and bool(self.win_hist)
+        for raw in list(reversed(self.moments))[:5]:
+            m = {k: v for k, v in raw.items() if not k.startswith("_")}
+            if show_wc:
+                w0, widx = raw.get("_w0"), raw.get("_widx")
+                if w0 is not None and widx is not None and widx < len(self.win_hist):
+                    w1 = self.win_hist[widx][1]
+                    span = f"you were {round(w0 * 100)}%, then {round(w1 * 100)}%"
+                    m["sub"] = f"{m['sub']} · {span}" if m.get("sub") else span
+            moments.append(m)
         opp_seen = sorted(self.opp_seen.values(), key=lambda e: str(e.get("name") or ""))
         you_used = sorted(self.you_used.values(), key=lambda e: str(e.get("name") or ""))
-        return {
+        out = {
             "turn": self.turn,
             "lp_you": you["lp"],
             "lp_bot": bot["lp"],
@@ -457,3 +481,8 @@ class DuelStats:
             "opp_seen": opp_seen,
             "you_used": you_used,
         }
+        if self.win_hist and winchance_on:
+            # Only while the switch is on: history for the chart line + key moments.
+            out["winchance"] = {"p": self.win_hist[-1][1], "turn": self.win_hist[-1][0],
+                                "history": [list(e) for e in self.win_hist]}
+        return out

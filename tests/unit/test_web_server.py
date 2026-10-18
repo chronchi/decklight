@@ -59,6 +59,7 @@ class _TinyLauncher:
 
     def __init__(self, forward) -> None:
         self.forward = forward
+        self.value = None  # fast mode: no value net (winchance stays null)
 
     def start_duel(self, engine, config, bot_seat, *, game_seed, ws_seed, human_fn=None):
         return ProductDriver(
@@ -68,6 +69,24 @@ class _TinyLauncher:
 
     def record_info(self, seed: int) -> dict:
         return {"ckpt": "tiny-test", "fast": True, "game_seed": seed, "search": "tiny"}
+
+
+class _TinyValueLauncher(_TinyLauncher):
+    """Tiny launcher with a spied value net: `value` records every obs batch it
+    gets (the server's winchance path only; the driver runs value-free)."""
+
+    def __init__(self, forward) -> None:
+        super().__init__(forward)
+        self.seen: list[dict] = []
+
+        def value(batch):
+            import numpy as _np
+
+            self.seen.append({k: _np.array(v) for k, v in batch.items()})
+            n = next(iter(batch.values())).shape[0]
+            return _np.zeros(n, dtype=_np.float32)
+
+        self.value = value
 
 
 def _make_app(tmp_path, engine, mode_factory=None):
@@ -691,3 +710,112 @@ def test_user_record_prompts(engine):
                 seen.add("effectyn")
         env.step(choice)
     assert seen == {"position", "search", "effectyn"}, seen
+
+
+# --- 8. win chance (off by default, human obs only) ---
+
+
+def _play_product_value(tmp_path, engine, *, winchance: bool, seed=0, first="bot"):
+    """A full tiny-product game with a spied value net; returns (app, launcher, states)."""
+    forward = _tiny_forward()
+    launcher = _TinyValueLauncher(forward)
+    app = _make_app(tmp_path, engine, mode_factory=lambda mode: launcher)
+    human_text = (FIXTURES / "BlueEyes.ydk").read_text()
+    bot_text = (FIXTURES / "Branded.ydk").read_text()
+    states: list[dict] = []
+    with _client(app).websocket_connect(f"/ws?t={TOKEN}") as ws:
+        assert json.loads(ws.receive_text())["t"] == "lobby"
+        if winchance:
+            ws.send_json({"t": "settings", "chain": "auto", "winchance": True})
+        msg = {"t": "new_game", "deck": {"ydk": human_text},
+               "bot_deck": {"ydk": bot_text}, "first": first, "mode": "product"}
+        ws.send_json(msg)
+        _play_to_end(ws, random.Random(seed), collect=states)
+    return app, launcher, states
+
+
+def _check_winchance_shape(wc: dict) -> None:
+    assert set(wc) == {"p", "turn", "history"}
+    assert isinstance(wc["turn"], int) and wc["turn"] >= 1
+    assert 0.03 <= wc["p"] <= 0.97
+    assert wc["history"], "history must hold every sample so far"
+    for t, p in wc["history"]:
+        assert isinstance(t, int) and 0.03 <= p <= 0.97
+    assert wc["p"] == wc["history"][-1][1] and wc["turn"] == wc["history"][-1][0]
+
+
+def test_winchance_off_by_default(tmp_path, engine):
+    _, launcher, states = _play_product_value(tmp_path, engine, winchance=False)
+    assert states, "no states received"
+    for m in states:
+        assert m.get("winchance") is None, "the switch is off: winchance must be null"
+        assert "winchance" not in (m.get("stats") or {}), "no stats win-chance field while off"
+    assert launcher.seen == [], "no value forward while the switch is off"
+
+
+def test_winchance_on_product(tmp_path, engine):
+    from ygo_zero.decks import parse_ydk
+
+    app, launcher, states = _play_product_value(tmp_path, engine, winchance=True)
+    assert states, "no states received"
+    first_prompt = next(i for i, m in enumerate(states) if m["prompt"] is not None)
+    assert first_prompt > 0, "the bot starts: states before the first human prompt exist"
+    for m in states[:first_prompt]:
+        assert m.get("winchance") is None, "no value before the first human decision"
+        assert "winchance" not in (m.get("stats") or {})
+    for m in states[first_prompt:]:
+        assert m.get("winchance") is not None, "the last value is kept between human decisions"
+        _check_winchance_shape(m["winchance"])
+        st = m.get("stats") or {}
+        assert "winchance" in st, "stats carry the history while on"
+        assert st["winchance"]["history"] == m["winchance"]["history"]
+    # The leak guard: every value call saw a genuine human-seat observation of
+    # this game (rebuilt by replay), each at a distinct human decision.
+    assert launcher.seen, "the value net was never called"
+    human_text = (FIXTURES / "BlueEyes.ydk").read_text()
+    bot_text = (FIXTURES / "Branded.ydk").read_text()
+    rec, cfg = _replay_record(engine, tmp_path / "runs", states[-1],
+                              (parse_ydk(human_text), parse_ydk(bot_text)))
+    env = PyEnv.replay(engine, cfg, [], auto_single=False)
+    hs = rec["human_seat"]
+    first_player = env.duel.first_player
+    want = []  # (turn, obs) at every human multi-option decision
+    for choice in rec["choices"]:
+        if env.done:
+            break
+        if env.player == hs and len(env.opts) > 1:
+            want.append((int(env.duel.turn),
+                         {k: np.ascontiguousarray(v)[np.newaxis, ...]
+                          for k, v in env._observe().items()}))
+        env.step(int(choice))
+    assert len(launcher.seen) <= len(want), "more value calls than human decisions"
+    matched = []
+    for batch in launcher.seen:
+        assert batch["global"].shape[0] == 1
+        g = batch["global"][0]
+        assert int(g[4]) == int(first_player == hs), "value obs is not the human seat's"
+        hits = [i for i, (_, w) in enumerate(want)
+                if all(np.array_equal(batch[k], w[k]) for k in w)]
+        assert hits, "value obs matches no human decision of this game"
+        matched.extend(hits)
+    assert len(set(matched)) == len(matched) == len(launcher.seen), \
+        "each value call must sit at a distinct human decision"
+    # A new connection resets the switch: the stored value is not sent anymore.
+    with _client(app).websocket_connect(f"/ws?t={TOKEN}") as ws2:
+        assert json.loads(ws2.receive_text())["t"] == "lobby"
+        ws2.send_json({"t": "resync"})
+        full = json.loads(ws2.receive_text())
+        assert full["t"] == "state"
+        assert full.get("winchance") is None
+        assert "winchance" not in (full.get("stats") or {})
+
+
+def test_settings_winchance_validation(tmp_path, engine):
+    app = _make_app(tmp_path, engine)
+    with _client(app).websocket_connect(f"/ws?t={TOKEN}") as ws:
+        ws.receive_text()  # lobby
+        ws.send_json({"t": "settings", "winchance": "yes"})
+        assert json.loads(ws.receive_text())["t"] == "error"
+        ws.send_json({"t": "settings", "winchance": True})  # no chain key: accepted
+        ws.send_json({"t": "resync"})
+        assert json.loads(ws.receive_text())["t"] == "lobby"  # no error in between

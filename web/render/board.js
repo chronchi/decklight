@@ -119,6 +119,17 @@ export function midHTML(view, opts) {
   );
 }
 
+// Win-chance bar under the turn/phase panel (the switch is off by default, so
+// this renders nothing unless the server sends a value). Your share is the
+// --you fill; the number carries the meaning, never the colour alone.
+export function winchanceHTML(wc) {
+  if (!wc || typeof wc.p !== "number") return "";
+  const pct = Math.round(wc.p * 100);
+  return '<div id="winchance" data-key="winchance" role="img" aria-label="Win chance ' + pct + '%">' +
+    '<div class="wcbar" aria-hidden="true"><i style="width:' + pct + '%"></i></div>' +
+    '<span class="wctext">' + pct + "%</span></div>";
+}
+
 // Phase buttons inside your bar (idle and battle prompts only).
 export function phaseBtnsHTML(prompt, locked) {
   if (!prompt || (prompt.kind !== "idle" && prompt.kind !== "battle")) return "";

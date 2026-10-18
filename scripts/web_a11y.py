@@ -65,6 +65,10 @@ STATES = [
     ("cards-tab", "16&log=1&logtab=cards", "phone"),
     ("stats-small", "16&log=1&logtab=stats", "small"),
     ("stats-desktop", "16&logtab=stats", "desktop"),
+    # Win chance on: the board bar, the game-menu switch, the Stats line.
+    ("winchance-board", "18&winchance=1", "phone"),
+    ("winchance-menu", "1&gamemenu=1&winchance=1", "phone"),
+    ("winchance-stats", "19&log=1&logtab=stats&winchance=1", "phone"),
 ]
 VIEWPORTS = {
     "phone": {"viewport": {"width": 412, "height": 915}, "device_scale_factor": 2, "is_mobile": True, "has_touch": True},

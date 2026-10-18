@@ -1,5 +1,5 @@
 import {connectWS} from "./ws.js";
-import {barHTML, sideHTML, midHTML, phaseBtnsHTML, chainHTML} from "./render/board.js";
+import {barHTML, sideHTML, midHTML, phaseBtnsHTML, chainHTML, winchanceHTML} from "./render/board.js";
 import {handHTML, sheetHTML, pileSheetHTML, infoHTML, actionableMap, statsLine, pileTitle} from "./render/hand.js";
 import {logHTML} from "./render/log.js";
 import {LOG_TABS, tabStripHTML, tabPanelOpen, statsPanelHTML, cardsPanelHTML} from "./render/stats.js";
@@ -26,6 +26,8 @@ const MOCKS = [
   "mock/16-cues-recap.json",
   "mock/17-duel-stats.json",
   "mock/18-duel-early.json",
+  "mock/19-winchance-board.json",
+  "mock/20-winchance-stats.json",
 ];
 
 const qs = new URLSearchParams(location.search);
@@ -116,6 +118,14 @@ try {
   if (saved === "auto" || saved === "all") chainMode = saved;
 } catch (e) { /* private mode: stay on auto */ }
 let inLobby = false;     // after Back to lobby: ignore states until new_game
+let gameMode = null;     // the running game's bot strength (for the win-chance note)
+
+// Win chance (the bot's calibrated estimate of your chance to win): a switch in
+// the game menu, off by default so it never steers play unless asked for.
+let winChance = false;
+try {
+  winChance = localStorage.getItem("ygo-winchance") === "1";
+} catch (e) { /* private mode: stay off */ }
 
 // Pacing cues (web/cues.js): speed "1" | "2" | "instant", pause after each bot
 // action, and the "what happened" recap at the start of your turn.
@@ -527,6 +537,9 @@ function gameMenuHTML() {
   const seg = (v, label) =>
     '<button role="radio" aria-checked="' + (chainMode === v) + '" class="' + (chainMode === v ? "sel" : "") +
     '" data-act="chainset" data-v="' + v + '">' + label + "</button>";
+  const wcNote = (gameMode === "random" || gameMode === "fast")
+    ? '<div class="mhint">Win chance needs the full bot.</div>'
+    : "";
   return '<div id="gscrim" data-key="gscrim" data-act="closegamemenu"></div>' +
     '<div id="gamemenu" data-key="gamemenu" role="dialog" aria-modal="true" aria-label="Game menu" tabindex="-1">' +
     '<div class="mhead">Game menu<button class="iconbtn" data-act="closegamemenu" aria-label="Close game menu">' +
@@ -535,6 +548,10 @@ function gameMenuHTML() {
     '<button class="mrow danger' + (surrenderArm ? " confirm" : "") + '" data-act="surrender">' +
     (surrenderArm ? "Tap again to surrender" : "Surrender") + "</button>" +
     '<button class="mrow" data-act="backlobby">Back to lobby</button>' +
+    '<div class="msep"></div>' +
+    toggleRow("winchanceset", winChance, "Show win chance",
+      "The bot's estimate of your chance to win, calibrated on ~3,000 games. Off by default so it doesn't steer your play.") +
+    wcNote +
     '<div class="msep"></div>' +
     '<div class="mrow" style="pointer-events:none" id="gm-chain">Chain responses</div>' +
     '<div class="seg" role="radiogroup" aria-labelledby="gm-chain">' + seg("auto", "Auto") + seg("all", "All") + "</div>" +
@@ -578,6 +595,7 @@ function renderGame() {
   h += '<div id="board" data-key="board">';
   h += '<div class="field bot">' + sideHTML(v.bot, {mirror: true, mock: MOCK, actionable: act, focus: focusUid}) + "</div>";
   h += '<div id="mid"><div id="midstrip" class="zrow">' + midHTML(v, {mock: MOCK, actionable: act, focus: focusUid, names: msg.names || null}) + "</div>";
+  if (winChance && msg.winchance) h += winchanceHTML(msg.winchance);
   const chain = chainHTML(v.chain, MOCK, chainNeg);
   if (chain) h += '<div id="chain">' + chain + "</div>";
   h += "</div>";
@@ -1068,12 +1086,20 @@ function sendGame(o) {
   if (ws) ws.send(o);
 }
 
+// Push both client settings (the server keeps the win-chance switch per
+// connection, off by default, so reconnects re-send it).
+function sendSettings() {
+  if (MOCK || !ws) return;
+  ws.send({t: "settings", chain: chainMode, winchance: winChance});
+}
+
 function goLobby() {
   msg = lobby || {t: "lobby", decks: []};
   detail = null;
   menuUid = null;
   pileOpen = null;
   gameMenu = false;
+  gameMode = null;
   surrenderArm = false;
   revealCur = null;
   revealQueue = [];
@@ -1135,8 +1161,12 @@ function onAction(kind, el) {
     if (v === "auto" || v === "all") {
       chainMode = v;
       try { localStorage.setItem("ygo-chain", v); } catch (e) { /* ignore */ }
-      if (!MOCK && ws) ws.send({t: "settings", chain: v});
+      if (!MOCK && ws) sendSettings();
     }
+  } else if (kind === "winchanceset") {
+    winChance = !winChance;
+    saveSetting("ygo-winchance", winChance ? "1" : "0");
+    if (!MOCK && ws) sendSettings();
   } else if (kind === "start" || kind === "rematch") {
     if (MOCK) { loadMock(1); return; }
     const ydk = kind === "start" ? ((document.getElementById("ydk") || {}).value || "").trim() : "";
@@ -1144,6 +1174,7 @@ function onAction(kind, el) {
     revealQueue = [];
     revealCur = null;
     bannerText = null;
+    gameMode = lobbyPick.mode;
     resetCues();
     sendGame({t: "new_game", deck: ydk ? {ydk} : lobbyPick.you, bot_deck: lobbyPick.bot,
       first: lobbyPick.first, mode: lobbyPick.mode, chain: chainMode});
@@ -1425,6 +1456,12 @@ function announceState(prev, m) {
     const w = m.result.winner;
     say("Duel over. " + (w === "you" ? "Victory." : w === "bot" ? "Defeat." : String(w) + " wins."));
   }
+  // Win-chance swings of 10 points or more, in words (the bar is never colour alone).
+  const wp = m.winchance && typeof m.winchance.p === "number" ? m.winchance.p : null;
+  const pp = prev && prev.winchance && typeof prev.winchance.p === "number" ? prev.winchance.p : null;
+  if (winChance && wp != null && pp != null && Math.abs(wp - pp) >= 0.10) {
+    say("Win chance " + Math.round(wp * 100) + "%.");
+  }
 }
 
 // Negated chain links stay marked: in the chain strip until the chain ends, and on
@@ -1502,6 +1539,8 @@ async function loadMock(i) {
     const lt = qs.get("logtab");
     if (lt === "log" || lt === "stats" || lt === "cards") setLogTab(lt);
     if (qs.get("log") === "1") logOpen = true;
+    // Screenshot hook for the win-chance switch: ?winchance=1 turns it on.
+    if (qs.get("winchance") === "1") winChance = true;
   }
   render();
   if (msg.t === "state" && !(Array.isArray(msg.cues) && msg.cues.length)) announceState(null, msg);
@@ -1652,7 +1691,7 @@ async function boot() {
     return;
   }
   ws = connectWS(TOKEN, {
-    onOpen() { banner.hidden = true; },
+    onOpen() { banner.hidden = true; sendSettings(); },
     onDrop() {
       banner.hidden = false;
       banner.textContent = "Reconnecting…";

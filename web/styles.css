@@ -184,6 +184,13 @@ html.short #app { height: var(--app-h); }
 /* EMZ strip */
 #mid { position: relative; margin: 4px 0; }
 #midstrip { height: calc(var(--card-h) + 8px); padding: 4px 0; }
+/* Win-chance bar: a thin 4px rounded track under the turn/phase panel. The
+   number carries the meaning (never colour alone); the fill animates slowly
+   (still under prefers-reduced-motion, which kills transitions globally). */
+#winchance { display: flex; align-items: center; gap: 8px; padding: 3px 8px 1px; }
+.wcbar { flex: 1; height: 4px; border-radius: 2px; background: rgba(181, 100, 90, 0.28); overflow: hidden; }
+.wcbar > i { display: block; height: 100%; border-radius: 2px; background: var(--you); transition: width 600ms var(--ease); }
+.wctext { font-size: 12px; color: var(--text); font-variant-numeric: tabular-nums; min-width: 3ch; text-align: right; }
 #midstrip::before, #midstrip::after {
   content: ""; position: absolute; left: 12%; right: 12%; height: 1px;
   background: linear-gradient(90deg, transparent, var(--line-2), transparent);
@@ -927,6 +934,7 @@ details.ydk textarea {
 .dchart .ln { stroke-width: 2.4; }
 .dchart .ln.you { stroke: var(--you); }
 .dchart .ln.bot { stroke: var(--bot); stroke-dasharray: 6 3; }
+.dchart .ln.win { stroke: var(--accent); stroke-width: 2; stroke-dasharray: 5 4; }
 .dchart .mk.you { fill: var(--you); }
 .dchart .mk.bot { fill: var(--bot); }
 .dchart .dticks { display: flex; justify-content: space-between; font-size: 11px; color: var(--muted); padding: 4px 2px 0; }
@@ -934,6 +942,7 @@ details.ydk textarea {
 .dlegend .sw { display: inline-block; width: 14px; height: 3px; border-radius: 2px; margin-right: 6px; vertical-align: middle; }
 .dlegend .sw.you { background: var(--you); }
 .dlegend .sw.bot { background: repeating-linear-gradient(90deg, var(--bot) 0 4px, transparent 4px 7px); }
+.dlegend .sw.win { background: repeating-linear-gradient(90deg, var(--accent) 0 5px, transparent 5px 9px); }
 /* key moments */
 .dmom { display: flex; gap: 12px; padding: 9px 0; border-bottom: 1px solid var(--line); font-size: 14px; align-items: flex-start; }
 .dmom .t { width: 30px; color: var(--muted); font-size: 12px; padding-top: 2px; flex: none; }

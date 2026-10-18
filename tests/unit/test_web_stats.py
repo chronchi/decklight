@@ -274,3 +274,20 @@ def test_web_stats_long_custom_game(monkeypatch):
     # key moments are newest-first
     turns = [m.get("turn", 0) for m in msg["moments"]]
     assert turns == sorted(turns, reverse=True), msg["moments"]
+
+
+def test_winchance_moments_and_off_gate():
+    """note_winchance history feeds the chart; moments between two samples carry
+    "you were 61%, then 38%"; winchance_on=False leaves no trace at all."""
+    st = DuelStats(0)
+    st.feed_cues([{"t": "turn", "n": 0, "turn": 2}])
+    st.note_winchance(2, 0.61)
+    st.feed_cues([{"t": "damage", "n": 1, "player": "me", "amount": 1500, "lp_after": 6500}])
+    st.note_winchance(2, 0.38)
+    msg = st.stats_message()
+    assert msg["winchance"] == {"p": 0.38, "turn": 2, "history": [[2, 0.61], [2, 0.38]]}
+    subs = [m.get("sub", "") for m in msg["moments"]]
+    assert any("you were 61%, then 38%" in s for s in subs), subs
+    off = st.stats_message(winchance_on=False)
+    assert "winchance" not in off
+    assert all("you were" not in m.get("sub", "") for m in off["moments"]), off["moments"]

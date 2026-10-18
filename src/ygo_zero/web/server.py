@@ -93,6 +93,11 @@ class Server:
         self._last_sig: tuple = ()
         self.user_decks: dict[str, str] = {}  # id -> ydk text (pasted this session)
         self.chain_mode = "auto"  # "auto": skip quiet chain windows (session.auto_pass_index); "all"
+        self.winchance_on = False  # client setting, off by default, reset per connection
+        self.winchance = None  # {"p","turn","history"} while on (sent as null when off)
+        self._wc_n = 0  # winchance computations this game (forces the prompt state out)
+        self._wc_map = None  # lazy CalibMap (False = unavailable, ALERTed)
+        self._wc_ms = 0.0  # last value-forward wall ms (CPU)
         self.auto_passed: set[int] = set()  # history numbers (1-based n) of auto-passes
         self.stats = None  # DuelStats | None (one per game, viewer = human seat)
         self._adv: asyncio.Task | None = None
@@ -225,7 +230,9 @@ class Server:
             winner = "you" if s.result.winner == human else "bot"
             result = {"winner": winner, "reason": self.end_reason or "win"}
         return {"t": "state", "view": view, "prompt": prompt,
-                "log": log, "cues": cues, "stats": self.stats.stats_message(),
+                "log": log, "cues": cues,
+                "stats": self.stats.stats_message(winchance_on=self.winchance_on),
+                "winchance": self.winchance if self.winchance_on else None,
                 "thinking": {"seconds": thinking} if thinking is not None else None,
                 "result": result}
 
@@ -280,6 +287,8 @@ class Server:
                         continue
                 if s.need_human:
                     self.advancing = False  # the client may answer as soon as it sees this
+                    if self.winchance_on:
+                        self._compute_winchance()
                     if self._sig() != self._last_sig:
                         await self.send_state()
                     return
@@ -340,7 +349,57 @@ class Server:
     def _sig(self) -> tuple:
         s = self.session
         return (len(s.env.history), s.env.duel.turn, s.env.duel.phase, s.done,
-                s.need_human and not self.advancing)
+                s.need_human and not self.advancing, self._wc_n)
+
+    def _product_value_fn(self):
+        """The product's value net, or None (random/fast mode: no value net)."""
+        s = self.session
+        if s is None or getattr(s, "launcher", None) is None:
+            return None
+        return getattr(s.launcher, "value", None)
+
+    def _compute_winchance(self) -> None:
+        """Value_p2 on the human's own pending observation, calibrated.
+
+        Call only while a human prompt waits (env.player == the human seat), so
+        the number can never leak the bot's hidden hand through a bot-view
+        observation. Between human decisions the last value is kept.
+        """
+        import numpy as np
+
+        s = self.session
+        fn = self._product_value_fn()
+        if s is None or fn is None or not s.need_human:
+            return
+        if self._wc_map is None:
+            try:
+                from ygo_zero.eval.winchance import load_calib
+
+                self._wc_map = load_calib()
+            except Exception as e:  # noqa: BLE001 -- map missing: stay null, keep playing
+                print(f"ALERT web: winchance map unavailable: {e}", flush=True)
+                self._wc_map = False
+                return
+        if self._wc_map is False:
+            return
+        t0 = time.monotonic()
+        # The same builder step() returns: the pending decision's observation,
+        # always from the player to act's view (here: the human seat).
+        obs = s.env._observe()
+        batch = {k: np.ascontiguousarray(v)[np.newaxis, ...] for k, v in obs.items()}
+        v = float(np.asarray(fn(batch)).ravel()[0])
+        self._wc_ms = (time.monotonic() - t0) * 1000.0
+        turn = int(s.env.duel.turn)
+        p = self._wc_map.p(v, turn)
+        self._wc_n += 1
+        if self.winchance is None:
+            self.winchance = {"p": p, "turn": turn, "history": []}
+        else:
+            self.winchance["p"] = p
+            self.winchance["turn"] = turn
+        self.winchance["history"].append([turn, p])
+        if self.stats is not None:
+            self.stats.note_winchance(turn, p)
 
     async def _think_loop(self, stop: asyncio.Event) -> None:
         while not stop.is_set():
@@ -446,6 +505,8 @@ class Server:
         self.finished = False
         self.end_reason = ""
         self._last_sig = ()
+        self.winchance = None
+        self._wc_n = 0
         self.auto_passed = set()
         from ygo_zero.web.stats import DuelStats
 
@@ -501,15 +562,31 @@ class Server:
         await self.send_state(full_log=True)
 
     async def on_settings(self, msg: dict) -> None:
-        chain = msg.get("chain")
-        if chain not in ("auto", "all"):
+        has_chain = "chain" in msg
+        has_wc = "winchance" in msg
+        if not has_chain and not has_wc:
             await self._error("settings.chain must be auto|all")
             return
-        self.chain_mode = chain
+        if has_chain:
+            chain = msg.get("chain")
+            if chain not in ("auto", "all"):
+                await self._error("settings.chain must be auto|all")
+                return
+            self.chain_mode = chain
+        if has_wc:
+            wc = msg.get("winchance")
+            if not isinstance(wc, bool):
+                await self._error("settings.winchance must be true|false")
+                return
+            self.winchance_on = wc
         s = self.session
-        if chain == "auto" and s is not None and not self.finished and s.need_human \
-                and not self.advancing:
+        if has_chain and self.chain_mode == "auto" and s is not None and not self.finished \
+                and s.need_human and not self.advancing:
             self.start_advance()  # a quiet window may be waiting right now
+        if has_wc and s is not None and not self.advancing:
+            if self.winchance_on and not self.finished and s.need_human:
+                self._compute_winchance()  # the switch was just turned on at a prompt
+            await self.send_state()  # push the toggle now (null when off)
 
     async def _error(self, text: str) -> None:
         if self.ws is None:
@@ -647,6 +724,7 @@ def create_app(*, token: str, engine=None, make_opponent=None,
         await ws.accept()
         old = srv.ws
         srv.ws = ws
+        srv.winchance_on = False  # the switch is per connection, off by default
         if old is not None and old is not ws:
             try:
                 await old.close(code=4400)
