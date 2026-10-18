@@ -134,6 +134,9 @@ def mark_bad_machine(machine_id, reason: str) -> None:
     BAD_MACHINES.write_text(json.dumps(bad, indent=1))
 
 
+SETUP_DOWN_GB = 6.0  # measured order of magnitude: cu128 torch wheel + nvidia libs + uv deps per fresh box
+
+
 def find_offer(
     spec: JobSpec, exclude_machines: set[int] = frozenset(), exclude_offers: set[int] = frozenset()
 ) -> dict:
@@ -151,7 +154,10 @@ def find_offer(
     ]
     if not offers:
         raise VastError(f"no offer matches: {q}")
-    return offers[0]
+    # Rank by expected cost, not dph alone: every box downloads ~SETUP_DOWN_GB (CUDA torch + deps), and some hosts bill
+    # downloads (primer-games 2026-10-18: $X/GB made three ~5-min boxes cost $X against $X of dph).
+    hours = min(max(spec.hours_cap, 0.25), 1.0)
+    return min(offers, key=lambda o: o["dph_total"] * hours + float(o.get("inet_down_cost") or 0) * SETUP_DOWN_GB)
 
 
 def _ssh_target(inst: dict) -> tuple[str, int]:
@@ -420,7 +426,7 @@ def start_session(spec: JobSpec, max_hosts: int = 3, name: str = "lines") -> dic
         offer = _rentable_offer(spec, bad_machines)
         selected = {
             k: offer.get(k)
-            for k in ("id", "machine_id", "gpu_name", "dph_total", "cpu_cores_effective", "geolocation")
+            for k in ("id", "machine_id", "gpu_name", "dph_total", "inet_down_cost", "cpu_cores_effective", "geolocation")
         }
         out = offer.pop("_created")  # worst-case cost was checked before creating
         instance_id = int(out["new_contract"])
@@ -595,7 +601,7 @@ def run_job(spec: JobSpec, reserve: float = 0.25, max_hosts: int = 3) -> JobResu
             offer = _rentable_offer(spec, bad_machines)
             res.offer = {
                 k: offer.get(k)
-                for k in ("id", "machine_id", "gpu_name", "dph_total", "cpu_cores_effective", "geolocation")
+                for k in ("id", "machine_id", "gpu_name", "dph_total", "inet_down_cost", "cpu_cores_effective", "geolocation")
             }
             out = offer.pop("_created")  # worst-case cost was checked before creating
             res.instance_id = int(out["new_contract"])

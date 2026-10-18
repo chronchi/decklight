@@ -106,6 +106,7 @@ def main(argv=None) -> int:
     verified: list[dict] = []
     reasons: Counter = Counter()
     secs: list[float] = []
+    naive_rates: list[float] = []
     budget = args.max_verify if args.max_verify > 0 else len(ordered)
     for c in ordered[:budget]:
         t0 = time.monotonic()
@@ -117,6 +118,19 @@ def main(argv=None) -> int:
         secs.append(dt)
         head = reason.split(":")[0]
         if ok:
+            try:
+                rate = float(P.naive_win_rate(engine, c, launcher))
+            except Exception as e:  # noqa: BLE001 -- a crashed naive check rejects
+                ok, reason = False, f"naive check crashed: {type(e).__name__}: {e}"
+                head = reason.split(":")[0]
+                rate = 1.0
+            else:
+                c["naive_win_rate"] = round(rate, 3)
+                naive_rates.append(rate)
+                if rate > P.NAIVE_KEEP_MAX:
+                    ok, reason = False, f"too easy: naive_win_rate {rate:.3f} > {P.NAIVE_KEEP_MAX}"
+                    head = reason.split(":")[0]
+        if ok:
             c["verified"] = True
             c["game_seed"] = c["seed"]
             c["ws_seed"] = c["seed"]
@@ -126,6 +140,11 @@ def main(argv=None) -> int:
         if len(verified) >= args.target:
             break
     avg = sum(secs) / len(secs) if secs else 0.0
+    if naive_rates:
+        from collections import Counter as _C
+
+        buckets = _C(f"{r:.3f}" for r in sorted(naive_rates))
+        print(f"naive_win_rate dist over {len(naive_rates)} verified: {dict(buckets)}", flush=True)
     print(
         f"puzzles: {len(candidates)} candidates, {len(verified)} verified "
         f"({avg:.1f}s avg per candidate), reasons {dict(reasons)}",
@@ -138,7 +157,8 @@ def main(argv=None) -> int:
     args.out.parent.mkdir(parents=True, exist_ok=True)
     args.out.write_text(json.dumps(verified) + "\n", encoding="utf-8")
     if args.commit_copy:
-        payload = json.dumps(verified)
+        stripped = [{k: v for k, v in p.items() if k != "solution_steps"} for p in verified]
+        payload = json.dumps(stripped)
         if len(payload.encode()) <= COMMIT_LIMIT:
             COMMIT_COPY.write_text(payload + "\n", encoding="utf-8")
             print(f"puzzles: committed copy -> {COMMIT_COPY}", flush=True)

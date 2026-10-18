@@ -163,6 +163,27 @@ let hintLoading = false;
 let hintPrompt = null;     // prompt id the current hint belongs to
 let whatIf = null;         // {"source","k","option","turn"} for a what-if game
 
+// Puzzles (step 5, item 8): list from the server, current puzzle banner + result,
+// solved marks remembered per browser, in-page solution replay.
+let puzzles = null;        // [{id,decks,turn,difficulty,goal,n_plays}] or null (not loaded yet)
+let puzzlesOpen = false;   // the puzzles list sheet is open (lobby)
+let puzzle = null;         // the running puzzle {"id","goal","n_plays","status"} or null
+let solvedIds = {};        // id -> true (localStorage ygo-puzzles-solved)
+try {
+  solvedIds = JSON.parse(localStorage.getItem("ygo-puzzles-solved") || "{}") || {};
+} catch (e) { solvedIds = {}; }
+function isSolved(id) { return !!(id && solvedIds[id]); }
+function markSolved(id) {
+  if (!id) return;
+  solvedIds[id] = true;
+  try { localStorage.setItem("ygo-puzzles-solved", JSON.stringify(solvedIds)); } catch (e) { /* ignore */ }
+}
+let solutionFrames = null; // puzzle_solution frames while showing the solution
+let solutionIdx = -1;
+let inSolution = false;
+let liveEnd = null;       // the puzzle end state saved while showing the solution
+let hidePuzzleResult = false; // suppress the Solved/Not-solved dialog during solution playback
+
 // Rules in context (step 5, item 6) + undo (item 9).
 let kwPop = null;          // {"id","term","long"} for the open keyword popover, or null
 let kwOpener = null;       // the keyword element to return focus to on close
@@ -712,12 +733,14 @@ function renderGame() {
     show: practiceMode && !msg.result,
     enabled: practiceMode && canUndo && !locked && !msg.thinking && !msg.result,
   };
-  app.classList.toggle("replay", IS_REPLAY);
+  const replayLike = IS_REPLAY || inSolution;
+  app.classList.toggle("replay", replayLike);
   if (focusUid && !findCard(focusUid)) focusUid = null;
   const yourTurn = v.turn_player === "you";
 
   let h = barHTML(v.bot, "bot", {thinking: msg.thinking, active: !yourTurn, name: replayName("bot")});
   if (whatIf) h += '<div id="whatifbanner" data-key="whatifbanner">What if · from turn ' + esc(String(whatIf.turn != null ? whatIf.turn : "?")) + "</div>";
+  if (puzzle && puzzle.status === "playing") h += '<div id="puzzlebanner" data-key="puzzlebanner">Puzzle · ' + esc(String(puzzle.goal || "Win this turn")) + "</div>";
   if (IS_REPLAY) {
     // Spectator: seat 1's hand face-up under the top header (frames are reveal_all).
     h += '<div id="thand" data-key="thand">' + handHTML(v.bot.hand, {}, MOCK, null) + "</div>";
@@ -736,11 +759,12 @@ function renderGame() {
 
   let info = null;
   let sheet = "";
-  if (IS_REPLAY) {
+  if (replayLike) {
     // Bottom order: header → seat 0's hand → last 5 log lines → caption bar.
     // The caption is a static block (see #app.replay #sheet): it never overlaps the hand.
     h += '<div id="hand" data-key="hand">' + handHTML(v.you.hand, {}, MOCK, null) + "</div>";
     h += '<div id="info" data-key="info">' +
+      (inSolution ? '<div class="solbar" data-key="solbar"><button class="hintbtn" data-act="exitsolution">Exit solution</button></div>' : "") +
       infoHTML(null, shownEvents().slice(-5), MOCK, "", msg.names || null) + "</div>";
     sheet = msg.caption && !msg.result ? captionHTML(msg) : "";
   } else {
@@ -763,7 +787,7 @@ function renderGame() {
   if (pileOpen) h += '<div id="pscrim" data-key="pscrim" data-act="closepile"></div>';
   if (sheet) {
     const lab = pileOpen ? ' role="dialog" aria-modal="true" tabindex="-1" aria-label="' + esc(pileTitle(pileOpen, msg.names || null)) + '"'
-      : IS_REPLAY ? "" : ' role="region" aria-label="' + esc((p && p.text) || "Choose") + '"';
+      : replayLike ? "" : ' role="region" aria-label="' + esc((p && p.text) || "Choose") + '"';
     h += '<div id="sheet" data-key="sheet" class="' + (locked && !pileOpen ? "locked" : "") + (pileOpen ? " pilesheet" : "") + '"' + lab + ">" + sheet + "</div>";
   }
   const restore = saveScrolls(app, ["#sheet .sbody", "#info .ftext"]);
@@ -896,7 +920,26 @@ function renderOverlays(logh) {
     oh += '<div id="retitle" data-key="retitle"><div class="box"><div class="kicker">ygo-zero replay</div>' +
       "<h2>" + esc(msg.title) + "</h2></div></div>";
   }
-  if (msg && msg.view && msg.result && !overDismissed) {
+  const pz = puzzle || (msg && msg.puzzle) || null;
+  if (pz && (pz.status === "solved" || pz.status === "failed") && msg && msg.view && !hidePuzzleResult && !inSolution) {
+    const n = pz.n_plays != null ? pz.n_plays : (pz.nPlays || "");
+    if (pz.status === "solved") {
+      oh += '<div id="puzzleresult" data-key="puzzleresult" role="alertdialog" aria-modal="true" tabindex="-1" aria-label="Puzzle solved"><div class="box">' +
+        '<div class="kicker">Puzzle · turn ' + msg.view.turn + "</div>" +
+        "<h2>Solved</h2>" +
+        '<p class="reason">Solved in ' + esc(String(n)) + " plays</p>" +
+        '<div class="row"><button class="bigbtn primary" data-act="puzzlenext">Next puzzle</button>' +
+        '<button class="bigbtn" data-act="puzzlesback">Back to puzzles</button></div></div></div>';
+    } else {
+      oh += '<div id="puzzleresult" data-key="puzzleresult" role="alertdialog" aria-modal="true" tabindex="-1" aria-label="Puzzle not solved"><div class="box">' +
+        '<div class="kicker">Puzzle · turn ' + msg.view.turn + "</div>" +
+        "<h2>Not solved</h2>" +
+        '<p class="reason">' + esc(String(pz.goal || "")) + "</p>" +
+        '<div class="row"><button class="bigbtn primary" data-act="puzzleretry">Retry</button>' +
+        '<button class="bigbtn" data-act="puzzlesolution">Show solution</button></div>' +
+        '<div class="row"><button class="bigbtn" data-act="puzzlesback">Back to puzzles</button></div></div></div>';
+    }
+  } else if (msg && msg.view && msg.result && !overDismissed) {
     const missed = review ? (review.missed || 0) : 0;
     const reviewLabel = reviewLoading
       ? ("Reviewing… " + (reviewProgress ? reviewProgress.done + "/" + reviewProgress.total : ""))
@@ -1001,6 +1044,35 @@ function segHTML(label, key, items) {
     "</div></section>";
 }
 
+// Puzzles list sheet (lobby): grouped by difficulty, quiet Solved text marks.
+function puzzlesSheetHTML() {
+  if (!puzzlesOpen) return "";
+  const list = Array.isArray(puzzles) ? puzzles : [];
+  const groups = [["easy", "Easy"], ["medium", "Medium"], ["hard", "Hard"]];
+  let body = "";
+  for (const [key, label] of groups) {
+    const rows = list.filter((p) => (p.difficulty || "medium") === key);
+    body += '<div class="msep"></div><div class="mrow" style="pointer-events:none">' + esc(label) + "</div>";
+    if (!rows.length) {
+      body += '<p class="emptytx">No ' + esc(label.toLowerCase()) + " puzzles yet.</p>";
+      continue;
+    }
+    body += '<div class="plist" role="list" aria-label="' + esc(label) + ' puzzles">' + rows.map((p) => {
+      const title = esc(p.decks[0] + " vs " + p.decks[1] + " · Turn " + p.turn);
+      return '<div role="listitem"><button class="prow" data-act="puzzlestart" data-id="' + esc(p.id) + '">' +
+        '<span class="pt"><span class="ptitle">' + title + "</span>" +
+        '<span class="psub">' + esc(p.goal || "") + "</span></span>" +
+        (isSolved(p.id) ? '<span class="psolved">Solved</span>' : "") +
+        "</button></div>";
+    }).join("") + "</div>";
+  }
+  return '<div id="pscrim" data-key="pscrim" data-act="closepuzzles"></div>' +
+    '<div id="puzzlesheet" data-key="puzzlesheet" role="dialog" aria-modal="true" tabindex="-1" aria-label="Puzzles">' +
+    '<div class="mhead">Puzzles<button class="iconbtn" data-act="closepuzzles" aria-label="Close puzzles">' +
+    '<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5 5l10 10M15 5 5 15"/></svg></button></div>' +
+    '<div class="mbody">' + body + "</div></div>";
+}
+
 function renderLobby() {
   const decks = (lobby && lobby.decks) || [];
   if (!lobbyPick.you && decks.length) lobbyPick.you = decks[0].id;
@@ -1016,6 +1088,10 @@ function renderLobby() {
   h += segHTML("Bot strength", "mode", [["product", "Full"], ["fast", "Fast"], ["random", "Random"]]);
   h += '<details class="ydk"><summary>Paste a .ydk instead<svg class="chev" viewBox="0 0 20 20" aria-hidden="true"><path d="M5 8l5 5 5-5"/></svg></summary>' +
     '<textarea id="ydk" aria-label="Deck list in .ydk format" placeholder="#main&#10;14558128&#10;…" spellcheck="false"></textarea></details>';
+  h += '<section class="field-group"><div class="flabel">Puzzles</div>' +
+    '<button class="pickbtn" data-act="puzzles" aria-haspopup="dialog"><span class="nm">Win this turn puzzles</span>' +
+    '<span class="g">' + esc(puzzles ? String(puzzles.length) : "…") + '</span>' +
+    '<svg class="chev" viewBox="0 0 20 20" aria-hidden="true"><path d="M5 8l5 5 5-5"/></svg></button></section>';
   if (MOCK) h += '<div class="mocknav">mock ' + (mockIdx + 1) + "/" + MOCKS.length + " · ← → to step</div>";
   h += '</div><div id="startwrap"><button id="startbtn" data-act="start">Start duel</button></div></div>';
   app.innerHTML = h;
@@ -1023,7 +1099,7 @@ function renderLobby() {
   logside.innerHTML = '<div class="loghead">Duel log</div><div class="loglist"><p class="emptytx">No duel yet.</p></div>';
   morph(ovLog, "");
   morph(ovMenu, "");
-  morph(ovGame, "");
+  morph(ovGame, puzzlesSheetHTML());
   morph(ovDetail, "");
   morph(ovReveal, "");
   morph(ovOver, "");
@@ -1326,6 +1402,13 @@ function goLobby() {
   hintLoading = false;
   hintPrompt = null;
   whatIf = null;
+  puzzle = null;
+  puzzlesOpen = false;
+  inSolution = false;
+  solutionFrames = null;
+  solutionIdx = -1;
+  liveEnd = null;
+  hidePuzzleResult = false;
   inLobby = true;
   resetCues();
   render();
@@ -1496,7 +1579,136 @@ function onAction(kind, el) {
     render();
     ws.send({t: "whatif", k: parseInt(k, 10), option: parseInt(option, 10)});
     return;
+  } else if (kind === "puzzles") {
+    puzzlesOpen = true;
+    if (MOCK && puzzles === null) puzzles = mockPuzzles();
+    if (!MOCK && puzzles === null && ws) ws.send({t: "puzzles"});
+    render();
+    return;
+  } else if (kind === "closepuzzles") {
+    puzzlesOpen = false;
+    render();
+    return;
+  } else if (kind === "puzzlestart") {
+    const id = el.getAttribute("data-id");
+    if (!id) return;
+    if (MOCK) { loadMock(1); puzzle = {id, goal: "Win this turn · opponent has 6,700 LP", n_plays: 4, status: "playing"}; puzzlesOpen = false; render(); return; }
+    startPuzzle(id);
+    return;
+  } else if (kind === "puzzleretry") {
+    const id = puzzle && puzzle.id;
+    if (!id) return;
+    if (MOCK) { render(); return; }
+    hidePuzzleResult = false;
+    inSolution = false;
+    solutionFrames = null;
+    liveEnd = null;
+    startPuzzle(id);
+    return;
+  } else if (kind === "puzzlenext") {
+    const nxt = nextPuzzleId();
+    if (!nxt) return;
+    if (MOCK) { puzzle = {id: nxt, goal: "Win this turn · opponent has 6,700 LP", n_plays: 4, status: "playing"}; render(); return; }
+    hidePuzzleResult = false;
+    inSolution = false;
+    solutionFrames = null;
+    liveEnd = null;
+    startPuzzle(nxt);
+    return;
+  } else if (kind === "puzzlesback") {
+    hidePuzzleResult = false;
+    inSolution = false;
+    solutionFrames = null;
+    liveEnd = null;
+    goLobby();
+    puzzlesOpen = true;
+    if (MOCK && puzzles === null) puzzles = mockPuzzles();
+    render();
+    return;
+  } else if (kind === "puzzlesolution") {
+    if (MOCK) { say("Showing the solution."); render(); return; }
+    if (!ws || !puzzle || !puzzle.id) return;
+    ws.send({t: "puzzle_solution", id: puzzle.id});
+    return;
+  } else if (kind === "exitsolution") {
+    exitSolution();
+    return;
   } else return;
+  render();
+}
+
+// Puzzles: start one, step to the next, mock data for screenshots, solution replay.
+function startPuzzle(id) {
+  events = [];
+  revealQueue = [];
+  revealCur = null;
+  bannerText = null;
+  review = null;
+  reviewLoading = false;
+  reviewProgress = null;
+  reviewFrame = null;
+  overDismissed = false;
+  hint = null;
+  hintLoading = false;
+  hintPrompt = null;
+  whatIf = null;
+  puzzlesOpen = false;
+  inSolution = false;
+  solutionFrames = null;
+  solutionIdx = -1;
+  liveEnd = null;
+  hidePuzzleResult = false;
+  gameMode = "fast";
+  practiceMode = true;
+  inLobby = false;
+  resetCues();
+  render();
+  if (ws) ws.send({t: "puzzle", id});
+}
+
+function nextPuzzleId() {
+  if (!puzzles || !puzzles.length) return puzzle ? puzzle.id : null;
+  const ids = puzzles.map((p) => p.id);
+  const i = ids.indexOf(puzzle && puzzle.id);
+  if (i < 0) return ids[0];
+  return ids[(i + 1) % ids.length];
+}
+
+function mockPuzzles() {
+  return [
+    {id: "p-easy", decks: ["Blue Eyes", "Branded"], turn: 2, difficulty: "easy", goal: "Win this turn · opponent has 6,700 LP", n_plays: 3},
+    {id: "p-medium", decks: ["Mitsurugi", "Snake-Eye"], turn: 3, difficulty: "medium", goal: "Win this turn · opponent has 4,200 LP", n_plays: 5},
+    {id: "p-hard", decks: ["Branded", "Blue Eyes"], turn: 4, difficulty: "hard", goal: "Win this turn · opponent has 7,900 LP", n_plays: 8},
+  ];
+}
+
+function startSolution(frames) {
+  if (!Array.isArray(frames) || !frames.length) return;
+  liveEnd = msg;
+  hidePuzzleResult = true;
+  inSolution = true;
+  solutionFrames = frames;
+  solutionIdx = 0;
+  // Play with the normal cue pacing: first board at once, the rest through the cue player.
+  msg = frames[0];
+  locked = false;
+  sel = [];
+  menuUid = null;
+  render();
+  say("Showing the solution.");
+  for (let i = 1; i < frames.length; i++) {
+    const f = frames[i];
+    cue.enqueue(Array.isArray(f.cues) ? f.cues : [], f);
+  }
+}
+
+function exitSolution() {
+  inSolution = false;
+  solutionFrames = null;
+  solutionIdx = -1;
+  hidePuzzleResult = false;
+  if (liveEnd) msg = liveEnd;
+  liveEnd = null;
   render();
 }
 
@@ -1553,7 +1765,7 @@ const FOCUSABLE = 'button:not([disabled]), [href], input, textarea, select, summ
 const visible = (el) => !!el && el.getClientRects().length > 0 && getComputedStyle(el).visibility !== "hidden";
 function topModal() {
   if (IS_REPLAY) return null;
-  for (const sel of ["#kwpop", "#detail", "#menu", "#gamemenu", "#sheet.pilesheet", "#reviewframe", "#logdrawer", "#gameover[role=alertdialog]"]) {
+  for (const sel of ["#kwpop", "#detail", "#menu", "#gamemenu", "#puzzlesheet", "#sheet.pilesheet", "#reviewframe", "#logdrawer", "#puzzleresult[role=alertdialog]", "#gameover[role=alertdialog]"]) {
     const el = document.querySelector(sel);
     if (el && visible(el)) return el;
   }
@@ -1607,6 +1819,8 @@ function closeTop() {
   if (detail) { closeState("detail"); render(); closeOv("detail"); return true; }
   if (reviewFrame) { reviewFrame = null; render(); return true; }
   if (gameMenu) { closeState("gamemenu"); render(); closeOv("gamemenu"); return true; }
+  if (puzzlesOpen) { puzzlesOpen = false; render(); return true; }
+  if (inSolution) { exitSolution(); return true; }
   if (pileOpen) { closeState("pile"); render(); closeOv("pile"); return true; }
   if (logOpen) { closeState("log"); render(); closeOv("log"); return true; }
   if (revealCur) { dismissReveal(); return true; }
@@ -1777,6 +1991,12 @@ function announceState(prev, m) {
       say(t + (/[.?!…]$/.test(t) ? "" : ".") + pick);
     }
   }
+  const pz = m.puzzle || null;
+  const ppz = prev ? prev.puzzle : null;
+  if (pz && pz.status && (!ppz || ppz.status !== pz.status)) {
+    if (pz.status === "solved") say("Puzzle solved.");
+    else if (pz.status === "failed") say("Puzzle not solved.");
+  }
   if (m.result && !(prev && prev.result)) {
     const w = m.result.winner;
     say("Duel over. " + (w === "you" ? "Victory." : w === "bot" ? "Defeat." : String(w) + " wins."));
@@ -1824,6 +2044,9 @@ function applyState(m) {
   practiceMode = !!m.practice;
   canUndo = !!m.can_undo;
   whatIf = m.what_if || null;
+  puzzle = m.puzzle || null;
+  if (puzzle && puzzle.status === "solved") markSolved(puzzle.id);
+  if (inSolution && !(puzzle && puzzle.status)) { inSolution = false; solutionFrames = null; solutionIdx = -1; }
   if (undoPending) {
     say("Undid your last decision");
     undoPending = false;
@@ -1947,6 +2170,30 @@ async function loadMock(i) {
       whatIf = {source: "mock", k: 1, option: 1, turn: msg.view ? msg.view.turn : 2};
     }
     if (qs.get("hint") === "1" && msg.prompt) practiceMode = true;
+    // Puzzles screenshots: ?puzzlebanner=1 shows the in-puzzle banner,
+    // ?puzzlesolved=1 / ?puzzlefailed=1 show the result dialogs.
+    if (qs.get("puzzlebanner") === "1") {
+      practiceMode = true;
+      puzzle = {id: "p-mock", goal: "Win this turn · opponent has 6,700 LP", n_plays: 4, status: "playing"};
+    }
+    if (qs.get("puzzlesolved") === "1") {
+      practiceMode = true;
+      puzzle = {id: "p-mock", goal: "Win this turn · opponent has 6,700 LP", n_plays: 4, status: "solved"};
+      msg = Object.assign({}, msg, {result: {winner: "you", reason: "win"}, prompt: null, puzzle});
+    }
+    if (qs.get("puzzlefailed") === "1") {
+      practiceMode = true;
+      puzzle = {id: "p-mock", goal: "Win this turn · opponent has 6,700 LP", n_plays: 4, status: "failed"};
+      msg = Object.assign({}, msg, {result: {winner: "bot", reason: "puzzle failed"}, prompt: null, puzzle});
+    }
+  }
+  if (msg.t === "lobby" && qs.get("puzzles") === "1") {
+    puzzles = mockPuzzles();
+    // Mark one as solved to show the quiet Solved mark (text, not colour alone).
+    try {
+      if (!solvedIds["p-easy"]) { solvedIds["p-easy"] = true; }
+    } catch (e) { /* ignore */ }
+    puzzlesOpen = true;
   }
   render();
   if (msg.t === "state" && !(Array.isArray(msg.cues) && msg.cues.length)) announceState(null, msg);
@@ -2114,6 +2361,7 @@ async function boot() {
       if (m.t === "lobby") {
         lobby = m;
         if (!msg || msg.t === "lobby") msg = m;
+        if (puzzles === null && !MOCK && ws) ws.send({t: "puzzles"});
       } else if (m.t === "review_progress") {
         reviewLoading = true;
         reviewProgress = {done: m.done || 0, total: m.total || 0};
@@ -2146,6 +2394,13 @@ async function boot() {
           say("Hint 1, " + (first.label || "option") + ", bot's confidence " + pct + "%.");
         }
         render();
+        return;
+      } else if (m.t === "puzzles") {
+        puzzles = Array.isArray(m.items) ? m.items : [];
+        render();
+        return;
+      } else if (m.t === "puzzle_solution") {
+        startSolution(m.frames || []);
         return;
       } else if (m.t === "state") {
         if (inLobby) return;   // Back to lobby: ignore states until the next new_game

@@ -90,6 +90,12 @@ STATES = [
     ("practice-undo", "1&hint=1&canundo=1", "phone"),
     ("cue-rule-note", "11&cue=3&t=0.6", "phone"),
     ("keywords-small", "1&detailcode=14558128", "small"),
+    # Puzzles (step 5, item 8): list, banner, solved + failed dialogs.
+    ("puzzle-list", "0&puzzles=1", "phone"),
+    ("puzzle-banner", "1&puzzlebanner=1", "phone"),
+    ("puzzle-solved", "1&puzzlesolved=1", "phone"),
+    ("puzzle-failed", "1&puzzlefailed=1", "phone"),
+    ("puzzle-list-small", "0&puzzles=1", "small"),
 ]
 VIEWPORTS = {
     "phone": {

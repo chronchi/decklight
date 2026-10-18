@@ -29,6 +29,7 @@ from starlette.websockets import WebSocket, WebSocketDisconnect
 ROOT = Path(__file__).resolve().parents[3]
 DECK_DIRS = (("pool", ROOT / "decks" / "pool"), ("newcards", ROOT / "decks" / "newcards"))
 PICS_DIR = ROOT / "data" / "cache" / "pics"
+PUZZLES_PATH = ROOT / "src" / "ygo_zero" / "web" / "puzzles.json"
 
 IMG_URLS = {
     "small": "https://images.ygoprodeck.com/images/cards_small/{code}.jpg",
@@ -114,6 +115,8 @@ class Server:
         # in order; undo rewinds to the last one (auto-passed windows are not here).
         self.human_decisions: list[int] = []
         self.what_if: dict | None = None  # {"source","k","option","turn"} for a what-if game
+        self.puzzle: dict | None = None  # {"id","start_turn","goal","status"} for a puzzle game
+        self._puzzles_cache: list[dict] | None = None
         self.record_path: Path | None = None  # game.jsonl of the live/finished game
         self._review_task: asyncio.Task | None = None
         self.stats = None  # DuelStats | None (one per game, viewer = human seat)
@@ -256,6 +259,34 @@ class Server:
             "practice": self.practice,
             "can_undo": bool(self.practice and not self.advancing and s.need_human and self.human_decisions),
             "what_if": self.what_if,
+            "puzzle": self.puzzle,
+        }
+
+    def get_puzzles(self) -> list[dict]:
+        """Puzzles from puzzles.json, loaded once; missing file -> empty list."""
+        if self._puzzles_cache is not None:
+            return self._puzzles_cache
+        try:
+            raw = PUZZLES_PATH.read_text(encoding="utf-8")
+            data = json.loads(raw)
+            out = data if isinstance(data, list) else []
+        except (OSError, ValueError):
+            out = []
+        self._puzzles_cache = out if isinstance(out, list) else []
+        return self._puzzles_cache
+
+    def _puzzle_item(self, p: dict) -> dict:
+        decks = [str(d) for d in p.get("decks", [])]
+        names = [_pretty_deck_name(d) for d in decks[:2]]
+        while len(names) < 2:
+            names.append("?")
+        return {
+            "id": str(p.get("id")),
+            "decks": names,
+            "turn": int(p.get("turn", 1)),
+            "difficulty": str(p.get("difficulty", "medium")),
+            "goal": str(p.get("goal", "")),
+            "n_plays": int(p.get("n_plays", p.get("n_moves", 0))),
         }
 
     async def send_state(self, *, full_log: bool = False, peek: bool = False) -> None:
@@ -287,10 +318,16 @@ class Server:
                 s = self.session
                 if s is None or self.ws is None or gen != self.gen:
                     return
+                if self._puzzle_failed(s):
+                    await self._fail_puzzle(s)
+                    return
                 if s.done:
                     await self._finish(s, "")
                     return
                 moved = s.settle("all")
+                if self._puzzle_failed(s):
+                    await self._fail_puzzle(s)
+                    return
                 if s.done:
                     await self._finish(s, "")
                     return
@@ -324,6 +361,9 @@ class Server:
                     await self._diverged(s, e, gen)
                     return
                 if gen != self.gen:
+                    return
+                if self._puzzle_failed(s):
+                    await self._fail_puzzle(s)
                     return
                 await self.send_state()
         finally:
@@ -452,15 +492,64 @@ class Server:
             res = s.surrender(by_human=True)
             res.diverged = True
             s.record_meta["hints_used"] = self.hints_used
+            if self.puzzle is not None:
+                s.record_meta["puzzle_result"] = "failed"
+                self.puzzle = dict(self.puzzle, status="failed")
             self.record_path = s.write_record(res, auto_passed=self.auto_passed)
             self.finished = True
             self.end_reason = "the bot diverged (see server log)"
             await self.send_state(full_log=True)
             return
         s.record_meta["hints_used"] = self.hints_used
+        if self.puzzle is not None and s.result is not None:
+            start = int(self.puzzle.get("start_turn", 0))
+            seat = int(s.human_seat)
+            won = s.result.winner == seat and int(s.env.duel.turn) == start
+            status = "solved" if won else "failed"
+            self.puzzle = dict(self.puzzle, status=status)
+            s.record_meta["puzzle_result"] = status
         self.record_path = s.write_record(s.result, auto_passed=self.auto_passed)
         self.finished = True
         self.end_reason = reason
+        self.log_sent = len(s.env.history)
+        await self.send_state(full_log=True)
+
+    def _puzzle_failed(self, s) -> bool:
+        """A puzzle fails the moment the turn passes without a win (game stops there)."""
+        if self.puzzle is None or s is None or s.done or self.finished:
+            return False
+        try:
+            start = int(self.puzzle.get("start_turn", 0))
+        except (TypeError, ValueError):
+            return False
+        try:
+            cur = int(s.env.duel.turn)
+        except Exception:  # noqa: BLE001 -- no board yet: not failed
+            return False
+        return cur != start
+
+    async def _fail_puzzle(self, s) -> None:
+        """Stop a failed puzzle: abandon, write the record with puzzle_result, send failed."""
+        from ygo_zero.play.session import DuelResult
+
+        if self.finished:
+            return
+        thinking = s.thinking_since is not None
+        try:
+            res = DuelResult(
+                None, int(s.env.duel.turn), list(s.env.choices), [e.actor for e in s.env.history]
+            )
+        except Exception:  # noqa: BLE001 -- best effort record
+            res = s.surrender(by_human=True)
+        s.record_meta["hints_used"] = self.hints_used
+        s.record_meta["puzzle_result"] = "failed"
+        if self.puzzle is not None:
+            self.puzzle = dict(self.puzzle, status="failed")
+        self.record_path = s.write_record(res, auto_passed=self.auto_passed)
+        self.finished = True
+        self.end_reason = "puzzle failed"
+        if thinking:
+            s.abandon()
         self.log_sent = len(s.env.history)
         await self.send_state(full_log=True)
 
@@ -552,6 +641,7 @@ class Server:
         self.undos = 0
         self.human_decisions = []
         self.what_if = None
+        self.puzzle = None
         self.prompt_id = 0
         self.log_sent = 0
         self.cue_sent = 0
@@ -620,6 +710,197 @@ class Server:
         if thinking:
             s.abandon()
         await self.send_state(full_log=True)
+
+    async def on_puzzles(self) -> None:
+        items = [self._puzzle_item(p) for p in self.get_puzzles()]
+        if self.ws is None:
+            return
+        try:
+            await self.ws.send_json({"t": "puzzles", "items": items})
+        except (WebSocketDisconnect, RuntimeError):
+            pass
+
+    async def on_puzzle(self, msg: dict) -> None:
+        from ygo_zero.analysis.events import deck_path
+        from ygo_zero.decks import load_ydk
+        from ygo_zero.engine.duel import DuelConfig
+        from ygo_zero.engine.env import PyEnv
+        from ygo_zero.play.session import DuelSession
+
+        pid = msg.get("id")
+        found = next((p for p in self.get_puzzles() if str(p.get("id")) == str(pid)), None)
+        if found is None:
+            await self._error(f"unknown puzzle {pid!r}")
+            return
+        try:
+            decks = [load_ydk(deck_path(d)) for d in found["decks"]]
+        except (FileNotFoundError, ValueError, KeyError) as e:
+            await self._error(f"puzzle decks unavailable: {e}")
+            return
+        try:
+            seat = int(found["seat"])
+            start_turn = int(found["turn"])
+            prefix = [int(c) for c in found["prefix"]]
+            game_seed = int(found.get("game_seed", found["seed"]))
+        except (KeyError, TypeError, ValueError) as e:
+            await self._error(f"bad puzzle {pid!r}: {e}")
+            return
+        cfg = DuelConfig(decks[0], decks[1], seed=int(found["seed"]))
+        # Host-verified prefix decisions (what-if shape).
+        env = PyEnv(self.engine, cfg, auto_single=False)
+        env.reset()
+        prefix_decisions: list[dict] = []
+        prefix_lens: list[int] = []
+        for i, c in enumerate(prefix):
+            if env.done:
+                break
+            n = len(env.opts)
+            prefix_lens.append(int(n))
+            if n > 1:
+                prefix_decisions.append({"player": int(env.player), "n_options": int(n)})
+            env.step(int(c))
+        if env.done:
+            await self._error("the puzzle position is already game over")
+            return
+        try:
+            product_prefix = [int(c) for c, n in zip(prefix, prefix_lens) if int(n) > 1]
+        except ValueError as e:
+            await self._error(f"replay failed: {e}")
+            return
+        try:
+            opp = await asyncio.to_thread(self._make_opponent, "fast")
+        except Exception as e:  # noqa: BLE001
+            await self._error(f"could not start the fast opponent: {e}")
+            return
+        launcher = opp if hasattr(opp, "start_duel") else None
+        bot = None if launcher is not None else opp
+        meta = {
+            "human_deck": str(found["decks"][seat]) if seat < len(found["decks"]) else "puzzle",
+            "bot_deck": str(found["decks"][1 - seat]) if len(found["decks"]) > 1 else "puzzle",
+            "mode": "fast",
+            "practice": True,
+            "puzzle": {"id": str(found["id"])},
+            "hints_used": 0,
+        }
+        session = DuelSession(
+            self.engine,
+            cfg,
+            seat,
+            bot=bot,
+            launcher=launcher,
+            seed=game_seed,
+            record_root=self.record_root,
+            human_auto=True,
+            record_meta=meta,
+            driver_prefix=product_prefix,
+            driver_prefix_decisions=prefix_decisions,
+        )
+        try:
+            await asyncio.to_thread(session.reset)
+        except Exception as e:  # noqa: BLE001
+            session.close()
+            await self._error(f"could not start the puzzle duel: {e}")
+            return
+        try:
+            for c in prefix:
+                if session.env.done:
+                    break
+                session.env.step(int(c))
+            if session.env.done:
+                raise ValueError("the replay position is already game over")
+            if int(session.env.duel.turn) != start_turn:
+                raise ValueError("puzzle prefix does not end on its turn")
+            session.prod_len = len(prefix_decisions)
+            if session.driver is not None:
+                session.check_driver_step(
+                    len(prefix_decisions), (int(session.env.player), len(session.env.opts))
+                )
+        except Exception as e:  # noqa: BLE001 -- ALERT, keep the current game
+            print(f"ALERT web: puzzle replay failed: {e}", flush=True)
+            session.close()
+            await self._error(f"replay failed: {e}")
+            return
+        self.gen += 1
+        if self.session is not None:
+            self._drop_session(self.session)
+        self.session = session
+        self.mode = "fast"
+        self.practice = True
+        self.hints_used = 0
+        self.undos = 0
+        self.human_decisions = []
+        self.what_if = None
+        self.puzzle = {
+            "id": str(found["id"]),
+            "start_turn": int(start_turn),
+            "goal": str(found.get("goal", "")),
+            "n_plays": int(found.get("n_plays", found.get("n_moves", 0))),
+            "status": "playing",
+        }
+        self.prompt_id = 0
+        self.log_sent = 0
+        self.cue_sent = 0
+        self.finished = False
+        self.end_reason = ""
+        self._last_sig = ()
+        self.winchance = None
+        self._wc_n = 0
+        self.auto_passed = set()
+        self.record_path = None
+        if self._review_task is not None and not self._review_task.done():
+            self._review_task.cancel()
+            self._review_task = None
+        from ygo_zero.web.stats import DuelStats
+
+        self.stats = DuelStats(session.human_seat)
+        self.start_advance()
+
+    async def on_puzzle_solution(self, msg: dict) -> None:
+        from ygo_zero.analysis.events import deck_path
+        from ygo_zero.decks import load_ydk
+        from ygo_zero.engine.duel import DuelConfig
+
+        pid = msg.get("id")
+        found = next((p for p in self.get_puzzles() if str(p.get("id")) == str(pid)), None)
+        if found is None:
+            await self._error(f"unknown puzzle {pid!r}")
+            return
+        try:
+            from ygo_zero.web.replay import replay_frames
+
+            decks = [load_ydk(deck_path(d)) for d in found["decks"]]
+            cfg = DuelConfig(decks[0], decks[1], seed=int(found["seed"]))
+            prefix = [int(c) for c in found["prefix"]]
+            sol = [int(c) for c in found["solution"]]
+            names = tuple(_pretty_deck_name(str(d)) for d in found["decks"][:2])
+            while len(names) < 2:
+                names += ("?",)
+            frames = await asyncio.to_thread(
+                replay_frames,
+                self.engine,
+                cfg,
+                prefix + sol,
+                names,
+                expect_winner=int(found["seat"]),
+                auto_single=False,
+            )
+            frames = frames[len(prefix) :]
+            if self.ws is None:
+                return
+            try:
+                await self.ws.send_json({"t": "puzzle_solution", "id": str(found["id"]), "frames": frames})
+            except (WebSocketDisconnect, RuntimeError):
+                pass
+        except RuntimeError as e:
+            await self._error(f"puzzle solution failed: {e}")
+            return
+        except Exception as e:  # noqa: BLE001 -- fail loud, keep playing
+            import traceback
+
+            print(
+                "ALERT web: puzzle_solution crashed:\n" + "".join(traceback.format_exception(e)), flush=True
+            )
+            await self._error(f"puzzle solution failed: {e!r} (see server log)")
 
     async def on_settings(self, msg: dict) -> None:
         has_chain = "chain" in msg
@@ -1074,6 +1355,13 @@ class Server:
         if ok:
             self.human_decisions = []
             self.undos = 0
+            self.puzzle = None
+            try:
+                if self.session is not None:
+                    (self.session.record_meta or {}).pop("puzzle", None)
+                    (self.session.record_meta or {}).pop("puzzle_result", None)
+            except Exception:  # noqa: BLE001, S110 -- best effort
+                pass
 
     async def on_undo(self) -> None:
         """Practice-mode undo: rewind to the human's previous real decision.
@@ -1321,9 +1609,17 @@ def create_app(
                 if t == "hint":  # read-only: answered from the waiting prompt
                     await srv.on_hint()
                     continue
+                if t == "puzzles":  # read-only list
+                    await srv.on_puzzles()
+                    continue
+                if t == "puzzle_solution":  # read-only replay frames
+                    await srv.on_puzzle_solution(msg if isinstance(msg, dict) else {})
+                    continue
                 async with srv.lock:
                     if t == "new_game":
                         await srv.on_new_game(msg)
+                    elif t == "puzzle":
+                        await srv.on_puzzle(msg if isinstance(msg, dict) else {})
                     elif t == "whatif":
                         await srv.on_whatif(msg if isinstance(msg, dict) else {})
                     elif t == "undo":

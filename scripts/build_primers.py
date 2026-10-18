@@ -41,6 +41,38 @@ def parse_args(argv=None):
     return ap.parse_args(argv)
 
 
+_W: dict = {}
+
+
+def _summarize_file(job: tuple[str, int]) -> tuple[str, list[dict], list[str], int]:
+    """Worker: summarize every record of one games file (engine and card tables built once per process)."""
+    from ygo_zero.analysis.primer import _summarize_game
+
+    if not _W:
+        from ygo_zero.engine.duel import Engine
+        from ygo_zero.engine.resources import load_cards
+        from ygo_zero.web.view import DB
+
+        _W.update(engine=Engine(), cards=load_cards(), names=DB.names())
+    fname, cap = job
+    out: list[dict] = []
+    probs: list[str] = []
+    n = 0
+    for line in Path(fname).read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        if cap and n >= cap:
+            break
+        n += 1
+        try:
+            rec = json.loads(line)
+            out.append(_summarize_game(_W["engine"], rec, _W["cards"], _W["names"]))
+        except Exception as e:  # noqa: BLE001 -- reported by the parent with the file name
+            probs.append(f"game {n - 1}: {type(e).__name__}: {e}")
+    return fname, out, probs, n
+
+
 def main(argv=None) -> int:
     import ygo_zero.analysis.primer as P
     from ygo_zero.analysis.primer import (  # noqa: F401  # noqa: F401
@@ -50,7 +82,6 @@ def main(argv=None) -> int:
         load_store,
         names_of,
     )
-    from ygo_zero.engine.duel import Engine
     from ygo_zero.engine.resources import load_cards
     from ygo_zero.web.view import DB
 
@@ -75,29 +106,25 @@ def main(argv=None) -> int:
         print(f"ALERT build_primers: no {args.pattern} in {[str(d) for d in dirs]}", flush=True)
         return 2
 
-    engine = Engine()
-    cards = load_cards()
-    names = DB.names()
+    # One process per games file (4 at most: the laptop's core cap); problems are printed as each file finishes, so a
+    # replay bug shows in minutes, not at the end (the first full build ran 112 min serially, then failed on 7 games).
+    from concurrent.futures import ProcessPoolExecutor
+
+    # --max-games (smoke): the first 4 files, each capped, then trimmed to the budget in order
+    jobs = [(str(f), args.max_games) for f in (files[:4] if args.max_games else files)]
     summaries: list[dict] = []
     problems: list[str] = []
     n_read = 0
-    for f in files:
-        for line in f.open(encoding="utf-8"):
-            line = line.strip()
-            if not line:
-                continue
+    with ProcessPoolExecutor(max_workers=min(4, len(jobs))) as ex:
+        for fname, s_list, probs, n in ex.map(_summarize_file, jobs):
             if args.max_games and n_read >= args.max_games:
-                break
-            n_read += 1
-            try:
-                rec = json.loads(line)
-                summaries.append(_summarize_game(engine, rec, cards, names))
-            except Exception as e:  # noqa: BLE001 -- fail loud below with the record id
-                problems.append(f"{f.name}: {type(e).__name__}: {e}")
-        if args.max_games and n_read >= args.max_games:
-            break
-    for p in problems[:10]:
-        print(f"ALERT build_primers: {p}", flush=True)
+                continue
+            take = s_list[: args.max_games - n_read] if args.max_games else s_list
+            summaries.extend(take)
+            n_read += n if not args.max_games else min(n, args.max_games - n_read)
+            for pr in probs:
+                print(f"ALERT build_primers: {Path(fname).name}: {pr}", flush=True)
+            problems.extend(f"{Path(fname).name}: {pr}" for pr in probs)
     if problems:
         print(f"ALERT build_primers: {len(problems)} records failed to replay", flush=True)
         return 2
@@ -105,6 +132,8 @@ def main(argv=None) -> int:
         print("ALERT build_primers: 0 games read", flush=True)
         return 2
 
+    cards = load_cards()
+    names = DB.names()
     store = aggregate(summaries, cards, names, overrides)
     payload = json.dumps(store)
     args.out.parent.mkdir(parents=True, exist_ok=True)

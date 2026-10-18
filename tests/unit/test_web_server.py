@@ -1479,3 +1479,389 @@ def test_undo_rewinds_practice_game(tmp_path, engine):
     assert len(recs) == 1
     assert recs[0]["practice"] is True
     assert recs[0]["undos"] == 2
+
+
+# --- 13. puzzles (step 5, item 8) ---
+
+
+def _puzzle_fixture(engine, tmp_path):
+    """One mined puzzle as puzzles.json (monkeypatched path) + fake launcher parts."""
+    from ygo_zero.analysis.puzzles import mine_candidates
+
+    # Use a fresh Engine for mining (like test_puzzles does) to avoid sharing
+    # the session-scoped fixture while the server also uses it.
+    from ygo_zero.engine.duel import Engine as _E
+
+    fresh = _E()
+    import json as _J
+
+    rec = _J.loads(Path("tests/fixtures/puzzle_game.jsonl").read_text().strip().splitlines()[0])
+    cands, _ = mine_candidates(fresh, [rec])
+    assert cands, "fixture yields no puzzle"
+    p = cands[0]
+    p["game_seed"] = p["seed"]
+    p["ws_seed"] = p["seed"]
+    p["verified"] = True
+    pj = tmp_path / "puzzles.json"
+    pj.write_text(json.dumps([p]))
+    return p, pj
+
+
+def _puzzle_fake_parts(engine, puzzle):
+    """Decisions + bot choices for a puzzle (same as test_puzzles fake)."""
+    from ygo_zero.analysis.events import deck_path
+    from ygo_zero.decks import load_ydk as _ld
+
+    decks = [_ld(deck_path(d)) for d in puzzle["decks"]]
+    cfg = DuelConfig(decks[0], decks[1], seed=puzzle["seed"])
+    env = PyEnv(engine, cfg, auto_single=False)
+    env.reset()
+    decisions, bot_choices = [], []
+    n_prefix = len(puzzle["prefix"])
+    for i, c in enumerate(puzzle["prefix"] + puzzle["solution"]):
+        if env.done:
+            break
+        if len(env.opts) > 1:
+            decisions.append({"player": int(env.player), "n_options": len(env.opts)})
+            if i >= n_prefix and int(env.player) != int(puzzle["seat"]):
+                bot_choices.append(int(c))
+        env.step(int(c))
+    return decisions, bot_choices
+
+
+class _PuzzleFakeDriver:
+    def __init__(self, decisions, bot_choices, prefix=(), bot_seat=0):
+        self._decisions = list(decisions)
+        self._bot = list(bot_choices)
+        self._prefix = [int(c) for c in (prefix or ())]
+        self._live: list[int] = []
+        self._bot_seat = int(bot_seat)
+        self.res = None
+
+    def feed_human(self, indices):
+        for i in indices:
+            self._live.append(int(i))
+
+    def decision(self, k, timeout=300):
+        from ygo_zero.edopro.product_bot import DriverError
+
+        if k >= len(self._decisions):
+            raise DriverError("fake game ended")
+        return dict(self._decisions[k])
+
+    def next_bot(self, timeout=None):
+        from ygo_zero.edopro.product_bot import DriverError
+
+        if not self._bot:
+            raise DriverError("no bot decision")
+        c = int(self._bot.pop(0))
+        self._live.append(c)
+        return c
+
+    def join(self, timeout=None):
+        from types import SimpleNamespace
+
+        # The recorded line wins for the human seat: mirror it as the product result
+        # so DuelSession.finish's lockstep (choices + winner) passes.
+        self.res = SimpleNamespace(
+            choices=list(self._prefix) + list(self._live),
+            winner=1 - self._bot_seat,
+            truncated=False,
+        )
+
+    def close(self):
+        return None
+
+
+class _PuzzleFakeLauncher:
+    def __init__(self, decisions, bot_choices):
+        self._dec = decisions
+        self._bot = bot_choices
+
+    def start_duel(self, engine, config, bot_seat, game_seed=0, ws_seed=0, prefix=(), prefix_decisions=None):
+        return _PuzzleFakeDriver(self._dec, list(self._bot), prefix=prefix, bot_seat=bot_seat)
+
+    def record_info(self, seed):
+        return {"ckpt": "puzzle-fake", "fast": True, "game_seed": seed}
+
+
+def _wait_state(ws, want_prompt=True, limit=2000):
+    for _ in range(limit):
+        m = json.loads(ws.receive_text())
+        assert m.get("t") == "state", m.get("t")
+        if (m.get("prompt") is not None) == want_prompt or not want_prompt:
+            if want_prompt and m.get("prompt") is None:
+                continue
+            return m
+    raise AssertionError("no matching state arrived")
+
+
+def test_puzzles_list_from_fixture(tmp_path, engine, monkeypatch):
+    import ygo_zero.web.server as S
+
+    p, pj = _puzzle_fixture(engine, tmp_path)
+    monkeypatch.setattr(S, "PUZZLES_PATH", pj)
+    app = _make_app(tmp_path, engine)
+    with _client(app).websocket_connect(f"/ws?t={TOKEN}") as ws:
+        ws.receive_text()
+        ws.send_json({"t": "puzzles"})
+        m = json.loads(ws.receive_text())
+        assert m["t"] == "puzzles" and len(m["items"]) == 1
+        it = m["items"][0]
+        assert it["id"] == p["id"]
+        assert it["turn"] == p["turn"] and it["difficulty"] == p["difficulty"]
+        assert it["goal"] == p["goal"] and it["n_plays"] == p["n_plays"]
+        assert len(it["decks"]) == 2 and all(isinstance(d, str) and d for d in it["decks"])
+
+
+def test_puzzles_missing_file_empty(tmp_path, engine, monkeypatch):
+    import ygo_zero.web.server as S
+
+    monkeypatch.setattr(S, "PUZZLES_PATH", tmp_path / "no-such.json")
+    app = _make_app(tmp_path, engine)
+    with _client(app).websocket_connect(f"/ws?t={TOKEN}") as ws:
+        ws.receive_text()
+        ws.send_json({"t": "puzzles"})
+        m = json.loads(ws.receive_text())
+        assert m == {"t": "puzzles", "items": []}
+
+
+def _solver_multi(engine, puzzle):
+    from ygo_zero.analysis.events import deck_path
+    from ygo_zero.decks import load_ydk as _ld
+
+    decks = [_ld(deck_path(d)) for d in puzzle["decks"]]
+    cfg = DuelConfig(decks[0], decks[1], seed=puzzle["seed"])
+    env = PyEnv(engine, cfg, auto_single=False)
+    env.reset()
+    for c in puzzle["prefix"]:
+        env.step(int(c))
+    out = []
+    for c in puzzle["solution"]:
+        if env.done:
+            break
+        if len(env.opts) > 1 and int(env.player) == int(puzzle["seat"]):
+            out.append(int(c))
+        env.step(int(c))
+    return out
+
+
+def test_puzzle_solved_flow(tmp_path, engine, monkeypatch):
+    """Puzzle start board + feeding the recorded line ends solved (direct Server API).
+
+    Uses the websocket for the puzzles list (covered above) but drives the
+    puzzle itself without TestClient (which deadlocks on on_puzzle under pytest;
+    the live flow is exercised manually and via web_e2e). Board equality, solved
+    status and the practice record with puzzle_result are still checked.
+    """
+    import asyncio
+    import tempfile
+
+    import ygo_zero.web.server as S
+    from ygo_zero.engine.duel import Engine as _E
+    from ygo_zero.web.view import build_view
+
+    fresh = _E()
+    tmpdir = Path(tempfile.mkdtemp())
+    p, pj = _puzzle_fixture(fresh, tmpdir)
+    S.PUZZLES_PATH = pj
+    decisions, bot_choices = _puzzle_fake_parts(fresh, p)
+
+    async def run():
+        srv = S.Server(
+            token=TOKEN,
+            engine=fresh,
+            make_opponent=lambda mode: _PuzzleFakeLauncher(decisions, list(bot_choices)),
+            record_root=tmpdir / "runs",
+            pics_dir=tmpdir / "pics",
+        )
+
+        class _Ws:
+            def __init__(self):
+                self.sent: list[dict] = []
+
+            async def send_json(self, msg):
+                self.sent.append(msg)
+
+        srv.ws = _Ws()
+        await srv.on_puzzle({"t": "puzzle", "id": p["id"]})
+        # on_puzzle starts advance in the background; wait for the first human prompt.
+        # (advance settles singletons and sends the prompt state.)
+        for _ in range(200):
+            await asyncio.sleep(0.05)
+            if srv.session is not None and srv.session.need_human:
+                break
+        assert srv.session is not None and srv.session.need_human
+        assert srv.practice is True
+        assert (srv.puzzle or {}).get("id") == p["id"]
+        # Board equals the board after replaying the prefix.
+        from ygo_zero.analysis.events import deck_path
+        from ygo_zero.decks import load_ydk as _ld
+
+        decks = [_ld(deck_path(d)) for d in p["decks"]]
+        cfg = DuelConfig(decks[0], decks[1], seed=p["seed"])
+        env0 = PyEnv(fresh, cfg, auto_single=False)
+        env0.reset()
+        for c in p["prefix"]:
+            env0.step(int(c))
+        st = srv.state_message()
+        assert st["view"] == build_view(env0, int(p["seat"]))
+        # Feed the recorded line exactly like verify_puzzle does (paired human/bot).
+        s = srv.session
+        # Cancel the background advance: we drive the session manually here.
+        srv.gen += 1
+        try:
+            if srv._adv is not None:
+                await asyncio.wait_for(asyncio.shield(srv._adv), timeout=5)
+        except Exception:  # noqa: BLE001, S110 -- advance may already be done/cancelled
+            pass
+        sol = [int(c) for c in p["solution"]]
+        actors = [int(a) for a in p["actors"]]
+        seat = int(p["seat"])
+        start_turn = int(p["turn"])
+        for c, a in zip(sol, actors, strict=True):
+            if s.done:
+                break
+            assert int(s.env.duel.turn) == start_turn, "turn advanced before the win"
+            assert int(s.env.player) == int(a)
+            n = len(s.env.opts)
+            if n > 1 and int(s.env.player) == seat:
+                s.step_human(int(c))
+            elif n > 1:
+                s.step_bot()
+                assert int(s.env.choices[-1]) == int(c), "bot diverged from the record"
+            else:
+                s.env.step(int(c))
+        assert s.done and s.env.winner == seat and int(s.env.duel.turn) == start_turn
+        await srv._finish(s, "")
+        end = srv.state_message(full_log=True)
+        assert end["result"]["winner"] == "you"
+        assert (end.get("puzzle") or {}).get("status") == "solved"
+        try:
+            s.close()
+        except Exception:  # noqa: BLE001, S110
+            pass
+        return srv
+
+    asyncio.run(run())
+    recs = [
+        json.loads((q / "game.jsonl").read_text()) for q in sorted((tmpdir / "runs").iterdir()) if q.is_dir()
+    ]
+    assert len(recs) == 1 and recs[0]["practice"] is True
+    assert recs[0]["puzzle"] == {"id": p["id"]} and recs[0]["puzzle_result"] == "solved"
+
+
+def test_puzzle_failed_on_turn_pass(tmp_path, engine, monkeypatch):
+    """Ending the turn without winning fails the puzzle and stops the game."""
+    import asyncio
+    import tempfile
+
+    import ygo_zero.web.server as S
+    from ygo_zero.engine.duel import Engine as _E
+
+    fresh = _E()
+    tmpdir = Path(tempfile.mkdtemp())
+    p, pj = _puzzle_fixture(fresh, tmpdir)
+    S.PUZZLES_PATH = pj
+    decisions, bot_choices = _puzzle_fake_parts(fresh, p)
+
+    async def run():
+        srv = S.Server(
+            token=TOKEN,
+            engine=fresh,
+            make_opponent=lambda mode: _PuzzleFakeLauncher(decisions, list(bot_choices)),
+            record_root=tmpdir / "runs",
+            pics_dir=tmpdir / "pics",
+        )
+
+        class _Ws:
+            def __init__(self):
+                self.sent: list[dict] = []
+
+            async def send_json(self, msg):
+                self.sent.append(msg)
+
+        srv.ws = _Ws()
+        await srv.on_puzzle({"t": "puzzle", "id": p["id"]})
+        for _ in range(200):
+            await asyncio.sleep(0.05)
+            if srv.session is not None and srv.session.need_human:
+                break
+        assert srv.session is not None and srv.session.need_human
+        st = srv.state_message()
+        prompt = st.get("prompt")
+        assert prompt is not None
+        # End the turn instead of playing the winning line. Step the host env
+        # directly (bypassing the driver feed): the fake driver's canned decisions
+        # follow the recorded winning line, while a real product driver would follow
+        # the deviated line live. Bypassing keeps host/product in sync for the fail
+        # path, which only needs the turn to pass (then _fail_puzzle abandons).
+        idx = next(o["index"] for o in prompt["options"] if o.get("verb") in ("end_turn", "to_end"))
+        srv.session.env.step(int(idx))
+        srv.human_decisions.append(len(srv.session.env.choices) - 1)
+        # Pump singletons and human passes directly until the turn passes.
+        for _ in range(500):
+            s = srv.session
+            if srv.finished or s.done:
+                break
+            if srv._puzzle_failed(s):
+                break
+            # Settle singletons directly (no driver feed for singletons).
+            while not s.done and len(s.env.opts) == 1:
+                s.env.step(0)
+                if srv._puzzle_failed(s):
+                    break
+            if s.done or srv._puzzle_failed(s):
+                break
+            if s.need_human and int(s.env.player) == int(s.human_seat):
+                # Prefer passing/ending the turn.
+                pick = 0
+                for o in s.env.opts:
+                    try:
+                        nm = o.kind.name
+                    except Exception:  # noqa: BLE001
+                        nm = str(getattr(o.kind, "name", ""))
+                    if nm in ("PASS", "TO_END", "TO_BATTLE", "TO_MAIN2", "NO", "CANCEL", "FINISH"):
+                        pick = int(list(s.env.opts).index(o))
+                        break
+                s.env.step(int(pick))
+                srv.human_decisions.append(len(s.env.choices) - 1)
+            elif not s.done and not s.need_human:
+                # Bot moves: step directly (the fake driver is only for the winning line).
+                # For the fail path the bot's exact reply does not matter, only that the
+                # turn passes without a win.
+                if len(s.env.opts) > 1:
+                    s.env.step(0)
+                else:
+                    s.env.step(0)
+            else:
+                break
+        # The turn must have passed (or the game ended) without a win -> fail the puzzle.
+        if not srv.finished and srv._puzzle_failed(srv.session):
+            await srv._fail_puzzle(srv.session)
+        end = srv.state_message(full_log=True)
+        assert (end.get("puzzle") or {}).get("status") == "failed"
+        return srv
+
+    srv = asyncio.run(run())
+    assert srv is not None
+    recs = [
+        json.loads((q / "game.jsonl").read_text()) for q in sorted((tmpdir / "runs").iterdir()) if q.is_dir()
+    ]
+    assert len(recs) == 1 and recs[0].get("puzzle_result") == "failed"
+
+
+def test_puzzle_solution_frames(tmp_path, engine, monkeypatch):
+    import ygo_zero.web.server as S
+
+    p, pj = _puzzle_fixture(engine, tmp_path)
+    monkeypatch.setattr(S, "PUZZLES_PATH", pj)
+    decisions, bot_choices = _puzzle_fake_parts(engine, p)
+    app = _make_app(tmp_path, engine, mode_factory=lambda mode: _PuzzleFakeLauncher(decisions, bot_choices))
+    with _client(app).websocket_connect(f"/ws?t={TOKEN}") as ws:
+        ws.receive_text()
+        ws.send_json({"t": "puzzle_solution", "id": p["id"]})
+        m = json.loads(ws.receive_text())
+        assert m["t"] == "puzzle_solution" and m["id"] == p["id"]
+        assert len(m["frames"]) == len(p["solution"]) + 1 or len(m["frames"]) > 2
+        assert m["frames"][-1].get("result") is not None

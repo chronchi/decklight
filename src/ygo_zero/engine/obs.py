@@ -203,7 +203,7 @@ class Board:
 
     def global_array(self, duel, msg_type: int) -> np.ndarray:
         me, opp = self.me, 1 - self.me
-        g = [self.lp[me], self.lp[opp], duel.turn, duel.phase, int(duel.first_player == me),
+        g = [i32(self.lp[me]), i32(self.lp[opp]), duel.turn, duel.phase, int(duel.first_player == me),
              int(duel.turn_player == me)]  # fmt: skip
         for p in (me, opp):
             g += [self.counts[(p, loc)] for loc in Q.QUERY_LOCATIONS]

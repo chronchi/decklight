@@ -56,6 +56,12 @@ MOCKS = [
     ("59-kw-popover", "1&detailcode=14558128&kw=quick-effect"),
     ("60-rule-notes-menu", "1&gamemenu=1"),
     ("61-practice-undo", "1&hint=1&canundo=1"),
+    # Puzzles (step 5, item 8): the lobby list grouped by difficulty, the in-puzzle
+    # banner, the Solved dialog and the Not-solved dialog.
+    ("63-puzzle-list", "0&puzzles=1"),
+    ("64-puzzle-banner", "1&puzzlebanner=1"),
+    ("65-puzzle-solved", "1&puzzlesolved=1"),
+    ("66-puzzle-failed", "1&puzzlefailed=1"),
 ]
 
 # Pacing cues frozen mid-scene: ?cue=K&t=F freezes visible scene K at fraction F
@@ -283,6 +289,61 @@ def kw_topmost(page) -> str:
     return page.evaluate(KW_TOPMOST_JS)
 
 
+PUZZLE_TOPMOST_JS = """() => {
+  // Every puzzle row's centre must land on its own row (never covered).
+  const rows = [...document.querySelectorAll('#puzzlesheet .prow')].filter((b) => {
+    const r = b.getBoundingClientRect();
+    return r.width > 2 && r.height > 2 && r.bottom > 0 && r.top < innerHeight;
+  });
+  if (!rows.length) return 'none-present';
+  const bad = [];
+  for (const b of rows) {
+    const r = b.getBoundingClientRect();
+    const el = document.elementFromPoint(
+      Math.min(window.innerWidth - 1, Math.max(0, r.left + r.width / 2)),
+      Math.min(window.innerHeight - 1, Math.max(0, r.top + r.height / 2)));
+    if (!el || !(el === b || b.contains(el) || el.contains(b))) bad.push(el && (el.id || el.className || el.tagName));
+  }
+  return bad.length ? 'covered-by:' + bad.slice(0, 3).join(',') : 'ok';
+}"""
+
+
+def puzzle_topmost(page) -> str:
+    return page.evaluate(PUZZLE_TOPMOST_JS)
+
+
+PUZZLE_BANNER_TOPMOST_JS = """() => {
+  const b = document.querySelector('#puzzlebanner');
+  if (!b) return 'none-present';
+  const r = b.getBoundingClientRect();
+  const el = document.elementFromPoint(
+    Math.min(window.innerWidth - 1, Math.max(0, r.left + r.width / 2)),
+    Math.min(window.innerHeight - 1, Math.max(0, r.top + r.height / 2)));
+  if (!el || !(el === b || b.contains(el) || el.contains(b))) return 'banner-covered-by:' + (el && (el.id || el.className || el.tagName));
+  return 'ok';
+}"""
+
+
+def puzzle_banner_topmost(page) -> str:
+    return page.evaluate(PUZZLE_BANNER_TOPMOST_JS)
+
+
+PUZZLE_DIALOG_TOPMOST_JS = """() => {
+  const d = document.querySelector('#puzzleresult');
+  if (!d) return 'none-present';
+  const r = d.getBoundingClientRect();
+  const el = document.elementFromPoint(
+    Math.min(window.innerWidth - 1, Math.max(0, r.left + r.width / 2)),
+    Math.min(window.innerHeight - 1, Math.max(0, r.top + r.height / 2)));
+  if (!el || !(el === d || d.contains(el) || el.contains(d))) return 'dialog-covered-by:' + (el && (el.id || el.className || el.tagName));
+  return 'ok';
+}"""
+
+
+def puzzle_dialog_topmost(page) -> str:
+    return page.evaluate(PUZZLE_DIALOG_TOPMOST_JS)
+
+
 def launch_kwargs():
     """Point at the pre-installed Chromium (brief: already in ~/.cache/ms-playwright)."""
     env = os.environ.get("CHROME_EXE")
@@ -425,13 +486,47 @@ def main() -> int:
                 if name == "61-practice-undo":
                     if not page.evaluate("!!document.querySelector('[data-act=undo]')"):
                         errors.append("61-practice-undo: no Undo button on screen")
-                    if not page.evaluate("!!document.querySelector('.hintbar [data-act=hint] ~ [data-act=undo]')"):
+                    if not page.evaluate(
+                        "!!document.querySelector('.hintbar [data-act=hint] ~ [data-act=undo]')"
+                    ):
                         errors.append("61-practice-undo: no Hint button next to Undo")
-                    if page.evaluate("!!document.querySelector('.phasebtns [data-act=hint], .phasebtns [data-act=undo]')"):
+                    if page.evaluate(
+                        "!!document.querySelector('.phasebtns [data-act=hint], .phasebtns [data-act=undo]')"
+                    ):
                         errors.append("61-practice-undo: Hint/Undo back in the bar (no room at phone width)")
                     top = kw_topmost(page)
                     if top != "ok":
                         errors.append(f"61-practice-undo: Undo button covered ({top})")
+                if name == "63-puzzle-list":
+                    if not page.evaluate("!!document.querySelector('#puzzlesheet')"):
+                        errors.append("63-puzzle-list: no puzzles sheet on screen")
+                    if page.evaluate("document.querySelectorAll('#puzzlesheet .prow').length") < 3:
+                        errors.append("63-puzzle-list: fewer than 3 puzzle rows")
+                    if not page.evaluate("/Solved/.test(document.querySelector('#puzzlesheet').textContent)"):
+                        errors.append("63-puzzle-list: no Solved mark on screen")
+                    top = puzzle_topmost(page)
+                    if top != "ok":
+                        errors.append(f"63-puzzle-list: puzzle rows not topmost ({top})")
+                if name == "64-puzzle-banner":
+                    if not page.evaluate("!!document.querySelector('#puzzlebanner')"):
+                        errors.append("64-puzzle-banner: no puzzle banner on screen")
+                    top = puzzle_banner_topmost(page)
+                    if top != "ok":
+                        errors.append(f"64-puzzle-banner: puzzle banner covered ({top})")
+                if name in ("65-puzzle-solved", "66-puzzle-failed"):
+                    if not page.evaluate("!!document.querySelector('#puzzleresult')"):
+                        errors.append(f"{name}: no puzzle result dialog on screen")
+                    if name == "65-puzzle-solved" and not page.evaluate(
+                        "/Solved in/.test(document.querySelector('#puzzleresult').textContent)"
+                    ):
+                        errors.append("65-puzzle-solved: no 'Solved in' text")
+                    if name == "66-puzzle-failed" and not page.evaluate(
+                        "/Not solved/.test(document.querySelector('#puzzleresult').textContent)"
+                    ):
+                        errors.append("66-puzzle-failed: no 'Not solved' text")
+                    top = puzzle_dialog_topmost(page)
+                    if top != "ok":
+                        errors.append(f"{name}: puzzle dialog not topmost ({top})")
             for name, i in CUE_SHOTS:
                 page.goto(f"{base}?mock=1&i={i}", wait_until="networkidle")
                 page.wait_for_timeout(250)

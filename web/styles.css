@@ -487,29 +487,30 @@ html.short #app { height: var(--app-h); }
 #detail .dclose { margin-top: auto; padding-top: 18px; font-size: 12px; color: var(--muted); }
 
 /* ---------- game over ---------- */
-#gameover {
+#gameover, #puzzleresult {
   position: fixed; inset: 0; z-index: 75;
   background: rgba(16, 15, 12, 0.8);
   display: flex; align-items: center; justify-content: center; padding: 24px;
   animation: fade 260ms var(--ease);
 }
-#gameover .box {
+#gameover .box, #puzzleresult .box {
   width: min(100%, 340px); text-align: center;
   background: var(--sheet); border: 1px solid var(--line-2); border-radius: 18px;
   padding: 30px 22px 22px; animation: up 260ms var(--ease);
 }
-#gameover .kicker { font-size: 13px; color: var(--muted); }
-#gameover h2 { margin: 8px 0 6px; font-size: 34px; font-weight: 300; letter-spacing: 0.04em; }
+#gameover .kicker, #puzzleresult .kicker { font-size: 13px; color: var(--muted); }
+#gameover h2, #puzzleresult h2 { margin: 8px 0 6px; font-size: 34px; font-weight: 300; letter-spacing: 0.04em; }
 #gameover .win h2 { color: var(--accent); }
 #gameover .loss h2 { color: var(--bot); }
-#gameover h2::after { content: ""; display: block; width: 28px; height: 1px; margin: 14px auto 0; background: currentColor; opacity: 0.6; }
-#gameover .reason { color: var(--muted); margin: 0 0 18px; font-size: 14px; }
-#gameover .reason:empty { display: none; }
+#gameover h2::after, #puzzleresult h2::after { content: ""; display: block; width: 28px; height: 1px; margin: 14px auto 0; background: currentColor; opacity: 0.6; }
+#gameover .reason, #puzzleresult .reason { color: var(--muted); margin: 0 0 18px; font-size: 14px; }
+#gameover .reason:empty, #puzzleresult .reason:empty { display: none; }
 #gameover .score { display: flex; justify-content: center; margin: 4px 0 24px; }
 #gameover .score span { flex: 1; display: flex; flex-direction: column; gap: 2px; font-size: 13px; color: var(--muted); font-variant-caps: all-small-caps; letter-spacing: 0.14em; }
 #gameover .score span + span { border-left: 1px solid var(--line-2); }
 #gameover .score b { font-size: 24px; font-weight: 300; color: var(--text); letter-spacing: 0.01em; font-variant-caps: normal; font-variant-numeric: tabular-nums; }
-#gameover .row { display: flex; gap: 10px; }
+#gameover .row, #puzzleresult .row { display: flex; gap: 10px; }
+#puzzleresult .row + .row { margin-top: 10px; }
 
 /* ---------- replay title card (game_video.py) ---------- */
 #retitle {
@@ -696,7 +697,13 @@ details.ydk textarea {
 #botbanner.leave { transition: opacity 300ms var(--ease); opacity: 0; }
 
 /* ---------- in-game menu ---------- */
-#gamemenu {
+#puzzlebanner, #whatifbanner {
+  margin: 2px auto 0; max-width: calc(100% - 24px); padding: 4px 12px; border-radius: 999px;
+  background: rgba(28, 26, 22, 0.92); border: 1px solid var(--line);
+  font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  text-align: center;
+}
+#gamemenu, #puzzlesheet {
   position: fixed; left: 50%; bottom: 0; transform: translateX(-50%); z-index: 72;
   width: min(100%, 420px);
   background: var(--sheet); border-radius: 16px 16px 0 0;
@@ -704,18 +711,18 @@ details.ydk textarea {
   animation: up 240ms var(--ease);
   display: flex; flex-direction: column; padding-bottom: calc(12px + env(safe-area-inset-bottom));
 }
-#gamemenu .mhead {
+#gamemenu .mhead, #puzzlesheet .mhead {
   display: flex; align-items: center; min-height: 52px; padding: 4px 6px 4px 18px;
   font-size: 14px; color: var(--muted); font-variant-caps: all-small-caps; letter-spacing: 0.14em;
   border-bottom: 1px solid var(--line);
 }
-#gamemenu .mhead button { margin-left: auto; }
-#gamemenu .mbody { display: flex; flex-direction: column; gap: 2px; padding: 8px 10px; }
-#gamemenu .mrow {
+#gamemenu .mhead button, #puzzlesheet .mhead button { margin-left: auto; }
+#gamemenu .mbody, #puzzlesheet .mbody { display: flex; flex-direction: column; gap: 2px; padding: 8px 10px; }
+#gamemenu .mrow, #puzzlesheet .mrow {
   display: flex; align-items: center; gap: 12px; width: 100%;
   min-height: 48px; padding: 0 12px; border-radius: 10px; text-align: left; font-size: 15px;
 }
-#gamemenu .mrow:active { background: var(--raise); }
+#gamemenu .mrow:active, #puzzlesheet .mrow:active { background: var(--raise); }
 #gamemenu .mrow.danger { color: var(--danger); }
 #gamemenu .mrow.danger.confirm { background: rgba(181, 100, 90, 0.12); }
 #gamemenu .mrow .sub { margin-left: auto; font-size: 13px; color: var(--muted); }
@@ -727,12 +734,24 @@ details.ydk textarea {
 }
 #gamemenu .seg button.sel { color: var(--accent); border-color: rgba(184, 154, 94, 0.6); background: var(--accent-tint); }
 #gamemenu .mhint { font-size: 12px; color: var(--muted); padding: 0 24px 4px; }
-#gamemenu .msep { height: 1px; background: var(--line); margin: 6px 12px; }
-#gamemenu { max-height: 92dvh; }
-#gamemenu .mbody { overflow-y: auto; min-height: 0; }
+#gamemenu .msep, #puzzlesheet .msep { height: 1px; background: var(--line); margin: 6px 12px; }
+#gamemenu, #puzzlesheet { max-height: 92dvh; }
+#gamemenu .mbody, #puzzlesheet .mbody { overflow-y: auto; min-height: 0; }
 #gamemenu .mrow.tog { justify-content: space-between; padding-top: 6px; padding-bottom: 6px; }
 #gamemenu .tog .tl { display: flex; flex-direction: column; gap: 2px; }
 #gamemenu .tog .th { font-size: 12px; color: var(--muted); }
+/* Puzzles list rows + quiet Solved mark (text, never colour alone). */
+.plist { display: flex; flex-direction: column; gap: 2px; }
+.prow {
+  display: flex; align-items: center; gap: 12px; width: 100%;
+  min-height: 52px; padding: 8px 12px; border-radius: 10px; text-align: left;
+}
+.prow:active { background: var(--raise); }
+.prow .pt { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.prow .ptitle { font-size: 15px; }
+.prow .psub { font-size: 12px; color: var(--muted); }
+.prow .psolved { flex: 0 0 auto; font-size: 12px; color: var(--muted); border: 1px solid var(--line-2); border-radius: 999px; padding: 2px 8px; }
+.solbar { display: flex; justify-content: center; padding: 6px 0; }
 .sw { position: relative; flex: 0 0 auto; width: 34px; height: 20px; border-radius: 10px; box-shadow: inset 0 0 0 1px rgba(214, 207, 192, 0.42); transition: background var(--t) var(--ease), box-shadow var(--t) var(--ease); }
 .sw i { position: absolute; top: 4px; left: 4px; width: 12px; height: 12px; border-radius: 50%; background: var(--muted); transition: transform var(--t) var(--ease), background var(--t) var(--ease); }
 .sw.on { background: var(--accent-tint); box-shadow: inset 0 0 0 1px rgba(184, 154, 94, 0.55); }

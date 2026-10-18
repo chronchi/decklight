@@ -28,14 +28,36 @@ MIN_MOVES = 4  # solver multi-option decisions from the start to the win
 TARGET_PUZZLES = 60
 PER_GROUP_CAP = 2  # at most 2 puzzles per deck pair + turn
 PLAY_KINDS = ("SUMMON", "SPSUMMON", "ACTIVATE")  # option kinds whose code is recorded
+# Meaningful plays for difficulty: the solver's game actions (SET = MSET + SSET).
+PLAY_CHOICE_KINDS = frozenset({"ACTIVATE", "SUMMON", "SPSUMMON", "MSET", "SSET", "ATTACK", "TO_BATTLE"})
+NAIVE_ROLLOUTS = 8  # solver sampled at temperature 1.0, bot live (see naive_win_rate)
+NAIVE_KEEP_MAX = 0.5  # keep puzzles the bot's own policy fails at least half the time
 
 
-def difficulty(n_moves: int) -> str:
-    if n_moves <= 6:
+def difficulty(n_plays: int) -> str:
+    if n_plays <= 3:
         return "easy"
-    if n_moves <= 11:
+    if n_plays <= 6:
         return "medium"
     return "hard"
+
+
+def count_plays(solution_steps: Sequence[dict], seat: int) -> int:
+    """Meaningful solver plays: ACTIVATE / SUMMON / SPSUMMON / SET / ATTACK / TO_BATTLE."""
+    n = 0
+    for st in solution_steps:
+        try:
+            if int(st.get("player", -1)) != int(seat):
+                continue
+        except (TypeError, ValueError):
+            continue
+        if str(st.get("kind")) in PLAY_CHOICE_KINDS:
+            n += 1
+    return int(n)
+
+
+def goal_for(opp_lp: int) -> str:
+    return f"Win this turn \u00b7 opponent has {int(opp_lp):,} LP"
 
 
 def _signed_lps(env) -> tuple[int, int]:
@@ -114,7 +136,7 @@ def replay_false(engine: Engine, cfg: DuelConfig, true_choices: Sequence[int]) -
             kind = opt.kind.name
         except Exception:  # noqa: BLE001 -- defensive
             kind = str(opt.kind)
-        code = int(env.board.option_code(opt)) if kind in (*PLAY_KINDS, "MSET", "SSET") else 0
+        code = int(env.board.option_code(opt))
         steps.append(
             {
                 "player": int(env.player),
@@ -177,6 +199,8 @@ def mine_candidates(engine: Engine, records: list[dict]) -> tuple[list[dict], di
                 continue
             opp_lp = steps[k]["lp"][1 - s]
             sol = steps[k:]
+            sol_steps = [{"player": st["player"], "kind": st["kind"], "code": st["code"]} for st in sol]
+            n_plays = count_plays(sol_steps, int(s))
             candidates.append(
                 {
                     "id": f"{_slug(rec['decks'][0])}-vs-{_slug(rec['decks'][1])}-t{t}p{s}-{rec['seed']}",
@@ -186,13 +210,13 @@ def mine_candidates(engine: Engine, records: list[dict]) -> tuple[list[dict], di
                     "seat": int(s),
                     "turn": int(t),
                     "opp_lp": int(opp_lp),
+                    "goal": goal_for(int(opp_lp)),
                     "solution": [st["choice"] for st in sol],
                     "actors": [st["player"] for st in sol],
-                    "solution_steps": [
-                        {"player": st["player"], "kind": st["kind"], "code": st["code"]} for st in sol
-                    ],
+                    "solution_steps": sol_steps,
                     "n_moves": int(n_moves),
-                    "difficulty": difficulty(int(n_moves)),
+                    "n_plays": int(n_plays),
+                    "difficulty": difficulty(int(n_plays)),
                     "verified": False,
                 }
             )
@@ -221,6 +245,161 @@ def select(candidates: list[dict], target: int = TARGET_PUZZLES) -> list[dict]:
     return ordered
 
 
+def _launcher_logits(launcher, obs: dict):
+    import numpy as np
+
+    if hasattr(launcher, "base_logits"):
+        return np.asarray(launcher.base_logits([obs])).reshape(-1)
+    if hasattr(launcher, "forward"):
+        return np.asarray(launcher.forward([obs])).reshape(-1)
+    raise AttributeError("launcher has neither base_logits nor forward")
+
+
+def _sample_temp1(logits, mask, rng):
+    import numpy as np
+
+    z = np.array(logits[: len(mask)], dtype=np.float64)
+    m = np.asarray(mask, dtype=bool)
+    z[~m] = -np.inf
+    z -= np.nanmax(z)
+    e = np.exp(z)
+    e[~m] = 0.0
+    s = e.sum()
+    if not np.isfinite(s) or s <= 0:
+        legal = np.flatnonzero(m)
+        if len(legal) == 0:
+            raise ValueError("no legal options to sample")
+        return int(rng.choice(legal))
+    return int(rng.choice(len(e), p=e / s))
+
+
+def _puzzle_session(engine, puzzle, launcher, game_seed=None):
+    """Shared DuelSession setup for verify + naive rollouts (prefix not yet replayed).
+
+    Returns (session, prefix, prefix_decisions, seat, start_turn, cfg).
+    Raises ValueError/DriverError on mapping failures (callers turn these into rejections).
+    """
+    from ygo_zero.edopro.product_bot import host_to_product
+    from ygo_zero.play.session import DuelSession
+
+    decks = [load_ydk(deck_path(d)) for d in puzzle["decks"]]
+    cfg = DuelConfig(decks[0], decks[1], seed=puzzle["seed"])
+    seat = int(puzzle["seat"])
+    start_turn = int(puzzle["turn"])
+    prefix = [int(c) for c in puzzle["prefix"]]
+    product_prefix = [int(c) for c in host_to_product(engine, cfg, prefix)]
+    env0 = PyEnv(engine, cfg, auto_single=False)
+    env0.reset()
+    prefix_decisions: list[dict] = []
+    for c in prefix:
+        if env0.done:
+            raise ValueError("prefix overruns the duel")
+        if len(env0.opts) > 1:
+            prefix_decisions.append({"player": int(env0.player), "n_options": len(env0.opts)})
+        env0.step(int(c))
+    gs = puzzle["seed"] if game_seed is None else game_seed
+    session = DuelSession(
+        engine,
+        cfg,
+        human_seat=seat,
+        launcher=launcher,
+        seed=int(gs),
+        driver_prefix=product_prefix,
+        driver_prefix_decisions=prefix_decisions,
+    )
+    return session, prefix, prefix_decisions, seat, start_turn, cfg
+
+
+def _replay_prefix(session, prefix) -> tuple[bool, str]:
+    for c in prefix:
+        if session.env.done:
+            return False, "prefix overruns the duel"
+        try:
+            session.env.step(int(c))
+        except (IndexError, ValueError) as e:
+            return False, f"prefix diverged: {e}"
+    return True, "ok"
+
+
+def naive_win_rate(
+    engine, puzzle: dict, launcher, n_rollouts: int = NAIVE_ROLLOUTS, seed: int | None = None
+) -> float:
+    """Share of rollouts where the fast policy, sampled at temperature 1.0, still wins this turn.
+
+    From the puzzle start the solver's multi-option choices are sampled from the
+    launcher's policy (``base_logits``/``forward``) at temperature 1.0 while the
+    bot answers live exactly as in :func:`verify_puzzle` (``session.step_bot``).
+    Seeded and reproducible: ``seed`` defaults to the puzzle seed, spawned per rollout.
+    """
+    import numpy as np
+
+    base = int(puzzle["seed"]) if seed is None else int(seed)
+    try:
+        children = np.random.SeedSequence(int(base)).spawn(int(n_rollouts))
+    except Exception:  # noqa: BLE001 -- defensive: fall back to a simple stream
+        children = [
+            np.random.SeedSequence((int(base) + 7919 * (r + 1)) & 0xFFFFFFFF) for r in range(int(n_rollouts))
+        ]
+    wins = 0
+    for child in children:
+        rng = np.random.default_rng(child)
+        try:
+            won = _naive_rollout_once(engine, puzzle, launcher, rng)
+        except Exception:  # noqa: BLE001 -- a crashed rollout never wins
+            won = False
+        wins += 1 if won else 0
+    return float(wins) / float(max(1, int(n_rollouts)))
+
+
+def _naive_rollout_once(engine, puzzle: dict, launcher, rng) -> bool:
+    """One sampled rollout: True iff the sampled solver still wins in the puzzle turn."""
+    from ygo_zero.edopro.product_bot import DriverError
+    from ygo_zero.play.session import DriverDiverged
+
+    try:
+        session, prefix, prefix_decisions, seat, start_turn, _cfg = _puzzle_session(
+            engine, puzzle, launcher, game_seed=None
+        )
+    except (ValueError, DriverError, RuntimeError):
+        return False
+    try:
+        try:
+            session.reset()
+        except (DriverDiverged, DriverError, ValueError, RuntimeError):
+            return False
+        ok, _ = _replay_prefix(session, prefix)
+        if not ok:
+            return False
+        # Mirror verify's prod_len (host multi-option prefix length).
+        try:
+            session.prod_len = len(prefix_decisions)
+        except Exception:  # noqa: BLE001, S110 -- best effort
+            pass
+        while not session.env.done:
+            if int(session.env.duel.turn) != int(start_turn):
+                return False
+            n = len(session.env.opts)
+            player = int(session.env.player)
+            try:
+                if n > 1 and player == seat:
+                    obs = session.env._observe()
+                    logits = _launcher_logits(launcher, obs)
+                    idx = _sample_temp1(logits, obs["action_mask"], rng)
+                    session.step_human(int(idx))
+                elif n > 1:
+                    session.step_bot()
+                else:
+                    session.env.step(0)
+            except (DriverDiverged, DriverError, IndexError, ValueError):
+                return False
+        return bool(session.env.winner == seat and int(session.env.duel.turn) == int(start_turn))
+    finally:
+        try:
+            session.close()
+        except Exception:  # noqa: BLE001, S110 -- best effort
+            pass
+
+
 def verify_puzzle(
     engine: Engine, puzzle: dict, launcher, game_seed: int | None = None, ws_seed: int | None = None
 ) -> tuple[bool, str]:
@@ -231,40 +410,20 @@ def verify_puzzle(
     candidate is accepted only if the solver still wins in the puzzle turn.
     Returns (ok, reason) and never raises (driver failures are rejections).
     """
-    from ygo_zero.edopro.product_bot import DriverError, host_to_product
-    from ygo_zero.play.session import DriverDiverged, DuelSession
+    from ygo_zero.edopro.product_bot import DriverError
+    from ygo_zero.play.session import DriverDiverged
 
     try:
-        decks = [load_ydk(deck_path(d)) for d in puzzle["decks"]]
-        cfg = DuelConfig(decks[0], decks[1], seed=puzzle["seed"])
         seat = int(puzzle["seat"])
         start_turn = int(puzzle["turn"])
         prefix = [int(c) for c in puzzle["prefix"]]
         try:
-            product_prefix = [int(c) for c in host_to_product(engine, cfg, prefix)]
+            session, _p, prefix_decisions, _s, _t, _c = _puzzle_session(
+                engine, puzzle, launcher, game_seed=game_seed
+            )
         except ValueError as e:
             return False, f"prefix mapping failed: {e}"
-        # Host-verified prefix decisions (what-if shape): multi-option steps only.
-        env0 = PyEnv(engine, cfg, auto_single=False)
-        env0.reset()
-        prefix_decisions: list[dict] = []
-        for c in prefix:
-            if env0.done:
-                return False, "prefix overruns the duel"
-            if len(env0.opts) > 1:
-                prefix_decisions.append({"player": int(env0.player), "n_options": len(env0.opts)})
-            env0.step(int(c))
-        gs = puzzle["seed"] if game_seed is None else game_seed
         _ = ws_seed  # the session derives ws_seed from its seed, like the web's what-if
-        session = DuelSession(
-            engine,
-            cfg,
-            human_seat=seat,
-            launcher=launcher,
-            seed=int(gs),
-            driver_prefix=product_prefix,
-            driver_prefix_decisions=prefix_decisions,
-        )
         try:
             session.reset()
         except (DriverDiverged, DriverError, ValueError, RuntimeError) as e:
@@ -273,14 +432,13 @@ def verify_puzzle(
             # The prefix is replayed on the host env directly, exactly like the
             # web's what-if path: the driver replays it verbatim internally
             # (never re-searched), so it is never asked for prefix choices.
-            for c in prefix:
-                if session.env.done:
-                    return False, "prefix overruns the duel"
-                try:
-                    session.env.step(int(c))
-                except (IndexError, ValueError) as e:
-                    return False, f"prefix diverged: {e}"
-            session.prod_len = len(prefix_decisions)
+            ok, reason = _replay_prefix(session, prefix)
+            if not ok:
+                return False, reason
+            try:
+                session.prod_len = len(prefix_decisions)
+            except Exception:  # noqa: BLE001, S110 -- best effort
+                pass
             sol = [int(c) for c in puzzle["solution"]]
             actors = [int(a) for a in puzzle["actors"]]
             if len(sol) != len(actors):
