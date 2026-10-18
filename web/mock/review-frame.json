@@ -1,0 +1,26 @@
+{
+  "t": "review_frame",
+  "k": 1,
+  "view": null,
+  "options": [
+    {"index": 0, "verb": "pass", "label": "Pass", "card": null, "where": null, "effect": null},
+    {"index": 1, "verb": "activate", "label": "Activate Ash Blossom & Joyous Spring", "card": {"uid": "yh1", "code": 14558128, "name": "Ash Blossom & Joyous Spring", "faceup": true, "pos": null, "atk": 0, "def": 1800, "level": 3, "rank": 0, "link": 0, "counters": 0, "overlays": []}, "where": {"side": "you", "zone": "hand", "seq": 0}, "effect": null}
+  ],
+  "entry": {
+    "k": 1,
+    "turn": 2,
+    "phase": "main1",
+    "kind": "chain",
+    "mark": "Missed response",
+    "delta_pts": -9.4,
+    "your": {"label": "Pass", "card": {"code": 0, "name": null}},
+    "agent": {"label": "Activate Ash Blossom & Joyous Spring", "card": {"code": 14558128, "name": "Ash Blossom & Joyous Spring"}},
+    "policy_p_yours": 0.2,
+    "policy_p_agent": 0.68,
+    "missed_response": true,
+    "auto_passed": false,
+    "note": "You passed; the agent would activate Activate Ash Blossom & Joyous Spring (-9.4 pts)",
+    "est_yours": 0.41,
+    "est_agent": 0.504
+  }
+}

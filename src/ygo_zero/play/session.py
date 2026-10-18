@@ -24,7 +24,9 @@ from ygo_zero.engine.duel import DuelConfig, Engine
 from ygo_zero.engine.env import PyEnv
 
 # Chain-window timings (EDOPro TIMING_*) that mark a bare phase-transition window.
-_T_PHASES = 0x1 | 0x2 | 0x4 | 0x8 | 0x10 | 0x20 | 0x1000000 | 0x4000000  # DP SP M-end BP-start/end EP, BP, BP-step-end
+_T_PHASES = (
+    0x1 | 0x2 | 0x4 | 0x8 | 0x10 | 0x20 | 0x1000000 | 0x4000000
+)  # DP SP M-end BP-start/end EP, BP, BP-step-end
 _T_CHAIN_END = 0x8000
 _T_DRAW, _T_TOHAND = 0x10000, 0x200000
 # What may happen since the human's last decision for a window to stay "quiet".
@@ -55,11 +57,21 @@ class DuelSession:
     human's engine seat (the bot holds the other one).
     """
 
-    def __init__(self, engine: Engine, cfg: DuelConfig, human_seat: int, *,
-                 bot=None, launcher=None, seed: int | None = None,
-                 human_side: tuple = (), human_name: str = "human",
-                 record_root: Path = Path("runs/web"),
-                 human_auto: bool = False, record_meta: dict | None = None) -> None:
+    def __init__(
+        self,
+        engine: Engine,
+        cfg: DuelConfig,
+        human_seat: int,
+        *,
+        bot=None,
+        launcher=None,
+        seed: int | None = None,
+        human_side: tuple = (),
+        human_name: str = "human",
+        record_root: Path = Path("runs/web"),
+        human_auto: bool = False,
+        record_meta: dict | None = None,
+    ) -> None:
         if (bot is None) == (launcher is None):
             raise ValueError("DuelSession needs exactly one of bot= / launcher=")
         self.engine = engine
@@ -96,8 +108,8 @@ class DuelSession:
         self.product_info = None
         if self.launcher is not None:
             self.driver = self.launcher.start_duel(
-                self.engine, self.cfg, self.bot_seat,
-                game_seed=self.seed, ws_seed=self.seed)
+                self.engine, self.cfg, self.bot_seat, game_seed=self.seed, ws_seed=self.seed
+            )
             self.product_info = self.launcher.record_info(self.seed)
 
     def close(self) -> None:
@@ -112,8 +124,7 @@ class DuelSession:
     @property
     def need_human(self) -> bool:
         """A multi-option prompt waits for the human (after singletons are settled)."""
-        return (not self.env.done and self.env.player == self.human_seat
-                and len(self.env.opts) > 1)
+        return not self.env.done and self.env.player == self.human_seat and len(self.env.opts) > 1
 
     # --- lockstep (driver mode) ---
 
@@ -128,7 +139,8 @@ class DuelSession:
         if (want["player"], want["n_options"]) != pre:
             raise DriverDiverged(
                 f"outer decision {k}: host (player={pre[0]}, options={pre[1]}) vs "
-                f"product (player={want['player']}, options={want['n_options']})")
+                f"product (player={want['player']}, options={want['n_options']})"
+            )
 
     # --- stepping ---
 
@@ -233,7 +245,7 @@ class DuelSession:
             if env.history[i].actor == self.human_seat:
                 last = i
                 break
-        for e in env.history[last + 1:]:
+        for e in env.history[last + 1 :]:
             try:
                 if Kind(e.row[0]) not in _QUIET_KINDS:
                     return None
@@ -281,38 +293,62 @@ class DuelSession:
             mine = host_to_product(self.engine, self.cfg, env.choices)
             if [int(c) for c in mine] != [int(c) for c in res.choices]:
                 raise DriverDiverged(
-                    f"choice history mismatch: host {len(mine)} vs product {len(res.choices)} steps")
+                    f"choice history mismatch: host {len(mine)} vs product {len(res.choices)} steps"
+                )
             if res.winner != env.duel.winner or res.truncated:
                 raise DriverDiverged(
                     f"ending mismatch: product winner={res.winner} truncated={res.truncated} vs "
-                    f"host winner={env.duel.winner}")
-        self.result = DuelResult(env.duel.winner, env.duel.turn, list(env.choices),
-                                 [e.actor for e in env.history])
+                    f"host winner={env.duel.winner}"
+                )
+        self.result = DuelResult(
+            env.duel.winner, env.duel.turn, list(env.choices), [e.actor for e in env.history]
+        )
         return self.result
 
     def surrender(self, by_human: bool = True) -> DuelResult:
         """The human surrenders (or disconnects): the other seat wins."""
         env = self.env
         winner = self.bot_seat if by_human else self.human_seat
-        self.result = DuelResult(winner, env.duel.turn, list(env.choices),
-                                 [e.actor for e in env.history], surrendered=by_human)
+        self.result = DuelResult(
+            winner, env.duel.turn, list(env.choices), [e.actor for e in env.history], surrendered=by_human
+        )
         return self.result
 
     # --- record ---
 
-    def write_record(self, result: DuelResult, seed: int | None = None) -> Path:
+    def write_record(
+        self, result: DuelResult, seed: int | None = None, auto_passed: set[int] | None = None
+    ) -> Path:
         """The host's record format: game.jsonl (replayable) + human.ydk."""
         bot = self.launcher if self.launcher is not None else self.bot
         bot_name = getattr(getattr(bot, "bot_deck", None), "name", "") or "bot"
         return write_record(
-            self.record_root, self.cfg, self.seed if seed is None else seed, result,
-            human_seat=self.human_seat, human_side=self.human_side,
-            bot_name=bot_name, product_info=self.product_info, meta=self.record_meta)
+            self.record_root,
+            self.cfg,
+            self.seed if seed is None else seed,
+            result,
+            human_seat=self.human_seat,
+            human_side=self.human_side,
+            bot_name=bot_name,
+            product_info=self.product_info,
+            meta=self.record_meta,
+            auto_passed=auto_passed,
+        )
 
 
-def write_record(record_root: Path, cfg: DuelConfig, seed: int, result: DuelResult, *,
-                 human_seat: int, human_side: tuple = (), bot_name: str = "bot",
-                 product_info: dict | None = None, meta: dict | None = None) -> Path:
+def write_record(
+    record_root: Path,
+    cfg: DuelConfig,
+    seed: int,
+    result: DuelResult,
+    *,
+    human_seat: int,
+    human_side: tuple = (),
+    bot_name: str = "bot",
+    product_info: dict | None = None,
+    meta: dict | None = None,
+    auto_passed: set[int] | None = None,
+) -> Path:
     """Write one duel's record directory (game.jsonl + human.ydk + bot.ydk); returns
     game.jsonl. `meta` adds fields (e.g. human_deck, bot_deck, mode, chain)."""
     ts = time.strftime("%Y%m%d-%H%M%S")
@@ -326,15 +362,23 @@ def write_record(record_root: Path, cfg: DuelConfig, seed: int, result: DuelResu
         except FileExistsError:
             continue
     rec = {
-        "game_idx": 0, "decks": ["human" if i == human_seat else bot_name for i in (0, 1)],
-        "seed": seed, "choices": result.choices,
+        "game_idx": 0,
+        "decks": ["human" if i == human_seat else bot_name for i in (0, 1)],
+        "seed": seed,
+        "choices": result.choices,
         "auto_single": False,  # replay with PyEnv(..., auto_single=False)
-        "actors": result.actors, "turns": result.turns, "winner": result.winner,
-        "human_seat": human_seat, "surrendered": result.surrendered,
-        "disconnected": result.disconnected, "diverged": result.diverged,
+        "actors": result.actors,
+        "turns": result.turns,
+        "winner": result.winner,
+        "human_seat": human_seat,
+        "surrendered": result.surrendered,
+        "disconnected": result.disconnected,
+        "diverged": result.diverged,
     }
     if product_info is not None:
         rec["product"] = product_info
+    if auto_passed is not None:
+        rec["auto_passed"] = sorted(int(x) for x in auto_passed)
     for k, v in (meta or {}).items():
         rec.setdefault(k, v)
     (outdir / "game.jsonl").write_text(json.dumps(rec) + "\n")
@@ -347,6 +391,7 @@ def write_record(record_root: Path, cfg: DuelConfig, seed: int, result: DuelResu
     bydk = "#main\n" + "".join(f"{c}\n" for c in bot.main)
     bydk += "#extra\n" + "".join(f"{c}\n" for c in bot.extra)
     (outdir / "bot.ydk").write_text(bydk)
-    print(f"record -> {outdir / 'game.jsonl'} (winner seat {result.winner}, "
-          f"{result.turns} turns)", flush=True)
+    print(
+        f"record -> {outdir / 'game.jsonl'} (winner seat {result.winner}, {result.turns} turns)", flush=True
+    )
     return outdir / "game.jsonl"

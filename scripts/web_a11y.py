@@ -69,15 +69,36 @@ STATES = [
     ("winchance-board", "18&winchance=1", "phone"),
     ("winchance-menu", "1&gamemenu=1&winchance=1", "phone"),
     ("winchance-stats", "19&log=1&logtab=stats&winchance=1", "phone"),
+    # Post-game review: summary + list, mistakes filter, decision board, game over.
+    ("review-tab", "7&log=1&logtab=review&review=1", "phone"),
+    ("review-mistakes", "7&log=1&logtab=review&review=1&reviewfilter=mistakes", "phone"),
+    ("review-frame", "7&log=1&logtab=review&review=1&reviewframe=1", "phone"),
+    ("review-small", "7&log=1&logtab=review&review=1", "small"),
+    ("gameover-review", "7&review=1", "phone"),
 ]
 VIEWPORTS = {
-    "phone": {"viewport": {"width": 412, "height": 915}, "device_scale_factor": 2, "is_mobile": True, "has_touch": True},
-    "small": {"viewport": {"width": 360, "height": 780}, "device_scale_factor": 2, "is_mobile": True, "has_touch": True},
+    "phone": {
+        "viewport": {"width": 412, "height": 915},
+        "device_scale_factor": 2,
+        "is_mobile": True,
+        "has_touch": True,
+    },
+    "small": {
+        "viewport": {"width": 360, "height": 780},
+        "device_scale_factor": 2,
+        "is_mobile": True,
+        "has_touch": True,
+    },
     "desktop": {"viewport": {"width": 1280, "height": 800}},
     # 200% browser zoom on a 1280x800 window: 640x400 CSS px at device scale 2.
     "zoom200": {"viewport": {"width": 640, "height": 400}, "device_scale_factor": 2},
     # Large system font on a phone (Android Chrome scales the page): 412 px at 130%.
-    "bigtext": {"viewport": {"width": 317, "height": 704}, "device_scale_factor": 2.6, "is_mobile": True, "has_touch": True},
+    "bigtext": {
+        "viewport": {"width": 317, "height": 704},
+        "device_scale_factor": 2.6,
+        "is_mobile": True,
+        "has_touch": True,
+    },
 }
 
 # Shared colour helpers + the text contrast scan (runs in the page).
@@ -242,11 +263,14 @@ TARGETS_JS = r"""() => {
 def run_axe(page) -> list[dict]:
     if not page.evaluate("!!window.axe"):
         page.add_script_tag(url=AXE_URL)
-    res = page.evaluate("""async (tags) => {
+    res = page.evaluate(
+        """async (tags) => {
       const r = await axe.run(document, {runOnly: {type: 'tag', values: tags}, resultTypes: ['violations']});
       return r.violations.map((v) => ({id: v.id, impact: v.impact, help: v.help,
         nodes: v.nodes.slice(0, 4).map((n) => (n.target || []).join(' ') + ' :: ' + (n.failureSummary || '').split('\\n').slice(1, 2).join(''))}));
-    }""", AXE_TAGS)
+    }""",
+        AXE_TAGS,
+    )
     return res
 
 
@@ -280,20 +304,25 @@ def main() -> int:
                 page.wait_for_timeout(450)
                 page.add_script_tag(content=COLOR_JS)
                 if vp in ("zoom200", "bigtext") and page.evaluate(
-                        "document.documentElement.scrollWidth > window.innerWidth + 1"):
+                    "document.documentElement.scrollWidth > window.innerWidth + 1"
+                ):
                     errors.append(f"{name}: horizontal scroll at {vp}")
                 viol = run_axe(page)
                 axe_all[name] = viol
                 for v in viol:
                     if v["impact"] in ("serious", "critical"):
-                        errors.append(f"axe {v['impact']} in {name}: {v['id']} ({v['help']}) {v['nodes'][:2]}")
+                        errors.append(
+                            f"axe {v['impact']} in {name}: {v['id']} ({v['help']}) {v['nodes'][:2]}"
+                        )
                 for row in page.evaluate("window.__a11y.textScan()"):
                     key = (row["sig"], row["fg"], row["bg"], round(row["size"]))
                     if key not in text_rows or row["ratio"] < text_rows[key]["ratio"]:
                         row["state"] = name
                         text_rows[key] = row
                 for row in page.evaluate(MARKS_JS, MARKS):
-                    if row["label"] not in mark_rows or row.get("ratio", 0) < mark_rows[row["label"]].get("ratio", 99):
+                    if row["label"] not in mark_rows or row.get("ratio", 0) < mark_rows[row["label"]].get(
+                        "ratio", 99
+                    ):
                         row["state"] = name
                         mark_rows[row["label"]] = row
                 if vp in ("phone", "small", "desktop"):
@@ -301,8 +330,10 @@ def main() -> int:
                         k = t["cls"] + "|" + t["name"]
                         if min(t["w"], t["h"]) < 24:
                             small_targets.setdefault(k, dict(t, state=name))
-                        if any(p in t["cls"] for p in ("bigbtn", "phbtn", "startbtn", "iconbtn", "dx")) \
-                                and min(t["w"], t["h"]) < 44:
+                        if (
+                            any(p in t["cls"] for p in ("bigbtn", "phbtn", "startbtn", "iconbtn", "dx"))
+                            and min(t["w"], t["h"]) < 44
+                        ):
                             primary_small.setdefault(k, dict(t, state=name))
 
             # Detail + log drawer opened from the keyboard: Enter opens, Escape closes, focus returns.
@@ -323,7 +354,9 @@ def main() -> int:
                 axe_all[name] = viol
                 for v in viol:
                     if v["impact"] in ("serious", "critical"):
-                        errors.append(f"axe {v['impact']} in {name}: {v['id']} ({v['help']}) {v['nodes'][:2]}")
+                        errors.append(
+                            f"axe {v['impact']} in {name}: {v['id']} ({v['help']}) {v['nodes'][:2]}"
+                        )
 
             # Reduced motion + live region.
             rm = browser.new_context(reduced_motion="reduce", **VIEWPORTS["phone"])
@@ -354,10 +387,14 @@ def main() -> int:
         bad = row["ratio"] < row["need"] and not row["disabled"]
         fails += bad
         flag = "FAIL" if bad else ("img " if row["image"] else "    ")
-        print(f"  {row['ratio']:6.2f} {row['need']:4}  {row['fg']} {row['bg']} {row['size']:4.0f}  {flag} {row['sig']}"
-              f"  [{row['text']} · {row['state']}]" + ("  (disabled)" if row["disabled"] else ""))
+        print(
+            f"  {row['ratio']:6.2f} {row['need']:4}  {row['fg']} {row['bg']} {row['size']:4.0f}  {flag} {row['sig']}"
+            f"  [{row['text']} · {row['state']}]" + ("  (disabled)" if row["disabled"] else "")
+        )
         if bad and not row["image"]:
-            errors.append(f"text contrast {row['ratio']} < {row['need']}: {row['sig']} '{row['text']}' ({row['state']})")
+            errors.append(
+                f"text contrast {row['ratio']} < {row['need']}: {row['sig']} '{row['text']}' ({row['state']})"
+            )
     print(f"  styles: {len(text_rows)}, below threshold: {fails}")
 
     print("\n== non-text marks (>= 3:1 against what they sit on) ==")
@@ -366,7 +403,9 @@ def main() -> int:
             print(f"  ----  {row['label']}: {row['error']}")
             continue
         bad = row["ratio"] < 3
-        print(f"  {row['ratio']:5.2f}  {'FAIL' if bad else '    '} {row['label']:28} {row['fg']} on {row['bg']}  ({row['state']})")
+        print(
+            f"  {row['ratio']:5.2f}  {'FAIL' if bad else '    '} {row['label']:28} {row['fg']} on {row['bg']}  ({row['state']})"
+        )
         if bad:
             errors.append(f"mark contrast {row['ratio']} < 3: {row['label']} ({row['state']})")
 
@@ -436,7 +475,8 @@ def keyboard_checks(page, errors) -> dict:
     page.keyboard.press(" ")
     page.wait_for_timeout(250)
     out["gamemenu_dialog"] = page.evaluate(
-        "(() => { const d = document.querySelector('#gamemenu'); return !!d && d.getAttribute('role') === 'dialog' && d.getAttribute('aria-modal') === 'true'; })()")
+        "(() => { const d = document.querySelector('#gamemenu'); return !!d && d.getAttribute('role') === 'dialog' && d.getAttribute('aria-modal') === 'true'; })()"
+    )
     out["focus_in_gamemenu"] = page.evaluate("!!document.activeElement.closest('#gamemenu')")
     # Tab stays inside the modal.
     inside = True
@@ -447,13 +487,16 @@ def keyboard_checks(page, errors) -> dict:
     page.keyboard.press("Escape")
     page.wait_for_timeout(250)
     out["escape_closes_gamemenu"] = page.evaluate("!document.querySelector('#gamemenu')")
-    out["focus_returned_menu_btn"] = page.evaluate("document.activeElement.getAttribute('data-act')") == "gamemenu"
+    out["focus_returned_menu_btn"] = (
+        page.evaluate("document.activeElement.getAttribute('data-act')") == "gamemenu"
+    )
     # Card detail from the keyboard (a non-actionable face-up card).
     page.locator(".field .card[role=button]:not(.actionable)").first.focus()
     page.keyboard.press("Enter")
     page.wait_for_timeout(250)
     out["detail_dialog"] = page.evaluate(
-        "(() => { const d = document.querySelector('#detail'); return !!d && d.getAttribute('aria-modal') === 'true' && !!document.activeElement.closest('#detail'); })()")
+        "(() => { const d = document.querySelector('#detail'); return !!d && d.getAttribute('aria-modal') === 'true' && !!document.activeElement.closest('#detail'); })()"
+    )
     page.keyboard.press("Escape")
     page.wait_for_timeout(250)
     out["escape_closes_detail"] = page.evaluate("!document.querySelector('#detail')")
@@ -526,7 +569,9 @@ def live_region_checks(page, base, errors) -> dict:
     # A new prompt is announced.
     page.goto(f"{base}?mock=1&i=2", wait_until="networkidle")
     page.wait_for_timeout(500)
-    txt = page.evaluate("((document.getElementById('sr-live') || {}).lastElementChild || {}).textContent || ''")
+    txt = page.evaluate(
+        "((document.getElementById('sr-live') || {}).lastElementChild || {}).textContent || ''"
+    )
     out["prompt_announcement"] = txt.strip()[:80]
     if not txt.strip():
         errors.append("live region: a new prompt was not announced")

@@ -40,15 +40,17 @@ def _tiny_forward():
     codes = sorted({c for d in decks for c in list(d.main) + list(d.extra)} - {0})
     rng = np.random.default_rng(0)
     n = len(codes)
-    emb = {"codes": np.array(codes), "card": rng.normal(size=(n, 8)).astype(np.float32),
-           "effects": rng.normal(size=(n, 2, 8)).astype(np.float32),
-           "n_effects": np.ones(n, np.int64)}
+    emb = {
+        "codes": np.array(codes),
+        "card": rng.normal(size=(n, 8)).astype(np.float32),
+        "effects": rng.normal(size=(n, 2, 8)).astype(np.float32),
+        "n_effects": np.ones(n, np.int64),
+    }
     net = PolicyNet(emb, d=16, layers=1, heads=2, dropout=0.0).eval()
 
     @torch.no_grad()
     def forward(obs_list):
-        t = {k: torch.from_numpy(np.ascontiguousarray(np.stack([o[k] for o in obs_list])))
-             for k in OBS_KEYS}
+        t = {k: torch.from_numpy(np.ascontiguousarray(np.stack([o[k] for o in obs_list]))) for k in OBS_KEYS}
         return net(t).numpy()
 
     return forward
@@ -63,9 +65,17 @@ class _TinyLauncher:
 
     def start_duel(self, engine, config, bot_seat, *, game_seed, ws_seed, human_fn=None):
         return ProductDriver(
-            engine, config, bot_seat=bot_seat, base_logits=self.forward, value=None,
-            search_kwargs={}, game_seed=game_seed, ws_seed=ws_seed,
-            fast=True, human_fn=human_fn).start()
+            engine,
+            config,
+            bot_seat=bot_seat,
+            base_logits=self.forward,
+            value=None,
+            search_kwargs={},
+            game_seed=game_seed,
+            ws_seed=ws_seed,
+            fast=True,
+            human_fn=human_fn,
+        ).start()
 
     def record_info(self, seed: int) -> dict:
         return {"ckpt": "tiny-test", "fast": True, "game_seed": seed, "search": "tiny"}
@@ -95,8 +105,13 @@ def _make_app(tmp_path, engine, mode_factory=None):
             return mode_factory(mode)
         return RandomBot(1234)
 
-    return create_app(token=TOKEN, engine=engine, make_opponent=make_opponent,
-                      record_root=tmp_path / "runs", pics_dir=tmp_path / "pics")
+    return create_app(
+        token=TOKEN,
+        engine=engine,
+        make_opponent=make_opponent,
+        record_root=tmp_path / "runs",
+        pics_dir=tmp_path / "pics",
+    )
 
 
 def _client(app):
@@ -105,12 +120,32 @@ def _client(app):
 
 # --- schema ---
 
-_CARD_KEYS = {"uid": str, "code": int, "faceup": bool, "pos": (str, type(None)),
-              "atk": int, "def": int, "level": int, "rank": int, "link": int,
-              "counters": int, "overlays": list}
-_SIDE_KEYS = {"lp": int, "deck": int, "extra_count": int, "hand": list,
-              "mzone": list, "emz": list, "szone": list, "field": (dict, type(None)),
-              "gy": list, "banished": list, "extra": list}
+_CARD_KEYS = {
+    "uid": str,
+    "code": int,
+    "faceup": bool,
+    "pos": (str, type(None)),
+    "atk": int,
+    "def": int,
+    "level": int,
+    "rank": int,
+    "link": int,
+    "counters": int,
+    "overlays": list,
+}
+_SIDE_KEYS = {
+    "lp": int,
+    "deck": int,
+    "extra_count": int,
+    "hand": list,
+    "mzone": list,
+    "emz": list,
+    "szone": list,
+    "field": (dict, type(None)),
+    "gy": list,
+    "banished": list,
+    "extra": list,
+}
 
 
 def _check_card(card, where: str) -> None:
@@ -171,9 +206,20 @@ def _check_state(msg: dict) -> None:
     if prompt is not None:
         assert set(prompt) == {"id", "kind", "text", "card", "options", "min", "max"}
         assert isinstance(prompt["id"], int) and isinstance(prompt["text"], str)
-        assert prompt["kind"] in ("idle", "battle", "chain", "card", "yesno",
-                                  "effectyn", "option", "position", "place",
-                                  "announce", "sort", "counter")
+        assert prompt["kind"] in (
+            "idle",
+            "battle",
+            "chain",
+            "card",
+            "yesno",
+            "effectyn",
+            "option",
+            "position",
+            "place",
+            "announce",
+            "sort",
+            "counter",
+        )
         assert isinstance(prompt["min"], int) and isinstance(prompt["max"], int)
         if prompt["card"] is not None:
             _check_card(prompt["card"], "prompt.card")
@@ -187,9 +233,17 @@ def _check_state(msg: dict) -> None:
             if o["where"] is not None:
                 assert set(o["where"]) == {"side", "zone", "seq"}
                 assert o["where"]["side"] in ("you", "bot")
-                assert o["where"]["zone"] in ("hand", "mzone", "emz", "szone",
-                                              "field", "gy", "banished",
-                                              "extra", "deck")
+                assert o["where"]["zone"] in (
+                    "hand",
+                    "mzone",
+                    "emz",
+                    "szone",
+                    "field",
+                    "gy",
+                    "banished",
+                    "extra",
+                    "deck",
+                )
             assert o["effect"] is None or isinstance(o["effect"], str)
     assert isinstance(msg["log"], list)
     for e in msg["log"]:
@@ -198,19 +252,38 @@ def _check_state(msg: dict) -> None:
         if e["card"] is not None:
             _check_card(e["card"], "log.card")
     assert msg["thinking"] is None or (
-        set(msg["thinking"]) == {"seconds"}
-        and isinstance(msg["thinking"]["seconds"], float))
+        set(msg["thinking"]) == {"seconds"} and isinstance(msg["thinking"]["seconds"], float)
+    )
     assert msg["result"] is None or (
         set(msg["result"]) == {"winner", "reason"}
         and msg["result"]["winner"] in ("you", "bot")
-        and isinstance(msg["result"]["reason"], str))
+        and isinstance(msg["result"]["reason"], str)
+    )
     st = msg.get("stats")
     if st is not None:
-        for k in ("turn", "lp_you", "lp_bot", "dealt_you", "dealt_bot",
-                  "adv_you", "adv_bot", "adv_diff", "windows_used",
-                  "windows_total", "neg_you", "neg_were_you", "neg_bot",
-                  "neg_were_bot", "chart_labels", "chart_you", "chart_bot",
-                  "moments", "ledger", "opp_seen", "you_used"):
+        for k in (
+            "turn",
+            "lp_you",
+            "lp_bot",
+            "dealt_you",
+            "dealt_bot",
+            "adv_you",
+            "adv_bot",
+            "adv_diff",
+            "windows_used",
+            "windows_total",
+            "neg_you",
+            "neg_were_you",
+            "neg_bot",
+            "neg_were_bot",
+            "chart_labels",
+            "chart_you",
+            "chart_bot",
+            "moments",
+            "ledger",
+            "opp_seen",
+            "you_used",
+        ):
             assert k in st, f"stats missing {k}"
         assert st["windows_used"] <= st["windows_total"]
         assert len(st["chart_labels"]) == len(st["chart_you"]) == len(st["chart_bot"])
@@ -248,6 +321,7 @@ def _codes_in_state(msg: dict) -> tuple[set[int], str]:
         for e in st.get(lst_key) or []:
             if isinstance(e, dict) and e.get("code"):
                 codes.add(int(e["code"]))
+
     # Name checks scan everything except effect descriptions: a public card's effect text may name a hidden card
     # ("... using \"Fallen of Albaz\" as material") without revealing it (NOTEBOOK 2026-10-17).
     def strip(x):
@@ -281,13 +355,17 @@ def _play_to_end(ws, rng, *, collect=None) -> dict:
             return msg
         if msg["prompt"] is not None:
             n = len(msg["prompt"]["options"])
-            ws.send_json({"t": "choose", "prompt": msg["prompt"]["id"],
-                          "index": rng.randrange(n)})
+            ws.send_json({"t": "choose", "prompt": msg["prompt"]["id"], "index": rng.randrange(n)})
 
 
 def _new_game(ws, human_text: str, bot_text: str, **kw) -> None:
-    msg = {"t": "new_game", "deck": {"ydk": human_text},
-           "bot_deck": {"ydk": bot_text}, "first": "me", "mode": "random"}
+    msg = {
+        "t": "new_game",
+        "deck": {"ydk": human_text},
+        "bot_deck": {"ydk": bot_text},
+        "first": "me",
+        "mode": "random",
+    }
     msg.update(kw)
     ws.send_json(msg)
 
@@ -298,16 +376,14 @@ def _hidden_codes_of(env, human: int) -> set[int]:
     duel = env.duel
     visible = Board(duel, human).visible_codes()
     hidden = set()
-    for loc in (C.LOCATION_HAND, C.LOCATION_MZONE, C.LOCATION_SZONE,
-                C.LOCATION_REMOVED, C.LOCATION_EXTRA):
+    for loc in (C.LOCATION_HAND, C.LOCATION_MZONE, C.LOCATION_SZONE, C.LOCATION_REMOVED, C.LOCATION_EXTRA):
         for c in duel.query_location(bot, loc):
             if c is not None and c.code and c.code not in visible:
                 hidden.add(c.code)
     return hidden
 
 
-def _verify_no_leak(engine, cfg, human_seat: int, choices: list[int],
-                    messages: list[dict]) -> None:
+def _verify_no_leak(engine, cfg, human_seat: int, choices: list[int], messages: list[dict]) -> None:
     """Every code in the bot's hand/face-down zones never reaches the client
     before it is public: each state's `log` carries absolute history indices
     (`n`), and the replay is deterministic, so message with max-n h is checked
@@ -409,8 +485,11 @@ def _replay_record(engine, record_root: Path, last: dict, decks: tuple) -> tuple
     assert len(subs) == 1 and (subs[0] / "human.ydk").is_file()
     rec = json.loads((subs[0] / "game.jsonl").read_text())
     human, bot = decks
-    cfg = (DuelConfig(human, bot, seed=rec["seed"]) if rec["human_seat"] == 0
-           else DuelConfig(bot, human, seed=rec["seed"]))
+    cfg = (
+        DuelConfig(human, bot, seed=rec["seed"])
+        if rec["human_seat"] == 0
+        else DuelConfig(bot, human, seed=rec["seed"])
+    )
     assert rec["auto_single"] is False
     assert len(rec["actors"]) == len(rec["choices"]) and rec["choices"]
     env = PyEnv.replay(engine, cfg, rec["choices"], auto_single=False)
@@ -440,8 +519,8 @@ def test_full_game_tiny_product(tmp_path, engine):
 
     forward = _tiny_forward()
     app, last, messages, human_text, bot_text = _full_game(
-        tmp_path, engine, "product",
-        make_opponent=lambda mode: _TinyLauncher(forward))
+        tmp_path, engine, "product", make_opponent=lambda mode: _TinyLauncher(forward)
+    )
     _ = app
     human, bot = parse_ydk(human_text), parse_ydk(bot_text)
     rec, cfg = _replay_record(engine, tmp_path / "runs", last, (human, bot))
@@ -503,8 +582,7 @@ def test_img_miss_then_cache(tmp_path, engine, monkeypatch):
 
     app = _make_app(tmp_path, engine)
     calls = []
-    monkeypatch.setattr(S, "_fetch_img",
-                        lambda url, timeout=5.0: calls.append(url) or JPEG)
+    monkeypatch.setattr(S, "_fetch_img", lambda url, timeout=5.0: calls.append(url) or JPEG)
     client = _client(app)
     r = client.get("/img/456.jpg", params={"t": TOKEN, "size": "small"})
     assert r.status_code == 200 and r.content == JPEG
@@ -595,8 +673,9 @@ def test_chain_auto_vs_all(tmp_path, engine):
             ws.receive_text()
             _new_game(ws, human_text, bot_text, chain=chain, seed=3)
             last = _play_to_end(ws, random.Random(3), collect=msgs)
-        rec, _ = _replay_record(engine, tmp_path / chain / "runs", last,
-                                (parse_ydk(human_text), parse_ydk(bot_text)))
+        rec, _ = _replay_record(
+            engine, tmp_path / chain / "runs", last, (parse_ydk(human_text), parse_ydk(bot_text))
+        )
         assert rec["chain"] == chain and rec["mode"] == "random"
         assert rec["human_deck"] == "pasted" and rec["bot_deck"] == "pasted"
         assert (next((tmp_path / chain / "runs").iterdir()) / "bot.ydk").is_file()
@@ -612,6 +691,7 @@ class _SlowLauncher(_TinyLauncher):
         def slow(obs_list):
             time.sleep(delay)
             return forward(obs_list)
+
         super().__init__(slow)
 
 
@@ -663,14 +743,14 @@ def test_settings_message(tmp_path, engine):
 
 # --- 6. protocol errors ---
 
+
 def test_choose_errors(tmp_path, engine):
     app = _make_app(tmp_path, engine)
     with _client(app).websocket_connect(f"/ws?t={TOKEN}") as ws:
         ws.receive_text()  # lobby
         ws.send_json({"t": "choose", "prompt": 0, "index": 0})
         assert json.loads(ws.receive_text())["t"] == "error"  # no game yet
-        ws.send_json({"t": "new_game", "deck": {"ydk": "nonsense"},
-                      "mode": "random"})
+        ws.send_json({"t": "new_game", "deck": {"ydk": "nonsense"}, "mode": "random"})
         assert json.loads(ws.receive_text())["t"] == "error"  # illegal deck
         ws.send_json({"t": "bogus"})
         assert json.loads(ws.receive_text())["t"] == "error"  # unknown type
@@ -688,15 +768,20 @@ def test_user_record_prompts(engine):
     d = Path("tests/fixtures/web/mitsurugi-20261016")
     rec = json.loads((d / "game.jsonl").read_text())
     human, bot = load_ydk(d / "human.ydk"), load_ydk(d / "bot.ydk")
-    cfg = (DuelConfig(human, bot, seed=rec["seed"]) if rec["human_seat"] == 0
-           else DuelConfig(bot, human, seed=rec["seed"]))
+    cfg = (
+        DuelConfig(human, bot, seed=rec["seed"])
+        if rec["human_seat"] == 0
+        else DuelConfig(bot, human, seed=rec["seed"])
+    )
     env = PyEnv.replay(engine, cfg, [], auto_single=False)
     hs = rec["human_seat"]
     seen = set()
     for choice in rec["choices"]:
         p = build_prompt(env, hs, 1)
         if p is not None:
-            texts = [p["text"]] + [o["label"] for o in p["options"]] + [o["effect"] or "" for o in p["options"]]
+            texts = (
+                [p["text"]] + [o["label"] for o in p["options"]] + [o["effect"] or "" for o in p["options"]]
+            )
             assert not [t for t in texts if _RAW_FMT.search(t)], texts
             if p["kind"] == "position":
                 seen.add("position")
@@ -727,8 +812,13 @@ def _play_product_value(tmp_path, engine, *, winchance: bool, seed=0, first="bot
         assert json.loads(ws.receive_text())["t"] == "lobby"
         if winchance:
             ws.send_json({"t": "settings", "chain": "auto", "winchance": True})
-        msg = {"t": "new_game", "deck": {"ydk": human_text},
-               "bot_deck": {"ydk": bot_text}, "first": first, "mode": "product"}
+        msg = {
+            "t": "new_game",
+            "deck": {"ydk": human_text},
+            "bot_deck": {"ydk": bot_text},
+            "first": first,
+            "mode": "product",
+        }
         ws.send_json(msg)
         _play_to_end(ws, random.Random(seed), collect=states)
     return app, launcher, states
@@ -774,8 +864,9 @@ def test_winchance_on_product(tmp_path, engine):
     assert launcher.seen, "the value net was never called"
     human_text = (FIXTURES / "BlueEyes.ydk").read_text()
     bot_text = (FIXTURES / "Branded.ydk").read_text()
-    rec, cfg = _replay_record(engine, tmp_path / "runs", states[-1],
-                              (parse_ydk(human_text), parse_ydk(bot_text)))
+    rec, cfg = _replay_record(
+        engine, tmp_path / "runs", states[-1], (parse_ydk(human_text), parse_ydk(bot_text))
+    )
     env = PyEnv.replay(engine, cfg, [], auto_single=False)
     hs = rec["human_seat"]
     first_player = env.duel.first_player
@@ -784,9 +875,12 @@ def test_winchance_on_product(tmp_path, engine):
         if env.done:
             break
         if env.player == hs and len(env.opts) > 1:
-            want.append((int(env.duel.turn),
-                         {k: np.ascontiguousarray(v)[np.newaxis, ...]
-                          for k, v in env._observe().items()}))
+            want.append(
+                (
+                    int(env.duel.turn),
+                    {k: np.ascontiguousarray(v)[np.newaxis, ...] for k, v in env._observe().items()},
+                )
+            )
         env.step(int(choice))
     assert len(launcher.seen) <= len(want), "more value calls than human decisions"
     matched = []
@@ -794,12 +888,12 @@ def test_winchance_on_product(tmp_path, engine):
         assert batch["global"].shape[0] == 1
         g = batch["global"][0]
         assert int(g[4]) == int(first_player == hs), "value obs is not the human seat's"
-        hits = [i for i, (_, w) in enumerate(want)
-                if all(np.array_equal(batch[k], w[k]) for k in w)]
+        hits = [i for i, (_, w) in enumerate(want) if all(np.array_equal(batch[k], w[k]) for k in w)]
         assert hits, "value obs matches no human decision of this game"
         matched.extend(hits)
-    assert len(set(matched)) == len(matched) == len(launcher.seen), \
+    assert len(set(matched)) == len(matched) == len(launcher.seen), (
         "each value call must sit at a distinct human decision"
+    )
     # A new connection resets the switch: the stored value is not sent anymore.
     with _client(app).websocket_connect(f"/ws?t={TOKEN}") as ws2:
         assert json.loads(ws2.receive_text())["t"] == "lobby"
@@ -819,3 +913,198 @@ def test_settings_winchance_validation(tmp_path, engine):
         ws.send_json({"t": "settings", "winchance": True})  # no chain key: accepted
         ws.send_json({"t": "resync"})
         assert json.loads(ws.receive_text())["t"] == "lobby"  # no error in between
+
+
+# --- 9. post-game review (product mode only, after game over) ---
+
+
+def _tiny_review_launcher(forward):
+    class _L(_TinyLauncher):
+        def __init__(self) -> None:
+            super().__init__(forward)
+            seen: list[dict] = []
+            self._seen = seen
+
+            def value(batch):
+                import numpy as _np
+
+                self._seen.append({k: _np.array(v) for k, v in batch.items()})
+                n = next(iter(batch.values())).shape[0]
+                return _np.zeros(n, dtype=_np.float32)
+
+            self.value = value
+            self.value_seen = seen
+
+        def base_logits(self, obs_list):
+            return self.forward(obs_list)
+
+    return _L()
+
+
+def _play_tiny_to_end(ws, rng):
+    states = 0
+    while True:
+        raw = ws.receive_text()
+        msg = json.loads(raw)
+        if msg.get("t") == "error":
+            raise AssertionError(f"server error: {msg['text']}")
+        if msg.get("t") in ("review_progress", "review", "review_frame"):
+            continue  # a previous review's async messages: not part of this game
+        assert msg.get("t") == "state"
+        states += 1
+        assert states < 20000
+        if msg["result"] is not None:
+            return msg
+        if msg["prompt"] is not None:
+            ws.send_json(
+                {
+                    "t": "choose",
+                    "prompt": msg["prompt"]["id"],
+                    "index": rng.randrange(len(msg["prompt"]["options"])),
+                }
+            )
+
+
+def test_review_before_game_over_errors(tmp_path, engine):
+    forward = _tiny_forward()
+    launcher = _tiny_review_launcher(forward)
+    app = _make_app(tmp_path, engine, mode_factory=lambda mode: launcher)
+    human_text = (FIXTURES / "BlueEyes.ydk").read_text()
+    bot_text = (FIXTURES / "Branded.ydk").read_text()
+    with _client(app).websocket_connect(f"/ws?t={TOKEN}") as ws:
+        ws.receive_text()
+        _new_game(ws, human_text, bot_text, mode="product")
+        for _ in range(1000):  # drain to the first prompt (game is live, not over)
+            m = json.loads(ws.receive_text())
+            if m.get("prompt") is not None:
+                break
+        ws.send_json({"t": "review"})
+        for _ in range(1000):
+            m = json.loads(ws.receive_text())
+            if m.get("t") == "error":
+                break
+            assert m.get("t") == "state", m.get("t")
+        assert m["t"] == "error"
+
+
+def test_review_random_mode_errors(tmp_path, engine):
+    app = _make_app(tmp_path, engine)
+    human_text = (FIXTURES / "BlueEyes.ydk").read_text()
+    bot_text = (FIXTURES / "Branded.ydk").read_text()
+    with _client(app).websocket_connect(f"/ws?t={TOKEN}") as ws:
+        ws.receive_text()
+        _new_game(ws, human_text, bot_text, mode="random")
+        _play_to_end(ws, random.Random(0))
+        ws.send_json({"t": "review"})
+        err = json.loads(ws.receive_text())
+        assert err["t"] == "error" and err["text"] == "Review needs the full bot"
+
+
+def test_review_after_tiny_product_game(tmp_path, engine):
+    from ygo_zero.engine.env import PyEnv
+
+    forward = _tiny_forward()
+    launcher = _tiny_review_launcher(forward)
+    app = _make_app(tmp_path, engine, mode_factory=lambda mode: launcher)
+    human_text = (FIXTURES / "BlueEyes.ydk").read_text()
+    bot_text = (FIXTURES / "Branded.ydk").read_text()
+    with _client(app).websocket_connect(f"/ws?t={TOKEN}") as ws:
+        ws.receive_text()
+        _new_game(ws, human_text, bot_text, mode="product", first="me")
+        # Play a few human decisions then surrender: a finished (surrendered)
+        # game reviews the same way as a full one, but stays fast on CPU.
+        rng = random.Random(0)
+        last = None
+        human_moves = 0
+        for _ in range(2000):
+            m = json.loads(ws.receive_text())
+            if m.get("t") in ("review_progress", "review", "review_frame"):
+                continue
+            assert m.get("t") == "state"
+            if m["result"] is not None:
+                last = m
+                break
+            if m["prompt"] is not None:
+                ws.send_json(
+                    {
+                        "t": "choose",
+                        "prompt": m["prompt"]["id"],
+                        "index": rng.randrange(len(m["prompt"]["options"])),
+                    }
+                )
+                human_moves += 1
+                if human_moves >= 4:
+                    ws.send_json({"t": "surrender"})
+                    for _ in range(50):
+                        m2 = json.loads(ws.receive_text())
+                        if m2.get("t") == "state" and m2.get("result") is not None:
+                            last = m2
+                            break
+                    break
+        assert last is not None and last["result"] is not None
+        n_multi = None
+        ws.send_json({"t": "review"})
+        review = None
+        for _ in range(600):
+            m = json.loads(ws.receive_text())
+            if m.get("t") == "review_progress":
+                assert m["done"] <= m["total"]
+                continue
+            if m.get("t") == "review":
+                review = m
+                break
+            assert m.get("t") == "state", m.get("t")
+        assert review is not None, "no review message"
+        assert review["decisions"], "empty review"
+        # one entry per multi-option human decision, in order.
+        recs = [
+            json.loads((p / "game.jsonl").read_text())
+            for p in sorted((tmp_path / "runs").iterdir())
+            if p.is_dir()
+        ]
+        assert len(recs) == 1 and "auto_passed" in recs[0]
+        rec = recs[0]
+        from ygo_zero.decks import parse_ydk
+
+        human, bot = parse_ydk(human_text), parse_ydk(bot_text)
+        cfg = (
+            DuelConfig(human, bot, seed=rec["seed"])
+            if rec["human_seat"] == 0
+            else DuelConfig(bot, human, seed=rec["seed"])
+        )
+        env = PyEnv(engine, cfg, auto_single=False)
+        env.reset()
+        want = 0
+        for ch in rec["choices"]:
+            if env.done:
+                break
+            if env.player == rec["human_seat"] and len(env.opts) > 1:
+                want += 1
+            env.step(int(ch))
+        assert len(review["decisions"]) == want
+        assert [e["k"] for e in review["decisions"]] == list(range(want))
+        # cached: a second request returns the same review at once.
+        ws.send_json({"t": "review"})
+        again = json.loads(ws.receive_text())
+        assert again.get("t") == "review"
+        assert again["decisions"] == review["decisions"]
+        # the board snapshot for a decision.
+        ws.send_json({"t": "review_frame", "k": 0})
+        frame = json.loads(ws.receive_text())
+        assert frame.get("t") == "review_frame" and frame.get("k") == 0
+        assert "view" in frame and "options" in frame and "entry" in frame
+        _check_state(
+            {
+                "t": "state",
+                "view": frame["view"],
+                "prompt": None,
+                "log": [],
+                "cues": [],
+                "stats": last.get("stats"),
+                "winchance": None,
+                "thinking": None,
+                "result": None,
+            }
+        )
+        n_multi = want
+        assert n_multi is not None

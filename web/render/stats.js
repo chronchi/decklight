@@ -2,8 +2,8 @@
 // Pure functions of the server's `stats` object (web/stats.py); no game logic.
 import {thumbHTML, esc} from "./card.js";
 
-export const LOG_TABS = ["log", "stats", "cards"];
-const TAB_LABEL = {log: "Log", stats: "Stats", cards: "Cards"};
+export const LOG_TABS = ["log", "stats", "cards", "review"];
+const TAB_LABEL = {log: "Log", stats: "Stats", cards: "Cards", review: "Review"};
 
 export function tabStripHTML(active, prefix) {
   const p = prefix || "d";
@@ -191,4 +191,67 @@ export function cardsPanelHTML(st, mock) {
       : '<p class="emptytx">None yet.</p>') + "</section>";
   return sec("Opponent's cards seen", "Every bot card revealed this duel · ×N = times played.", opp) +
     sec("Your cards used", "Activated, summoned or set.", mine);
+}
+
+const MARK_META = {
+  "Good": {glyph: "○", cls: "good"},
+  "Inaccuracy": {glyph: "△", cls: "inacc"},
+  "Mistake": {glyph: "◇", cls: "mist"},
+  "Blunder": {glyph: "✕", cls: "blund"},
+  "Missed response": {glyph: "⊘", cls: "missed"},
+};
+
+export function markChip(mark) {
+  const m = MARK_META[mark] || {glyph: "○", cls: "good"};
+  return '<span class="mk ' + m.cls + '" aria-hidden="true">' + m.glyph + "</span>";
+}
+
+function reviewRowHTML(e, winChance) {
+  const m = MARK_META[e.mark] || MARK_META["Good"];
+  const pts = (typeof e.delta_pts === "number") ? (e.delta_pts <= 0 ? e.delta_pts : "+" + e.delta_pts) : "";
+  const ptsTxt = winChance ? " (" + pts + " pts)" : "";
+  const aria = winChance ? e.mark + ", " + pts + " points" : e.mark;
+  const you = (e.your && e.your.label) || "";
+  const ag = (e.agent && e.agent.label) || "";
+  return '<div role="listitem"><button class="rrow" data-reviewk="' + e.k + '" aria-label="' + esc(aria) + '">' +
+    '<span class="rmk ' + m.cls + '" aria-hidden="true">' + m.glyph + "</span>" +
+    '<span class="rtx"><span class="rt">T' + esc(String(e.turn)) + " · " + esc(you) + "</span>" +
+    '<span class="rsub">Agent: ' + esc(ag) + (winChance ? " · " + esc(pts + " pts") : "") + "</span></span>" +
+    '<span class="rm">' + esc(e.mark) + ptsTxt + "</span></button></div>";
+}
+
+export function reviewPanelHTML(review, winChance, filter, mock, showResult) {
+  if (!review) return '<p class="emptytx">Finish a game, then tap Review game.</p>';
+  const counts = review.counts || {};
+  const acc = review.accuracy;
+  const accTag = (winChance && typeof acc === "number")
+    ? '<span class="tag">Accuracy ' + esc(String(acc)) + "</span>"
+    : "";
+  // After the game-over card is dismissed, Result brings it back (New game /
+  // Rematch stay reachable from the review).
+  const resBtn = showResult ? '<button class="rresult" data-act="showresult">Result</button>' : "";
+  const head = (accTag || resBtn) ? '<div class="dstathd">' + accTag + resBtn + "</div>" : "";
+  const chips = Object.keys(MARK_META).map((k) =>
+    '<span class="chip"><span aria-hidden="true">' + MARK_META[k].glyph + "</span> " +
+    esc(k) + " " + (counts[k] || 0) + "</span>").join("");
+  const f = filter || "all";
+  const fbtn = (v, label) =>
+    '<button role="radio" aria-checked="' + (f === v) + '" class="' + (f === v ? "sel" : "") +
+    '" data-reviewfilter="' + v + '">' + esc(label) + "</button>";
+  const list = (review.decisions || []).filter((e) => {
+    // Zone-placement rows (place/position/sort) clutter the list: hide them
+    // unless they are Inaccuracy or worse. They are still counted in accuracy.
+    if ((e.kind === "place" || e.kind === "position" || e.kind === "sort") &&
+        e.mark === "Good" && !e.missed_response) return false;
+    if (f === "missed") return !!e.missed_response;
+    if (f === "mistakes") return e.mark === "Mistake" || e.mark === "Blunder" || !!e.missed_response;
+    return true;
+  });
+  const rows = list.length ? list.map((e) => reviewRowHTML(e, winChance)).join("")
+    : '<p class="emptytx">No decisions match this filter.</p>';
+  void mock;
+  return head + '<div class="dchips">' + chips + "</div>" +
+    '<div class="seg" role="radiogroup" aria-label="Review filter">' +
+    fbtn("all", "All") + fbtn("mistakes", "Mistakes+") + fbtn("missed", "Missed responses") + "</div>" +
+    '<div class="rlist" role="list" aria-label="Decisions">' + rows + "</div>";
 }

@@ -77,6 +77,14 @@ LOG_SHOTS = [
     ("42-cards-tab", "16&log=1&logtab=cards"),
     # Win chance on (mock 20): the Stats tab with the dashed kincha line.
     ("44-winchance-line", "19&log=1&logtab=stats&winchance=1"),
+    # Post-game review (mock 08 game over + mock/review.json): summary + list,
+    # the mistakes filter, the decision board, and the game-over Review button.
+    # 45-47 mirror the real flow (Review tapped: the game-over card dismissed,
+    # the sheet open on Review); 48 is the game-over card itself.
+    ("45-review-tab", "7&log=1&logtab=review&review=1"),
+    ("46-review-mistakes", "7&log=1&logtab=review&review=1&reviewfilter=mistakes"),
+    ("47-review-frame", "7&log=1&logtab=review&review=1&reviewframe=1"),
+    ("48-gameover-review", "7&review=1"),
 ]
 
 
@@ -119,6 +127,7 @@ NEG_CONTRAST_JS = """async ([a, b]) => {
 def neg_contrast(page) -> dict:
     """Pixel-measured contrast of the frozen negation stamp (see NEG_CONTRAST_JS)."""
     import base64
+
     box = page.evaluate("""() => { const m = document.querySelector('#ov-cues .negmark circle.case');
       if (!m) return null; const r = m.getBoundingClientRect();
       return {x: Math.max(0, r.x - 4), y: Math.max(0, r.y - 4), width: r.width + 8, height: r.height + 8}; }""")
@@ -130,7 +139,30 @@ def neg_contrast(page) -> dict:
     page.wait_for_timeout(50)
     hidden = page.screenshot(clip=box)
     page.evaluate("() => document.getElementById('neg-probe').remove()")
-    return page.evaluate(NEG_CONTRAST_JS, [base64.b64encode(shown).decode(), base64.b64encode(hidden).decode()])
+    return page.evaluate(
+        NEG_CONTRAST_JS, [base64.b64encode(shown).decode(), base64.b64encode(hidden).decode()]
+    )
+
+
+REVIEW_TOPMOST_JS = """() => {
+  // The game-over card must not cover the review: at the review list's centre
+  // the topmost element has to be inside the drawer (or the decision board).
+  const list = document.querySelector('#logdrawer .rlist');
+  if (!list) return 'no-rlist';
+  if (document.querySelector('#gameover')) return 'gameover-present';
+  const r = list.getBoundingClientRect();
+  const x = Math.min(window.innerWidth - 1, Math.max(0, r.left + r.width / 2));
+  const y = Math.min(window.innerHeight - 1, Math.max(0, r.top + r.height / 2));
+  const el = document.elementFromPoint(x, y);
+  if (!el) return 'no-element';
+  if (el.closest('#reviewframe')) return 'ok-frame';
+  return el.closest('#logdrawer') ? 'ok' : 'covered-by:' + (el.id || el.className || el.tagName);
+}"""
+
+
+def review_topmost(page) -> str:
+    """Topmost check for the review shots (see REVIEW_TOPMOST_JS)."""
+    return page.evaluate(REVIEW_TOPMOST_JS)
 
 
 def launch_kwargs():
@@ -193,12 +225,15 @@ def main() -> int:
         with sync_playwright() as pw:
             browser = pw.chromium.launch(**launch_kwargs())
             # Phone shots, one per mock.
-            ctx = browser.new_context(viewport={"width": 412, "height": 915},
-                                      device_scale_factor=2, is_mobile=True)
+            ctx = browser.new_context(
+                viewport={"width": 412, "height": 915}, device_scale_factor=2, is_mobile=True
+            )
             page = ctx.new_page()
             page.on("pageerror", lambda e: errors.append(f"pageerror: {e}"))
-            page.on("console", lambda m: errors.append(f"console-{m.type}: {m.text}")
-                      if m.type in ("error",) else None)
+            page.on(
+                "console",
+                lambda m: errors.append(f"console-{m.type}: {m.text}") if m.type in ("error",) else None,
+            )
             for name, i in MOCKS:
                 page.goto(f"{base}?mock=1&i={i}", wait_until="networkidle")
                 page.wait_for_timeout(400)
@@ -213,13 +248,22 @@ def main() -> int:
                 if name == "21-winchance-menu":
                     if not page.evaluate("!!document.querySelector('#gamemenu')"):
                         errors.append("21-winchance-menu has no game menu")
-                    if not page.evaluate("/Show win chance/.test(document.querySelector('#gamemenu').textContent)"):
+                    if not page.evaluate(
+                        "/Show win chance/.test(document.querySelector('#gamemenu').textContent)"
+                    ):
                         errors.append("21-winchance-menu: no win-chance switch")
-                if name == "19-winchance-board" and not page.evaluate("!!document.querySelector('#winchance')"):
+                if name == "19-winchance-board" and not page.evaluate(
+                    "!!document.querySelector('#winchance')"
+                ):
                     errors.append("19-winchance-board has no win-chance bar")
-                if name == "19-winchance-board" and page.evaluate(
+                if (
+                    name == "19-winchance-board"
+                    and page.evaluate(
                         "document.querySelector('#winchance') && "
-                        "document.querySelector('#winchance').getAttribute('aria-label')") != "Win chance 62%":
+                        "document.querySelector('#winchance').getAttribute('aria-label')"
+                    )
+                    != "Win chance 62%"
+                ):
                     errors.append("19-winchance-board: bar aria-label is not 'Win chance 62%'")
                 if name == "16-reveal" and not page.evaluate("!!document.querySelector('#reveal')"):
                     errors.append("16-reveal has no reveal overlay")
@@ -228,8 +272,10 @@ def main() -> int:
                 page.wait_for_timeout(250)
                 page.screenshot(path=str(OUT / f"{name}.png"))
                 print(f"shot {name}.png", flush=True)
-                if not page.evaluate("window.cueFrozen === true && "
-                                     "document.querySelector('#ov-cues .cue-stage').children.length > 0"):
+                if not page.evaluate(
+                    "window.cueFrozen === true && "
+                    "document.querySelector('#ov-cues .cue-stage').children.length > 0"
+                ):
                     errors.append(f"{name}: no cue scene on screen")
                 if page.evaluate("document.documentElement.scrollWidth > window.innerWidth"):
                     errors.append(f"horizontal overflow at 412px in {name}")
@@ -237,13 +283,18 @@ def main() -> int:
                     numbers["neg412"] = nc = neg_contrast(page)
                     if "error" in nc or nc["mark_vs_casing"] < 3 or nc["mark_vs_card"] < 3:
                         errors.append(f"26-cue-negated: negation mark contrast below 3:1 ({nc})")
-                    if not page.evaluate("/negated/i.test(document.querySelector('#ov-cues .cue-neg').textContent)"):
+                    if not page.evaluate(
+                        "/negated/i.test(document.querySelector('#ov-cues .cue-neg').textContent)"
+                    ):
                         errors.append("26-cue-negated: no 'negated' text label")
             # Duel-log sheet tabs (Log | Stats | Cards) against the stats mock.
             for name, i in LOG_SHOTS:
                 page.goto(f"{base}?mock=1&i={i}", wait_until="networkidle")
                 page.wait_for_timeout(400)
-                if not page.evaluate("!!document.querySelector('#logdrawer')"):
+                # 48 is the game-over card itself: the drawer stays shut until Review is tapped.
+                if name != "48-gameover-review" and not page.evaluate(
+                    "!!document.querySelector('#logdrawer')"
+                ):
                     errors.append(f"{name}: no log drawer on screen")
                 if name == "41-stats-bottom":
                     page.evaluate("document.querySelector('#logdrawer .dbody').scrollTop = 1e6")
@@ -253,7 +304,8 @@ def main() -> int:
                 if page.evaluate("document.documentElement.scrollWidth > window.innerWidth"):
                     errors.append(f"horizontal overflow at 412px in {name}")
                 if name == "40-stats-tab" and not page.evaluate(
-                        "!!document.querySelector('#logdrawer .dtiles')"):
+                    "!!document.querySelector('#logdrawer .dtiles')"
+                ):
                     errors.append("40-stats-tab: no stat tiles on screen")
                 if name == "42-cards-tab":
                     if not page.evaluate("!!document.querySelector('#logdrawer .dcards')"):
@@ -265,11 +317,35 @@ def main() -> int:
                         errors.append("42-cards-tab: tapping a card opened no detail")
                     page.locator("#detail .dx").first.click()
                     page.wait_for_timeout(300)
+                if name == "45-review-tab" and not page.evaluate(
+                    "!!document.querySelector('#logdrawer .rlist')"
+                ):
+                    errors.append("45-review-tab: no review list on screen")
+                if (
+                    name == "46-review-mistakes"
+                    and page.evaluate("document.querySelectorAll('#logdrawer .rrow').length") < 2
+                ):
+                    errors.append("46-review-mistakes: mistakes filter shows fewer than 2 rows")
+                if name == "47-review-frame" and not page.evaluate(
+                    "!!document.querySelector('#reviewframe')"
+                ):
+                    errors.append("47-review-frame: no decision board on screen")
+                if name in ("45-review-tab", "46-review-mistakes", "47-review-frame"):
+                    top = review_topmost(page)
+                    if top not in ("ok", "ok-frame"):
+                        errors.append(f"{name}: review list not topmost at its centre ({top})")
+                if name == "48-gameover-review":
+                    if not page.evaluate("!!document.querySelector('#gameover')"):
+                        errors.append("48-gameover-review: no game-over modal")
+                    if not page.evaluate(
+                        "/Review game/.test(document.querySelector('#gameover').textContent)"
+                    ):
+                        errors.append("48-gameover-review: no Review game button")
             # A negated link stays marked in the chain strip (shape + word, not colour alone).
             neg_html = page.evaluate("""async () => { const m = await import('./render/board.js');
               return m.chainHTML([{card: {name: 'A'}, controller: 'bot'}, {card: {name: 'B'}, controller: 'you'}],
                                  true, new Set([1])); }""")
-            if 'link bot neg' not in neg_html or 'negated' not in neg_html or neg_html.count(' neg"') != 1:
+            if "link bot neg" not in neg_html or "negated" not in neg_html or neg_html.count(' neg"') != 1:
                 errors.append("chainHTML does not mark exactly the negated link")
             # Recap at the start of your turn, and a cue list played in real time.
             page.goto(f"{base}?mock=1&i=15&recap=1", wait_until="networkidle")
@@ -284,14 +360,17 @@ def main() -> int:
             if page.evaluate("document.querySelectorAll('#info .recap .rrow').length") < 4:
                 errors.append("38-recap: recap has fewer than 4 lines")
             page.goto(f"{base}?mock=1&i=13", wait_until="networkidle")
-            page.wait_for_function("!document.querySelector('#ov-cues').classList.contains('playing')",
-                                   timeout=15000)
+            page.wait_for_function(
+                "!document.querySelector('#ov-cues').classList.contains('playing')", timeout=15000
+            )
             if page.evaluate("document.querySelector('.pbar.you .lp').textContent.trim()") != "6200":
                 errors.append("live cue playback did not end on the mock's board (LP != 6200)")
             # Detail overlay via a real tap (field monster -> detail X).
             page.goto(f"{base}?mock=1&i=1", wait_until="networkidle")
             page.wait_for_timeout(400)
-            card = page.locator(".field [data-row=mzone] .slot:not(.side) .card[data-uid]:not(.back):not(.actionable)").first
+            card = page.locator(
+                ".field [data-row=mzone] .slot:not(.side) .card[data-uid]:not(.back):not(.actionable)"
+            ).first
             if card.count():
                 card.click()
                 page.wait_for_timeout(300)
@@ -303,14 +382,25 @@ def main() -> int:
                 errors.append("17-detail-x has no detail overlay with an X button")
             ctx.close()
             # Small-phone variant of 02.
-            ctx3 = browser.new_context(viewport={"width": 360, "height": 780},
-                                       device_scale_factor=2, is_mobile=True)
+            ctx3 = browser.new_context(
+                viewport={"width": 360, "height": 780}, device_scale_factor=2, is_mobile=True
+            )
             s = ctx3.new_page()
             s.on("pageerror", lambda e: errors.append(f"pageerror-small: {e}"))
-            s.on("console", lambda m: errors.append(f"console-small-{m.type}: {m.text}")
-                   if m.type in ("error",) else None)
-            for nm, i in [("02-small", 1), ("03-small", 2), ("01-small", 0), ("07-small", 6),
-                           ("40-small-stats", "16&log=1&logtab=stats")]:
+            s.on(
+                "console",
+                lambda m: (
+                    errors.append(f"console-small-{m.type}: {m.text}") if m.type in ("error",) else None
+                ),
+            )
+            for nm, i in [
+                ("02-small", 1),
+                ("03-small", 2),
+                ("01-small", 0),
+                ("07-small", 6),
+                ("40-small-stats", "16&log=1&logtab=stats"),
+                ("45-small-review", "7&log=1&logtab=review&review=1"),
+            ]:
                 s.goto(f"{base}?mock=1&i={i}", wait_until="networkidle")
                 s.wait_for_timeout(400)
                 s.screenshot(path=str(OUT / f"{nm}.png"))
@@ -318,8 +408,17 @@ def main() -> int:
                 if nm == "02-small":
                     numbers["m360"] = s.evaluate(MEASURE_JS)
                 if nm == "40-small-stats" and not s.evaluate(
-                        "!!document.querySelector('#logdrawer .dtiles')"):
+                    "!!document.querySelector('#logdrawer .dtiles')"
+                ):
                     errors.append("40-small-stats: no stat tiles on screen")
+                if nm == "45-small-review" and not s.evaluate(
+                    "!!document.querySelector('#logdrawer .rlist')"
+                ):
+                    errors.append("45-small-review: no review list on screen")
+                if nm == "45-small-review":
+                    top = review_topmost(s)
+                    if top not in ("ok", "ok-frame"):
+                        errors.append(f"45-small-review: review list not topmost at its centre ({top})")
                 if s.evaluate("document.documentElement.scrollWidth > window.innerWidth"):
                     errors.append(f"horizontal overflow at 360px in {nm}")
             for nm, i in CUE_SHOTS_360:
@@ -335,15 +434,23 @@ def main() -> int:
                     numbers["neg360"] = nc = neg_contrast(s)
                     if "error" in nc or nc["mark_vs_casing"] < 3 or nc["mark_vs_card"] < 3:
                         errors.append(f"{nm}: negation mark contrast below 3:1 ({nc})")
-                numbers.setdefault("lw360", s.evaluate(
-                    "getComputedStyle(document.querySelector('#ov-cues')).getPropertyValue('--cue-lw')"))
+                numbers.setdefault(
+                    "lw360",
+                    s.evaluate(
+                        "getComputedStyle(document.querySelector('#ov-cues')).getPropertyValue('--cue-lw')"
+                    ),
+                )
             ctx3.close()
             # Desktop shot of the main-phase board (log drawer open).
             ctx2 = browser.new_context(viewport={"width": 1280, "height": 800})
             d = ctx2.new_page()
             d.on("pageerror", lambda e: errors.append(f"pageerror-desktop: {e}"))
-            d.on("console", lambda m: errors.append(f"console-desktop-{m.type}: {m.text}")
-                       if m.type in ("error",) else None)
+            d.on(
+                "console",
+                lambda m: (
+                    errors.append(f"console-desktop-{m.type}: {m.text}") if m.type in ("error",) else None
+                ),
+            )
             d.goto(f"{base}?mock=1&i=1", wait_until="networkidle")
             d.wait_for_timeout(400)
             d.screenshot(path=str(OUT / "09-desktop.png"))
@@ -369,7 +476,10 @@ def main() -> int:
         for e in errors:
             print(f"  {e}", flush=True)
         return 1
-    print(f"ok: {len(MOCKS) + len(CUE_SHOTS) + len(LOG_SHOTS) + len(CUE_SHOTS_360) + 8} PNGs in {OUT}", flush=True)
+    print(
+        f"ok: {len(MOCKS) + len(CUE_SHOTS) + len(LOG_SHOTS) + len(CUE_SHOTS_360) + 8} PNGs in {OUT}",
+        flush=True,
+    )
     return 0
 
 

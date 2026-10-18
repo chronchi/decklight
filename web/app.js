@@ -2,7 +2,7 @@ import {connectWS} from "./ws.js";
 import {barHTML, sideHTML, midHTML, phaseBtnsHTML, chainHTML, winchanceHTML} from "./render/board.js";
 import {handHTML, sheetHTML, pileSheetHTML, infoHTML, actionableMap, statsLine, pileTitle} from "./render/hand.js";
 import {logHTML} from "./render/log.js";
-import {LOG_TABS, tabStripHTML, tabPanelOpen, statsPanelHTML, cardsPanelHTML} from "./render/stats.js";
+import {LOG_TABS, tabStripHTML, tabPanelOpen, statsPanelHTML, cardsPanelHTML, reviewPanelHTML} from "./render/stats.js";
 import {esc, imgUrl, isHidden, phHTML} from "./render/card.js";
 import {morph} from "./render/morph.js";
 import {createCuePlayer, recapItem, chainTracker, planSteps, stepText} from "./cues.js";
@@ -88,13 +88,13 @@ let logOpen = false;
 let logAll = false;      // show passes / auto-passes / zone picks too (drawer toggle)
 const QUIET = new Set(["pass", "auto_pass", "place"]);
 const shownEvents = () => (logAll ? events : events.filter((e) => !QUIET.has(e.kind)));
-let logTab = "log";      // "log" | "stats" | "cards" (the duel-log sheet tabs)
+let logTab = "log";      // "log" | "stats" | "cards" | "review" (the duel-log sheet tabs)
 try {
   const savedTab = localStorage.getItem("ygo-logtab");
-  if (savedTab === "log" || savedTab === "stats" || savedTab === "cards") logTab = savedTab;
+  if (savedTab === "log" || savedTab === "stats" || savedTab === "cards" || savedTab === "review") logTab = savedTab;
 } catch (e) { /* private mode: stay on log */ }
 function setLogTab(t) {
-  if (t !== "log" && t !== "stats" && t !== "cards") return;
+  if (t !== "log" && t !== "stats" && t !== "cards" && t !== "review") return;
   logTab = t;
   try { localStorage.setItem("ygo-logtab", t); } catch (e) { /* ignore */ }
 }
@@ -145,6 +145,14 @@ let recap = null;        // {turn, who, items:[{text, sub, card}]} shown at the 
 let recapAcc = null;     // collecting during the opponent's turn
 let lastCueN = -1;       // cues are deduped by trace index (peek states may repeat them)
 let lastCueTurn = 0;
+
+// Post-game review (web-ux-plan step 3): opened only after the game ends.
+let review = null;         // the server's {"decisions", "counts", "accuracy", "missed"} or null
+let reviewLoading = false;
+let reviewProgress = null; // {done, total}
+let reviewFilter = "all";  // "all" | "mistakes" | "missed"
+let reviewFrame = null;    // {"k","view","options","entry"} for the tapped decision
+let overDismissed = false; // "Review game" dismisses the game-over card; "Result" brings it back
 
 // Bot activation reveal queue + top-of-board banner.
 let revealQueue = [];
@@ -689,6 +697,14 @@ function sidePanelInner(which, logh) {
   const st = msg && msg.stats;
   if (which === "stats") return statsPanelHTML(st, MOCK);
   if (which === "cards") return cardsPanelHTML(st, MOCK);
+  if (which === "review") {
+    if (reviewLoading) {
+      const p = reviewProgress ? "Reviewing… " + reviewProgress.done + "/" + reviewProgress.total : "Reviewing…";
+      return '<p class="emptytx" role="status">' + esc(p) + "</p>";
+    }
+    return reviewPanelHTML(review, winChance, reviewFilter, MOCK,
+      !!(msg && msg.result && overDismissed));
+  }
   return '<div class="loghead" data-key="lhead">Duel log' + logAllBtn() + '</div><div class="loglist" data-key="llist">' + logh + "</div>";
 }
 
@@ -751,7 +767,14 @@ function renderOverlays(logh) {
     oh += '<div id="retitle" data-key="retitle"><div class="box"><div class="kicker">ygo-zero replay</div>' +
       "<h2>" + esc(msg.title) + "</h2></div></div>";
   }
-  if (msg && msg.view && msg.result) {
+  if (msg && msg.view && msg.result && !overDismissed) {
+    const missed = review ? (review.missed || 0) : 0;
+    const reviewLabel = reviewLoading
+      ? ("Reviewing… " + (reviewProgress ? reviewProgress.done + "/" + reviewProgress.total : ""))
+      : (review ? ("Review game" + (missed ? " · " + missed + " missed response" + (missed === 1 ? "" : "s") : ""))
+        : "Review game");
+    const reviewBtn = '<button class="bigbtn" data-act="review" aria-label="' + esc(reviewLabel) + '"' +
+      (reviewLoading ? " disabled" : "") + ">" + esc(reviewLabel) + "</button>";
     if (msg.names) {
       const win = msg.result.winner;
       const loser = msg.names[0] === win ? msg.names[1] : msg.names[0];
@@ -761,7 +784,8 @@ function renderOverlays(logh) {
         "<h2>" + esc(win) + " wins</h2>" +
         '<p class="reason">' + esc(reason) + "</p>" +
         '<div class="score"><span class="you">' + esc(msg.names[0]) + "<b>" + msg.view.you.lp + "</b></span>" +
-        '<span class="bot">' + esc(msg.names[1]) + "<b>" + msg.view.bot.lp + "</b></span></div></div></div>";
+        '<span class="bot">' + esc(msg.names[1]) + "<b>" + msg.view.bot.lp + "</b></span></div>" +
+        '<div class="row"><button class="bigbtn primary" data-act="rematch">Rematch</button>' + reviewBtn + "</div></div></div>";
     } else {
       const win = msg.result.winner === "you";
       oh = '<div id="gameover" data-key="gameover" role="alertdialog" aria-modal="true" tabindex="-1" aria-label="' + (win ? "Victory" : "Defeat") + '"><div class="box ' + (win ? "win" : "loss") + '">' +
@@ -771,10 +795,37 @@ function renderOverlays(logh) {
         '<div class="score"><span class="you">You<b>' + msg.view.you.lp + "</b></span>" +
         '<span class="bot">ygo-zero<b>' + msg.view.bot.lp + "</b></span></div>" +
         '<div class="row"><button class="bigbtn" data-act="newgame">New game</button>' +
-        '<button class="bigbtn primary" data-act="rematch">Rematch</button></div></div></div>';
+        '<button class="bigbtn primary" data-act="rematch">Rematch</button></div>' +
+        '<div class="row">' + reviewBtn + "</div></div></div>";
     }
   }
   morph(ovOver, oh);
+  let rh = "";
+  if (reviewFrame && reviewFrame.entry) {
+    const e = reviewFrame.entry;
+    const opts = (reviewFrame.options || []).map((o) =>
+      '<div class="opt' + (o.label === (e.your && e.your.label) ? " you" : "") +
+      (o.label === (e.agent && e.agent.label) ? " agent" : "") + '">' +
+      '<span class="tx"><span class="lb">' + esc(o.label || "") + "</span></span>" +
+      (o.label === (e.your && e.your.label) ? '<span class="tag">You</span>' : "") +
+      (o.label === (e.agent && e.agent.label) ? '<span class="tag">Agent</span>' : "") + "</div>").join("");
+    rh = '<div id="rscrim" data-key="rscrim" data-act="closereviewframe"></div>' +
+      '<div id="reviewframe" data-key="reviewframe" role="dialog" aria-modal="true" tabindex="-1" aria-label="' +
+      esc("Decision " + reviewFrame.k + ": " + (e.mark || "")) + '">' +
+      '<div class="mhead">Turn ' + esc(String(e.turn)) + " · " + esc(e.mark || "") +
+      "<button class=\"iconbtn\" data-act=\"closereviewframe\" aria-label=\"Close decision board\">" +
+      '<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5 5l10 10M15 5 5 15"/></svg></button></div>' +
+      '<div class="mbody"><div class="rduo"><span>You: ' + esc((e.your && e.your.label) || "") + "</span>" +
+      "<span>Agent: " + esc((e.agent && e.agent.label) || "") + "</span></div>" +
+      '<div class="sbody">' + opts + "</div></div></div>";
+  }
+  let rEl = document.getElementById("ov-review");
+  if (!rEl) {
+    rEl = document.createElement("div");
+    rEl.id = "ov-review";
+    document.getElementById("layer").appendChild(rEl);
+  }
+  morph(rEl, rh);
 }
 
 // ---- lobby ----
@@ -1039,6 +1090,25 @@ function onOverlayClick(ev) {
     render();
     return;
   }
+  const rf = ev.target.closest("[data-reviewfilter]");
+  if (rf) {
+    reviewFilter = rf.getAttribute("data-reviewfilter") || "all";
+    render();
+    return;
+  }
+  const rk = ev.target.closest("[data-reviewk]");
+  if (rk) {
+    const k = parseInt(rk.getAttribute("data-reviewk"), 10);
+    if (MOCK) {
+      fetch("mock/review-frame.json?v=2").then((r) => r.json()).then((j) => {
+        reviewFrame = j;
+        render();
+      }).catch(() => {});
+    } else if (ws) {
+      ws.send({t: "review_frame", k});
+    }
+    return;
+  }
   const sc = ev.target.closest("[data-statcode]");
   if (sc) {
     openStatDetail(parseInt(sc.getAttribute("data-statcode"), 10));
@@ -1104,6 +1174,11 @@ function goLobby() {
   revealCur = null;
   revealQueue = [];
   bannerText = null;
+  review = null;
+  reviewLoading = false;
+  reviewProgress = null;
+  reviewFrame = null;
+  overDismissed = false;
   inLobby = true;
   resetCues();
   render();
@@ -1174,6 +1249,11 @@ function onAction(kind, el) {
     revealQueue = [];
     revealCur = null;
     bannerText = null;
+    review = null;
+    reviewLoading = false;
+    reviewProgress = null;
+    reviewFrame = null;
+    overDismissed = false;
     gameMode = lobbyPick.mode;
     resetCues();
     sendGame({t: "new_game", deck: ydk ? {ydk} : lobbyPick.you, bot_deck: lobbyPick.bot,
@@ -1181,6 +1261,35 @@ function onAction(kind, el) {
     return;
   } else if (kind === "newgame") {
     goLobby();
+    return;
+  } else if (kind === "review") {
+    if (MOCK) {
+      fetch("mock/review.json?v=2").then((r) => r.json()).then((r) => {
+        review = r.review || r;
+        overDismissed = true;
+        logOpen = true;
+        setLogTab("review");
+        render();
+      }).catch(() => {
+        review = review || {decisions: [], counts: {}, accuracy: 0, missed: 0};
+        render();
+      });
+      return;
+    }
+    if (!msg || !msg.result || !ws) return;
+    overDismissed = true;
+    logOpen = true;
+    setLogTab("review");
+    reviewLoading = true;
+    reviewProgress = null;
+    render();
+    ws.send({t: "review"});
+    return;
+  } else if (kind === "showresult") {
+    overDismissed = false;
+  } else if (kind === "closereviewframe") {
+    reviewFrame = null;
+    render();
     return;
   } else return;
   render();
@@ -1239,7 +1348,7 @@ const FOCUSABLE = 'button:not([disabled]), [href], input, textarea, select, summ
 const visible = (el) => !!el && el.getClientRects().length > 0 && getComputedStyle(el).visibility !== "hidden";
 function topModal() {
   if (IS_REPLAY) return null;
-  for (const sel of ["#detail", "#menu", "#gamemenu", "#sheet.pilesheet", "#logdrawer", "#gameover[role=alertdialog]"]) {
+  for (const sel of ["#detail", "#menu", "#gamemenu", "#sheet.pilesheet", "#reviewframe", "#logdrawer", "#gameover[role=alertdialog]"]) {
     const el = document.querySelector(sel);
     if (el && visible(el)) return el;
   }
@@ -1290,6 +1399,7 @@ function manageFocus() {
 function closeTop() {
   if (menuUid) { closeState("menu"); render(); closeOv("menu"); return true; }
   if (detail) { closeState("detail"); render(); closeOv("detail"); return true; }
+  if (reviewFrame) { reviewFrame = null; render(); return true; }
   if (gameMenu) { closeState("gamemenu"); render(); closeOv("gamemenu"); return true; }
   if (pileOpen) { closeState("pile"); render(); closeOv("pile"); return true; }
   if (logOpen) { closeState("log"); render(); closeOv("log"); return true; }
@@ -1523,6 +1633,12 @@ async function loadMock(i) {
   revealCur = null;
   revealQueue = [];
   bannerText = null;
+  review = null;
+  reviewLoading = false;
+  reviewProgress = null;
+  reviewFilter = "all";
+  reviewFrame = null;
+  overDismissed = false;
   focusUid = qs.get("focus") || null;
   pileOpen = msg.openPile || qs.get("pile") || null;
   if (qs.get("menu") && msg.t === "state") {
@@ -1534,13 +1650,38 @@ async function loadMock(i) {
   if (qs.get("sel") && msg.t === "state") sel = qs.get("sel").split(",").map(Number);
   if (qs.get("picker") && msg.t === "lobby") pickerOpen = qs.get("picker");
   if (qs.get("gamemenu") && msg.t === "state") gameMenu = true;
-  // Screenshot hooks for the duel-log sheet: ?log=1 opens it, ?logtab=log|stats|cards picks the tab.
+  // Screenshot hooks for the duel-log sheet: ?log=1 opens it, ?logtab=log|stats|cards|review picks the tab.
   if (msg.t === "state") {
     const lt = qs.get("logtab");
-    if (lt === "log" || lt === "stats" || lt === "cards") setLogTab(lt);
+    if (lt === "log" || lt === "stats" || lt === "cards" || lt === "review") setLogTab(lt);
     if (qs.get("log") === "1") logOpen = true;
     // Screenshot hook for the win-chance switch: ?winchance=1 turns it on.
     if (qs.get("winchance") === "1") winChance = true;
+    // Screenshot hooks for the review tab: ?review=1 loads mock/review.json,
+    // ?reviewfilter=mistakes|missed picks the filter, ?reviewframe=1 opens the decision board.
+    if (qs.get("review") === "1") {
+      try {
+        const r = await fetch("mock/review.json?v=2");
+        const j = await r.json();
+        review = j.review || j;
+        reviewLoading = false;
+        const rf = qs.get("reviewfilter");
+        if (rf === "mistakes" || rf === "missed") reviewFilter = rf;
+        if (qs.get("reviewframe") === "1") {
+          try {
+            const fr = await fetch("mock/review-frame.json?v=2");
+            reviewFrame = await fr.json();
+          } catch (e) { /* leave closed */ }
+        }
+        if (qs.get("log") === "1") {
+          // The real flow: tapping "Review game" dismisses the game-over card
+          // and opens the sheet on the Review tab.
+          overDismissed = true;
+          logOpen = true;
+          setLogTab("review");
+        }
+      } catch (e) { /* leave empty */ }
+    }
   }
   render();
   if (msg.t === "state" && !(Array.isArray(msg.cues) && msg.cues.length)) announceState(null, msg);
@@ -1700,11 +1841,32 @@ async function boot() {
       if (m.t === "lobby") {
         lobby = m;
         if (!msg || msg.t === "lobby") msg = m;
+      } else if (m.t === "review_progress") {
+        reviewLoading = true;
+        reviewProgress = {done: m.done || 0, total: m.total || 0};
+        say("Reviewing… " + reviewProgress.done + " of " + reviewProgress.total);
+        render();
+        return;
+      } else if (m.t === "review") {
+        review = m;
+        reviewLoading = false;
+        reviewProgress = null;
+        overDismissed = true;
+        logOpen = true;
+        setLogTab("review");
+        const missed = m.missed || 0;
+        say("Review ready. " + ((m.decisions || []).length) + " decisions" +
+          (missed ? ", " + missed + " missed responses." : "."));
+        render();
+        return;
+      } else if (m.t === "review_frame") {
+        reviewFrame = m;
+        render();
+        return;
       } else if (m.t === "state") {
         if (inLobby) return;   // Back to lobby: ignore states until the next new_game
         receiveState(m);
         return;
-      } else if (m.t === "error") {
         banner.hidden = false;
         banner.textContent = m.text || "error";
         locked = false;

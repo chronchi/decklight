@@ -975,3 +975,29 @@ details.ydk textarea {
 #logside .dtabs { margin: 12px 14px 0; }
 #logside .dbody { padding: 12px 14px 16px; }
 #logside .sidecard + .dtabs { margin-top: 0; }
+/* ---------- review tab (post-game review) ---------- */
+.rresult { font-size: 12px; color: var(--text); border: 1px solid var(--line-2); border-radius: 20px; padding: 4px 12px; margin-left: 8px; }
+.dchips { display: flex; gap: 8px; flex-wrap: wrap; margin: 4px 0 12px; }
+.dchips .chip { font-size: 12px; color: var(--muted); border: 1px solid var(--line-2); border-radius: 20px; padding: 4px 10px; }
+.rlist { display: flex; flex-direction: column; gap: 4px; margin-top: 12px; }
+.rrow { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 48px; padding: 8px 10px; border-radius: 10px; border: 1px solid var(--line); text-align: left; }
+.rrow .rmk { font-size: 18px; width: 22px; text-align: center; flex: none; }
+.rrow .rmk.good { color: var(--muted); }
+.rrow .rmk.inacc { color: var(--accent); }
+.rrow .rmk.mist { color: var(--bot-ink); }
+.rrow .rmk.blund, .rrow .rmk.missed { color: var(--neg); }
+.rrow .rmk.missed { color: var(--you); }
+.rrow .rtx { flex: 1; min-width: 0; }
+.rrow .rt { display: block; font-size: 13.5px; }
+.rrow .rsub { display: block; font-size: 12px; color: var(--muted); margin-top: 2px; }
+.rrow .rm { font-size: 12px; color: var(--muted); flex: none; font-variant-numeric: tabular-nums; }
+#reviewframe { position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%); width: min(420px, calc(100vw - 24px)); max-height: 80vh; overflow-y: auto; background: var(--sheet); border: 1px solid var(--line-2); border-radius: 12px; z-index: 77; }
+#reviewframe .mhead { display: flex; align-items: center; min-height: 48px; padding: 4px 6px 4px 14px; font-size: 13px; color: var(--muted); border-bottom: 1px solid var(--line); }
+#reviewframe .mhead button { margin-left: auto; }
+#reviewframe .mbody { padding: 12px 14px 16px; }
+#reviewframe .rduo { display: flex; flex-direction: column; gap: 6px; font-size: 13px; margin-bottom: 10px; }
+#reviewframe .opt { border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; margin-bottom: 6px; font-size: 13px; }
+#reviewframe .opt.you { border-left: 3px solid var(--you); }
+#reviewframe .opt.agent { border-left: 3px solid var(--accent); }
+#reviewframe .opt .tag { display: inline-block; font-size: 11px; color: var(--muted); border: 1px solid var(--line-2); border-radius: 12px; padding: 1px 8px; margin-left: 8px; }
+#rscrim { position: fixed; inset: 0; z-index: 76; }

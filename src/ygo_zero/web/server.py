@@ -66,10 +66,18 @@ def _pretty_deck_name(stem: str) -> str:
 class Server:
     """App state: decks, the engine, the opponent factory, and the live game."""
 
-    def __init__(self, *, token: str, engine=None, make_opponent=None,
-                 record_root: Path = ROOT / "runs" / "web",
-                 pics_dir: Path = PICS_DIR, opponent_default: str = "product",
-                 device: str = "cpu", replay_threads: int = 1) -> None:
+    def __init__(
+        self,
+        *,
+        token: str,
+        engine=None,
+        make_opponent=None,
+        record_root: Path = ROOT / "runs" / "web",
+        pics_dir: Path = PICS_DIR,
+        opponent_default: str = "product",
+        device: str = "cpu",
+        replay_threads: int = 1,
+    ) -> None:
         self.token = token
         self._engine = engine
         self._make_opponent = make_opponent or self._default_opponent
@@ -99,6 +107,8 @@ class Server:
         self._wc_map = None  # lazy CalibMap (False = unavailable, ALERTed)
         self._wc_ms = 0.0  # last value-forward wall ms (CPU)
         self.auto_passed: set[int] = set()  # history numbers (1-based n) of auto-passes
+        self.record_path: Path | None = None  # game.jsonl of the live/finished game
+        self._review_task: asyncio.Task | None = None
         self.stats = None  # DuelStats | None (one per game, viewer = human seat)
         self._adv: asyncio.Task | None = None
         self.advancing = False
@@ -129,8 +139,7 @@ class Server:
         if mode == "random":
             return RandomBot(random.Random().randrange(1 << 30))
         if mode == "fast":
-            return ProductLauncher(device=self.device, fast=True,
-                                   replay_threads=self.replay_threads)
+            return ProductLauncher(device=self.device, fast=True, replay_threads=self.replay_threads)
         return ProductLauncher(device=self.device, replay_threads=self.replay_threads)
 
     # --- decks ---
@@ -144,8 +153,7 @@ class Server:
                 if p.stem in seen:
                     continue
                 seen.add(p.stem)
-                out.append({"id": p.stem, "name": _pretty_deck_name(p.stem),
-                            "group": group})
+                out.append({"id": p.stem, "name": _pretty_deck_name(p.stem), "group": group})
         for i, (deck_id, _text) in enumerate(sorted(self.user_decks.items())):
             out.append({"id": deck_id, "name": f"Pasted deck {i + 1}", "group": "user"})
         return out
@@ -167,7 +175,7 @@ class Server:
                 deck = parse_ydk(self.user_decks[spec], spec)
                 return deck, self.check_text(deck)
             return None, f"unknown deck {spec!r}"
-        return None, "deck must be a deck id or {\"ydk\": \"...\"}"
+        return None, 'deck must be a deck id or {"ydk": "..."}'
 
     def check_text(self, deck) -> str | None:
         """The EDOPro host's deck rules; names cards without embeddings."""
@@ -185,8 +193,7 @@ class Server:
             extra_txt = f": {code} ({names.get(code, 'unknown card')})"
         kinds = {0: "main-deck count", 1: "extra-deck count", 2: "unknown card"}
         what = kinds.get(type_, f"deck error {type_}")
-        return (f"illegal deck ({what}: have {cur}, allowed {minimum}-{maximum})"
-                f"{extra_txt}")
+        return f"illegal deck ({what}: have {cur}, allowed {minimum}-{maximum}){extra_txt}"
 
     # --- state ---
 
@@ -229,12 +236,17 @@ class Server:
         if self.finished and s.result is not None:
             winner = "you" if s.result.winner == human else "bot"
             result = {"winner": winner, "reason": self.end_reason or "win"}
-        return {"t": "state", "view": view, "prompt": prompt,
-                "log": log, "cues": cues,
-                "stats": self.stats.stats_message(winchance_on=self.winchance_on),
-                "winchance": self.winchance if self.winchance_on else None,
-                "thinking": {"seconds": thinking} if thinking is not None else None,
-                "result": result}
+        return {
+            "t": "state",
+            "view": view,
+            "prompt": prompt,
+            "log": log,
+            "cues": cues,
+            "stats": self.stats.stats_message(winchance_on=self.winchance_on),
+            "winchance": self.winchance if self.winchance_on else None,
+            "thinking": {"seconds": thinking} if thinking is not None else None,
+            "result": result,
+        }
 
     async def send_state(self, *, full_log: bool = False, peek: bool = False) -> None:
         if self.ws is None:
@@ -348,8 +360,14 @@ class Server:
 
     def _sig(self) -> tuple:
         s = self.session
-        return (len(s.env.history), s.env.duel.turn, s.env.duel.phase, s.done,
-                s.need_human and not self.advancing, self._wc_n)
+        return (
+            len(s.env.history),
+            s.env.duel.turn,
+            s.env.duel.phase,
+            s.done,
+            s.need_human and not self.advancing,
+            self._wc_n,
+        )
 
     def _product_value_fn(self):
         """The product's value net, or None (random/fast mode: no value net)."""
@@ -423,12 +441,12 @@ class Server:
             print(f"ALERT web: product driver diverged at finish: {e}", flush=True)
             res = s.surrender(by_human=True)
             res.diverged = True
-            s.write_record(res)
+            self.record_path = s.write_record(res, auto_passed=self.auto_passed)
             self.finished = True
             self.end_reason = "the bot diverged (see server log)"
             await self.send_state(full_log=True)
             return
-        s.write_record(s.result)
+        self.record_path = s.write_record(s.result, auto_passed=self.auto_passed)
         self.finished = True
         self.end_reason = reason
         self.log_sent = len(s.env.history)
@@ -480,12 +498,24 @@ class Server:
         chain = msg.get("chain", self.chain_mode)
         if chain in ("auto", "all"):
             self.chain_mode = chain
-        meta = {"human_deck": deck_spec if isinstance(deck_spec, str) else "pasted",
-                "bot_deck": bot_spec if isinstance(bot_spec, str) else "pasted",
-                "mode": mode, "first": first, "chain": self.chain_mode}
-        session = DuelSession(self.engine, cfg, human_seat, bot=bot, launcher=launcher,
-                              seed=seed, record_root=self.record_root, human_auto=True,
-                              record_meta=meta)
+        meta = {
+            "human_deck": deck_spec if isinstance(deck_spec, str) else "pasted",
+            "bot_deck": bot_spec if isinstance(bot_spec, str) else "pasted",
+            "mode": mode,
+            "first": first,
+            "chain": self.chain_mode,
+        }
+        session = DuelSession(
+            self.engine,
+            cfg,
+            human_seat,
+            bot=bot,
+            launcher=launcher,
+            seed=seed,
+            record_root=self.record_root,
+            human_auto=True,
+            record_meta=meta,
+        )
         try:
             await asyncio.to_thread(session.reset)
         except Exception as e:  # noqa: BLE001
@@ -508,6 +538,10 @@ class Server:
         self.winchance = None
         self._wc_n = 0
         self.auto_passed = set()
+        self.record_path = None
+        if self._review_task is not None and not self._review_task.done():
+            self._review_task.cancel()
+            self._review_task = None
         from ygo_zero.web.stats import DuelStats
 
         self.stats = DuelStats(session.human_seat)
@@ -533,11 +567,11 @@ class Server:
             from ygo_zero.engine import messages as M
 
             dec = s.env.pending_decision()
-            is_chain = dec is not None and isinstance(dec.msg, M.SelectChain) \
-                and s.env.player == s.human_seat
+            is_chain = dec is not None and isinstance(dec.msg, M.SelectChain) and s.env.player == s.human_seat
             had = bool(is_chain) and any(o.kind.name == "ACTIVATE" for o in s.env.opts)
-            used = bool(is_chain and 0 <= index < len(s.env.opts)
-                        and s.env.opts[index].kind.name == "ACTIVATE")
+            used = bool(
+                is_chain and 0 <= index < len(s.env.opts) and s.env.opts[index].kind.name == "ACTIVATE"
+            )
             s.step_human(index)
         except (IndexError, ValueError) as e:
             await self._error(f"illegal option: {e}")
@@ -554,7 +588,7 @@ class Server:
         self.gen += 1  # stops a running advance; a bot step in flight is abandoned
         thinking = s.thinking_since is not None
         s.surrender(by_human=True)
-        s.write_record(s.result)
+        self.record_path = s.write_record(s.result, auto_passed=self.auto_passed)
         self.finished = True
         self.end_reason = "surrender"
         if thinking:
@@ -580,13 +614,176 @@ class Server:
                 return
             self.winchance_on = wc
         s = self.session
-        if has_chain and self.chain_mode == "auto" and s is not None and not self.finished \
-                and s.need_human and not self.advancing:
+        if (
+            has_chain
+            and self.chain_mode == "auto"
+            and s is not None
+            and not self.finished
+            and s.need_human
+            and not self.advancing
+        ):
             self.start_advance()  # a quiet window may be waiting right now
         if has_wc and s is not None and not self.advancing:
             if self.winchance_on and not self.finished and s.need_human:
                 self._compute_winchance()  # the switch was just turned on at a prompt
             await self.send_state()  # push the toggle now (null when off)
+
+    def _review_cache_path(self) -> Path | None:
+        if self.record_path is None:
+            return None
+        return self.record_path.parent / "review.json"
+
+    async def _send_review_progress(self, done: int, total: int) -> None:
+        if self.ws is None:
+            return
+        try:
+            await self.ws.send_json({"t": "review_progress", "done": done, "total": total})
+        except (WebSocketDisconnect, RuntimeError):
+            pass
+
+    async def on_review(self) -> None:
+        s = self.session
+        if s is None or not self.finished or s.result is None:
+            await self._error("no finished game to review (finish a game first)")
+            return
+        if self.mode == "random":
+            await self._error("Review needs the full bot")
+            return
+        launcher = getattr(s, "launcher", None)
+        if launcher is None or getattr(launcher, "value", None) is None:
+            await self._error("Review needs the full bot")
+            return
+        cache = self._review_cache_path()
+        if cache is not None and cache.is_file():
+            try:
+                out = json.loads(cache.read_text())
+                if self.ws is not None:
+                    await self.ws.send_json({"t": "review", **out})
+                return
+            except (OSError, ValueError):
+                pass
+        if self._review_task is not None and not self._review_task.done():
+            return  # a review is already running
+        ws = self.ws
+        gen = self.gen
+        self._review_task = asyncio.create_task(self._run_review(ws, gen))
+
+    async def _run_review(self, ws, gen: int) -> None:
+        import traceback
+
+        s = self.session
+        try:
+            from ygo_zero.analysis.review import review_game
+            from ygo_zero.eval.winchance import load_calib
+
+            if self.record_path is None or s is None:
+                await self._error("no finished game to review (finish a game first)")
+                return
+            rec = json.loads(self.record_path.read_text())
+            cfg = s.cfg
+            launcher = getattr(s, "launcher", None)
+            try:
+                calib = load_calib()
+            except Exception as e:  # noqa: BLE001 -- map missing: fail loudly, keep playing
+                print(f"ALERT web: review calib unavailable: {e}", flush=True)
+                await self._error("review is unavailable (calibration missing)")
+                return
+            try:
+                n_dec = len([c for c in [rec.get("choices", [])] if c is not None])
+            except Exception:  # noqa: BLE001
+                n_dec = 0
+            loop = asyncio.get_running_loop()
+
+            def prog(done: int, total: int) -> None:
+                if ws is None:
+                    return
+                try:
+                    asyncio.run_coroutine_threadsafe(
+                        ws.send_json({"t": "review_progress", "done": done, "total": total}), loop
+                    )
+                except (RuntimeError, WebSocketDisconnect):
+                    pass
+
+            out = await asyncio.to_thread(
+                review_game, self.engine, cfg, rec, launcher, calib, max_steps=32, progress=prog
+            )
+            _ = n_dec
+            cache = self._review_cache_path()
+            if cache is not None:
+                try:
+                    cache.write_text(json.dumps(out) + "\n")
+                except OSError:
+                    pass
+            if self.ws is not ws or gen != self.gen:
+                return
+            try:
+                await ws.send_json({"t": "review", **out})
+            except (WebSocketDisconnect, RuntimeError):
+                pass
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:  # noqa: BLE001 -- fail loud, keep the client usable
+            print("ALERT web: review crashed:\n" + "".join(traceback.format_exception(e)), flush=True)
+            await self._error(f"review failed: {e!r} (see server log)")
+
+    async def on_review_frame(self, msg: dict) -> None:
+        from ygo_zero.engine.env import PyEnv
+        from ygo_zero.web.view import build_prompt, build_view
+
+        s = self.session
+        if s is None or not self.finished:
+            await self._error("no finished game to review (finish a game first)")
+            return
+        try:
+            k = int(msg.get("k"))
+        except (TypeError, ValueError):
+            await self._error("review_frame.k must be a decision number")
+            return
+        cache = self._review_cache_path()
+        if cache is None or not cache.is_file():
+            await self._error("no review yet (send review first)")
+            return
+        try:
+            out = json.loads(cache.read_text())
+        except (OSError, ValueError):
+            await self._error("no review yet (send review first)")
+            return
+        decs = out.get("decisions", [])
+        if not 0 <= k < len(decs):
+            await self._error(f"unknown decision {k}")
+            return
+        if self.record_path is None:
+            await self._error("no finished game to review (finish a game first)")
+            return
+        rec = json.loads(self.record_path.read_text())
+        choices = [int(c) for c in rec["choices"]]
+        hs = int(rec["human_seat"])
+        # Replay to decision k's position to rebuild the board + options.
+        from ygo_zero.analysis.review import collect_human_decisions
+
+        dlist = collect_human_decisions(self.engine, s.cfg, rec)
+        if not 0 <= k < len(dlist):
+            await self._error(f"unknown decision {k}")
+            return
+        env = PyEnv(self.engine, s.cfg, auto_single=False)
+        env.reset()
+        for pc in dlist[k]["prefix"]:
+            if env.done:
+                break
+            env.step(int(pc))
+        _ = choices
+        view = build_view(env, hs)
+        prompt = build_prompt(env, hs, 999)
+        entry = decs[k]
+        opts = (prompt or {}).get("options", []) if prompt else []
+        if self.ws is None:
+            return
+        try:
+            await self.ws.send_json(
+                {"t": "review_frame", "k": k, "view": view, "options": opts, "entry": entry}
+            )
+        except (WebSocketDisconnect, RuntimeError):
+            pass
 
     async def _error(self, text: str) -> None:
         if self.ws is None:
@@ -615,12 +812,20 @@ def _card_json(code: int) -> dict:
     atk, dfn, level, rank, link, type_ = st
     if cd is not None:
         atk, dfn = cd.attack, cd.defense
-    return {"code": code, "name": names.get(code, f"#{code}"),
-            "type": type_, "type_str": _type_str(type_),
-            "attribute": cd.attribute if cd is not None else 0,
-            "race": cd.race if cd is not None else 0,
-            "level": level, "rank": rank, "link": link,
-            "atk": atk, "def": dfn, "text": text}
+    return {
+        "code": code,
+        "name": names.get(code, f"#{code}"),
+        "type": type_,
+        "type_str": _type_str(type_),
+        "attribute": cd.attribute if cd is not None else 0,
+        "race": cd.race if cd is not None else 0,
+        "level": level,
+        "rank": rank,
+        "link": link,
+        "atk": atk,
+        "def": dfn,
+        "text": text,
+    }
 
 
 def _type_str(type_: int) -> str:
@@ -628,11 +833,17 @@ def _type_str(type_: int) -> str:
 
     if type_ & C.TYPE_MONSTER:
         kinds = []
-        for bit, name in ((C.TYPE_FUSION, "Fusion"), (C.TYPE_SYNCHRO, "Synchro"),
-                          (C.TYPE_XYZ, "Xyz"), (C.TYPE_LINK, "Link"),
-                          (C.TYPE_RITUAL, "Ritual"), (C.TYPE_PENDULUM, "Pendulum"),
-                          (C.TYPE_TUNER, "Tuner"), (C.TYPE_EFFECT, "Effect"),
-                          (C.TYPE_NORMAL, "Normal")):
+        for bit, name in (
+            (C.TYPE_FUSION, "Fusion"),
+            (C.TYPE_SYNCHRO, "Synchro"),
+            (C.TYPE_XYZ, "Xyz"),
+            (C.TYPE_LINK, "Link"),
+            (C.TYPE_RITUAL, "Ritual"),
+            (C.TYPE_PENDULUM, "Pendulum"),
+            (C.TYPE_TUNER, "Tuner"),
+            (C.TYPE_EFFECT, "Effect"),
+            (C.TYPE_NORMAL, "Normal"),
+        ):
             if type_ & bit:
                 kinds.append(name)
         return " ".join(kinds) + " Monster" if kinds else "Monster"
@@ -654,15 +865,28 @@ def _register_stack_dump() -> None:
         pass
 
 
-def create_app(*, token: str, engine=None, make_opponent=None,
-               record_root: Path = ROOT / "runs" / "web",
-               pics_dir: Path = PICS_DIR, opponent_default: str = "product",
-               device: str = "cpu", replay_threads: int = 1) -> Starlette:
+def create_app(
+    *,
+    token: str,
+    engine=None,
+    make_opponent=None,
+    record_root: Path = ROOT / "runs" / "web",
+    pics_dir: Path = PICS_DIR,
+    opponent_default: str = "product",
+    device: str = "cpu",
+    replay_threads: int = 1,
+) -> Starlette:
     _register_stack_dump()
-    srv = Server(token=token, engine=engine, make_opponent=make_opponent,
-                 record_root=record_root, pics_dir=pics_dir,
-                 opponent_default=opponent_default, device=device,
-                 replay_threads=replay_threads)
+    srv = Server(
+        token=token,
+        engine=engine,
+        make_opponent=make_opponent,
+        record_root=record_root,
+        pics_dir=pics_dir,
+        opponent_default=opponent_default,
+        device=device,
+        replay_threads=replay_threads,
+    )
 
     def need_token(req) -> bool:
         return req.query_params.get("t") == srv.token
@@ -672,8 +896,7 @@ def create_app(*, token: str, engine=None, make_opponent=None,
             return Response("unauthorized", status_code=401)
         page = ROOT / "web" / "index.html"
         if page.is_file():
-            return Response(page.read_text(encoding="utf-8"),
-                            media_type="text/html")
+            return Response(page.read_text(encoding="utf-8"), media_type="text/html")
         return Response(PLACEHOLDER, media_type="text/html")
 
     async def card(req):
@@ -707,8 +930,7 @@ def create_app(*, token: str, engine=None, make_opponent=None,
             if cand.is_file():
                 return Response(cand.read_bytes(), media_type="image/jpeg")
         try:
-            data = await asyncio.to_thread(
-                _fetch_img, IMG_URLS[size].format(code=code))
+            data = await asyncio.to_thread(_fetch_img, IMG_URLS[size].format(code=code))
         except Exception:  # noqa: BLE001 -- offline: the card-back placeholder
             return Response(CARD_BACK_SVG, media_type="image/svg+xml")
         if data[:2] != b"\xff\xd8":
@@ -753,6 +975,12 @@ def create_app(*, token: str, engine=None, make_opponent=None,
                 if t == "settings":
                     await srv.on_settings(msg)
                     continue
+                if t == "review":
+                    await srv.on_review()
+                    continue
+                if t == "review_frame":
+                    await srv.on_review_frame(msg if isinstance(msg, dict) else {})
+                    continue
                 async with srv.lock:
                     if t == "new_game":
                         await srv.on_new_game(msg)
@@ -760,8 +988,7 @@ def create_app(*, token: str, engine=None, make_opponent=None,
                         await srv.on_choose(msg)
                     elif t == "resync":
                         if srv.session is None:
-                            await ws.send_json({"t": "lobby",
-                                                "decks": srv.list_decks()})
+                            await ws.send_json({"t": "lobby", "decks": srv.list_decks()})
                         else:
                             await srv.send_state(full_log=True)
                     else:
@@ -770,8 +997,12 @@ def create_app(*, token: str, engine=None, make_opponent=None,
             if srv.ws is ws:
                 srv.ws = None
 
-    routes = [Route("/", index), Route("/card/{code}", card),
-              Route("/img/{code}.jpg", img), WebSocketRoute("/ws", ws_handler)]
+    routes = [
+        Route("/", index),
+        Route("/card/{code}", card),
+        Route("/img/{code}.jpg", img),
+        WebSocketRoute("/ws", ws_handler),
+    ]
     web_dir = ROOT / "web"
     if web_dir.is_dir():  # client code is public; game data (ws, img, card) needs the token
         routes.append(Mount("/", StaticFiles(directory=web_dir)))
