@@ -35,10 +35,15 @@ PP=$!; GMB=0; RMB=0
 # really used 270-800 MB and 17/45 hit CUDA OOM)
 for i in $(seq 15); do
   sleep 10
-  kill -0 $PP 2>/dev/null || { alert "probe died before 150 s: $(tail -1 "$OUT/probe.txt")"; exit 3; }
   g=$(nvidia-smi --query-compute-apps=used_memory --format=csv,noheader,nounits | sort -n | tail -1)
   r=$(ps -o rss= --ppid $PP 2>/dev/null | sort -n | tail -1)
   [ "${g:-0}" -gt "$GMB" ] && GMB=$g; [ $(( ${r:-0} / 1024 )) -gt "$RMB" ] && RMB=$(( ${r:-0} / 1024 ))
+  if ! kill -0 $PP 2>/dev/null; then
+    # a probe that ran out of games early is fine when it exited 0 and was measured (raw variants of a small deck
+    # set end in ~30 s: primer-games-v2-20261019-1104 newcards); a crash still fails the job
+    wait $PP && [ "$GMB" -gt 0 ] && { echo "probe ended after $((i * 10)) s (exit 0)" >> "$OUT/PROGRESS"; break; }
+    alert "probe died before 150 s: $(tail -1 "$OUT/probe.txt")"; exit 3
+  fi
 done
 kill $PP 2>/dev/null; sleep 3; for c in $(ps -o pid= --ppid $PP 2>/dev/null); do kill "$c" 2>/dev/null; done
 GTOT=$(nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits | head -1)

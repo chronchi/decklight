@@ -301,6 +301,8 @@ def main() -> None:
     ap.add_argument("--proc", type=int, default=0)
     ap.add_argument("--out", type=Path, default=None)
     ap.add_argument("--games-limit", type=int, default=0, help="debug: cap the total games")
+    ap.add_argument("--seed-per-pair", type=int, choices=(0, 1), default=0,
+                    help="1: each pair gets its own --seeds deal seeds (from --deal-seed0 + pair index x seeds)")
     ap.add_argument("--pairs", default="",
                     help="explicit deck pairs 'a:b,c:d' or @file (one or more per line; seat 0 deck first) from decks/pool, or decks/newcards with "
                          "--deck-set newcards; showcase games")
@@ -480,8 +482,11 @@ def main() -> None:
         if args.pairs:
             pair_names = [(names.index(a), names.index(b)) for a, b in want]
         sched = []
-        for di, dj in pair_names:
-            for s in range(args.deal_seed0, args.deal_seed0 + args.seeds):
+        for k, (di, dj) in enumerate(pair_names):
+            # --seed-per-pair: pair k gets its own seed range, so a deck meets a new opening hand in every game (one
+            # shared range gives a deck the same hand against every opponent; NOTEBOOK 2026-10-19)
+            s0 = args.deal_seed0 + (k * args.seeds if args.seed_per_pair else 0)
+            for s in range(s0, s0 + args.seeds):
                 for s_seat in (0, 1):
                     sched.append((di, dj, s, s_seat, len(sched)))
     if args.both_search and (args.opp != "self" or args.raw):

@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Fast vs Full primer quality (NOTEBOOK 2026-10-19 pre-registration): play the 12-deck ring with the Fast product
+# Games then impact scoring, one variant at a time (Fast vs Full primers, NOTEBOOK 2026-10-19; also lobby primer
+# games v2). First use: play the 12-deck ring with the Fast product
 # (raw P) and the Full product (P + hppo + value_p2, both seats), then impact-score each game dir separately.
 # Env: as vast_search_match.sh (CKPT, VARIANTS, SM_ARGS, PROBE_ARGS, VAR_CAP) + VALUE (value checkpoint, must exist).
 # Usage: bash scripts/vast_primer_fvf.sh <name>. Results: runs/<name>/{fast,full}/games-*.jsonl and
