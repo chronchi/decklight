@@ -38,6 +38,8 @@ from ygo_zero.engine import constants as C
 from ygo_zero.engine.duel import DuelConfig, Engine
 
 MIN_GAMES = 20  # a primer with fewer games is not served (primer_for -> None)
+# A list that is mostly a known one reuses that primer (primer_for similar fallback).
+SIMILAR_MIN = 0.80
 # A card counts as a negate for ``your_answers`` from this many credited negations (1-2 are attribution noise:
 # Sky Striker Ace - Raye and S:P Little Knight had 1 each in the full build, Ash Blossom 2,837).
 MIN_NEGATIONS = 3
@@ -838,6 +840,7 @@ def _finalize(
         out[h] = {
             "hash": h,
             "files": sorted(e["files"]),
+            "main": sorted(int(c) for c in e["main"]),
             "main_size": len(e["main"]),
             "extra_size": len(e["extra"]),
             "games": games,
@@ -860,22 +863,115 @@ def _finalize(
 # --- runtime lookup ---
 
 
+_KNOWN_MAINS: dict[str, list[int]] | None = None
+
+
+def _known_mains() -> dict[str, list[int]]:
+    """Hash -> sorted main of every deck file on disk (pool/newcards/gauntlet/studied).
+
+    Lets the similar-list fallback match shipped primers built before entries
+    carried ``main`` (their hashes still match today's pool lists)."""
+    global _KNOWN_MAINS
+    if _KNOWN_MAINS is not None:
+        return _KNOWN_MAINS
+    from pathlib import Path
+
+    out: dict[str, list[int]] = {}
+    root = Path(__file__).resolve().parents[3]
+    dirs = [root / "decks" / d for d in ("pool", "newcards", "gauntlet")]
+    studied = root / "data" / "primers" / "studied" / "decks"
+    if studied.is_dir():
+        dirs.append(studied)
+    for d in dirs:
+        if not d.is_dir():
+            continue
+        for p in sorted(d.glob("*.ydk")):
+            try:
+                deck = load_ydk(p)
+            except (OSError, ValueError):
+                continue
+            h = hash_of(deck)
+            out.setdefault(h, sorted(int(c) for c in deck.main))
+    _KNOWN_MAINS = out
+    return out
+
+
+def _main_list(deck) -> list[int]:
+    """The raw main codes of a Deck / mapping / flat code list."""
+    if isinstance(deck, Mapping):
+        return [int(c) for c in deck.get("main", ())]
+    if hasattr(deck, "main"):
+        return [int(c) for c in deck.main]
+    return [int(c) for c in deck]
+
+
+def _multiset_overlap(a: list[int], b: list[int]) -> int:
+    ca, cb = Counter(a), Counter(b)
+    return sum(min(ca[c], cb[c]) for c in ca.keys() & cb.keys())
+
+
 def primer_for(store: Mapping, bot_deck, my_deck) -> dict | None:
     """The stored primer for the bot's deck plus ``your_answers`` from the human deck.
 
     ``bot_deck`` / ``my_deck`` are Deck objects, ``{"main","extra"}`` mappings
     or flat code lists. Returns None when the deck is unknown or has fewer than
-    :data:`MIN_GAMES` games.
+    :data:`MIN_GAMES` games. When the exact list is missing (or too few games),
+    a stored list whose canon-folded main overlaps the asked main by at least
+    :data:`SIMILAR_MIN` is reused, labelled with ``similar`` (exact matches
+    never carry it).
     """
     decks = store.get("decks", {})
     h = hash_of(bot_deck)
     p = decks.get(h)
-    if p is None or p.get("games", 0) < MIN_GAMES:
+    if p is not None and p.get("games", 0) >= MIN_GAMES:
+        return {**p, "your_answers": _your_answers(store, p, my_deck)}
+    # Similar-list fallback: closest stored main (multiset intersection of
+    # canon-folded mains over the larger main size). Ties: more games, then hash.
+    asked = [canon(c) for c in _main_list(bot_deck)]
+    best = None
+    best_key: tuple | None = None
+    best_match = 0
+    known = None
+    for hh, cand in decks.items():
+        if cand.get("games", 0) < MIN_GAMES:
+            continue
+        cmain = cand.get("main")
+        if cmain is None:
+            if known is None:
+                known = _known_mains()
+            cmain = known.get(hh)
+            if cmain is None:
+                continue
+        cmain_c = [canon(c) for c in cmain]
+        larger = max(len(asked), len(cmain_c))
+        if not larger:
+            continue
+        match = _multiset_overlap(asked, cmain_c)
+        ratio = match / larger
+        if ratio < SIMILAR_MIN:
+            continue
+        key = (ratio, cand.get("games", 0))
+        if best_key is None or key > best_key or (key == best_key and hh < best[0]):
+            best = (hh, cand)
+            best_key = key
+            best_match = match
+    if best is None:
         return None
+    _, sp = best
+    out = {**sp, "your_answers": _your_answers(store, sp, my_deck)}
+    out["similar"] = {
+        "archetype": sp.get("archetype", ""),
+        "match": best_match,
+        "of": len(asked),
+    }
+    return out
+
+
+def _your_answers(store: Mapping, p: dict, my_deck) -> list[dict]:
     mine = codes_of(my_deck)
     ht_here = {h["code"]: h for h in p.get("hand_traps_seen", [])}
     ht_global: set[int] = set()
-    for d in decks.values():
+    for d in store.get("decks", {}).values():
         for h2 in d.get("hand_traps_seen", []):
             ht_global.add(h2["code"])
     negated_by = store.get("negated_by", {})
@@ -909,7 +1005,7 @@ def primer_for(store: Mapping, bot_deck, my_deck) -> dict | None:
         else:
             answers.append({"code": c, "name": names_of(store, c), "note": OTHER_DECKS_NOTE, "hits": []})
     answers.sort(key=lambda a: (not a.get("hits"), a["code"]))
-    return {**p, "your_answers": answers}
+    return answers
 
 
 def names_of(store: Mapping, code: int) -> str:

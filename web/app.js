@@ -191,7 +191,10 @@ let hidePuzzleResult = false; // suppress the Solved/Not-solved dialog during so
 let primerOpen = false;
 let primer = null;         // trimmed primer reply, or null (not enough games)
 let primerDeck = "";       // pretty bot deck name shown as the title
+let primerHash = null;     // hash of the asked bot list (matches study_status.hash)
 let primerLoading = false;
+let canStudy = false;      // the primer reply said no primer but the list can be studied
+let studyState = null;     // last study_status for the open sheet's deck, or null
 
 // Rules in context (step 5, item 6) + undo (item 9).
 let kwPop = null;          // {"id","term","long"} for the open keyword popover, or null
@@ -1104,10 +1107,21 @@ function primerSheetHTML() {
     body = '<p class="emptytx">Loading the primer…</p>';
   } else if (!primer) {
     body = '<p class="emptytx">Not enough bot games with this deck yet.</p>';
+    if (canStudy) body += studyButtonHTML();
   } else {
     const p = primer;
     body += '<p class="prsub">' + esc(p.archetype || "Unknown") + " · from " + esc(String(p.games || 0)) +
       " bot games</p>";
+    if (p.similar) {
+      body += '<p class="prnote">Based on a similar ' + esc(p.similar.archetype || "") + " list (" +
+        esc(String(p.similar.match || 0)) + " of " + esc(String(p.similar.of || 0)) +
+        " main-deck cards match).</p>";
+      body += studyButtonHTML();
+    }
+    if (p.study && p.study.phase === "games") {
+      body += '<p class="prnote">First version: ranked by how often cards are played. ' +
+        "The win-chance ranking is still being computed.</p>";
+    }
     const scored = (p.key_cards || []).some((c) => c.impact != null);
     if (scored) body += '<p class="prnote">Ranked by how much the bot\'s win-chance estimate moves.</p>';
     if ((p.key_cards || []).length) {
@@ -1155,6 +1169,53 @@ function primerSheetHTML() {
     '<button class="iconbtn" data-act="closeprimer" aria-label="Close deck primer">' +
     '<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5 5l10 10M15 5 5 15"/></svg></button></div>' +
     '<div class="mbody primer">' + body + "</div></div>";
+}
+
+// Deck study on demand: the button (or the live status while it runs) under the
+// similar-list note and the not-enough-games text.
+function studyForSheet() {
+  return studyState && primerHash && studyState.hash === primerHash ? studyState : null;
+}
+
+function studyButtonHTML() {
+  const st = studyForSheet();
+  if (st) {
+    if (st.phase === "failed") {
+      return '<p class="prnote" role="status">Study failed. Try again.</p>' +
+        '<button class="bigbtn" data-act="study">Study this deck</button>';
+    }
+    if (st.phase === "scoring" || st.phase === "games" || st.phase === "done") {
+      const done = st.done || 0, total = st.total || 32;
+      const line = st.phase === "scoring"
+        ? "Ranking cards… " + done + " of " + total + " games"
+        : "Studying… " + done + " of " + total + " games";
+      return '<div class="sline" aria-hidden="true"></div>' +
+        '<p class="prstudy" role="status" aria-live="polite">' + esc(line) + "</p>";
+    }
+    return "";
+  }
+  return '<button class="bigbtn" data-act="study">Study this deck</button>' +
+    '<p class="prnote">Plays about 32 bot games with this list on this computer. ' +
+    "A first version is ready in about a minute; the full ranking takes about 10 minutes.</p>";
+}
+
+function sendPrimerRequest() {
+  if (MOCK || !ws) return;
+  if (msg && msg.t === "lobby") {
+    const el = document.getElementById("ydk");
+    const ydk = ((el && el.value) || "").trim();
+    ws.send({t: "primer", deck: lobbyPick.bot, my_deck: ydk ? {ydk} : lobbyPick.you});
+  } else {
+    ws.send({t: "primer"});
+  }
+}
+
+function sendStudyRequest() {
+  studyState = {t: "study_status", phase: "games", done: 0, total: 32, deck: primerDeck, hash: primerHash};
+  render();
+  if (MOCK || !ws) return;
+  if (msg && msg.t === "lobby") ws.send({t: "study", deck: lobbyPick.bot});
+  else ws.send({t: "study"});
 }
 
 // Loading screen shown at once after Start / Rematch / puzzle start, instead of
@@ -1562,6 +1623,9 @@ function goLobby() {
   primer = null;
   primerLoading = false;
   primerDeck = "";
+  primerHash = null;
+  canStudy = false;
+  studyState = null;
   inSolution = false;
   solutionFrames = null;
   solutionIdx = -1;
@@ -1662,6 +1726,9 @@ function onAction(kind, el) {
     primerOpen = false;
     primer = null;
     primerLoading = false;
+    primerDeck = "";
+    primerHash = null;
+    canStudy = false;
     resetCues();
     starting = true;
     render();
@@ -1768,15 +1835,23 @@ function onAction(kind, el) {
       if (MOCK) {
         primerDeck = "Tenpai Dragon";
       } else if (ws) {
-        const el = document.getElementById("ydk");
-        const ydk = ((el && el.value) || "").trim();
-        ws.send({t: "primer", deck: lobbyPick.bot, my_deck: ydk ? {ydk} : lobbyPick.you});
+        sendPrimerRequest();
       }
     } else {
       primerDeck = "Opponent's deck";
       if (!MOCK && ws) ws.send({t: "primer"});
     }
-    if (MOCK) { primer = mockPrimer(); primerDeck = "Tenpai Dragon"; primerLoading = false; }
+    if (MOCK) {
+      primer = mockPrimer();
+      primerDeck = "Tenpai Dragon";
+      primerHash = "mockhash";
+      canStudy = false;
+      studyState = null;
+      primerLoading = false;
+    }
+  } else if (kind === "study") {
+    sendStudyRequest();
+    return;
   } else if (kind === "closeprimer") {
     closeState("primer");
     render();
@@ -2317,6 +2392,9 @@ async function loadMock(i) {
   primer = null;
   primerLoading = false;
   primerDeck = "";
+  primerHash = null;
+  canStudy = false;
+  studyState = null;
   surrenderArm = false;
   revealCur = null;
   revealQueue = [];
@@ -2427,12 +2505,34 @@ async function loadMock(i) {
     puzzlesOpen = true;
   }
   // Primer screenshots: ?primer=1 (a primer) or ?primer=null (not enough games),
-  // in the lobby or over a game.
-  if (qs.get("primer") === "1" || qs.get("primer") === "null") {
-    primerOpen = true;
-    primerLoading = false;
-    primer = qs.get("primer") === "null" ? null : mockPrimer();
-    primerDeck = "Tenpai Dragon";
+  // ?primer=similar (similar-list note + study button), ?primer=study (empty +
+  // study button), ?primer=studying (mid-study status), ?primer=partial
+  // (first-version note), in the lobby or over a game.
+  {
+    const pv = qs.get("primer");
+    if (pv === "1" || pv === "null" || pv === "similar" || pv === "study" ||
+        pv === "studying" || pv === "partial") {
+      primerOpen = true;
+      primerLoading = false;
+      primerDeck = "Tenpai Dragon";
+      primerHash = "mockhash";
+      canStudy = pv === "null" || pv === "study" || pv === "studying";
+      if (pv === "null" || pv === "study" || pv === "studying") {
+        primer = null;
+      } else {
+        primer = mockPrimer();
+      }
+      if (pv === "similar" && primer) {
+        primer.similar = {archetype: "Tenpai Dragon", match: 37, of: 40};
+      }
+      if (pv === "partial" && primer) {
+        primer.study = {phase: "games", games: 21};
+      }
+      if (pv === "studying") {
+        studyState = {t: "study_status", phase: "games", done: 12, total: 32,
+          deck: "Tenpai Dragon", hash: "mockhash"};
+      }
+    }
   }
   render();
   if (msg.t === "state" && !(Array.isArray(msg.cues) && msg.cues.length)) announceState(null, msg);
@@ -2641,10 +2741,20 @@ async function boot() {
       } else if (m.t === "primer") {
         primer = m.primer || null;
         primerDeck = m.deck || "Opponent's deck";
+        primerHash = m.hash || null;
+        canStudy = !!m.can_study;
         primerLoading = false;
         primerOpen = true;
         gameMenu = false;
+        if (primer && primer.study && primer.study.phase === "scored" &&
+            studyState && studyState.hash === primerHash) studyState = null;
         render();
+        return;
+      } else if (m.t === "study_status") {
+        if (!m.busy) studyState = m;
+        render();
+        const finished = (m.phase === "games" && (m.done || 0) >= (m.total || 0)) || m.phase === "done";
+        if (finished && primerOpen && primerHash && m.hash === primerHash) sendPrimerRequest();
         return;
       } else if (m.t === "puzzle_solution") {
         startSolution(m.frames || []);

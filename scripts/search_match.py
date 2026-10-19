@@ -306,6 +306,8 @@ def main() -> None:
     ap.add_argument("--pairs", default="",
                     help="explicit deck pairs 'a:b,c:d' or @file (one or more per line; seat 0 deck first) from decks/pool, or decks/newcards with "
                          "--deck-set newcards; showcase games")
+    ap.add_argument("--deck-dir", type=Path, default=None,
+                    help="--pairs: look deck names up in this dir first, then in decks/pool")
     ap.add_argument("--both-search", type=int, choices=(0, 1), default=0,
                     help="--opp self: both seats search (the product vs itself); log entries carry the seat")
     ap.add_argument("--prof", type=int, choices=(0, 1), default=0,
@@ -464,7 +466,18 @@ def main() -> None:
             names = sorted({d for pr in want for d in pr})
             if args.deck_set == "newcards":  # --pairs from decks/newcards instead of the pool
                 deck_dir = ROOT / "decks" / "newcards"
-            missing = [d for d in names if not (deck_dir / f"{d}.ydk").is_file()]
+
+            def _pair_path(name: str) -> Path:
+                if args.deck_dir is not None and (args.deck_dir / f"{name}.ydk").is_file():
+                    return args.deck_dir / f"{name}.ydk"
+                if (deck_dir / f"{name}.ydk").is_file():
+                    return deck_dir / f"{name}.ydk"
+                pool = ROOT / "decks" / "pool" / f"{name}.ydk"
+                if pool.is_file():
+                    return pool
+                return deck_dir / f"{name}.ydk"
+
+            missing = [d for d in names if not _pair_path(d).is_file()]
             if missing or any(len(pr) != 2 for pr in want):
                 fail(f"--pairs: bad pairs or decks not in {deck_dir.name}: {missing or want}")
         elif args.deck_set == "sample":
@@ -633,11 +646,18 @@ def main() -> None:
             else:
                 if args.deal_mode == "train" and (names[di] in hold or names[dj] in hold):
                     fail(f"train game drew a holdout deck: {names[di]} vs {names[dj]}")
-                cfg = DuelConfig(
-                    load_ydk(deck_dir / f"{names[di]}.ydk"),
-                    load_ydk(deck_dir / f"{names[dj]}.ydk"),
-                    seed=s,
-                )
+                if args.pairs:
+                    cfg = DuelConfig(
+                        load_ydk(_pair_path(names[di])),
+                        load_ydk(_pair_path(names[dj])),
+                        seed=s,
+                    )
+                else:
+                    cfg = DuelConfig(
+                        load_ydk(deck_dir / f"{names[di]}.ydk"),
+                        load_ydk(deck_dir / f"{names[dj]}.ydk"),
+                        seed=s,
+                    )
             cfgs[idx] = cfg
             if PROF:
                 inflight_meta[idx] = {"decks": [names[di], names[dj]], "seed": s, "s_seat": s_seat}

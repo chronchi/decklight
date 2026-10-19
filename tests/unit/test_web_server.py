@@ -2092,3 +2092,152 @@ def test_primer_in_game_uses_current_decks(tmp_path, engine, monkeypatch):
         m = _recv_type(ws, "primer")
         assert m["deck"] == "Blue Eyes"
         assert m["primer"] is not None and m["primer"]["key_cards"]
+
+
+# --- 12. deck study on demand (similar-list note + "Study this deck") ---
+
+
+def _swapped_paste() -> str:
+    """A legal pasted deck no shipped primer knows (one card swapped)."""
+    from ygo_zero.decks import parse_ydk
+
+    human = (FIXTURES / "BlueEyes.ydk").read_text()
+    other = parse_ydk((FIXTURES / "Branded.ydk").read_text())
+    lines = human.splitlines()
+    main_idx = next(i for i, line in enumerate(lines) if line.strip() == "#main")
+    extra_idx = next(i for i, line in enumerate(lines) if line.strip() == "#extra")
+    body = [line for line in lines[main_idx + 1 : extra_idx] if line.strip().isdigit()]
+    body[0] = str(other.main[0])
+    tail = [line for line in lines[extra_idx + 1 :] if line.strip().isdigit()]
+    return "#main\n" + "\n".join(body) + "\n#extra\n" + "\n".join(tail)
+
+
+class _FakeStudyStdout:
+    def __init__(self, lines: list[str]) -> None:
+        self._lines = [line.encode() + b"\n" for line in lines]
+
+    async def readline(self) -> bytes:
+        if self._lines:
+            return self._lines.pop(0)
+        return b""
+
+
+class _FakeStudyProc:
+    """An asyncio-subprocess stand-in feeding canned STUDY lines."""
+
+    def __init__(self, lines: list[str], rc: int = 0) -> None:
+        self.stdout = _FakeStudyStdout(lines)
+        self._rc = rc
+        self.returncode: int | None = None
+        self.killed = False
+
+    async def wait(self) -> int:
+        self.returncode = self._rc
+        return self._rc
+
+    def kill(self) -> None:
+        self.killed = True
+
+
+STUDY_LINES = [
+    "STUDY games 12/32",
+    "STUDY games 32/32",
+    "STUDY phase games done",
+    "STUDY scored 20/32",
+    "STUDY done",
+]
+
+
+def test_study_spawns_worker_and_reports_progress(tmp_path, engine, monkeypatch):
+    import asyncio as _asyncio
+
+    import ygo_zero.web.server as S
+
+    app = _make_app(tmp_path, engine)
+    srv = app.state.server
+    monkeypatch.setattr(S.Server, "get_primers", lambda self: {"decks": {}, "negated_by": {}})
+    srv._primers_cache = {"decks": {}, "negated_by": {}}
+    spawned: list = []
+
+    async def fake_exec(*args, **kwargs):
+        assert "scripts/study_deck.py" in list(args)
+        proc = _FakeStudyProc(STUDY_LINES)
+        spawned.append((args, kwargs))
+        return proc
+
+    monkeypatch.setattr(_asyncio, "create_subprocess_exec", fake_exec)
+    with _client(app).websocket_connect(f"/ws?t={TOKEN}") as ws:
+        ws.receive_text()  # lobby
+        ws.send_json({"t": "study", "deck": {"ydk": _swapped_paste()}})
+        got = []
+        for _ in range(50):
+            m = json.loads(ws.receive_text())
+            if m.get("t") != "study_status":
+                continue
+            got.append(m)
+            if m.get("phase") == "done":
+                break
+        assert [(m.get("phase"), m.get("done"), m.get("total")) for m in got] == [
+            ("games", 12, 32),
+            ("games", 32, 32),
+            ("games", 32, 32),
+            ("scoring", 20, 32),
+            ("done", 32, 32),
+        ]
+        assert spawned, "the worker was never spawned"
+        assert srv._primers_cache is None, "the primer cache was not dropped"
+
+
+def test_study_busy_while_running(tmp_path, engine):
+    from types import SimpleNamespace
+
+    app = _make_app(tmp_path, engine)
+    srv = app.state.server
+    srv._study_proc = SimpleNamespace(returncode=None)
+    try:
+        with _client(app).websocket_connect(f"/ws?t={TOKEN}") as ws:
+            ws.receive_text()  # lobby
+            ws.send_json({"t": "study", "deck": {"ydk": _swapped_paste()}})
+            m = _recv_type(ws, "study_status")
+            assert m.get("busy") is True
+    finally:
+        srv._study_proc = None
+
+
+def test_study_already_shipped_errors(tmp_path, engine):
+    import ygo_zero.web.server as S
+    from ygo_zero.analysis import primer as P
+    from ygo_zero.decks import load_ydk
+
+    app = _make_app(tmp_path, engine)
+    srv = app.state.server
+    store = srv.get_primers()
+    deck_id = None
+    for _group, d in S.DECK_DIRS:
+        if deck_id is not None:
+            break
+        for p in sorted(d.glob("*.ydk")):
+            h = P.hash_of(load_ydk(p))
+            e = store.get("decks", {}).get(h)
+            if e is not None and e.get("games", 0) >= P.MIN_GAMES:
+                deck_id = p.stem
+                break
+    assert deck_id is not None, "no shipped primer matches a pool/newcards deck"
+    with _client(app).websocket_connect(f"/ws?t={TOKEN}") as ws:
+        ws.receive_text()  # lobby
+        ws.send_json({"t": "study", "deck": deck_id})
+        m = _recv_type(ws, "error")
+        assert "already studied" in m["text"]
+
+
+def test_primer_can_study_unknown(tmp_path, engine, monkeypatch):
+    import ygo_zero.web.server as S
+
+    monkeypatch.setattr(S.Server, "get_primers", lambda self: {"decks": {}, "negated_by": {}})
+    app = _make_app(tmp_path, engine)
+    with _client(app).websocket_connect(f"/ws?t={TOKEN}") as ws:
+        ws.receive_text()  # lobby
+        ws.send_json({"t": "primer", "deck": {"ydk": _swapped_paste()}, "my_deck": {"ydk": _swapped_paste()}})
+        m = _recv_type(ws, "primer")
+        assert m["primer"] is None
+        assert m.get("can_study") is True

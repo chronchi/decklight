@@ -64,10 +64,20 @@ COUNTERS = (
 
 
 def deck_path(name: str) -> Path:
+    import os
+
+    extra = os.environ.get("YGO_STUDIED_DECKS")  # study_deck.py with --out-dir elsewhere (tests)
+    if extra:
+        p = Path(extra) / f"{name}.ydk"
+        if p.is_file():
+            return p
     for d in DECK_DIRS:
         p = ROOT / "decks" / d / f"{name}.ydk"
         if p.is_file():
             return p
+    p = ROOT / "data" / "primers" / "studied" / "decks" / f"{name}.ydk"
+    if p.is_file():
+        return p
     raise FileNotFoundError(f"deck {name} not found in decks/pool|gauntlet|newcards")
 
 

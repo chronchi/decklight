@@ -31,6 +31,10 @@ DECK_DIRS = (("pool", ROOT / "decks" / "pool"), ("newcards", ROOT / "decks" / "n
 PICS_DIR = ROOT / "data" / "cache" / "pics"
 PUZZLES_PATH = ROOT / "src" / "ygo_zero" / "web" / "puzzles.json"
 PRIMERS_PATH = ROOT / "src" / "ygo_zero" / "web" / "primers.json.gz"  # scripts/build_primers.py --commit-copy
+STUDIED_DIR = ROOT / "data" / "primers" / "studied"
+STUDIED_PRIMERS_PATH = STUDIED_DIR / "primers.json"
+STUDY_PROCS = 3
+STUDY_GAMES = 32
 
 IMG_URLS = {
     "small": "https://images.ygoprodeck.com/images/cards_small/{code}.jpg",
@@ -127,6 +131,7 @@ class Server:
         self.stats = None  # DuelStats | None (one per game, viewer = human seat)
         self._adv: asyncio.Task | None = None
         self.advancing = False
+        self._study_proc: asyncio.subprocess.Process | None = None  # at most one study at a time
 
     # --- lazy resources ---
 
@@ -295,7 +300,11 @@ class Server:
         }
 
     def get_primers(self) -> dict:
-        """Opponent primers from primers.json, loaded once; missing file -> empty store."""
+        """Opponent primers from primers.json, merged with studied lists; missing file -> empty store.
+
+        Studied entries (data/primers/studied/primers.json) never replace a
+        shipped entry with the same hash.
+        """
         if self._primers_cache is not None:
             return self._primers_cache
         from ygo_zero.analysis.primer import load_store
@@ -308,6 +317,23 @@ class Server:
         if not isinstance(out.get("decks"), dict):
             out = {"decks": {}, "negated_by": {}}
         out.setdefault("negated_by", {})
+        try:
+            studied = json.loads(STUDIED_PRIMERS_PATH.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            studied = {}
+        if isinstance(studied.get("decks"), dict):
+            for h, e in studied["decks"].items():
+                if h not in out["decks"]:
+                    out["decks"][h] = e
+            sneg = studied.get("negated_by", {})
+            if isinstance(sneg, dict):
+                neg = out["negated_by"]
+                for k, victims in sneg.items():
+                    if not isinstance(victims, dict):
+                        continue
+                    slot = neg.setdefault(k, {})
+                    for v, n in victims.items():
+                        slot[v] = slot.get(v, 0) + n
         self._primers_cache = out
         return self._primers_cache
 
@@ -316,7 +342,7 @@ class Server:
         """What the client sheet shows (no files, no bot-vs-bot win rates)."""
         if p is None:
             return None
-        return {
+        out = {
             "archetype": p.get("archetype", ""),
             "games": int(p.get("games", 0)),
             "key_cards": [
@@ -358,6 +384,17 @@ class Server:
                 for a in p.get("your_answers", [])
             ],
         }
+        if p.get("similar") is not None:
+            s = p["similar"]
+            out["similar"] = {
+                "archetype": s.get("archetype", ""),
+                "match": int(s.get("match", 0)),
+                "of": int(s.get("of", 0)),
+            }
+        if p.get("study") is not None:
+            st = p["study"]
+            out["study"] = {"phase": st.get("phase", ""), "games": int(st.get("games", 0))}
+        return out
 
     def _remember_decks(self, human_deck, bot_deck, human_spec=None, bot_spec=None) -> None:
         """Keep the live game's Deck objects for the in-game opponent primer."""
@@ -802,7 +839,7 @@ class Server:
 
     async def on_primer(self, msg: dict) -> None:
         """The opponent deck's primer (lobby: explicit decks; in game: the live ones)."""
-        from ygo_zero.analysis.primer import primer_for
+        from ygo_zero.analysis.primer import hash_of, primer_for
 
         store = self.get_primers()
         spec = msg.get("deck")
@@ -833,14 +870,225 @@ class Server:
         reply = {
             "t": "primer",
             "deck": bot_name,
+            "hash": hash_of(bot_deck),
             "primer": self._trim_primer(primer_for(store, bot_deck, my_deck)),
         }
+        if reply["primer"] is None:
+            reply["can_study"] = True
         if self.ws is None:
             return
         try:
             await self.ws.send_json(reply)
         except (WebSocketDisconnect, RuntimeError):
             pass
+
+    def _study_busy(self) -> bool:
+        return self._study_proc is not None and self._study_proc.returncode is None
+
+    async def shutdown(self) -> None:
+        """Kill a running deck study (called on server shutdown)."""
+        proc = self._study_proc
+        if proc is not None and proc.returncode is None:
+            try:
+                proc.kill()
+            except ProcessLookupError:
+                pass
+            try:
+                await proc.wait()
+            except Exception:  # noqa: BLE001, S110 -- shutting down: best effort
+                pass
+        self._study_proc = None
+
+    def _deck_text(self, spec) -> str | None:
+        """The .ydk text behind a deck spec (id, pasted dict, or session id)."""
+        if isinstance(spec, dict) and "ydk" in spec:
+            return spec["ydk"]
+        if isinstance(spec, str):
+            for _group, d in DECK_DIRS:
+                p = d / f"{spec}.ydk"
+                if p.is_file():
+                    return p.read_text(encoding="utf-8")
+            if spec in self.user_decks:
+                return self.user_decks[spec]
+        return None
+
+    async def on_study(self, msg: dict) -> None:
+        """Study a deck list on demand: play bot games with it in the background.
+
+        Replies ``study_status`` as the worker progresses; the primer cache is
+        dropped when the first (frequency) version lands and when scoring
+        finishes, so the next ``primer`` request returns the new entry.
+        """
+        import sys
+        import tempfile
+
+        from ygo_zero.analysis.primer import MIN_GAMES, hash_of
+
+        spec = msg.get("deck")
+        if spec is None:
+            if self.game_decks is None:
+                await self._error("no active game (send new_game first)")
+                return
+            deck = self.game_decks["bot"]
+            deck_name = self.game_deck_names.get("bot", "Opponent")
+            text = "#main\n" + "\n".join(str(c) for c in deck.main)
+            text += "\n#extra\n" + "\n".join(str(c) for c in deck.extra)
+            text += "\n!side\n" + "\n".join(str(c) for c in getattr(deck, "side", ()))
+            text += "\n"
+        else:
+            deck, err = self.resolve_deck(spec)
+            if err is not None:
+                await self._error(err)
+                return
+            deck_name = _pretty_deck_name(spec) if isinstance(spec, str) else "Pasted deck"
+            text = self._deck_text(spec)
+            if text is None:
+                await self._error(f"unknown deck {spec!r}")
+                return
+        h = hash_of(deck)
+        if self._study_busy():
+            await self._send_study({"t": "study_status", "busy": True, "deck": deck_name, "hash": h})
+            return
+        existing = self.get_primers().get("decks", {}).get(h)
+        if existing is not None and ("study" not in existing or existing["study"].get("phase") == "scored"):
+            parts = []
+            if existing.get("games", 0) >= MIN_GAMES:
+                parts.append("shipped" if "study" not in existing else "scored")
+            if parts:
+                await self._error(
+                    f"already studied ({parts[0]} primer with {existing.get('games', 0)} games)"
+                )
+                return
+        with tempfile.NamedTemporaryFile("w", suffix=".ydk", delete=False, encoding="utf-8") as tmp:
+            tmp.write(text)
+            tmp_name = tmp.name
+        try:
+            self._study_proc = await asyncio.create_subprocess_exec(
+                "taskset",
+                "-c",
+                "0-3",
+                "nice",
+                "-n",
+                "19",
+                sys.executable,
+                "scripts/study_deck.py",
+                "--ydk",
+                tmp_name,
+                "--out-dir",
+                str(STUDIED_DIR),
+                "--procs",
+                str(STUDY_PROCS),
+                "--games",
+                str(STUDY_GAMES),
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.STDOUT,
+                cwd=ROOT,
+            )
+        except OSError as e:
+            try:
+                Path(tmp_name).unlink(missing_ok=True)
+            except OSError:
+                pass
+            await self._error(f"could not start the study: {e}")
+            return
+        proc = self._study_proc
+        asyncio.create_task(self._watch_study(proc, tmp_name, deck_name, h))
+
+    async def _send_study(self, msg: dict) -> None:
+        if self.ws is None:
+            return
+        try:
+            await self.ws.send_json(msg)
+        except (WebSocketDisconnect, RuntimeError):
+            pass
+
+    async def _watch_study(self, proc, ydk_tmp: str, deck_name: str, h: str) -> None:
+        """Relay the study worker's STUDY lines as study_status; drop the primer
+        cache when the frequency version lands and when scoring finishes."""
+        import re
+
+        total = STUDY_GAMES
+        last = ""
+        try:
+            assert proc.stdout is not None
+            while True:
+                raw = await proc.stdout.readline()
+                if not raw:
+                    break
+                line = raw.decode(errors="replace").strip()
+                if not line:
+                    continue
+                last = line
+                m = re.match(r"^STUDY games (\d+)/(\d+)$", line)
+                s = re.match(r"^STUDY scored (\d+)/(\d+)$", line)
+                if m:
+                    done, total = int(m.group(1)), int(m.group(2))
+                    await self._send_study(
+                        {
+                            "t": "study_status",
+                            "deck": deck_name,
+                            "hash": h,
+                            "phase": "games",
+                            "done": done,
+                            "total": total,
+                        }
+                    )
+                elif line == "STUDY phase games done":
+                    self._primers_cache = None
+                    await self._send_study(
+                        {
+                            "t": "study_status",
+                            "deck": deck_name,
+                            "hash": h,
+                            "phase": "games",
+                            "done": total,
+                            "total": total,
+                        }
+                    )
+                elif s:
+                    await self._send_study(
+                        {
+                            "t": "study_status",
+                            "deck": deck_name,
+                            "hash": h,
+                            "phase": "scoring",
+                            "done": int(s.group(1)),
+                            "total": int(s.group(2)),
+                        }
+                    )
+                elif line == "STUDY done":
+                    self._primers_cache = None
+                    await self._send_study(
+                        {
+                            "t": "study_status",
+                            "deck": deck_name,
+                            "hash": h,
+                            "phase": "done",
+                            "done": total,
+                            "total": total,
+                        }
+                    )
+        finally:
+            try:
+                Path(ydk_tmp).unlink(missing_ok=True)
+            except OSError:
+                pass
+        rc = await proc.wait()
+        if self._study_proc is proc:
+            self._study_proc = None
+        if rc != 0:
+            print(f"ALERT web: study {deck_name} failed (exit {rc}): {last}", flush=True)
+            await self._send_study(
+                {
+                    "t": "study_status",
+                    "deck": deck_name,
+                    "hash": h,
+                    "phase": "failed",
+                    "done": 0,
+                    "total": total,
+                    "error": last or f"exit {rc}",
+                }
+            )
 
     async def on_puzzle(self, msg: dict) -> None:
         from ygo_zero.analysis.events import deck_path
@@ -1750,6 +1998,9 @@ def create_app(
                 if t == "primer":  # read-only deck primer
                     await srv.on_primer(msg if isinstance(msg, dict) else {})
                     continue
+                if t == "study":  # background deck study (spawns a subprocess)
+                    await srv.on_study(msg if isinstance(msg, dict) else {})
+                    continue
                 if t == "puzzle_solution":  # read-only replay frames
                     await srv.on_puzzle_solution(msg if isinstance(msg, dict) else {})
                     continue
@@ -1784,6 +2035,14 @@ def create_app(
     web_dir = ROOT / "web"
     if web_dir.is_dir():  # client code is public; game data (ws, img, card) needs the token
         routes.append(Mount("/", StaticFiles(directory=web_dir)))
-    app = Starlette(routes=routes)
+
+    from contextlib import asynccontextmanager
+
+    @asynccontextmanager
+    async def lifespan(app):
+        yield
+        await srv.shutdown()  # kill a running deck study, if any
+
+    app = Starlette(routes=routes, lifespan=lifespan)
     app.state.server = srv
     return app

@@ -3,6 +3,7 @@
 from ygo_zero.analysis.primer import (
     MIN_GAMES,
     OTHER_DECKS_NOTE,
+    SIMILAR_MIN,
     aggregate,
     deck_hash,
     hash_of,
@@ -327,3 +328,43 @@ def test_hand_trap_seen_and_primer_for():
     ans3 = {a["code"]: a for a in p3["your_answers"]}
     assert ans3[99999998].get("note") == OTHER_DECKS_NOTE
     assert ans3[99999998]["hits_elsewhere"][0]["code"] == 100
+
+
+def _swapped(deck, n: int, fill: int = 100000001):
+    """A copy of `deck` with its first `n` main cards replaced (same main size)."""
+    assert all(c < fill for c in (*deck.main, *deck.extra))
+    main = [fill + i for i in range(n)] + list(deck.main[n:])
+    return Deck(tuple(main), deck.extra, deck.side, "swapped")
+
+
+def test_similar_fallback_close_list():
+    """A list differing in 3 of 40 main cards reuses the primer, labelled similar."""
+    cards, names = _cards_names()
+    store = aggregate([_summary()] * 25, cards, names)
+    a = _deck(DECK_A)
+    assert len(a.main) == 40
+    mod = _swapped(a, 3)
+    p = primer_for(store, mod, mod)
+    assert p is not None
+    assert p["similar"]["match"] == 37
+    assert p["similar"]["of"] == 40
+    assert p["similar"]["archetype"] == p["archetype"]
+
+
+def test_similar_fallback_below_threshold():
+    """A list at 70% overlap gets no primer."""
+    cards, names = _cards_names()
+    store = aggregate([_summary()] * 25, cards, names)
+    a = _deck(DECK_A)
+    mod = _swapped(a, 12)
+    assert primer_for(store, mod, mod) is None
+    assert SIMILAR_MIN == 0.80
+
+
+def test_exact_match_carries_no_similar():
+    cards, names = _cards_names()
+    store = aggregate([_summary()] * 25, cards, names)
+    a = _deck(DECK_A)
+    p = primer_for(store, a, a)
+    assert p is not None
+    assert "similar" not in p

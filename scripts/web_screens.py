@@ -67,6 +67,13 @@ MOCKS = [
     ("67-primer-lobby", "0&primer=1"),
     ("68-primer-empty", "0&primer=null"),
     ("69-primer-game", "1&primer=1"),
+    # Similar-list fallback + study on demand: the similar note with its
+    # button, the empty state with its button, the mid-study status line,
+    # and the first-version (frequency-ranked) note.
+    ("71-primer-similar", "0&primer=similar"),
+    ("72-primer-study", "0&primer=study"),
+    ("73-primer-studying", "0&primer=studying"),
+    ("74-primer-partial", "0&primer=partial"),
     # Setting-up status right after Start (the start button disabled, no second new_game).
     ("70-starting", "0&starting=1"),
 ]
@@ -600,11 +607,24 @@ def main() -> int:
                     top = puzzle_dialog_topmost(page)
                     if top != "ok":
                         errors.append(f"{name}: puzzle dialog not topmost ({top})")
-                if name in ("67-primer-lobby", "68-primer-empty", "69-primer-game"):
+                if name in (
+                    "67-primer-lobby",
+                    "68-primer-empty",
+                    "69-primer-game",
+                    "71-primer-similar",
+                    "72-primer-study",
+                    "73-primer-studying",
+                    "74-primer-partial",
+                ):
                     if not page.evaluate("!!document.querySelector('#primersheet')"):
                         errors.append(f"{name}: no primer sheet on screen")
                     sheet = page.evaluate("document.querySelector('#primersheet').textContent")
-                    if name in ("67-primer-lobby", "69-primer-game"):
+                    if name in (
+                        "67-primer-lobby",
+                        "69-primer-game",
+                        "71-primer-similar",
+                        "74-primer-partial",
+                    ):
                         for want in (
                             "Key cards",
                             "How it opens",
@@ -633,6 +653,37 @@ def main() -> int:
                             errors.append("68-primer-empty: no not-enough-games line")
                         if page.evaluate("document.querySelectorAll('#primersheet h3').length"):
                             errors.append("68-primer-empty: empty sheet still shows sections")
+                    if name == "71-primer-similar":
+                        for want in (
+                            "Based on a similar Tenpai Dragon list",
+                            "37 of 40 main-deck cards match",
+                            "Study this deck",
+                            "Plays about 32 bot games",
+                        ):
+                            if want not in sheet:
+                                errors.append(f"{name}: no {want!r} in the sheet")
+                    if name == "72-primer-study":
+                        for want in (
+                            "Not enough bot games with this deck yet.",
+                            "Study this deck",
+                            "A first version is ready in about a minute",
+                        ):
+                            if want not in sheet:
+                                errors.append(f"{name}: no {want!r} in the sheet")
+                        if page.evaluate("document.querySelectorAll('#primersheet h3').length"):
+                            errors.append("72-primer-study: empty sheet still shows sections")
+                    if name == "73-primer-studying":
+                        if "Studying… 12 of 32 games" not in sheet:
+                            errors.append("73-primer-studying: no mid-study status line")
+                        if not page.evaluate("!!document.querySelector('#primersheet [role=status]')"):
+                            errors.append("73-primer-studying: status line has no role=status")
+                    if name == "74-primer-partial":
+                        for want in (
+                            "First version: ranked by",
+                            "win-chance ranking is still being computed",
+                        ):
+                            if want not in sheet:
+                                errors.append(f"{name}: no {want!r} in the sheet")
                     if name == "69-primer-game" and page.evaluate("!!document.querySelector('#gamemenu')"):
                         errors.append("69-primer-game: the game menu is still open under the primer")
                     top = primer_topmost(page)
