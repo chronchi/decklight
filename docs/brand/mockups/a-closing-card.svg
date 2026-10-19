@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="700" viewBox="0 0 1200 700">
+<title>tsume — a-closing-card</title>
+<rect width="1200" height="700" fill="#141310"/>
+<g>
+<rect x="540" y="110" width="120" height="174" rx="10" fill="none" stroke="#d6cfc0" stroke-width="3"/>
+<path d="M630 92 H678 V140" fill="none" stroke="#b89a5e" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+<circle cx="600" cy="197" r="5" fill="#b89a5e"/></g>
+<text x="600" y="530" text-anchor="middle" font-family="Clear Sans Thin, Clear Sans Light, sans-serif" font-weight="200" font-size="112" letter-spacing="26" fill="#d6cfc0">tsume</text>
+<text x="600" y="598" text-anchor="middle" font-family="Noto Sans CJK JP, sans-serif" font-size="24" letter-spacing="6" fill="#958f82">詰め · learns any deck</text>
+</svg>

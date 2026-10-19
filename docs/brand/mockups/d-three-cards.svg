@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="700" viewBox="0 0 1200 700">
+<title>tsume — d-three-cards</title>
+<rect width="1200" height="700" fill="#141310"/>
+<g>
+<g transform="rotate(-16 600 330)"><rect x="548" y="120" width="104" height="150" rx="9" fill="#141310" stroke="#5e5a51" stroke-width="3"/></g>
+<g transform="rotate(0 600 330)"><rect x="548" y="112" width="104" height="150" rx="9" fill="#141310" stroke="#958f82" stroke-width="3"/></g>
+<g transform="rotate(16 600 330)"><rect x="548" y="120" width="104" height="150" rx="9" fill="#141310" stroke="#b89a5e" stroke-width="4"/>
+<circle cx="600" cy="195" r="6" fill="#b89a5e"/></g></g>
+<text x="600" y="530" text-anchor="middle" font-family="Clear Sans Thin, Clear Sans Light, sans-serif" font-weight="200" font-size="112" letter-spacing="26" fill="#d6cfc0">tsume</text>
+<text x="600" y="598" text-anchor="middle" font-family="Noto Sans CJK JP, sans-serif" font-size="24" letter-spacing="6" fill="#958f82">詰め · learns any deck</text>
+</svg>

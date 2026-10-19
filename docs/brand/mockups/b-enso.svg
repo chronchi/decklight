@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="700" viewBox="0 0 1200 700">
+<title>tsume — b-enso</title>
+<rect width="1200" height="700" fill="#141310"/>
+<g>
+<path d="M 704 232 A 108 108 0 1 1 676 156" fill="none" stroke="#b89a5e" stroke-width="13" stroke-linecap="round"/>
+<path d="M 676 156 A 108 108 0 0 1 686 168" fill="none" stroke="#b89a5e" stroke-width="7" stroke-linecap="round" opacity="0.6"/>
+<rect x="578" y="198" width="44" height="64" rx="5" fill="none" stroke="#d6cfc0" stroke-width="3"/></g>
+<text x="600" y="530" text-anchor="middle" font-family="Clear Sans Thin, Clear Sans Light, sans-serif" font-weight="200" font-size="112" letter-spacing="26" fill="#d6cfc0">tsume</text>
+<text x="600" y="598" text-anchor="middle" font-family="Noto Sans CJK JP, sans-serif" font-size="24" letter-spacing="6" fill="#958f82">詰め · learns any deck</text>
+</svg>

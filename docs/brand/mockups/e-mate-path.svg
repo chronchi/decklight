@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="700" viewBox="0 0 1200 700">
+<title>tsume — e-mate-path</title>
+<rect width="1200" height="700" fill="#141310"/>
+<g><circle cx="510" cy="110" r="3" fill="#5e5a51"/><circle cx="510" cy="170" r="3" fill="#5e5a51"/><circle cx="510" cy="230" r="3" fill="#5e5a51"/><circle cx="510" cy="290" r="3" fill="#5e5a51"/><circle cx="570" cy="110" r="3" fill="#5e5a51"/><circle cx="570" cy="170" r="3" fill="#5e5a51"/><circle cx="570" cy="230" r="3" fill="#5e5a51"/><circle cx="570" cy="290" r="3" fill="#5e5a51"/><circle cx="630" cy="110" r="3" fill="#5e5a51"/><circle cx="630" cy="170" r="3" fill="#5e5a51"/><circle cx="630" cy="230" r="3" fill="#5e5a51"/><circle cx="630" cy="290" r="3" fill="#5e5a51"/><circle cx="690" cy="110" r="3" fill="#5e5a51"/><circle cx="690" cy="170" r="3" fill="#5e5a51"/><circle cx="690" cy="230" r="3" fill="#5e5a51"/><circle cx="690" cy="290" r="3" fill="#5e5a51"/>
+<polyline points="510,290 570,230 630,230 690,170" fill="none" stroke="#d6cfc0" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+<circle cx="510" cy="290" r="9" fill="#141310" stroke="#d6cfc0" stroke-width="3"/>
+<circle cx="690" cy="170" r="13" fill="#b89a5e"/>
+<circle cx="690" cy="170" r="24" fill="none" stroke="#b89a5e" stroke-width="2" opacity="0.5"/></g>
+<text x="600" y="530" text-anchor="middle" font-family="Clear Sans Thin, Clear Sans Light, sans-serif" font-weight="200" font-size="112" letter-spacing="26" fill="#d6cfc0">tsume</text>
+<text x="600" y="598" text-anchor="middle" font-family="Noto Sans CJK JP, sans-serif" font-size="24" letter-spacing="6" fill="#958f82">詰め · learns any deck</text>
+</svg>

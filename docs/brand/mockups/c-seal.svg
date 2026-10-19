@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="700" viewBox="0 0 1200 700">
+<title>tsume — c-seal</title>
+<rect width="1200" height="700" fill="#141310"/>
+<g>
+<rect x="500" y="110" width="200" height="200" rx="16" fill="#b5645a"/>
+<rect x="514" y="124" width="172" height="172" rx="10" fill="none" stroke="#141310" stroke-width="3" opacity="0.55"/>
+<text x="600" y="262" text-anchor="middle" font-family="Noto Serif CJK JP" font-weight="700" font-size="140" fill="#141310">詰</text></g>
+<text x="600" y="530" text-anchor="middle" font-family="Clear Sans Thin, Clear Sans Light, sans-serif" font-weight="200" font-size="112" letter-spacing="26" fill="#d6cfc0">tsume</text>
+<text x="600" y="598" text-anchor="middle" font-family="Noto Sans CJK JP, sans-serif" font-size="24" letter-spacing="6" fill="#958f82">詰め · learns any deck</text>
+</svg>
