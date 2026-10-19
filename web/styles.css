@@ -510,7 +510,7 @@ html.short #app { height: var(--app-h); }
 #gameover .score span + span { border-left: 1px solid var(--line-2); }
 #gameover .score b { font-size: 24px; font-weight: 300; color: var(--text); letter-spacing: 0.01em; font-variant-caps: normal; font-variant-numeric: tabular-nums; }
 #gameover .row, #puzzleresult .row { display: flex; gap: 10px; }
-#puzzleresult .row + .row { margin-top: 10px; }
+#gameover .row + .row, #puzzleresult .row + .row { margin-top: 10px; }
 
 /* ---------- replay title card (game_video.py) ---------- */
 #retitle {
@@ -615,6 +615,22 @@ details.ydk textarea {
   width: 100%; min-height: 54px; border-radius: 12px;
   color: var(--accent); background: var(--accent-tint); border: 1px solid rgba(184, 154, 94, 0.6);
   font-size: 16px; font-weight: 400; letter-spacing: 0.12em;
+}
+#startbtn:disabled { opacity: 0.55; cursor: default; }
+/* Setting-up status after Start / Rematch / puzzle start (replaces the lobby
+   form until the first state lands): centred, night palette, one slow hairline. */
+#starting {
+  flex: 1; min-height: 40vh;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 10px; text-align: center; padding: 32px 12px;
+}
+#starting .sline { width: 30px; height: 1px; background: var(--accent); opacity: 0.55; animation: breathe 2.4s ease-in-out infinite; }
+#starting .kicker { font-size: 13px; color: var(--muted); }
+#starting .sdesc { font-size: 15px; color: var(--text); max-width: 300px; line-height: 1.5; }
+#starting .sthink { font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; }
+#starting .sthink.dim { opacity: 0.8; }
+@media (prefers-reduced-motion: reduce) {
+  #starting .sline { animation: none; }
 }
 .mocknav { margin-top: 24px; text-align: center; color: var(--muted); font-size: 12px; }
 
@@ -963,7 +979,7 @@ details.ydk textarea {
 .dtile { border: 1px solid var(--line-2); border-radius: 10px; padding: 12px; min-width: 0; }
 .dtile .dk { font-size: 11px; letter-spacing: 0.16em; color: var(--muted); font-variant-caps: all-small-caps; }
 .dtile .dn { font-size: 26px; font-weight: 300; margin-top: 6px; font-variant-numeric: tabular-nums; }
-.dtile .dn.lp { font-size: 23px; white-space: nowrap; }
+.dtile .dn.lp { font-size: 23px; display: flex; flex-wrap: wrap; align-items: baseline; column-gap: 0.3em; }
 .dtile .dn .you { color: var(--you); }
 .dtile .dn .bot { color: var(--bot-ink); }
 .dtile .dn .vs, .dtile .dn .of { font-size: 15px; color: var(--muted); }

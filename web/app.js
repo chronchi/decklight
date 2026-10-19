@@ -121,6 +121,9 @@ try {
 } catch (e) { /* private mode: stay on auto */ }
 let inLobby = false;     // after Back to lobby: ignore states until new_game
 let gameMode = null;     // the running game's bot strength (for the win-chance note)
+// New game sent, first state not yet applied: the start button is disabled and
+// the lobby shows the setting-up status instead of the form (no second new_game).
+let starting = false;
 
 // Win chance (the bot's calibrated estimate of your chance to win): a switch in
 // the game menu, off by default so it never steers play unless asked for.
@@ -967,17 +970,20 @@ function renderOverlays(logh) {
         '<p class="reason">' + esc(reason) + "</p>" +
         '<div class="score"><span class="you">' + esc(msg.names[0]) + "<b>" + msg.view.you.lp + "</b></span>" +
         '<span class="bot">' + esc(msg.names[1]) + "<b>" + msg.view.bot.lp + "</b></span></div>" +
-        '<div class="row"><button class="bigbtn primary" data-act="rematch">Rematch</button>' + reviewBtn + "</div></div></div>";
+        '<div class="row"><button class="bigbtn primary" data-act="rematch"' +
+        (starting ? ' disabled aria-busy="true">Starting…' : ">Rematch") + "</button>" + reviewBtn + "</div></div></div>";
     } else {
       const win = msg.result.winner === "you";
+      const dis = starting ? " disabled aria-busy=\"true\"" : "";
+      const rematchLabel = starting ? "Starting…" : "Rematch";
       oh = '<div id="gameover" data-key="gameover" role="alertdialog" aria-modal="true" tabindex="-1" aria-label="' + (win ? "Victory" : "Defeat") + '"><div class="box ' + (win ? "win" : "loss") + '">' +
         '<div class="kicker">Duel over · turn ' + msg.view.turn + "</div>" +
         "<h2>" + (win ? "Victory" : "Defeat") + "</h2>" +
         '<p class="reason">' + esc(msg.result.reason === "win" ? "" : msg.result.reason || "") + "</p>" +
         '<div class="score"><span class="you">You<b>' + msg.view.you.lp + "</b></span>" +
         '<span class="bot">ygo-zero<b>' + msg.view.bot.lp + "</b></span></div>" +
-        '<div class="row"><button class="bigbtn" data-act="newgame">New game</button>' +
-        '<button class="bigbtn primary" data-act="rematch">Rematch</button></div>' +
+        '<div class="row"><button class="bigbtn" data-act="newgame"' + dis + ">New game</button>" +
+        '<button class="bigbtn primary" data-act="rematch"' + dis + ">" + rematchLabel + "</button></div>" +
         '<div class="row">' + reviewBtn + "</div></div></div>";
     }
   }
@@ -1125,7 +1131,8 @@ function primerSheetHTML() {
     }
     // "Where it gets stopped" is hidden (user, 2026-10-18): neither the frequency nor the value-head chokepoint
     // ranking predicted anything on held-out games (NOTEBOOK 2026-10-18 primer comparison).
-    body += "<h3>Your answers</h3>";
+    body += "<h3>Your answers</h3>" +
+      '<p class="prnote">Hand traps and negates in your deck, and what they were used on against this deck in bot games.</p>';
     const answers = p.your_answers || [];
     if (!answers.length) {
       body += '<p class="prnote">No hand traps or negates in your deck were seen against this deck.</p>';
@@ -1133,10 +1140,10 @@ function primerSheetHTML() {
       body += '<ul class="prlist">' + answers.map((a) => {
         const hits = a.hits || [];
         if (hits.length) {
-          return "<li>" + primerCardHTML(a.code, a.name) + " — hit " +
+          return "<li>" + primerCardHTML(a.code, a.name) + " — used on " +
             hits.map((h) => primerCardHTML(h.code, h.name)).join(", ") + "</li>";
         }
-        return "<li>" + primerCardHTML(a.code, a.name) + " — used against other decks</li>";
+        return "<li>" + primerCardHTML(a.code, a.name) + " — not used against this deck in bot games</li>";
       }).join("") + "</ul>";
     }
   }
@@ -1150,10 +1157,44 @@ function primerSheetHTML() {
     '<div class="mbody primer">' + body + "</div></div>";
 }
 
+// Loading screen shown at once after Start / Rematch / puzzle start, instead of
+// leaving the lobby up with no feedback (the first state can take many seconds:
+// the Full bot's setup plus its whole first turn). role=status + aria-live so
+// screen readers hear it; motion is one slow hairline, none under reduced motion.
+function startingHTML() {
+  const decks = (lobby && lobby.decks) || [];
+  const youN = deckName(decks, lobbyPick.you);
+  const botN = deckName(decks, lobbyPick.bot);
+  const modeN = {product: "Full", fast: "Fast", random: "Random"}[lobbyPick.mode] || "Full";
+  const think = msg && msg.t === "state" && msg.thinking && typeof msg.thinking.seconds === "number"
+    ? '<div class="sthink">The bot is thinking… ' + Math.round(msg.thinking.seconds) + " s</div>"
+    : '<div class="sthink dim">Waiting for the bot…</div>';
+  return '<div id="starting" role="status" aria-live="polite">' +
+    '<div class="sline" aria-hidden="true"></div>' +
+    '<div class="kicker">Setting up the duel</div>' +
+    '<div class="sdesc">ygo-zero (' + esc(modeN) + ") · " + esc(botN) + " vs your " + esc(youN) + "</div>" +
+    think + "</div>";
+}
+
 function renderLobby() {
   const decks = (lobby && lobby.decks) || [];
   if (!lobbyPick.you && decks.length) lobbyPick.you = decks[0].id;
   if (!lobbyPick.bot && decks.length) lobbyPick.bot = decks[Math.min(1, decks.length - 1)].id;
+  if (starting) {
+    const h = '<div id="lobby"><div class="lscroll">' + startingHTML() +
+      '</div><div id="startwrap"><button id="startbtn" data-act="start" disabled aria-busy="true">Starting…</button></div></div>';
+    app.innerHTML = h;
+    app.classList.remove("busy");
+    logside.innerHTML = '<div class="loghead">Duel log</div><div class="loglist"><p class="emptytx">No duel yet.</p></div>';
+    morph(ovLog, "");
+    morph(ovMenu, "");
+    morph(ovGame, primerSheetHTML() + puzzlesSheetHTML());
+    morph(ovDetail, detail ? detailHTML() : "");
+    morph(ovReveal, "");
+    morph(ovOver, "");
+    syncOv();
+    return;
+  }
   let h = '<div id="lobby"><div class="lscroll">';
   h += '<header class="hero"><div class="fan" aria-hidden="true"><i></i><i></i><i></i></div>' +
     '<h1>ygo<span>-zero</span></h1><p>Duel the bot from your phone.</p></header>';
@@ -1178,10 +1219,9 @@ function renderLobby() {
   morph(ovLog, "");
   morph(ovMenu, "");
   morph(ovGame, primerSheetHTML() + puzzlesSheetHTML());
-  morph(ovDetail, "");
+  morph(ovDetail, detail ? detailHTML() : "");
   morph(ovReveal, "");
   morph(ovOver, "");
-  ovStack = [];
   syncOv();
 }
 
@@ -1513,6 +1553,7 @@ function goLobby() {
   liveEnd = null;
   hidePuzzleResult = false;
   inLobby = true;
+  starting = false;
   resetCues();
   render();
 }
@@ -1584,6 +1625,7 @@ function onAction(kind, el) {
     saveSetting("ygo-winchance", winChance ? "1" : "0");
     if (!MOCK && ws) sendSettings();
   } else if (kind === "start" || kind === "rematch") {
+    if (starting) return;   // a second click sends no second new_game
     if (MOCK) { loadMock(1); return; }
     const ydk = kind === "start" ? ((document.getElementById("ydk") || {}).value || "").trim() : "";
     events = [];
@@ -1606,6 +1648,8 @@ function onAction(kind, el) {
     primer = null;
     primerLoading = false;
     resetCues();
+    starting = true;
+    render();
     sendGame({t: "new_game", deck: ydk ? {ydk} : lobbyPick.you, bot_deck: lobbyPick.bot,
       first: lobbyPick.first, mode: lobbyPick.mode, chain: chainMode,
       practice: lobbyPick.play === "practice"});
@@ -1724,9 +1768,11 @@ function onAction(kind, el) {
     closeOv("primer");
     return;
   } else if (kind === "puzzlestart") {
+    if (starting) return;   // a second click sends no second puzzle request
     const id = el.getAttribute("data-id");
     if (!id) return;
     if (MOCK) { loadMock(1); puzzle = {id, goal: "Win this turn · opponent has 6,700 LP", n_plays: 4, status: "playing"}; puzzlesOpen = false; render(); return; }
+    starting = true;
     startPuzzle(id);
     return;
   } else if (kind === "puzzleretry") {
@@ -2232,6 +2278,9 @@ async function loadMock(i) {
     msg = {t: "error", text: "mock load failed: " + MOCKS[mockIdx]};
   }
   if (msg.t === "lobby") lobby = msg;
+  // Screenshot hook for the setting-up status: ?starting=1 shows the loading
+  // screen right after Start (start button disabled, no second new_game).
+  starting = qs.get("starting") === "1";
   // Mock screenshots of rules-in-context need real card text (the live path
   // fetches /card/{code}; mocks preload a small map instead).
   try {
@@ -2584,19 +2633,32 @@ async function boot() {
         return;
       } else if (m.t === "state") {
         if (inLobby) return;   // Back to lobby: ignore states until the next new_game
+        if (starting || !msg || msg.t !== "state") {
+          // First state of a new game: apply the board at once, skipping that
+          // message's cues (they would animate against no board), but still run
+          // freshCues + collectRecap so the opponent-turn recap still works.
+          // Peek/think states count too: the board appears with the thinking
+          // indicator while the bot plays turn 1; later moves animate as now.
+          const cues = freshCues(m);
+          for (const c of cues) if (c.t === "activate" && c.card && c.card.code) cardText(c.card.code);
+          collectRecap(m, cues);
+          starting = false;
+          applyState(m);
+          return;
+        }
         receiveState(m);
         return;
-        banner.hidden = false;
-        banner.textContent = m.text || "error";
-        locked = false;
-        setTimeout(() => { banner.hidden = true; }, 4000);
       } else {
-        if (m.t === "error") { undoPending = false; primerLoading = false; }   // the request was refused
+        if (m.t === "error") { undoPending = false; primerLoading = false; starting = false; }   // the request was refused
         msg = m;
       }
       render();
     },
   });
 }
+
+// Test hook (mock screenshots only): web_screens.py simulates a late card-text
+// arrival by re-rendering the lobby with an open card detail.
+if (MOCK) window.render = render;
 
 boot();

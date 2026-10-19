@@ -67,6 +67,8 @@ MOCKS = [
     ("67-primer-lobby", "0&primer=1"),
     ("68-primer-empty", "0&primer=null"),
     ("69-primer-game", "1&primer=1"),
+    # Setting-up status right after Start (the start button disabled, no second new_game).
+    ("70-starting", "0&starting=1"),
 ]
 
 # Pacing cues frozen mid-scene: ?cue=K&t=F freezes visible scene K at fraction F
@@ -379,6 +381,42 @@ def primer_topmost(page) -> str:
     return page.evaluate(PRIMER_TOPMOST_JS)
 
 
+GAMEOVER_GAP_JS = """() => {
+  // Vertical gap between the game-over dialog's two button rows.
+  const rows = [...document.querySelectorAll('#gameover .row')];
+  if (rows.length < 2) return 'need-2-rows:' + rows.length;
+  const a = rows[0].getBoundingClientRect(), b = rows[1].getBoundingClientRect();
+  return b.top - a.bottom;
+}"""
+
+
+def gameover_gap(page):
+    """Gap between the two #gameover .row button rows (see GAMEOVER_GAP_JS)."""
+    return page.evaluate(GAMEOVER_GAP_JS)
+
+
+DTILE_OVERFLOW_JS = """() => {
+  // Every stat tile's content must fit: no tile scrolls horizontally.
+  return [...document.querySelectorAll('.dtile')].map((el) => ({
+    cls: (el.querySelector('.dk') || {}).textContent || '?',
+    sw: el.scrollWidth, cw: el.clientWidth,
+  }));
+}"""
+
+
+def dtile_overflow(page) -> list:
+    """Per-tile scrollWidth/clientWidth pairs (see DTILE_OVERFLOW_JS)."""
+    return page.evaluate(DTILE_OVERFLOW_JS)
+
+
+def check_no_dtile_overflow(page, name, errors) -> None:
+    for t in dtile_overflow(page):
+        if t["sw"] > t["cw"] + 1:
+            errors.append(
+                f"{name}: stat tile overflows ({t['cls'].strip()}: scroll {t['sw']} > client {t['cw']})"
+            )
+
+
 def launch_kwargs():
     """Point at the pre-installed Chromium (brief: already in ~/.cache/ms-playwright)."""
     env = os.environ.get("CHROME_EXE")
@@ -567,10 +605,21 @@ def main() -> int:
                         errors.append(f"{name}: no primer sheet on screen")
                     sheet = page.evaluate("document.querySelector('#primersheet').textContent")
                     if name in ("67-primer-lobby", "69-primer-game"):
-                        for want in ("Key cards", "How it opens", "Your answers", "pts a game"):
+                        for want in (
+                            "Key cards",
+                            "How it opens",
+                            "Your answers",
+                            "pts a game",
+                            "Hand traps and negates in your deck",
+                        ):
                             if want not in sheet:
                                 errors.append(f"{name}: no {want!r} in the sheet")
-                        if "Where it gets stopped" in sheet:  # hidden: not validated held-out (user, 2026-10-18)
+                        if "used on" not in sheet:
+                            errors.append(f"{name}: no 'used on' in Your answers")
+                        if "— hit " in sheet:
+                            errors.append(f"{name}: old '— hit' wording is back")
+                        # Hidden: not validated on held-out games (user, 2026-10-18).
+                        if "Where it gets stopped" in sheet:
                             errors.append(f"{name}: 'Where it gets stopped' is back")
                         if "Ash Blossom & Joyous Spring" not in sheet:
                             errors.append(f"{name}: no matching hand trap in Your answers")
@@ -592,6 +641,12 @@ def main() -> int:
                         page.wait_for_timeout(300)
                         if not page.evaluate("!!document.querySelector('#detail')"):
                             errors.append(f"{name}: tapping a card name opened no detail")
+                        # A late card-text arrival re-renders the lobby: the detail
+                        # must stay open (it used to close itself the first time).
+                        page.evaluate("window.render && window.render()")
+                        page.wait_for_timeout(1500)
+                        if not page.evaluate("!!document.querySelector('#detail')"):
+                            errors.append(f"{name}: the detail closed itself on re-render")
                         page.keyboard.press("Escape")
                         page.wait_for_timeout(300)
                         if page.evaluate("!!document.querySelector('#detail')"):
@@ -625,6 +680,39 @@ def main() -> int:
                             "!!(document.activeElement && document.activeElement.getAttribute('data-act') === 'primer')"
                         ):
                             errors.append("67-primer-lobby: focus did not return to the About button")
+                if name == "08-game-over":
+                    gap = gameover_gap(page)
+                    if not isinstance(gap, (int, float)) or gap < 8:
+                        errors.append(f"08-game-over: button rows touch (gap {gap})")
+                if name in ("17-duel-stats", "20-winchance-stats"):
+                    # Board shots carry this mock's stats: the drawer states
+                    # below (40/44) assert the tiles; here just check nothing
+                    # already overflows in the DOM, if tiles are present.
+                    check_no_dtile_overflow(page, name, errors)
+                if name == "70-starting":
+                    if not page.evaluate("!!document.querySelector('#starting')"):
+                        errors.append("70-starting: no loading screen after Start")
+                    if not page.evaluate(
+                        "/Setting up the duel/.test(document.querySelector('#starting').textContent)"
+                    ):
+                        errors.append("70-starting: no 'Setting up the duel' kicker")
+                    if not page.evaluate(
+                        "/ygo-zero \\(Full\\)/.test(document.querySelector('#starting').textContent)"
+                    ):
+                        errors.append("70-starting: no bot strength/decks line")
+                    btn = page.evaluate("""() => { const b = document.querySelector('#startbtn');
+                      return b ? {disabled: !!b.disabled, busy: b.getAttribute('aria-busy'),
+                                 label: b.textContent.trim()} : null; }""")
+                    if not btn or not btn["disabled"] or btn["busy"] != "true":
+                        errors.append(f"70-starting: start button not disabled+busy ({btn})")
+                    if not btn or btn["label"] != "Starting…":
+                        errors.append(f"70-starting: start button label is not 'Starting…' ({btn})")
+                    # A second click sends no second new_game: the button is
+                    # disabled, so the loading screen just stays put.
+                    page.locator("#startbtn").click(force=True)
+                    page.wait_for_timeout(300)
+                    if not page.evaluate("!!document.querySelector('#starting')"):
+                        errors.append("70-starting: a second Start click left the loading screen")
             for name, i in CUE_SHOTS:
                 page.goto(f"{base}?mock=1&i={i}", wait_until="networkidle")
                 page.wait_for_timeout(250)
@@ -670,6 +758,8 @@ def main() -> int:
                     "!!document.querySelector('#logdrawer .dtiles')"
                 ):
                     errors.append("40-stats-tab: no stat tiles on screen")
+                if name in ("40-stats-tab", "41-stats-bottom"):
+                    check_no_dtile_overflow(page, name, errors)
                 if name == "42-cards-tab":
                     if not page.evaluate("!!document.querySelector('#logdrawer .dcards')"):
                         errors.append("42-cards-tab: no card lists on screen")
@@ -710,6 +800,9 @@ def main() -> int:
                         "/Review game/.test(document.querySelector('#gameover').textContent)"
                     ):
                         errors.append("48-gameover-review: no Review game button")
+                    gap = gameover_gap(page)
+                    if not isinstance(gap, (int, float)) or gap < 8:
+                        errors.append(f"48-gameover-review: button rows touch (gap {gap})")
             # A negated link stays marked in the chain strip (shape + word, not colour alone).
             neg_html = page.evaluate("""async () => { const m = await import('./render/board.js');
               return m.chainHTML([{card: {name: 'A'}, controller: 'bot'}, {card: {name: 'B'}, controller: 'you'}],
@@ -780,6 +873,18 @@ def main() -> int:
                     "!!document.querySelector('#logdrawer .dtiles')"
                 ):
                     errors.append("40-small-stats: no stat tiles on screen")
+                if nm == "40-small-stats":
+                    check_no_dtile_overflow(s, nm, errors)
+                    # Larger system text: the tiles must still fit at 130%.
+                    s.evaluate("document.body.style.zoom = '1.3'")
+                    s.wait_for_timeout(300)
+                    for t in dtile_overflow(s):
+                        if t["sw"] > t["cw"] + 1:
+                            errors.append(
+                                f"{nm}@130%: stat tile overflows ({t['cls'].strip()}: scroll {t['sw']} > client {t['cw']})"
+                            )
+                    s.evaluate("document.body.style.zoom = ''")
+                    s.wait_for_timeout(200)
                 if nm == "45-small-review" and not s.evaluate(
                     "!!document.querySelector('#logdrawer .rlist')"
                 ):
