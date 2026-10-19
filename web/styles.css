@@ -1,4 +1,4 @@
-/* ygo-zero web client. Night-time, minimalist: warm sumi-ink surfaces, washi text,
+/* decklight web client. Night-time, minimalist: warm sumi-ink surfaces, washi text,
    hairlines instead of boxes, desaturated traditional accents used as small marks only.
    Nothing is pure white or pure black; card art is the brightest thing, and it is dimmed. */
 :root {
@@ -95,7 +95,7 @@ html.short #app { height: var(--app-h); }
 .pbar.you { height: 54px; }
 .lpblock { display: grid; grid-template-columns: auto auto; column-gap: 10px; row-gap: 4px; align-items: baseline; min-width: 0; }
 .lpblock .pname { display: inline-flex; align-items: center; gap: 7px; font-size: 13px; color: var(--muted); white-space: nowrap; }
-/* you: a small indigo dot; ygo-zero: a tiny hanko seal (vermilion outlined square) */
+/* you: a small indigo dot; decklight: a tiny hanko seal (vermilion outlined square) */
 .lpblock .pname::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--you); opacity: 0.5; }
 .pbar.bot .pname::before {
   width: 9px; height: 9px; border-radius: 2px; background: none;
@@ -272,7 +272,7 @@ html.short #app { height: var(--app-h); }
 
 /* card back: deep indigo, seigaiha waves in very low contrast, a small closed diamond
    (static; an open circle read as a loading spinner on the phone) */
-.handcount i, .card.back, .thumb.back, .fan i, .cue-card.back {
+.handcount i, .card.back, .thumb.back, .cue-card.back {
   background-color: var(--indigo-2);
   background-image:
     radial-gradient(circle at 50% 100%, transparent 0 2px, rgba(150, 170, 205, 0.07) 2px 3px, transparent 3px 5px, rgba(150, 170, 205, 0.07) 5px 6px, transparent 6px 8px, rgba(150, 170, 205, 0.07) 8px 9px, transparent 9px),
@@ -285,7 +285,7 @@ html.short #app { height: var(--app-h); }
   box-shadow: inset 0 0 0 2px var(--indigo-2), inset 0 0 0 2.5px rgba(150, 170, 205, 0.16), 0 0 0 1px rgba(0, 0, 0, 0.3);
   display: flex; align-items: center; justify-content: center;
 }
-.card.back::after, .thumb.back::after, .fan i::after, .cue-card.back::after {
+.card.back::after, .thumb.back::after, .cue-card.back::after {
   content: ""; width: 16%; aspect-ratio: 1;
   border: 1px solid rgba(184, 154, 94, 0.42);
   background: rgba(184, 154, 94, 0.10);
@@ -557,24 +557,10 @@ html.short #app { height: var(--app-h); }
 #lobby { height: 100dvh; display: flex; flex-direction: column; }
 .lscroll { flex: 1; min-height: 0; overflow-y: auto; padding: 28px 18px 18px; }
 .hero { text-align: center; padding: 8px 0 10px; }
-.fan { position: relative; height: 92px; margin-bottom: 14px; }
-.fan i {
-  position: absolute; left: 50%; top: 6px; width: 52px; height: 76px; margin-left: -26px; border-radius: 5px;
-  display: flex; align-items: center; justify-content: center;
-  box-shadow: inset 0 0 0 2px var(--indigo-2), inset 0 0 0 2.5px rgba(150, 170, 205, 0.16), 0 8px 20px rgba(10, 9, 7, 0.5);
-  transform-origin: 50% 120%;
-}
-.fan i:nth-child(1) { transform: rotate(-12deg); opacity: 0.55; }
-.fan i:nth-child(3) { transform: rotate(12deg); opacity: 0.55; }
-.fan i:nth-child(2) { z-index: 1; }
-.hero h1 { margin: 0; font-size: 28px; font-weight: 300; letter-spacing: 0.08em; display: inline-flex; align-items: center; gap: 10px; }
-.hero h1 span { color: var(--muted); }
-/* hanko seal after the wordmark */
-.hero h1::after {
-  content: ""; width: 14px; height: 14px; border-radius: 2px;
-  box-shadow: inset 0 0 0 1.5px var(--bot), inset 0 0 0 3.5px transparent, inset 0 0 0 5px rgba(181, 100, 90, 0.5);
-}
-.hero p { margin: 8px 0 0; color: var(--muted); font-size: 14px; letter-spacing: 0.02em; }
+.mark { height: 92px; margin-bottom: 14px; }
+.mark svg { height: 92px; width: auto; margin: 0 auto; overflow: visible; }  /* the glow runs past the cropped viewBox */
+/* the wordmark alone, as in the approved logo (docs/brand/decklight/final): no seal beside it */
+.hero h1 { margin: 0; font-size: 28px; font-weight: 300; letter-spacing: 0.08em; }
 .field-group { margin-top: 26px; }
 .flabel { font-size: 13px; color: var(--muted); margin: 0 0 8px 2px; }
 .pickbtn {

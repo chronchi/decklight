@@ -48,7 +48,7 @@ def main() -> None:
 
     app = create_app(token=token, opponent_default=a.opponent_default, device=a.device,
                      replay_threads=a.replay_threads)
-    print(f"ygo-zero web client: http://{host}:{a.port}/?t={token}", flush=True)
+    print(f"decklight web client: http://{host}:{a.port}/?t={token}", flush=True)
     uvicorn.run(app, host=host, port=a.port, log_level="warning")
 
 

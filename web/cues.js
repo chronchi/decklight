@@ -221,9 +221,9 @@ export function planDurations(cues, baseChain) {
 
 // ---------- spoken lines (screen readers: the polite live region) ----------
 
-// One sentence per visible scene, e.g. "ygo-zero activates Ash Blossom, chain 2".
+// One sentence per visible scene, e.g. "decklight activates Ash Blossom, chain 2".
 export function stepText(step, names) {
-  const opp = (names && names[1]) || "ygo-zero";
+  const opp = (names && names[1]) || "decklight";
   const you = names ? names[0] : "You";
   const mine = (r) => r && r.owner === "me";
   const who = (r) => (mine(r) ? you : opp);
@@ -595,7 +595,7 @@ export function createCuePlayer(opts) {
   }
   const nameOf = (who) => {
     const n = opts.names ? opts.names() : null;
-    if (who === "opp") return (n && n[1]) || "ygo-zero";
+    if (who === "opp") return (n && n[1]) || "decklight";
     return (n && n[0]) || "You";
   };
 

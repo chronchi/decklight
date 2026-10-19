@@ -567,6 +567,21 @@ def test_token_required(tmp_path, engine):
         assert "accepted" not in str(e)
 
 
+def test_brand_assets_no_token(tmp_path, engine):
+    """Decklight brand files are public static files (the token gate is only
+    for game data); the lobby page itself carries the new name."""
+    client = _client(_make_app(tmp_path, engine))
+    r = client.get("/assets/decklight-icon-32.png", params={"t": TOKEN})
+    assert r.status_code == 200 and r.headers["content-type"] == "image/png"
+    r = client.get("/manifest.webmanifest")
+    assert r.status_code == 200 and "manifest" in r.headers["content-type"]
+    body = r.json()
+    assert body["name"] == "decklight" and body["short_name"] == "decklight"
+    assert {"192x192", "512x512"} <= {i["sizes"] for i in body["icons"]}
+    r = client.get("/", params={"t": TOKEN})
+    assert r.status_code == 200 and "<title>decklight</title>" in r.text
+
+
 # --- 4. images and card text ---
 
 JPEG = b"\xff\xd8\xff\xe0" + b"fake-jpeg"

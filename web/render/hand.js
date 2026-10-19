@@ -177,7 +177,7 @@ export function pileSheetHTML(pile, cards, mock, names) {
 export function pileTitle(pile, names) {
   const [kind, who] = (pile || "").split(":");
   const owner = names ? (who === "bot" ? names[1] + "’s " : names[0] + "’s ")
-    : who === "bot" ? "ygo-zero's " : "Your ";
+    : who === "bot" ? "decklight's " : "Your ";
   return owner + ({gy: "Graveyard", banished: "banished cards", extra: "Extra Deck"}[kind] || kind);
 }
 

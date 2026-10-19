@@ -680,6 +680,13 @@ def main() -> int:
                             "!!(document.activeElement && document.activeElement.getAttribute('data-act') === 'primer')"
                         ):
                             errors.append("67-primer-lobby: focus did not return to the About button")
+                if name == "01-lobby":
+                    if page.evaluate("document.body.innerText.includes('ygo-zero')"):
+                        errors.append("01-lobby: old name still visible in the lobby text")
+                    if page.evaluate("document.title.includes('ygo-zero')"):
+                        errors.append("01-lobby: old name still in the page title")
+                    if not page.evaluate("!!document.querySelector('.hero .mark svg')"):
+                        errors.append("01-lobby: no decklight mark in the hero")
                 if name == "08-game-over":
                     gap = gameover_gap(page)
                     if not isinstance(gap, (int, float)) or gap < 8:
@@ -697,7 +704,7 @@ def main() -> int:
                     ):
                         errors.append("70-starting: no 'Setting up the duel' kicker")
                     if not page.evaluate(
-                        "/ygo-zero \\(Full\\)/.test(document.querySelector('#starting').textContent)"
+                        "/decklight \\(Full\\)/.test(document.querySelector('#starting').textContent)"
                     ):
                         errors.append("70-starting: no bot strength/decks line")
                     btn = page.evaluate("""() => { const b = document.querySelector('#startbtn');

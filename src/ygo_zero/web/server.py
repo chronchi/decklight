@@ -39,8 +39,8 @@ IMG_URLS = {
 
 PLACEHOLDER = """<!doctype html><html><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>ygo-zero web client</title></head><body>
-<h1>ygo-zero web client</h1>
+<title>decklight web client</title></head><body>
+<h1>decklight web client</h1>
 <p>The phone client (W2) is not built yet. The game protocol lives at <code>/ws</code>.</p>
 </body></html>
 """
@@ -49,14 +49,14 @@ CARD_BACK_SVG = """<svg xmlns="http://www.w3.org/2000/svg" width="100" height="1
 <rect width="100" height="146" rx="6" fill="#1d2a5e"/>
 <rect x="8" y="8" width="84" height="130" rx="4" fill="none" stroke="#c8a24a" stroke-width="2"/>
 <circle cx="50" cy="73" r="22" fill="none" stroke="#c8a24a" stroke-width="2"/>
-<text x="50" y="77" text-anchor="middle" font-size="10" fill="#c8a24a">ygo-zero</text>
+<text x="50" y="77" text-anchor="middle" font-size="10" fill="#c8a24a">decklight</text>
 </svg>
 """
 
 
 def _fetch_img(url: str, timeout: float = 5.0) -> bytes:
     """One image fetch (module-level so tests can monkeypatch it)."""
-    req = urllib.request.Request(url, headers={"User-Agent": "ygo-zero-web/1.0"})
+    req = urllib.request.Request(url, headers={"User-Agent": "decklight-web/1.0"})
     with urllib.request.urlopen(req, timeout=timeout) as r:
         return r.read()
 

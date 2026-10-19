@@ -403,7 +403,7 @@ function queueNotices(added) {
       if (revealQueue.length > 2) revealQueue.shift();  // a long combo: show the latest, never a wall of reveals
     } else if (["summon", "spsummon", "attack", "mset", "sset"].includes(e.kind)) {
       const t = e.text || "";
-      showBanner("ygo-zero " + t.charAt(0).toLowerCase() + t.slice(1));
+      showBanner("decklight " + t.charAt(0).toLowerCase() + t.slice(1));
     }
   }
   pumpReveal();
@@ -420,7 +420,7 @@ function showBanner(text) {
 function pumpReveal() {
   if (revealCur || revealLeaving || !revealQueue.length) return;
   revealCur = revealQueue.shift();
-  say("ygo-zero activates " + ((revealCur.card && revealCur.card.name) || "a card"));
+  say("decklight activates " + ((revealCur.card && revealCur.card.name) || "a card"));
   render();
   if (!MOCK) revealTimer = setTimeout(() => dismissReveal(), 1600);
 }
@@ -463,7 +463,7 @@ function revealHTML(ev) {
     : '<div class="rface">' + phHTML(c) + "</div>";
   const txt = (t && t.text) || (MOCK ? "Card text loads from the server in a live game." : "");
   return '<div id="reveal" data-key="reveal" data-act="closereveal" aria-hidden="true">' +
-    face + '<div class="rkicker">ygo-zero activates</div>' +
+    face + '<div class="rkicker">decklight activates</div>' +
     "<h2>" + esc(c.name || "") + "</h2>" +
     '<div class="rtext">' + esc(txt) + "</div></div>";
 }
@@ -547,7 +547,7 @@ function hintFor(p) {
   if (IS_REPLAY) return "";   // the caption bar carries the narration instead
   if (msg.result) return "";
   if (msg.thinking) return "";   // the bot bar already shows it
-  if (!p) return "Waiting for ygo-zero…";
+  if (!p) return "Waiting for decklight…";
   if (p.kind === "idle") return "Your move · tap a glowing card";
   if (p.kind === "battle") return "Battle · tap a glowing monster to attack";
   return "";
@@ -930,7 +930,7 @@ function renderOverlays(logh) {
 
   let oh = "";
   if (IS_REPLAY && msg && msg.title && replayIdx === 0) {
-    oh += '<div id="retitle" data-key="retitle"><div class="box"><div class="kicker">ygo-zero replay</div>' +
+    oh += '<div id="retitle" data-key="retitle"><div class="box"><div class="kicker">decklight replay</div>' +
       "<h2>" + esc(msg.title) + "</h2></div></div>";
   }
   const pz = puzzle || (msg && msg.puzzle) || null;
@@ -981,7 +981,7 @@ function renderOverlays(logh) {
         "<h2>" + (win ? "Victory" : "Defeat") + "</h2>" +
         '<p class="reason">' + esc(msg.result.reason === "win" ? "" : msg.result.reason || "") + "</p>" +
         '<div class="score"><span class="you">You<b>' + msg.view.you.lp + "</b></span>" +
-        '<span class="bot">ygo-zero<b>' + msg.view.bot.lp + "</b></span></div>" +
+        '<span class="bot">decklight<b>' + msg.view.bot.lp + "</b></span></div>" +
         '<div class="row"><button class="bigbtn" data-act="newgame"' + dis + ">New game</button>" +
         '<button class="bigbtn primary" data-act="rematch"' + dis + ">" + rematchLabel + "</button></div>" +
         '<div class="row">' + reviewBtn + "</div></div></div>";
@@ -1172,7 +1172,7 @@ function startingHTML() {
   return '<div id="starting" role="status" aria-live="polite">' +
     '<div class="sline" aria-hidden="true"></div>' +
     '<div class="kicker">Setting up the duel</div>' +
-    '<div class="sdesc">ygo-zero (' + esc(modeN) + ") · " + esc(botN) + " vs your " + esc(youN) + "</div>" +
+    '<div class="sdesc">decklight (' + esc(modeN) + ") · " + esc(botN) + " vs your " + esc(youN) + "</div>" +
     think + "</div>";
 }
 
@@ -1196,11 +1196,26 @@ function renderLobby() {
     return;
   }
   let h = '<div id="lobby"><div class="lscroll">';
-  h += '<header class="hero"><div class="fan" aria-hidden="true"><i></i><i></i><i></i></div>' +
-    '<h1>ygo<span>-zero</span></h1><p>Duel the bot from your phone.</p></header>';
+  h += '<header class="hero"><div class="mark" aria-hidden="true">' +
+    '<svg viewBox="70 145 370 255"><title>decklight mark</title>' +
+    '<defs><radialGradient id="dl-glow"><stop offset="0" stop-color="#b89a5e" stop-opacity="0.5"/>' +
+    '<stop offset="1" stop-color="#b89a5e" stop-opacity="0"/></radialGradient>' +
+    '<radialGradient id="dl-cardglow"><stop offset="0" stop-color="#b89a5e" stop-opacity="0.10"/>' +
+    '<stop offset="1" stop-color="#b89a5e" stop-opacity="0"/></radialGradient></defs>' +
+    '<circle cx="337.2" cy="276.3" r="175.0" fill="url(#dl-cardglow)"/>' +
+    '<g transform="rotate(-20 256.0 499.5)"><rect x="191.0" y="167.0" width="130.0" height="190.0" rx="12.5" fill="#141310" stroke="#7a756a" stroke-width="4.0"/></g>' +
+    '<g transform="rotate(0 256.0 499.5)"><rect x="191.0" y="167.0" width="130.0" height="190.0" rx="12.5" fill="#141310" stroke="#958f82" stroke-width="4.0"/></g>' +
+    '<g transform="rotate(20 256.0 499.5)"><rect x="191.0" y="167.0" width="130.0" height="190.0" rx="12.5" fill="#141310" stroke="#d6cfc0" stroke-width="5.0"/></g>' +
+    '<polyline points="158.5,315.3 227.4,260.1 357.2,221.4" fill="none" stroke="#b89a5e" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round"/>' +
+    '<circle cx="158.5" cy="315.3" r="7.5" fill="#141310" stroke="#b89a5e" stroke-width="3.8"/>' +
+    '<circle cx="227.4" cy="260.1" r="7.5" fill="#141310" stroke="#b89a5e" stroke-width="3.8"/>' +
+    '<circle cx="357.2" cy="221.4" r="65.0" fill="url(#dl-glow)"/>' +
+    '<circle cx="357.2" cy="221.4" r="13.8" fill="#b89a5e"/>' +
+    "</svg></div>" +
+    '<h1>decklight</h1></header>';
   h += '<h2 class="sr-only">New duel</h2>';
   h += pickerHTML(decks, "you", "Your deck");
-  h += pickerHTML(decks, "bot", "ygo-zero plays");
+  h += pickerHTML(decks, "bot", "decklight plays");
   h += '<div class="aboutrow"><button class="linkbtn" data-act="primer">About this deck</button></div>';
   h += segHTML("Mode", "play", [["duel", "Duel"], ["practice", "Practice"]]);
   h += segHTML("Going first", "first", [["rps", "Rock-paper-scissors"], ["me", "Me"], ["bot", "Bot"]]);
@@ -1237,8 +1252,8 @@ function render() {
   if (msg.t === "state") {
     renderGame();
     if (!IS_REPLAY) flipAnimate(before);
-    document.title = msg.prompt && msg.prompt.text ? msg.prompt.text + " · ygo-zero"
-      : msg.caption && msg.caption.text ? msg.caption.text + " · ygo-zero" : "ygo-zero";
+    document.title = msg.prompt && msg.prompt.text ? msg.prompt.text + " · decklight"
+      : msg.caption && msg.caption.text ? msg.caption.text + " · decklight" : "decklight";
     manageFocus();
   } else if (msg.t === "error") {
     banner.hidden = false;
@@ -2144,7 +2159,7 @@ function freshCues(m) {
 let liveChain = chainTracker();
 let chainNeg = new Set();   // chain links shown negated in the chain strip until the chain ends
 function collectRecap(m, cues) {
-  const oppName = (m.names && m.names[1]) || "ygo-zero";
+  const oppName = (m.names && m.names[1]) || "decklight";
   m._negs = m._negs || [];
   for (const c of cues) {
     const neg = liveChain.feed(c);

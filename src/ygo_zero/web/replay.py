@@ -103,7 +103,7 @@ def replay_frames(
             "names": [n0, n1],
         }
         if k == 0:
-            frame["title"] = f"{n0} vs {n1} · seed {cfg.seed} · ygo-zero"
+            frame["title"] = f"{n0} vs {n1} · seed {cfg.seed} · decklight"
         frames.append(frame)
         prev_len = len(env.history)
         prev_trace = len(env.duel.trace)

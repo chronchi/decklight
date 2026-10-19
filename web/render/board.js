@@ -167,7 +167,7 @@ export function phaseBtnsHTML(prompt, locked, hintByIndex, showHint, undo) {
 export function barHTML(side, who, opts) {
   opts = opts || {};
   const frac = Math.max(0, Math.min(1, side.lp / 8000));
-  const name = opts.name || (who === "you" ? "You" : "ygo-zero");
+  const name = opts.name || (who === "you" ? "You" : "decklight");
   let right = "";
   if (who === "bot") {
     if (opts.thinking) {
@@ -202,7 +202,7 @@ export function chainHTML(chain, mock, negated) {
     const newest = i === chain.length - 1 ? " new" : "";
     const neg = negated && negated.has(i + 1);
     const bot = link.controller === "bot";
-    const said = "Chain " + (i + 1) + ": " + ((c && c.name) || "a card") + ", " + (bot ? "ygo-zero" : "yours") + (neg ? ", negated" : "");
+    const said = "Chain " + (i + 1) + ": " + ((c && c.name) || "a card") + ", " + (bot ? "decklight" : "yours") + (neg ? ", negated" : "");
     return '<div class="link ' + (bot ? "bot" : "you") + newest + (neg ? " neg" : "") + '" role="img" aria-label="' + esc(said) + '"' +
       (c && c.uid ? ' data-uid="' + esc(c.uid) + '"' : "") + ' title="' + esc(((c && c.name) || "") + (neg ? " (negated)" : "")) + '">' +
       thumbHTML(c, mock) + '<span class="cn">' + (i + 1) + "</span>" +

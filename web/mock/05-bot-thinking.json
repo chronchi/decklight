@@ -72,7 +72,7 @@
   "prompt": null,
   "log": [
     {"n": 14, "actor": "bot", "text": "Special Summons Snake-Eye Oak", "card": {"uid": "bm2", "code": 45663742, "name": "Snake-Eye Oak", "faceup": true, "pos": "atk", "atk": 1500, "def": 2000, "level": 4, "rank": 0, "link": 0, "counters": 0, "overlays": []}, "kind": "spsummon"},
-    {"n": 15, "actor": "system", "text": "ygo-zero is thinking…", "card": null, "kind": null}
+    {"n": 15, "actor": "system", "text": "decklight is thinking…", "card": null, "kind": null}
   ],
   "thinking": {"seconds": 3.2},
   "result": null

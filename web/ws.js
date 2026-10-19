@@ -1,4 +1,4 @@
-// Minimal WebSocket client for the ygo-zero game server.
+// Minimal WebSocket client for the decklight game server.
 // Connects to /ws?t=<token>, resyncs after every reconnect, backs off.
 export function connectWS(token, hooks) {
   hooks = hooks || {};
