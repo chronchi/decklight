@@ -610,10 +610,13 @@ def main() -> int:
                             "How it opens",
                             "Your answers",
                             "pts a game",
+                            "first in",
                             "Hand traps and negates in your deck",
                         ):
                             if want not in sheet:
                                 errors.append(f"{name}: no {want!r} in the sheet")
+                        if " → " in sheet:
+                            errors.append(f"{name}: old ' → ' opener lines are back")
                         if "used on" not in sheet:
                             errors.append(f"{name}: no 'used on' in Your answers")
                         if "— hit " in sheet:

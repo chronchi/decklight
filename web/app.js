@@ -1121,12 +1121,12 @@ function primerSheetHTML() {
           ' <span class="prmeta">in ' + n + " of 10 games</span></li>";
       }).join("") + "</ul>";
     }
-    if ((p.openers || []).length) {
-      body += '<h3>How it opens</h3><p class="prnote">Going first, first three plays</p>' +
-        '<ul class="prlist">' + p.openers.map((o) => {
-          const names = o.names || [];
-          const seq = names.map((nm, i) => primerCardHTML((o.plays || [])[i], nm)).join(" → ");
-          return "<li>" + seq + ' <span class="prmeta">' + esc(String(o.games || 0)) + " games</span></li>";
+    if ((p.first_plays || []).length) {
+      body += '<h3>How it opens</h3><p class="prnote">Going first, the card it plays first</p>' +
+        '<ul class="prlist">' + p.first_plays.map((c) => {
+          const n = Math.round((c.share || 0) * 10);
+          const meta = n <= 0 ? "first in under 1 of 10 games" : "first in " + n + " of 10 games";
+          return "<li>" + primerCardHTML(c.code, c.name) + ' <span class="prmeta">' + meta + "</span></li>";
         }).join("") + "</ul>";
     }
     // "Where it gets stopped" is hidden (user, 2026-10-18): neither the frequency nor the value-head chokepoint
@@ -1888,10 +1888,13 @@ function mockPrimer() {
       {code: 39931513, name: "Tenpai Dragon Paidra", games: 43, per_game: 0.896, impact: 4.7},
       {code: 30336082, name: "Sangen Summoning", games: 37, per_game: 0.771, impact: 4.5},
     ],
-    openers: [
-      {plays: [66730191, 39931513, 91810826], names: ["Sangen Kaimen", "Tenpai Dragon Paidra", "Tenpai Dragon Chundra"], games: 14},
-      {plays: [39931513, 91800273, 91810826], names: ["Tenpai Dragon Paidra", "Dimension Shifter", "Tenpai Dragon Chundra"], games: 9},
+    first_plays: [
+      {code: 30336082, name: "Sangen Summoning", games: 6, share: 0.4},
+      {code: 39931513, name: "Tenpai Dragon Paidra", games: 4, share: 0.27},
+      {code: 66730191, name: "Sangen Kaimen", games: 3, share: 0.2},
+      {code: 73628505, name: "Terraforming", games: 1, share: 0.07},
     ],
+    first_n: 15,
     your_answers: [
       {code: 14558127, name: "Ash Blossom & Joyous Spring", hits: [
         {code: 39931513, name: "Tenpai Dragon Paidra", times: 5},

@@ -329,15 +329,16 @@ class Server:
                 }
                 for c in p.get("key_cards", [])[:8]
             ],
-            "openers": [
+            "first_plays": [
                 {
-                    "plays": list(o.get("plays", [])),
-                    "names": list(o.get("names", [])),
-                    "games": int(o.get("games", 0)),
-                    **({"w_after": o["w_after"]} if "w_after" in o else {}),
+                    "code": c.get("code"),
+                    "name": c.get("name", ""),
+                    "games": int(c.get("games", 0)),
+                    "share": c.get("share", 0.0),
                 }
-                for o in p.get("openers", [])
+                for c in p.get("first_plays", [])[:4]
             ],
+            "first_n": int(p.get("first_n", 0)),
             # No chokepoints and no answer gains: neither ranking validated on held-out games (user chose to hide
             # "Where it gets stopped", NOTEBOOK 2026-10-18 primer comparison).
             "your_answers": [

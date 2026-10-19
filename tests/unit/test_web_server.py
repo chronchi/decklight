@@ -1916,6 +1916,11 @@ def _primer_fixture(tmp_path):
                 "share": 0.25,
             },
         ],
+        "first_plays": [
+            {"code": code, "name": "Blue-Eyes White Dragon", "games": 8, "share": 0.5},
+            {"code": int(bot.main[1]), "name": "Sage with Eyes of Blue", "games": 4, "share": 0.25},
+        ],
+        "first_n": 16,
         "chokepoints": [
             {
                 "code": code,
@@ -1963,7 +1968,9 @@ def test_primer_lobby(tmp_path, engine, monkeypatch):
         assert p is not None
         assert p["archetype"] == "Blue-Eyes" and p["games"] == 24
         assert p["key_cards"] and p["key_cards"][0]["code"] == code
-        assert p["openers"] and "chokepoints" not in p  # hidden: did not validate held-out
+        assert p["first_plays"] and "openers" not in p  # first-play frequencies replaced the 3-play lines
+        assert p["first_n"] == 16
+        assert "chokepoints" not in p  # hidden: did not validate held-out
         assert p["your_answers"], "the human deck's matching card must be listed"
         assert p["your_answers"][0]["code"] == code
         # Trimmed for the sheet: no files and no bot-vs-bot win rates.
@@ -2000,6 +2007,8 @@ def test_primer_trim_passes_impact_fields():
             {"code": 1, "name": "A", "games": 5, "per_game": 0.5, "impact": 6.2, "per_play": 12.4},
         ],
         "openers": [{"plays": [1], "names": ["A"], "games": 3, "w_after": 55.0}],
+        "first_plays": [{"code": 1, "name": "A", "games": 3, "share": 0.3}],
+        "first_n": 10,
         "chokepoints": [
             {
                 "code": 1,
@@ -2023,7 +2032,9 @@ def test_primer_trim_passes_impact_fields():
     t = S.Server._trim_primer(p)
     assert t["key_cards"][0]["impact"] == 6.2 and t["key_cards"][0]["per_play"] == 12.4
     assert t["key_cards"][0]["per_game"] == 0.5
-    assert t["openers"][0]["w_after"] == 55.0
+    assert t["first_plays"] == [{"code": 1, "name": "A", "games": 3, "share": 0.3}]
+    assert t["first_n"] == 10
+    assert "openers" not in t
     # Chokepoints and answer gains are dropped (neither validated held-out; user chose to hide them).
     assert "chokepoints" not in t
     assert "gain" not in t["your_answers"][0] and "gain" not in t["your_answers"][0]["hits"][0]
@@ -2033,14 +2044,30 @@ def test_primer_trim_passes_impact_fields():
         "games": 10,
         "key_cards": [{"code": 1, "name": "A", "games": 5, "per_game": 0.5}],
         "openers": [{"plays": [1], "names": ["A"], "games": 3}],
+        "first_plays": [{"code": 1, "name": "A", "games": 3, "share": 0.3}],
+        "first_n": 10,
         "chokepoints": [{"code": 1, "name": "A", "responses": 4, "negated": 1}],
         "your_answers": [{"code": 2, "name": "B", "hits": [{"code": 1, "name": "A", "times": 2}]}],
     }
     t2 = S.Server._trim_primer(p2)
     assert set(t2["key_cards"][0]) == {"code", "name", "games", "per_game"}
-    assert set(t2["openers"][0]) == {"plays", "names", "games"}
+    assert set(t2["first_plays"][0]) == {"code", "name", "games", "share"}
+    assert t2["first_n"] == 10
+    assert "openers" not in t2
     assert "chokepoints" not in t2
     assert set(t2["your_answers"][0]["hits"][0]) == {"code", "name", "times"}
+    # An old store entry without first_plays gives an empty list.
+    p3 = {
+        "archetype": "X",
+        "games": 10,
+        "key_cards": [{"code": 1, "name": "A", "games": 5, "per_game": 0.5}],
+        "openers": [{"plays": [1], "names": ["A"], "games": 3}],
+        "your_answers": [],
+    }
+    t3 = S.Server._trim_primer(p3)
+    assert t3["first_plays"] == []
+    assert t3["first_n"] == 0
+    assert "openers" not in t3
     assert S.Server._trim_primer(None) is None
 
 

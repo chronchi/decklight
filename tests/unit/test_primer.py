@@ -237,6 +237,53 @@ def test_unscored_caches_keep_frequency_fields():
             assert "w_after" not in o
 
 
+def _pstep(player, kind, code, turn):
+    return {
+        "player": player,
+        "n_opts": 2,
+        "kind": kind,
+        "code": code,
+        "turn": turn,
+        "phase": int(C.PHASE_MAIN1),
+        "turn_player": player,
+    }
+
+
+def test_first_plays_count_only_going_first_first_play():
+    """first_plays counts seq[0] of going-first turn-1 plays; share uses the openers_n denominator."""
+    cards, names = _cards_names()
+    s1 = _summary(
+        first=0,
+        steps=[_pstep(0, "ACTIVATE", 11, 1), _pstep(0, "SUMMON", 12, 1)],
+        turns=[{"turn": 1, "turn_player": 0}],
+    )
+    s2 = _summary(
+        first=0,
+        steps=[_pstep(0, "ACTIVATE", 22, 1)],
+        turns=[{"turn": 1, "turn_player": 0}],
+    )
+    # Seat 0 going second: its turn-1 plays must not count (seat 1 went first).
+    s3 = _summary(
+        first=1,
+        steps=[_pstep(1, "ACTIVATE", 33, 1), _pstep(0, "ACTIVATE", 11, 1)],
+        turns=[{"turn": 1, "turn_player": 1}],
+    )
+    store = aggregate([s1, s2, s3], cards, names)
+    ha, hb = hash_of(_deck(DECK_A)), hash_of(_deck(DECK_B))
+    pa = store["decks"][ha]
+    assert pa["first_n"] == 2
+    fp = {c["code"]: c for c in pa["first_plays"]}
+    assert set(fp) == {11, 22}
+    assert fp[11]["games"] == 1 and fp[11]["share"] == 0.5
+    assert fp[22]["games"] == 1 and fp[22]["share"] == 0.5
+    # Deterministic tie-break: lower code first.
+    assert [c["code"] for c in pa["first_plays"]] == [11, 22]
+    pb = store["decks"][hb]
+    assert pb["first_n"] == 1
+    assert pb["first_plays"][0]["code"] == 33
+    assert pb["first_plays"][0]["share"] == 1.0
+
+
 def test_hand_trap_seen_and_primer_for():
     cards, names = _cards_names()
     ht, victim = 14558127, 66730191  # real codes: name resolution must work

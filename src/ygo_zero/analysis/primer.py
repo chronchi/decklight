@@ -12,6 +12,7 @@ Per deck (from every game it played, either seat):
   common leading word of card names in that group (override map supported);
 - ``key_cards``: top 8 cards by plays (activations + summons, once per game);
 - ``openers``: the 3 most common first-3-play sequences on turn 1 going first;
+- ``first_plays``: the 4 most common first plays on turn 1 going first;
 - ``chokepoints``: the deck's cards opponents responded to (an opponent chain
   link right after the activation in the same chain, or the first opponent
   activation after a summon in the same turn) and how often negation hit;
@@ -539,6 +540,7 @@ def aggregate(
                 "went_first_wins": 0,
                 "plays": Counter(),  # code -> games with a play
                 "openers": Counter(),  # first-3-plays tuple -> games
+                "first_plays": Counter(),  # first play code -> games going first
                 "openers_n": 0,
                 "responses": Counter(),  # card code -> opponent answers
                 "resp_neg": Counter(),  # card code -> answers that negated it
@@ -597,6 +599,7 @@ def aggregate(
             if seq:
                 e = decks[hashes[seat]]
                 e["openers"][tuple(seq)] += 1
+                e["first_plays"][seq[0]] += 1
                 e["openers_n"] += 1
         # chokepoints: opponent answers to activations (next link, same chain)
         by_group: dict[int, list[dict]] = {}
@@ -768,6 +771,16 @@ def _finalize(
             if acc:
                 o["w_after"] = round(acc[0] / acc[1] * 100, 1)
             openers.append(o)
+        ranked_fp = sorted(e["first_plays"], key=lambda c: (-e["first_plays"][c], c))
+        first_plays = [
+            {
+                "code": c,
+                "name": names.get(c, f"#{c}"),
+                "games": e["first_plays"][c],
+                "share": round(e["first_plays"][c] / e["openers_n"], 3) if e["openers_n"] else 0.0,
+            }
+            for c in ranked_fp[:4]
+        ]
         if scored:
             # Ranked by cost (mean points per game the deck loses when answered).
             ranked_ch = sorted(e["answered_n"], key=lambda c: (-e["answer_cost"][c], c))
@@ -836,6 +849,8 @@ def _finalize(
             "archetype": _archetype(e["main"], cards, names, overrides, h, df),
             "key_cards": key_cards,
             "openers": openers,
+            "first_plays": first_plays,
+            "first_n": e["openers_n"],
             "chokepoints": chokepoints,
             "hand_traps_seen": hand_traps,
         }
