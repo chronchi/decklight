@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Impact scoring (primer-impact): build_primers.py --score over the hppo + primer game dirs (GPU value net).
 # Sizing: procs = min(cores, RAM*0.8 / per-proc RSS, GPU memory*0.85 / per-proc GPU mem) with per-proc numbers
-# measured by a <=60 s probe (one --score run on 60 games: peak nvidia-smi used_memory + RSS), like
+# measured by a <=60 s probe (one --score run on 16 games (4 files x 4; 60 took ~12 min on one proc, primer-fvf-20261019-0924): peak nvidia-smi used_memory + RSS), like
 # vast_score_decisions.sh. A scored game with bad w (NaN/outside [0,1]) fails the job (build_primers exits 2).
 # Usage: bash scripts/vast_primer_impact.sh <name> <game dirs...>
 # Results: runs/<name>/summaries.json.gz and runs/<name>/primers.json, PROGRESS, ALERT.
@@ -22,9 +22,9 @@ export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 USAGE_PID=$!
 . scripts/cores.sh
 J=$(box_cores); RTOT=$(free -m | awk '/Mem/{print $2}')
-# Probe: one proc scores 60 games (<=60 s of sampling); its peak GPU memory and RSS size the pool.
+# Probe: one proc scores 16 games (<=60 s of sampling); its peak GPU memory and RSS size the pool.
 FIRST="$1"
-uv run --no-sync python scripts/build_primers.py --score --device cuda --procs 1 --max-games 60 --min-games 1 \
+uv run --no-sync python scripts/build_primers.py --score --device cuda --procs 1 --max-games 16 --min-games 1 \
   --games "$FIRST" --summaries "$OUT/probe-summ.json.gz" --out "$OUT/probe-prim.json" > "$OUT/probe.txt" 2>&1 &
 PP=$!; GMB=0; RMB=0
 for _ in $(seq 20); do
