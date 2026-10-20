@@ -23,10 +23,10 @@ import numpy as np
 import torch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from train_bc import _run_args, batches  # noqa: E402
+from train_bc import _run_args, batches
 
-from ygo_zero.model.bc_data import load_shards, split_masks  # noqa: E402
-from ygo_zero.model.policy_v3 import make_policy  # noqa: E402
+from ygo_zero.model.bc_data import load_shards, split_masks
+from ygo_zero.model.policy_v3 import make_policy
 
 
 def mcnemar_one_sided(fixes: int, breaks: int) -> float:
@@ -39,8 +39,13 @@ def mcnemar_one_sided(fixes: int, breaks: int) -> float:
 
 def load_policy(ckpt: Path, emb: Path, device):
     a = {"d": 256, "layers": 4, "heads": 4, "hist": 0, "known": False, "v3": False}
-    a.update({k: v for k, v in _run_args(ckpt).items() if k in ("d", "layers", "heads", "hist", "known", "v3",
-                                                                 "desc_strings", "desc_lua")})
+    a.update(
+        {
+            k: v
+            for k, v in _run_args(ckpt).items()
+            if k in ("d", "layers", "heads", "hist", "known", "v3", "desc_strings", "desc_lua")
+        }
+    )
     a["emb"] = emb
     model = make_policy(emb, a, dropout=0.0, card_dropout=0.0).to(device)
     state = torch.load(ckpt, map_location="cpu")
@@ -53,7 +58,9 @@ def hits(model, a, data, idx, device) -> np.ndarray:
     out = np.zeros(len(idx), bool)
     pos = 0
     with torch.no_grad():
-        for obs, _act, _w, eq, _si, _sq, j in batches(data, idx, 256, device, False, None, a["hist"], True, a["known"]):
+        for obs, _act, _w, eq, _si, _sq, j in batches(
+            data, idx, 256, device, False, None, a["hist"], True, a["known"]
+        ):
             pred = model(obs).float().argmax(-1)
             out[pos : pos + len(j)] = eq[torch.arange(len(j), device=device), pred].cpu().numpy()
             pos += len(j)
@@ -98,12 +105,21 @@ def main() -> int:
             if not m.any():
                 continue
             fx, br = int((~hb[m] & hs[m]).sum()), int((hb[m] & ~hs[m]).sum())
-            r = {"n": int(m.sum()), "base_acc": round(float(hb[m].mean()), 4),
-                 "student_acc": round(float(hs[m].mean()), 4), "base_wrong": int((~hb[m]).sum()),
-                 "fixes": fx, "breaks": br, "p_one_sided": round(mcnemar_one_sided(fx, br), 4)}
+            r = {
+                "n": int(m.sum()),
+                "base_acc": round(float(hb[m].mean()), 4),
+                "student_acc": round(float(hs[m].mean()), 4),
+                "base_wrong": int((~hb[m]).sum()),
+                "fixes": fx,
+                "breaks": br,
+                "p_one_sided": round(mcnemar_one_sided(fx, br), 4),
+            }
             rep[f"{split}/{kd}"] = r
-            print(f"{split:8s} {kd:12s} n {r['n']:5d}  base {r['base_acc']:.3f} -> student {r['student_acc']:.3f}  "
-                  f"fixes {fx} / breaks {br} (of {r['base_wrong']} base-wrong)  p {r['p_one_sided']:.4f}", flush=True)
+            print(
+                f"{split:8s} {kd:12s} n {r['n']:5d}  base {r['base_acc']:.3f} -> student {r['student_acc']:.3f}  "
+                f"fixes {fx} / breaks {br} (of {r['base_wrong']} base-wrong)  p {r['p_one_sided']:.4f}",
+                flush=True,
+            )
     if a.out:
         a.out.write_text(json.dumps(rep, indent=1))
     if total == 0:
