@@ -17,10 +17,10 @@ from collections import Counter, defaultdict
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import show_divergence as S  # noqa: E402
-from search_override_se import gap_se  # noqa: E402
+import show_divergence as S
+from search_override_se import gap_se
 
-from ygo_zero.demos.game import _opts  # noqa: E402
+from ygo_zero.demos.game import _opts
 
 
 def main() -> int:
@@ -30,8 +30,8 @@ def main() -> int:
     ap.add_argument("--max-games", type=int, default=0)
     a = ap.parse_args()
     from ygo_zero.analysis.events import deck_path
-    from ygo_zero.demos.names import CardNames
     from ygo_zero.decks import load_ydk
+    from ygo_zero.demos.names import CardNames
     from ygo_zero.engine.cpp_env import CppEnv
     from ygo_zero.engine.duel import DuelConfig, Engine
 
@@ -54,18 +54,33 @@ def main() -> int:
             e = log.get(k)
             if e is not None and e["chosen"] != e["played"] and e["played"] in e["cands"]:
                 o = _opts(obs)
-                m, t = gap_se(e["samples"][e["cands"].index(e["chosen"])], e["samples"][e["cands"].index(e["played"])])
-                lab = [f"{S.H._kind(o[i][0])} {nn.get(o[i][1], '-') if o[i][1] else '-'}" for i in (e["played"], e["chosen"])]
-                rows.append({"deck": g["decks"][g["s_seat"]], "game": g["game_idx"], "gap": m, "t": t,
-                             "dup": o[e["chosen"]] == o[e["played"]], "key": (lab[0], lab[1])})
+                m, t = gap_se(
+                    e["samples"][e["cands"].index(e["chosen"])], e["samples"][e["cands"].index(e["played"])]
+                )
+                lab = [
+                    f"{S.H._kind(o[i][0])} {nn.get(o[i][1], '-') if o[i][1] else '-'}"
+                    for i in (e["played"], e["chosen"])
+                ]
+                rows.append(
+                    {
+                        "deck": g["decks"][g["s_seat"]],
+                        "game": g["game_idx"],
+                        "gap": m,
+                        "t": t,
+                        "dup": o[e["chosen"]] == o[e["played"]],
+                        "key": (lab[0], lab[1]),
+                    }
+                )
             obs = env.step(int(c))
     if not rows:
         print("ALERT t1_override_patterns: no turn-1 overrides found")
         return 2
     dec = [r for r in rows if r["t"] >= a.z and not r["dup"]]
     ndup = sum(r["t"] >= a.z and r["dup"] for r in rows)
-    print(f"{len(G)} games, {len(rows)} turn-1 overrides, decisive (z >= {a.z}, not a duplicate candidate) {len(dec)}; "
-          f"z >= {a.z} duplicates dropped {ndup}")
+    print(
+        f"{len(G)} games, {len(rows)} turn-1 overrides, decisive (z >= {a.z}, not a duplicate candidate) {len(dec)}; "
+        f"z >= {a.z} duplicates dropped {ndup}"
+    )
     games_by = defaultdict(set)
     for r in dec:
         games_by[(r["deck"], r["key"])].add(r["game"])
