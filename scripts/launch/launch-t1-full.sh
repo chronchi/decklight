@@ -4,8 +4,12 @@
 # (data/cache/primer/pairs-t1-r4.txt, deal-seed0 40000, seed per pair); S = first player, opponent raw P:
 #   full:    S = the product search as decklight runs it (turns >= 2 + windows; own turn 1 unsearched);
 #   full_t1: the same plus its own turn 1 searched (--own-turn1 1).
-# Budget: credit $X, floor $X (user 2026-10-20: "It's ok if it goes to X of vast credit") -> HOURS 2.6 at <=
-# $X/h (<= $X); each arm capped (VAR_CAP 60m), paired on shared deals.
+# First try t1-full-20261020-0902 (RTX 3090 24 GB, 13 procs at margin 1.5, GPU 1-46% busy, ~15 games/min) was
+# stopped at its first milestone: too slow for 1,400 deals per arm. Now: >= 40 GB GPU, GPU_MARGIN 1.25 (measured
+# 1.0 GB/proc peak) -> ~30 procs.
+# Budget: credit $X after the first try, floor $X (user 2026-10-20: "It's ok if it goes to 0.50 of vast
+# credit") -> HOURS 2.2 at <= $X/h (<= $X);
+# each arm capped (VAR_CAP 60m), paired on shared deals.
 cd "$(dirname "$0")/../.."
 . scripts/product.sh
 P=data/cache/primer/pairs-t1-r4.txt
@@ -17,8 +21,8 @@ SM="--opp self --s-seat-only 0 --seeds 1 --seed-per-pair 1 --deal-seed0 40000 --
 FULL="--value $PRODUCT_VALUE $PRODUCT_SEARCH"
 VARIANTS="full|$FULL;full_t1|$FULL --own-turn1 1"
 taskset -c 0-3 uv run --no-sync python scripts/vast_job.py --name $N \
-  --cmd "PROBE_NPROC=${PROBE_NPROC:-40} PROBE_ARGS='$FULL --own-turn1 1' CKPT=$PRODUCT_CKPT SM_ARGS='$SM' VARIANTS='$VARIANTS' VAR_CAP=${VAR_CAP:-60m} bash scripts/vast_search_match.sh $N" \
-  --hours "${HOURS:-2.6}" --max-dph "${MAX_DPH:-0.40}" --min-cpus "${MIN_CPUS:-48}" --min-gpu-ram "${MIN_GPU_RAM:-24}" \
+  --cmd "GPU_MARGIN=${GPU_MARGIN:-1.25} PROBE_NPROC=${PROBE_NPROC:-40} PROBE_ARGS='$FULL --own-turn1 1' CKPT=$PRODUCT_CKPT SM_ARGS='$SM' VARIANTS='$VARIANTS' VAR_CAP=${VAR_CAP:-60m} bash scripts/vast_search_match.sh $N" \
+  --hours "${HOURS:-2.2}" --max-dph "${MAX_DPH:-0.45}" --min-cpus "${MIN_CPUS:-48}" --min-gpu-ram "${MIN_GPU_RAM:-40}" \
   --extra-query "compute_cap>=800 cpu_ram>=${MIN_RAM:-96}" \
   --data decks data/cards/emb data/cache/P "$PRODUCT_VALUE_DIR" data/cache/primer \
   > data/cache/briefs/$N.launcher.log 2>&1
