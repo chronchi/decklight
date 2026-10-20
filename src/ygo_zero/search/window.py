@@ -397,6 +397,20 @@ class WindowSearch:
             src = snap_value if sk.startswith("value@") else snap_board
             for i, (_, j, _, _) in enumerate(branches):
                 self.last_samples[j].append(float(src[i][sh]))  # type: ignore[arg-type]
+        # Per-sample scores of every score key, per candidate in branch order (fork_pilot.py reads
+        # value@h1 / done@h99). Additive only: last_samples above is untouched.
+        _src_of = {"board": snap_board, "cards": snap_cards, "done": snap_done}
+        if self.value is not None:
+            _src_of["value"] = snap_value
+        self.last_samples_all: dict[str, list[list[float]]] = {
+            kk: [[] for _ in range(n_cands)] for kk in keys
+        }
+        for kk in keys:
+            name, h = kk.split("@h")
+            h_idx = hs.index(int(h))
+            src_all = _src_of[name]
+            for i, (_, j, _, _) in enumerate(branches):
+                self.last_samples_all[kk][j].append(float(src_all[i][h_idx]))  # type: ignore[arg-type]
         for kk in keys:
             for j in range(n_cands):
                 if counts[j]:
