@@ -43,7 +43,8 @@ def main():
     ap.add_argument("--summaries", default="data/primers/summaries.json.gz")
     ap.add_argument("--min-games", type=int, default=20)
     a = ap.parse_args()
-    games = json.load(gzip.open(a.summaries))
+    with gzip.open(a.summaries) as f:
+        games = json.load(f)
     by_src = defaultdict(lambda: [0, 0])
     deck = defaultdict(lambda: [0, 0, 0, 0])  # first wins, first n, second wins, second n
     draws = 0
@@ -81,11 +82,15 @@ def main():
     rows.sort(reverse=True)
     adj = holm([r[-1] for r in rows])
     pos = sum(r[0] > 0 for r in rows)
-    print(f"\ndecks with >= {a.min_games} games each way: {len(rows)}; first > second in {pos} "
-          f"(sign test p={binomtest(pos, len(rows), 0.5).pvalue:.2g}); Holm p<0.05 in {sum(q < 0.05 for q in adj)}")
+    print(
+        f"\ndecks with >= {a.min_games} games each way: {len(rows)}; first > second in {pos} "
+        f"(sign test p={binomtest(pos, len(rows), 0.5).pvalue:.2g}); Holm p<0.05 in {sum(q < 0.05 for q in adj)}"
+    )
     print(f"{'deck':28s} {'1st':>12s} {'2nd':>12s} {'diff':>6s} {'holm p':>7s}")
     for (dlt, name, fw, fn, sw, sn, _), q in [*zip(rows[:12], adj[:12]), *zip(rows[-8:], adj[-8:])]:
-        print(f"{name[:28]:28s} {fw:3d}/{fn:3d} {fw / fn:.2f} {sw:3d}/{sn:3d} {sw / sn:.2f} {dlt:+.2f} {q:7.2g}")
+        print(
+            f"{name[:28]:28s} {fw:3d}/{fn:3d} {fw / fn:.2f} {sw:3d}/{sn:3d} {sw / sn:.2f} {dlt:+.2f} {q:7.2g}"
+        )
 
 
 if __name__ == "__main__":
