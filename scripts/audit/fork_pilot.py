@@ -202,8 +202,22 @@ def pick_candidates(obs, played: int, k_extra: int, logits: np.ndarray) -> tuple
     return cands, [ez[i] / tot for i in cands]
 
 
-def fork_gen(engine, ws: WindowSearch, rec: dict, sel: dict, cfg, det_tries: int, n_samples: int, seed: int):
-    """One decision's fork: yield obs for policy logits, then roll out candidates on shared worlds."""
+def fork_gen(
+    engine,
+    ws: WindowSearch,
+    rec: dict,
+    sel: dict,
+    cfg,
+    det_tries: int,
+    n_samples: int,
+    seed: int,
+    worlds_mode="honest",
+):
+    """One decision's fork: yield obs for policy logits, then roll out candidates on shared worlds.
+    `worlds_mode` "true": every sample is the real state (an RL fork clones the self-play env, so the samples
+    differ only by the rollout policy's sampling); "honest": Determinizer worlds of the acting seat. Honest worlds
+    were rejected for half the states (forkpilot-20261020-1849: deck-search option order, opponent plays of hidden
+    cards), and the kept half skews easy."""
     k = int(sel["k"])
     me = int(sel["actor"])
     choices = [int(c) for c in rec["choices"]]
@@ -220,19 +234,22 @@ def fork_gen(engine, ws: WindowSearch, rec: dict, sel: dict, cfg, det_tries: int
     cands, probs = pick_candidates(obs, int(sel["played"]), sel["_k_extra"], z)
     kinds = [int(obs["actions"][i, 0]) for i in cands]
     turn = int(obs["global"][2])
-    det = Determinizer(
-        engine,
-        cfg,
-        rec.get("auto_single", True),
-        me,
-        choices[:k],
-        tr.seen,
-        obs,
-        random.Random(f"{seed}:{sel['game_idx']}:{k}"),
-        prefix_keys=keys,
-        tries=det_tries,
-    )
-    worlds = [w for w in (det.sample() for _ in range(n_samples)) if w is not None]
+    if worlds_mode == "true":
+        worlds = [(cfg, choices[:k])] * n_samples
+    else:
+        det = Determinizer(
+            engine,
+            cfg,
+            rec.get("auto_single", True),
+            me,
+            choices[:k],
+            tr.seen,
+            obs,
+            random.Random(f"{seed}:{sel['game_idx']}:{k}"),
+            prefix_keys=keys,
+            tries=det_tries,
+        )
+        worlds = [w for w in (det.sample() for _ in range(n_samples)) if w is not None]
     if len(worlds) < n_samples // 2:
         return {
             "game_idx": sel["game_idx"],
@@ -274,6 +291,7 @@ def fork_gen(engine, ws: WindowSearch, rec: dict, sel: dict, cfg, det_tries: int
         "v1": v1,
         "end": end,
         "capped": [capped_before, ws.capped],
+        "worlds": worlds_mode,
     }
 
 
@@ -417,6 +435,9 @@ def main() -> None:
     ap.add_argument("--k-extra", type=int, default=3)
     ap.add_argument("--samples", type=int, default=16)
     ap.add_argument("--det-tries", type=int, default=32)
+    ap.add_argument(
+        "--worlds", choices=("honest", "true"), default="honest", help="true: forks of the real state"
+    )
     ap.add_argument("--max-rollout", type=int, default=800)
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--ckpt", type=Path, default=None)
@@ -533,6 +554,7 @@ def main() -> None:
                     args.det_tries,
                     args.samples,
                     args.seed,
+                    args.worlds,
                 ),
             )
         )

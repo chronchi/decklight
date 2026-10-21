@@ -2,7 +2,7 @@
 # M1 fork pilot (docs/plans/2026-10-20-rl-signal.md; pre-registered NOTEBOOK 2026-10-20): scripts/audit/fork_pilot.py
 # over raw-P self-play games (runs/t1-boards-20261019-2309/raw, shipped as data/cache/fork-in/raw), 100 decisions per category
 # (ht / place / t1 / any), played option + up to 3 alternatives on 16 shared honest worlds, scored by value_p2 at h1 and
-# by the game result. Env: SAMPLES (16), N_PER (100), FCAP (45m per proc), MAX_ROLLOUT (800).
+# by the game result. Env: SAMPLES (16), N_PER (100), FCAP (45m per proc), MAX_ROLLOUT (800), WORLDS (honest|true).
 # Usage: bash scripts/vast_fork_pilot.sh <name>. Do NOT run on the laptop (vast GPU only).
 # Results: runs/<name>/rows-*.jsonl, rows.pass1.json, rows.summary.json, summary.txt.
 set -uo pipefail
@@ -25,7 +25,7 @@ G=data/cache/fork-in/raw  # = runs/t1-boards-20261019-2309/raw, copied by the la
 [ "$(ls $G/games-*.jsonl | wc -l)" -ge 1 ] || { alert "no games in $G"; exit 3; }
 FP=(uv run --no-sync python scripts/audit/fork_pilot.py --games "$G" --ckpt data/cache/P/best.pt
     --value data/cache/value_p2/best.pt --samples "${SAMPLES:-16}" --n-per "${N_PER:-100}"
-    --max-rollout "${MAX_ROLLOUT:-800}" --out "$OUT/rows.jsonl")
+    --max-rollout "${MAX_ROLLOUT:-800}" --worlds "${WORLDS:-honest}" --out "$OUT/rows.jsonl")
 # probe: one proc (after its pass 1) for 60 s measures GPU memory and RSS per process (its rows are discarded)
 "${FP[@]}" --nproc 40 --proc 0 --out "$OUT/probe/rows.jsonl" > "$OUT/probe.txt" 2>&1 &
 PP=$!; GMB=0; RMB=0
