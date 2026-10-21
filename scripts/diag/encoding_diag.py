@@ -179,7 +179,13 @@ def probe(a) -> int:
             sd = sd.get("model", sd)
             has_v = any(k.startswith("value_head") for k in sd)
             has_q = any(k.startswith("q_head") for k in sd)
-            net = PolicyNet(emb, d=a.d, layers=4, heads=4, value=has_v, q=has_q)
+            from train_bc import _run_args
+
+            from ygo_zero.model.policy_v3 import make_policy
+
+            ra = _run_args(Path(ckpt))  # a v3 checkpoint (B-v3) needs its own network class
+            net = (make_policy(emb, ra, value=has_v, q=has_q) if ra.get("v3")
+                   else PolicyNet(emb, d=a.d, layers=4, heads=4, value=has_v, q=has_q))  # fmt: skip
             net.load_state_dict({k: v.float() if v.is_floating_point() else v for k, v in sd.items()})
         net.to(dev).eval()
 
