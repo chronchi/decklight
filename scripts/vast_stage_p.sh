@@ -8,7 +8,8 @@
 #     only: B-v1 itself starts above the bound (NOTEBOOK 2026-10-13 10:30).
 #   Pc card (seeds 3000+): P and base_r3 raw vs ygo-agent on the same 5,952 deals (paired), raw head-to-heads P vs
 #   base_r3 on holdout (seeds 4, ~2,176 games) and new-card decks (seeds 6, ~2,184), principle audit both seats.
-# Env: INIT (data/cache/bv1/best.pt), ITERS (560), MS_IT (160), RL_HOURS (5.5), GA_SEEDS (24), VAR_CAP (60m), SMOKE=1.
+# Env: INIT (data/cache/bv1/best.pt), REF (card reference, data/cache/base_r3/best.pt; stage P3 uses P), DEAL0 (3000), ITERS (560),
+#      MS_IT (160), RL_HOURS (5.5), GA_SEEDS (24), VAR_CAP (60m), SMOKE=1.
 # Usage: bash scripts/vast_stage_p.sh <name>. Do NOT run on the laptop (vast GPU only).
 set -uo pipefail
 export PATH="$HOME/.local/bin:$PATH"
@@ -28,7 +29,7 @@ export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 ( while true; do echo "$(date +%T) $(nvidia-smi --query-gpu=utilization.gpu,memory.used --format=csv,noheader,nounits 2>/dev/null | tr -d ' ') $(cut -d' ' -f1 /proc/loadavg) $(free -g | awk '/Mem/{print $3}')G"; sleep 30; done ) > "$OUT/usage.txt" 2>&1 &
 T0=$SECONDS
 tick() { echo "$(date +%T) $1 $((SECONDS - T0)) s" | tee -a "$OUT/PROGRESS"; }
-INIT=${INIT:-data/cache/bv1/best.pt}; ITERS=${ITERS:-560}; MS_IT=${MS_IT:-160}
+INIT=${INIT:-data/cache/bv1/best.pt}; REF=${REF:-data/cache/base_r3/best.pt}; ITERS=${ITERS:-560}; MS_IT=${MS_IT:-160}
 [ -s "$INIT" ] && [ -s "$(dirname "$INIT")/metrics.jsonl" ] || { alert "missing $INIT or its metrics.jsonl"; exit 3; }
 MSE=(--eval-seeds 18 --ga-seeds 6); RLX=()
 if [ "${SMOKE:-0}" = 1 ]; then ITERS=6; MS_IT=4; MSE=(--eval-seeds 1 --ga-seeds 1); RLX=(--rollout 4096 --envs 64 --eval-seeds 1 --value-warmup 1 --eval-every 2); fi
@@ -80,16 +81,16 @@ ref = {s: json.loads((o / f"ms/principles-init-{s}.json").read_text()) for s in 
 pw, yw, bw = p["s"]["lines_with_own_t1_ht"], p["ya"]["lines_with_own_t1_ht"], ref["s"]["lines_with_own_t1_ht"]
 bound = 1.5 * yw
 kl_m = sum(kl) / len(kl) if kl else float("nan")
-print(f"milestone it{it}: vs B-v1 {ev['vs_bc']['wr']} n={ev['vs_bc']['n']} {ev['vs_bc']['ci']}; vs ygo-agent "
-      f"{ev['vs_ygoagent']['wr']} n={ev['vs_ygoagent']['n']}; kl_bc mean {kl_m:.4f}; own-T1 HT games P {pw} vs B-v1 {bw} "
+print(f"milestone it{it}: vs init {ev['vs_bc']['wr']} n={ev['vs_bc']['n']} {ev['vs_bc']['ci']}; vs ygo-agent "
+      f"{ev['vs_ygoagent']['wr']} n={ev['vs_ygoagent']['n']}; kl_bc mean {kl_m:.4f}; own-T1 HT games cand {pw} vs init {bw} "
       f"(ygo-agent {yw}, bound {bound:.0f}); interrupts P {p['s']['interrupt_opp']['rate']} ygo-agent {p['ya']['interrupt_opp']['rate']}")
 bad = []
 if ev["vs_bc"]["wr"] < 0.50:
-    bad.append(f"vs B-v1 {ev['vs_bc']['wr']} < 0.50")
+    bad.append(f"vs init {ev['vs_bc']['wr']} < 0.50")
 if not kl or kl_m > 0.1:
     bad.append(f"kl_bc mean {kl_m:.4f} > 0.1 (or missing)")
 if pw > bw + 2 * math.sqrt(max(bw, 1)):
-    bad.append(f"own-T1 waste worse than B-v1 ({pw} vs {bw})")
+    bad.append(f"own-T1 waste worse than init ({pw} vs {bw})")
 if pw > bound:
     print(f"ALERT milestone: own-T1 HT games {pw} above the gate-3 bound {bound:.0f} (B-v1 {bw}; not a stop)")
 for b in bad:
@@ -135,10 +136,10 @@ tick "ppo $(basename "$LAST")"
 # 2. Pc card on fresh deals (seeds 3000+)
 GS=${GA_SEEDS:-24}; HS=4; NS=6; [ "${SMOKE:-0}" = 1 ] && { GS=1; HS=1; NS=1; }
 V="p|--opp ygoagent --raw 1 --ckpt $OUT/P/best.pt"
-V="$V;base|--opp ygoagent --raw 1 --ckpt data/cache/base_r3/best.pt"
-V="$V;p-hold|--opp ckpt --opp-ckpt data/cache/base_r3/best.pt --raw 1 --deck-set holdout --seeds $HS --ckpt $OUT/P/best.pt"
-V="$V;p-new|--opp ckpt --opp-ckpt data/cache/base_r3/best.pt --raw 1 --deck-set newcards --seeds $NS --ckpt $OUT/P/best.pt"
-CKPT=data/cache/base_r3/best.pt SM_ARGS="--ga-seeds $GS --deal-seed0 3000" VARIANTS="$V" PROBE_NPROC=1 \
+V="$V;base|--opp ygoagent --raw 1 --ckpt $REF"
+V="$V;p-hold|--opp ckpt --opp-ckpt $REF --raw 1 --deck-set holdout --seeds $HS --ckpt $OUT/P/best.pt"
+V="$V;p-new|--opp ckpt --opp-ckpt $REF --raw 1 --deck-set newcards --seeds $NS --ckpt $OUT/P/best.pt"
+CKPT=$REF SM_ARGS="--ga-seeds $GS --deal-seed0 ${DEAL0:-3000}" VARIANTS="$V" PROBE_NPROC=1 \
   VAR_CAP="${VAR_CAP:-60m}" bash scripts/vast_search_match.sh "$NAME"
 tick card
 uv run --no-sync python scripts/audit/paired_sm.py "$OUT/base" "$OUT/p" > "$OUT/paired-base.txt" 2>&1 \
