@@ -12,8 +12,8 @@ for f in data/cache/bv3/best.pt data/cache/bv3/metrics.jsonl data/cache/P/best.p
 done
 N=stage-p3-$(date +%Y%m%d-%H%M)${SMOKE:+-smoke}; echo $N
 taskset -c 0-3 uv run --no-sync python scripts/vast_job.py --name $N \
-  --cmd "SMOKE=${SMOKE:-0} INIT=data/cache/bv3/best.pt REF=data/cache/P/best.pt DEAL0=9000 ITERS=${ITERS:-560} RL_HOURS=${RL_HOURS:-5.5} GA_SEEDS=${GA_SEEDS:-24} bash scripts/vast_stage_p.sh $N" \
+  --cmd "SMOKE=${SMOKE:-0} SMOKE_ITERS=${SMOKE_ITERS:-6} INIT=data/cache/bv3/best.pt REF=data/cache/P/best.pt DEAL0=9000 ITERS=${ITERS:-560} RL_HOURS=${RL_HOURS:-5.5} GA_SEEDS=${GA_SEEDS:-24} bash scripts/vast_stage_p.sh $N" \
   --hours "${HOURS:-8}" --max-dph "${MAX_DPH:-0.40}" --min-cpus "${MIN_CPUS:-24}" --min-gpu-ram "${MIN_GPU_RAM:-24}" \
-  --extra-query "compute_cap>=800 cpu_ram>=${MIN_RAM:-48}" \
+  --extra-query "compute_cap>=800 cpu_ram>=${MIN_RAM:-48} gpu_name!=CMP_170HX ${EXTRA_Q:-}" \
   --data decks data/cards/emb data/cards/lua_desc.npz data/models data/cache/bv3 data/cache/P > data/cache/briefs/$N.launcher.log 2>&1
 echo "exit $?"

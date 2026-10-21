@@ -8,7 +8,7 @@
 #     only: B-v1 itself starts above the bound (NOTEBOOK 2026-10-13 10:30).
 #   Pc card (seeds 3000+): P and base_r3 raw vs ygo-agent on the same 5,952 deals (paired), raw head-to-heads P vs
 #   base_r3 on holdout (seeds 4, ~2,176 games) and new-card decks (seeds 6, ~2,184), principle audit both seats.
-# Env: INIT (data/cache/bv1/best.pt), REF (card reference, data/cache/base_r3/best.pt; stage P3 uses P), DEAL0 (3000), ITERS (560),
+# Env: INIT (data/cache/bv1/best.pt), SMOKE_ITERS (6; smoke runs also set YGO_NAN_DEBUG), REF (card reference, data/cache/base_r3/best.pt; stage P3 uses P), DEAL0 (3000), ITERS (560),
 #      MS_IT (160), RL_HOURS (5.5), GA_SEEDS (24), VAR_CAP (60m), SMOKE=1.
 # Usage: bash scripts/vast_stage_p.sh <name>. Do NOT run on the laptop (vast GPU only).
 set -uo pipefail
@@ -32,7 +32,7 @@ tick() { echo "$(date +%T) $1 $((SECONDS - T0)) s" | tee -a "$OUT/PROGRESS"; }
 INIT=${INIT:-data/cache/bv1/best.pt}; REF=${REF:-data/cache/base_r3/best.pt}; ITERS=${ITERS:-560}; MS_IT=${MS_IT:-160}
 [ -s "$INIT" ] && [ -s "$(dirname "$INIT")/metrics.jsonl" ] || { alert "missing $INIT or its metrics.jsonl"; exit 3; }
 MSE=(--eval-seeds 18 --ga-seeds 6); RLX=()
-if [ "${SMOKE:-0}" = 1 ]; then ITERS=6; MS_IT=4; MSE=(--eval-seeds 1 --ga-seeds 1); RLX=(--rollout 4096 --envs 64 --eval-seeds 1 --value-warmup 1 --eval-every 2); fi
+if [ "${SMOKE:-0}" = 1 ]; then ITERS=${SMOKE_ITERS:-6}; MS_IT=4; export YGO_NAN_DEBUG="$OUT/nan"; MSE=(--eval-seeds 1 --ga-seeds 1); RLX=(--rollout 4096 --envs 64 --eval-seeds 1 --value-warmup 1 --eval-every 2); fi
 # train_rl's fixed eval decks (4 train + 4 holdout pool decks, random.Random(1234)): eval_ckpt needs the same names
 EVN=$(uv run --no-sync python - <<'EOF'
 import random

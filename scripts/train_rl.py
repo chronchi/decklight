@@ -277,6 +277,26 @@ def _fwd_of(m):
     return m.module if isinstance(m, DDP) else m
 
 
+def _nan_debug(model, loss, stats, obs, act, olp, rl, a_t, r_t) -> None:
+    """YGO_NAN_DEBUG=<dir>: per minibatch (one host sync each), if the loss or any gradient is non-finite, save the
+    minibatch + weights to <dir>/nan_batch.pt, print which stats/inputs/grads are non-finite, and raise."""
+    bad_grads = [n for n, p in model.named_parameters() if p.grad is not None and not torch.isfinite(p.grad).all()]
+    if torch.isfinite(loss).item() and not bad_grads:
+        return
+    out = Path(os.environ["YGO_NAN_DEBUG"])
+    out.mkdir(parents=True, exist_ok=True)
+    cpu = {k: v.detach().cpu() for k, v in obs.items()}
+    torch.save({"obs": cpu, "act": act.cpu(), "olp": olp.cpu(), "ref_lp": None if rl is None else rl.cpu(),
+                "adv": a_t.cpu(), "ret": r_t.cpu(), "model": {k: v.detach().cpu() for k, v in model.state_dict().items()}},
+               out / "nan_batch.pt")  # fmt: skip
+    print(f"NAN_DEBUG loss {loss.item()} stats {({k: float(v) for k, v in stats.items()})}", flush=True)
+    print(f"NAN_DEBUG non-finite inputs: {[k for k, v in cpu.items() if v.is_floating_point() and not torch.isfinite(v).all()]}"
+          f" olp {(~torch.isfinite(olp)).sum().item()} ref_lp {0 if rl is None else (~torch.isfinite(rl)).sum().item()}"
+          f" adv {(~torch.isfinite(a_t)).sum().item()} ret {(~torch.isfinite(r_t)).sum().item()}", flush=True)  # fmt: skip
+    print(f"NAN_DEBUG non-finite grads ({len(bad_grads)}): {bad_grads[:12]}", flush=True)
+    raise RuntimeError("NAN_DEBUG: non-finite loss or gradient (batch saved)")
+
+
 def ppo_update(model: PolicyNet, upd_model, opt, vopt, store: SlotStore, slots: np.ndarray,
                adv_n: np.ndarray, ret: np.ndarray, rng: np.random.Generator, dev: torch.device,
                *, clip: float, vf_coef: float, kl_coef: float, ent_coef: float, epochs: int,
@@ -459,6 +479,8 @@ def ppo_update(model: PolicyNet, upd_model, opt, vopt, store: SlotStore, slots: 
                 finite_epoch = finite_epoch & torch.isfinite(loss).detach()
                 opt.zero_grad(set_to_none=True)
                 loss.backward()
+                if os.environ.get("YGO_NAN_DEBUG"):  # smoke-only: locate the first non-finite loss/grad (stage P3)
+                    _nan_debug(model, loss, s, obs, act, olp, rl, a_t, r_t)
                 distmod.average_grads_(model)
                 torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
                 opt.step()
