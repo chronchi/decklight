@@ -10,6 +10,9 @@ Arms: stored Full-P = runs/value-p2-20261015-2044/hppo-p2; <run>/full_p3 (P3 + v
     done
     uv run python scripts/audit/full_p3_gate.py $R
 
+Other arms (same gate, pre-registered NOTEBOOK 2026-10-21 "Full-P + ho card"): `--arm full_p_ho --name ho` reads
+<run>/full_p_ho, principles-ho-s.json, maxx-ho.json; `--rep DIR` points the drift check at another run's full_p_rep.
+
   1. drift: paired full_p_rep - stored, 95% CI contains 0 (else the stored pairing is invalid: verdict INVALID, exit 3);
   2. non-inferiority: paired full_p3 - stored lower 90% >= -2 pp, each seat >= -3 pp;
   3. improved play: own-turn Maxx games share or own-turn hand-trap games lower by > 2 SE; ht_opp / interrupt_opp not
@@ -53,16 +56,27 @@ def prop_diff(pa: float, na: int, pb: float, nb: int) -> tuple[float, float]:
 
 
 def main() -> int:
-    run = Path(sys.argv[1])
-    st, p3, rep = games(STORED), games(run / "full_p3"), games(run / "full_p_rep")
+    import argparse
+
+    ap = argparse.ArgumentParser()
+    ap.add_argument("run", type=Path)
+    ap.add_argument("--arm", default="full_p3")
+    ap.add_argument("--name", default="p3", help="suffix of the principles / maxx inputs")
+    ap.add_argument("--rep", type=Path, default=None, help="drift arm dir (default <run>/full_p_rep)")
+    a = ap.parse_args()
+    run = a.run
+    st, p3, rep = games(STORED), games(run / a.arm), games(a.rep or run / "full_p_rep")
     if not st or not p3:
-        fail(f"no games: stored {len(st)}, full_p3 {len(p3)}")
+        fail(f"no games: stored {len(st)}, {a.arm} {len(p3)}")
+    if not rep:
+        fail("no drift-arm games (--rep)")
     try:
-        pr = {k: json.loads((run / f"principles-{k}-s.json").read_text()) for k in ("p3", "p")}
-        mx = {k: json.loads((run / f"maxx-{k}.json").read_text())["all"] for k in ("p3", "p")}
+        pr = {k: json.loads((run / f"principles-{k}-s.json").read_text()) for k in (a.name, "p")}
+        mx = {k: json.loads((run / f"maxx-{k}.json").read_text())["all"] for k in (a.name, "p")}
+        pr["p3"], mx["p3"] = pr[a.name], mx[a.name]
     except FileNotFoundError as e:
         fail(f"missing input: {e.filename} (see the docstring)")
-    wr = {n: sum(g.values()) / len(g) for n, g in (("stored Full-P", st), ("full_p3", p3), ("full_p_rep", rep)) if g}
+    wr = {n: sum(g.values()) / len(g) for n, g in (("stored Full-P", st), (a.arm, p3), ("full_p_rep", rep)) if g}
     print("win rates vs ygo-agent:", {k: f"{v:.3f} (n {len(g)})" for (k, v), g in zip(wr.items(), (st, p3, rep))})
 
     # 1. drift
@@ -75,7 +89,7 @@ def main() -> int:
     lo = m - 1.645 * se
     seats = {s: paired(st, p3, i)[1] for i, s in ((0, "first"), (1, "second"))}
     ni_ok = lo >= -2.0 and all(v >= -3.0 for v in seats.values())
-    print(f"2. Full-P3 - Full-P {m:+.1f} pp (SE {se:.2f}, n {n}, lower 90% {lo:+.1f}); seats "
+    print(f"2. {a.arm} - Full-P {m:+.1f} pp (SE {se:.2f}, n {n}, lower 90% {lo:+.1f}); seats "
           f"{ {k: round(v, 1) for k, v in seats.items()} } -> {'PASS' if ni_ok else 'FAIL'}")
     if n < 0.9 * len(st):
         print(f"   note: {n} of {len(st)} stored deals paired (full_p3 capped?)")
@@ -86,15 +100,15 @@ def main() -> int:
     ga, gb = pr["p"]["lines_with_own_turn_ht"] / len(st), pr["p3"]["lines_with_own_turn_ht"] / len(p3)
     d2, s2 = prop_diff(ga, len(st), gb, len(p3))
     better = d1 < -2 * s1 or d2 < -2 * s2
-    print(f"3. own-turn Maxx games   P {mx['p']['share_games_fired']:.4f} P3 {mx['p3']['share_games_fired']:.4f}"
+    print(f"3. own-turn Maxx games   P {mx['p']['share_games_fired']:.4f} new {mx['p3']['share_games_fired']:.4f}"
           f"  diff {d1:+.4f} (SE {s1:.4f})")
-    print(f"   own-turn HT games     P {ga:.4f} P3 {gb:.4f}  diff {d2:+.4f} (SE {s2:.4f})")
+    print(f"   own-turn HT games     P {ga:.4f} new {gb:.4f}  diff {d2:+.4f} (SE {s2:.4f})")
     worse = []
     for k in ("ht_opp", "interrupt_opp", "ht_own_t1", "ht_own_t2p"):
-        a, b = pr["p"][k], pr["p3"][k]
-        d, s = prop_diff(a["rate"], a["opps"], b["rate"], b["opps"])
-        print(f"   {k:20s} P {a['rate']:.4f} P3 {b['rate']:.4f}  diff {d:+.4f} (SE {s:.4f})")
-        if k in ("ht_opp", "interrupt_opp") and d - 2 * s < -NI_REL * a["rate"]:
+        x, y = pr["p"][k], pr["p3"][k]
+        d, s = prop_diff(x["rate"], x["opps"], y["rate"], y["opps"])
+        print(f"   {k:20s} P {x['rate']:.4f} new {y['rate']:.4f}  diff {d:+.4f} (SE {s:.4f})")
+        if k in ("ht_opp", "interrupt_opp") and d - 2 * s < -NI_REL * x["rate"]:
             worse.append(k)
     play_ok = better and not worse
     print(f"   -> improved play: {'PASS' if play_ok else 'FAIL'} (waste lower: {better}; anti-passivity worse: {worse})")
