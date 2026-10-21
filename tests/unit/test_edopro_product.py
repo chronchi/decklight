@@ -32,6 +32,7 @@ from ygo_zero.engine.env import PyEnv
 from ygo_zero.eval.policies import GreedyPolicy
 from ygo_zero.model.bc_data import OBS_KEYS
 from ygo_zero.model.policy import PolicyNet
+from ygo_zero.search.honest import HonestRule
 from ygo_zero.search.play import argmax_select, search_game_gen
 from ygo_zero.search.product import RouteWindowSearch, seat_of, tag_game
 from ygo_zero.search.turn1 import _batch, drive_many
@@ -93,14 +94,14 @@ KW = {"own_turn1": True, "conf_skip": 1.01, "own_frac": 1.0,
       "honest": True, "det_tries": 8, "det_fallback": "skip"}  # fmt: skip
 
 
-def _reference_game(engine, cfg, s_seat, forward, seed=0, game_seed=0):
+def _reference_game(engine, cfg, s_seat, forward, seed=0, game_seed=0, ho=None):
     """search_match's routed path in-process: RouteWindowSearch + tag_game, R = greedy one-hot,
     per_seat guard with R unguarded (search_match.py :615-633, :690-705)."""
     route: dict = {}
     ws = RouteWindowSearch(engine, _never, k=2, horizon=1, samples=1, seed=seed, route=route)
     gen = tag_game(0, s_seat, search_game_gen(
         engine, cfg, ws, s_seat, argmax_select, game_seed=game_seed,
-        guard_mode="per_seat", unguarded_seat=1 - s_seat, **KW), route)
+        guard_mode="per_seat", unguarded_seat=1 - s_seat, ho=ho, **KW), route)
     opp = GreedyPolicy(seed=3)
 
     def fwd(obs_list: list[dict]) -> np.ndarray:
@@ -142,17 +143,19 @@ def _s_choices(res, s_seat):
     return [c for c, a in zip(res.choices, res.actors, strict=True) if a == s_seat]
 
 
+@pytest.mark.parametrize("ho", [False, True])
 @pytest.mark.parametrize("s_seat", [0, 1])
-def test_routed_equivalence(engine, s_seat):
-    """The key test: the driver plays S exactly as search_match's routed path does."""
+def test_routed_equivalence(engine, s_seat, ho):
+    """The key test: the driver plays S exactly as search_match's routed path does (with and without the product's
+    honest override, search_match --ho 1 = HonestRule())."""
     forward, cfg = _tiny_forward(), _cfg()
-    ref = _reference_game(engine, cfg, s_seat, forward)
+    ref = _reference_game(engine, cfg, s_seat, forward, ho=HonestRule() if ho else None)
     assert not ref.truncated and ref.winner in (0, 1)
     r_choices = [c for c, a in zip(ref.choices, ref.actors, strict=True) if a == 1 - s_seat]
     assert r_choices, "R made 0 decisions (routing broke)"
 
     drv = ProductDriver(engine, cfg, bot_seat=s_seat, base_logits=forward, value=None,
-                        search_kwargs={"k": 2, "samples": 1, **KW},
+                        search_kwargs={"k": 2, "samples": 1, "ho": ho, **KW},
                         game_seed=0, ws_seed=0)
     drv.start()
     drv.feed_human(r_choices)

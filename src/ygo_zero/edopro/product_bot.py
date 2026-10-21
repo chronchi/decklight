@@ -28,6 +28,7 @@ import numpy as np
 
 from ygo_zero.engine.duel import DuelConfig, Engine
 from ygo_zero.engine.env import PyEnv
+from ygo_zero.search.honest import HonestRule
 from ygo_zero.search.play import argmax_select, search_game_gen, softmax_conf
 from ygo_zero.search.product import (
     RouteWindowSearch,  # noqa: F401 (re-exported for search_match-style use)
@@ -267,7 +268,8 @@ class ProductDriver:
                        "own_turn1": kw.pop("own_turn1"), "honest": kw.pop("honest"),
                        "det_tries": kw.pop("det_tries"), "det_fallback": kw.pop("det_fallback"),
                        "margin": kw.pop("margin"), "max_search_turn": kw.pop("max_search_turn"),
-                       "max_searches": kw.pop("max_searches")}
+                       "max_searches": kw.pop("max_searches"),
+                       "ho": HonestRule() if kw.pop("ho", False) else None}
         if kw:
             raise ValueError(f"ProductDriver: unknown search kwargs {sorted(kw)}")
         self.game_seed, self.ws_seed = game_seed, ws_seed

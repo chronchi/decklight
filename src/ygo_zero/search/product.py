@@ -3,7 +3,7 @@
 `RouteWindowSearch`, `tag_game` and `seat_of` moved verbatim from `scripts/search_match.py`
 (D3: pure move, search_match imports them back so its behaviour stays bit-identical).
 `product_search_kwargs` + `build_search` + `load_policy`/`load_value` build the product
-(P + hppo + value, honest k4 s4 h1, det-tries 32, det-fallback skip, conf-skip 0.9)
+(P + value_p2, honest k4 s4 h1, det-tries 32, det-fallback skip, conf-skip 0.9, honest override `ho`)
 from the product flags for both search_match-style jobs and the EDOPro host driver.
 """
 
@@ -20,7 +20,8 @@ from ygo_zero.search.window import WindowSearch
 
 ROOT = Path(__file__).resolve().parents[3]
 
-# The product (scripts/product.sh): honest k4 s4 h1, det-tries 32, skip, conf-skip 0.9.
+# The product (scripts/product.sh): honest k4 s4 h1, det-tries 32, skip, conf-skip 0.9, ho (search/honest.py
+# HonestRule defaults = search_match --ho 1; adopted 2026-10-21, NOTEBOOK "Full-P + ho result").
 PRODUCT_K = 4
 PRODUCT_SAMPLES = 4
 PRODUCT_HORIZON = 1
@@ -87,6 +88,7 @@ def product_search_kwargs(fast: bool = False) -> dict:
         "rollout_temp": PRODUCT_ROLLOUT_TEMP, "conf_skip": 0.0 if fast else PRODUCT_CONF_SKIP,
         "own_frac": 1.0, "own_turn1": False, "honest": True, "det_tries": PRODUCT_DET_TRIES,
         "det_fallback": PRODUCT_DET_FALLBACK, "margin": 0.0, "max_search_turn": 0, "max_searches": 0,
+        "ho": not fast,  # True -> HonestRule() (bool here: the dict is written into game metadata)
     }
 
 
