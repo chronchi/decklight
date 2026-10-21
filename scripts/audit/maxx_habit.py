@@ -38,6 +38,9 @@ from ygo_zero.engine.cpp_env import CppEnv  # noqa: E402
 from ygo_zero.engine.duel import DuelConfig, Engine  # noqa: E402
 from ygo_zero.model.bc_data import OBS_KEYS  # noqa: E402
 
+# v3 / --known checkpoints also read these (CppEnv obs carry them)
+POL_KEYS = (*OBS_KEYS, "hist_long", "hist_long_mask", "card_known", "known_code")
+
 MAXX = 23434538
 
 
@@ -114,7 +117,7 @@ def main() -> int:
     def flush() -> None:
         if not buf:
             return
-        lg = pol.logits({k: np.stack([o[k] for o in buf]) for k in OBS_KEYS})
+        lg = pol.logits({k: np.stack([o[k] for o in buf]) for k in POL_KEYS})
         for (key, j, mx, legal, ch, taken), z in zip(refs, lg):
             z = z[: len(legal)].astype(np.float64)
             z[~legal] = -np.inf
@@ -152,7 +155,7 @@ def main() -> int:
         key = (gid, player)
         pg[key].append((int(g[2]) == 1, int(g[3]) in (0x1, 0x2), ch in mx, bool(taken)))
         if pol is not None:
-            buf.append({k: np.array(obs[k]) for k in OBS_KEYS})
+            buf.append({k: np.array(obs[k]) for k in POL_KEYS if k in obs})
             refs.append((key, len(pg[key]) - 1, mx, mask.copy(), ch, taken))
             if len(buf) >= 256:
                 flush()
