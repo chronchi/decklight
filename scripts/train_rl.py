@@ -278,12 +278,12 @@ def _fwd_of(m):
 
 
 def _nan_debug(model, loss, stats, obs, act, olp, rl, a_t, r_t) -> None:
-    """YGO_NAN_DEBUG=<dir>: per minibatch (one host sync each), if the loss or any gradient is non-finite, save the
-    minibatch + weights to <dir>/nan_batch.pt, print which stats/inputs/grads are non-finite, and raise."""
-    bad_grads = [n for n, p in model.named_parameters() if p.grad is not None and not torch.isfinite(p.grad).all()]
-    if torch.isfinite(loss).item() and not bad_grads:
-        return
+    """YGO_NAN_DEBUG=<dir>: called on a minibatch whose gradient norm is non-finite (the step is skipped): save the
+    first such minibatch + weights to <dir>/nan_batch.pt and print which stats/inputs/grads are non-finite."""
     out = Path(os.environ["YGO_NAN_DEBUG"])
+    if (out / "nan_batch.pt").exists():
+        return
+    bad_grads = [n for n, p in model.named_parameters() if p.grad is not None and not torch.isfinite(p.grad).all()]
     out.mkdir(parents=True, exist_ok=True)
     cpu = {k: v.detach().cpu() for k, v in obs.items()}
     torch.save({"obs": cpu, "act": act.cpu(), "olp": olp.cpu(), "ref_lp": None if rl is None else rl.cpu(),
@@ -294,7 +294,6 @@ def _nan_debug(model, loss, stats, obs, act, olp, rl, a_t, r_t) -> None:
           f" olp {(~torch.isfinite(olp)).sum().item()} ref_lp {0 if rl is None else (~torch.isfinite(rl)).sum().item()}"
           f" adv {(~torch.isfinite(a_t)).sum().item()} ret {(~torch.isfinite(r_t)).sum().item()}", flush=True)  # fmt: skip
     print(f"NAN_DEBUG non-finite grads ({len(bad_grads)}): {bad_grads[:12]}", flush=True)
-    raise RuntimeError("NAN_DEBUG: non-finite loss or gradient (batch saved)")
 
 
 def ppo_update(model: PolicyNet, upd_model, opt, vopt, store: SlotStore, slots: np.ndarray,
@@ -364,6 +363,8 @@ def ppo_update(model: PolicyNet, upd_model, opt, vopt, store: SlotStore, slots: 
         upd_model.train()
     agg_sum: dict[str, torch.Tensor] = {}
     agg_n = 0
+    nan_skip = 0  # plain-PPO minibatches whose gradient norm was non-finite: step skipped (stage P3, v3 + bf16)
+    n_mb = 0
     bad_loss = False
     for _ in range(epochs):
         finite_epoch = torch.ones((), dtype=torch.bool, device=dev)
@@ -476,13 +477,20 @@ def ppo_update(model: PolicyNet, upd_model, opt, vopt, store: SlotStore, slots: 
                     else:
                         loss, s = ppo_loss(fwd, rl, obs, act, olp, a_t, r_t, clip, vf_coef,
                                            kl_coef, ent_coef)  # fmt: skip
-                finite_epoch = finite_epoch & torch.isfinite(loss).detach()
                 opt.zero_grad(set_to_none=True)
                 loss.backward()
-                if os.environ.get("YGO_NAN_DEBUG"):  # smoke-only: locate the first non-finite loss/grad (stage P3)
-                    _nan_debug(model, loss, s, obs, act, olp, rl, a_t, r_t)
                 distmod.average_grads_(model)
-                torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+                gn = torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+                n_mb += 1
+                # one host sync per minibatch: a non-finite step would poison the weights and Adam state (smoke 1
+                # of stage P3 died at iteration 6); skip it, keep the first batch, fail loud if it recurs (below)
+                if not bool(torch.isfinite(gn).item()):
+                    nan_skip += 1
+                    if os.environ.get("YGO_NAN_DEBUG"):
+                        _nan_debug(model, loss, s, obs, act, olp, rl, a_t, r_t)
+                    opt.zero_grad(set_to_none=True)
+                    continue
+                finite_epoch = finite_epoch & torch.isfinite(loss).detach()
                 opt.step()
             for key, val in s.items():
                 t = val.detach()
@@ -496,6 +504,10 @@ def ppo_update(model: PolicyNet, upd_model, opt, vopt, store: SlotStore, slots: 
             break
     if bad_loss:
         raise RuntimeError("non-finite loss")
+    if nan_skip:
+        print(f"ALERT nan_skip: {nan_skip}/{n_mb} PPO minibatches had a non-finite gradient (steps skipped)", flush=True)
+        if nan_skip > max(1, n_mb // 20):
+            raise RuntimeError(f"non-finite gradients in {nan_skip}/{n_mb} minibatches (> 5%)")
     hint_stats: dict[str, float] = {}
     if hint is not None and not warm and float(hint.get("coef", 0.0)) > 0.0:
         # One hint-distillation step per PPO update (not per minibatch, so the coef

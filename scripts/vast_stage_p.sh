@@ -8,7 +8,7 @@
 #     only: B-v1 itself starts above the bound (NOTEBOOK 2026-10-13 10:30).
 #   Pc card (seeds 3000+): P and base_r3 raw vs ygo-agent on the same 5,952 deals (paired), raw head-to-heads P vs
 #   base_r3 on holdout (seeds 4, ~2,176 games) and new-card decks (seeds 6, ~2,184), principle audit both seats.
-# Env: INIT (data/cache/bv1/best.pt), SMOKE_ITERS (6; smoke runs also set YGO_NAN_DEBUG), REF (card reference, data/cache/base_r3/best.pt; stage P3 uses P), DEAL0 (3000), ITERS (560),
+# Env: INIT (data/cache/bv1/best.pt), SMOKE_ITERS (6), REF (card reference, data/cache/base_r3/best.pt; stage P3 uses P), DEAL0 (3000), ITERS (560),
 #      MS_IT (160), RL_HOURS (5.5), GA_SEEDS (24), VAR_CAP (60m), SMOKE=1.
 # Usage: bash scripts/vast_stage_p.sh <name>. Do NOT run on the laptop (vast GPU only).
 set -uo pipefail
@@ -31,8 +31,8 @@ T0=$SECONDS
 tick() { echo "$(date +%T) $1 $((SECONDS - T0)) s" | tee -a "$OUT/PROGRESS"; }
 INIT=${INIT:-data/cache/bv1/best.pt}; REF=${REF:-data/cache/base_r3/best.pt}; ITERS=${ITERS:-560}; MS_IT=${MS_IT:-160}
 [ -s "$INIT" ] && [ -s "$(dirname "$INIT")/metrics.jsonl" ] || { alert "missing $INIT or its metrics.jsonl"; exit 3; }
-MSE=(--eval-seeds 18 --ga-seeds 6); RLX=()
-if [ "${SMOKE:-0}" = 1 ]; then ITERS=${SMOKE_ITERS:-6}; MS_IT=4; export YGO_NAN_DEBUG="$OUT/nan"; MSE=(--eval-seeds 1 --ga-seeds 1); RLX=(--rollout 4096 --envs 64 --eval-seeds 1 --value-warmup 1 --eval-every 2); fi
+MSE=(--eval-seeds 18 --ga-seeds 6); RLX=(); export YGO_NAN_DEBUG="$OUT/nan"  # saves the first skipped non-finite minibatch
+if [ "${SMOKE:-0}" = 1 ]; then ITERS=${SMOKE_ITERS:-6}; MS_IT=4; MSE=(--eval-seeds 1 --ga-seeds 1); RLX=(--rollout 4096 --envs 64 --eval-seeds 1 --value-warmup 1 --eval-every 2); fi
 # train_rl's fixed eval decks (4 train + 4 holdout pool decks, random.Random(1234)): eval_ckpt needs the same names
 EVN=$(uv run --no-sync python - <<'EOF'
 import random
@@ -57,8 +57,8 @@ waste() {  # <tag>: own-T1 hand-trap games of the pilot (s) and ygo-agent (ya) i
 }
 
 # B-v1's waste on the milestone deals (the reference for the it160 check), run while PPO starts
-( evalck "$INIT" 0 init && waste init || alert "milestone reference (B-v1) eval/audit failed: $(tail -1 "$OUT/ms/init.txt")" ) &
-REFP=$!
+( evalck "$INIT" 0 init && waste init && touch "$OUT/ms/REF_DONE" \
+  || { alert "milestone reference (init) eval/audit failed: $(tail -1 "$OUT/ms/init.txt")"; touch "$OUT/ms/REF_DONE"; } ) &
 
 # 1. PPO
 touch "$OUT/train.txt"
@@ -68,7 +68,7 @@ TP=$!
 milestone() {
   local ck; ck=$(printf "%s/rl/iter-%04d.pt" "$OUT" "$MS_IT")
   evalck "$ck" "$MS_IT" "i$MS_IT" && waste "i$MS_IT" || { alert "milestone eval/audit failed: $(tail -1 "$OUT/ms/i$MS_IT.txt")"; return 1; }
-  wait $REFP
+  until [ -f "$OUT/ms/REF_DONE" ]; do sleep 20; done  # not `wait`: milestone runs in a subshell (stage P3 smoke 2)
   uv run --no-sync python - "$OUT" "$MS_IT" <<'EOF'
 import json, math, sys
 from pathlib import Path

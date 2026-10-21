@@ -185,3 +185,46 @@ def test_hint_step_stats_are_not_minibatch_averaged(engine):
                           adv_n, ret, np.random.default_rng(5), dev, hint=hint, **kw)
     assert {k: v for k, v in a1.items() if not k.startswith("hint_")} == a0
     assert 0.0 <= a1["hint_acc"] <= 1.0 and a1["hint_ce"] > 0.05  # an untrained tiny net is not near-zero CE
+
+
+def test_non_finite_minibatch_step_is_skipped(engine, capsys):
+    """A minibatch with a non-finite gradient skips its optimizer step (weights stay finite, ALERT printed); non-finite
+    gradients in > 5% of minibatches raise (stage P3 smoke 1, NOTEBOOK 2026-10-20)."""
+    tr = _train_rl_mod()
+    decks = [load_ydk(p) for p in sorted(FIXTURES.glob("*.ydk"))]
+    dev = torch.device("cpu")
+    model, ref = _tiny(decks, True), _tiny(decks, False)
+    vec = VecEnv(engine, decks, 8, 2, seed=0)
+    vec.set_max_decisions(60)
+    store = SlotStore(8000, gather(vec.buf, np.arange(1), 0, False))
+    col = Collector(vec, copy.deepcopy(model).eval(), ref, store, 0, False, dev, 0.3, -0.5, 2,
+                    np.random.default_rng(1234), "fp32")
+    finished, _ = col.collect(200)
+    slots, _adv, ret, adv_n = tr.gae_batch(store, finished, 0.95)
+    kw = dict(clip=0.2, vf_coef=0.5, kl_coef=0.1, ent_coef=0.003, epochs=1, minibatch=64, warm=False,
+              precision="fp32", max_upload_gb=6.0, compile=False)
+
+    def run(poison):
+        m = copy.deepcopy(model)
+        calls = [0]
+
+        def hook(g):
+            calls[0] += 1
+            return torch.full_like(g, float("nan")) if poison(calls[0]) else g
+
+        next(p for p in m.parameters() if p.requires_grad).register_hook(hook)
+        opt = torch.optim.AdamW(m.parameters(), lr=1e-3)
+        tr.ppo_update(m, m, opt, torch.optim.AdamW(m.value_head.parameters(), lr=1e-3), store, slots, adv_n, ret,
+                      np.random.default_rng(5), dev, **kw)
+        return m, calls[0]
+
+    m, n_mb = run(lambda c: c == 1)
+    assert n_mb >= 2
+    assert all(torch.isfinite(p).all() for p in m.parameters())
+    assert "ALERT nan_skip: 1/" in capsys.readouterr().out
+    try:
+        run(lambda c: True)
+    except RuntimeError as e:
+        assert "non-finite gradients" in str(e)
+    else:
+        raise AssertionError("all-NaN minibatches did not raise")
