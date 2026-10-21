@@ -9,7 +9,7 @@
 #   Pc card (seeds 3000+): P and base_r3 raw vs ygo-agent on the same 5,952 deals (paired), raw head-to-heads P vs
 #   base_r3 on holdout (seeds 4, ~2,176 games) and new-card decks (seeds 6, ~2,184), principle audit both seats.
 # Env: INIT (data/cache/bv1/best.pt), SMOKE_ITERS (6), REF (card reference, data/cache/base_r3/best.pt; stage P3 uses P), DEAL0 (3000), ITERS (560),
-#      MS_IT (160), RL_HOURS (5.5), GA_SEEDS (24), VAR_CAP (60m), SMOKE=1.
+#      MS_IT (160), RL_EXTRA (extra train_rl flags), RL_HOURS (5.5), GA_SEEDS (24), VAR_CAP (60m), SMOKE=1.
 # Usage: bash scripts/vast_stage_p.sh <name>. Do NOT run on the laptop (vast GPU only).
 set -uo pipefail
 export PATH="$HOME/.local/bin:$PATH"
@@ -63,7 +63,7 @@ waste() {  # <tag>: own-T1 hand-trap games of the pilot (s) and ygo-agent (ya) i
 # 1. PPO
 touch "$OUT/train.txt"
 uv run --no-sync python scripts/train_rl.py --init "$INIT" --out "$OUT/rl" --device cuda --lr 4e-5 --iters "$ITERS" \
-  --hours "${RL_HOURS:-5.5}" --eval-every 40 "${RLX[@]}" > "$OUT/train.txt" 2>&1 &
+  --hours "${RL_HOURS:-5.5}" --eval-every 40 "${RLX[@]}" ${RL_EXTRA:-} > "$OUT/train.txt" 2>&1 &
 TP=$!
 milestone() {
   local ck; ck=$(printf "%s/rl/iter-%04d.pt" "$OUT" "$MS_IT")

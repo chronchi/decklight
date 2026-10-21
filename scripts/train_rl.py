@@ -278,7 +278,7 @@ def _fwd_of(m):
 
 
 def _nan_debug(model, loss, stats, obs, act, olp, rl, a_t, r_t) -> None:
-    """YGO_NAN_DEBUG=<dir>: called on a minibatch whose gradient norm is non-finite (the step is skipped): save the
+    """YGO_NAN_DEBUG=<dir>: called on a minibatch whose loss or gradient norm is non-finite (the step is skipped): save the
     first such minibatch + weights to <dir>/nan_batch.pt and print which stats/inputs/grads are non-finite."""
     out = Path(os.environ["YGO_NAN_DEBUG"])
     if (out / "nan_batch.pt").exists():
@@ -363,7 +363,7 @@ def ppo_update(model: PolicyNet, upd_model, opt, vopt, store: SlotStore, slots: 
         upd_model.train()
     agg_sum: dict[str, torch.Tensor] = {}
     agg_n = 0
-    nan_skip = 0  # plain-PPO minibatches whose gradient norm was non-finite: step skipped (stage P3, v3 + bf16)
+    nan_skip = 0  # plain-PPO minibatches whose loss or gradient norm was non-finite: step skipped (stage P3, v3 + bf16)
     n_mb = 0
     bad_loss = False
     for _ in range(epochs):
@@ -484,7 +484,7 @@ def ppo_update(model: PolicyNet, upd_model, opt, vopt, store: SlotStore, slots: 
                 n_mb += 1
                 # one host sync per minibatch: a non-finite step would poison the weights and Adam state (smoke 1
                 # of stage P3 died at iteration 6); skip it, keep the first batch, fail loud if it recurs (below)
-                if not bool(torch.isfinite(gn).item()):
+                if not bool((torch.isfinite(gn) & torch.isfinite(loss)).item()):
                     nan_skip += 1
                     if os.environ.get("YGO_NAN_DEBUG"):
                         _nan_debug(model, loss, s, obs, act, olp, rl, a_t, r_t)
@@ -505,7 +505,8 @@ def ppo_update(model: PolicyNet, upd_model, opt, vopt, store: SlotStore, slots: 
     if bad_loss:
         raise RuntimeError("non-finite loss")
     if nan_skip:
-        print(f"ALERT nan_skip: {nan_skip}/{n_mb} PPO minibatches had a non-finite gradient (steps skipped)", flush=True)
+        print(f"ALERT nan_skip: {nan_skip}/{n_mb} PPO minibatches had a non-finite loss/gradient (steps skipped)",
+              flush=True)
         if nan_skip > max(1, n_mb // 20):
             raise RuntimeError(f"non-finite gradients in {nan_skip}/{n_mb} minibatches (> 5%)")
     hint_stats: dict[str, float] = {}
@@ -1329,6 +1330,7 @@ def main() -> None:
             dfail_if_any(len(slots) == 0, lambda: f"iteration {it}: collected 0 samples")
             warm = it <= args.value_warmup
             upd_ok = True
+            upd_err = ""
             try:
                 agg_mean, t_update = ppo_update(
                     model, upd_model, opt, vopt, store, slots, adv_n, ret, rng, dev,
@@ -1338,10 +1340,11 @@ def main() -> None:
                     compile=args.compile, critic=critic, copt=copt,
                     priv_critic=bool(args.priv_critic), adv=args.adv, upd_critic=upd_critic,
                     hint=hint)
-            except RuntimeError:
+            except RuntimeError as e:  # includes CUDA OOM: report the real error (stage P3 full run 1 said "non-finite")
                 upd_ok = False
+                upd_err = f"{type(e).__name__}: {str(e)[:300]}"
                 agg_mean, t_update = {}, 0.0
-            dfail_if_any(not upd_ok, lambda: f"iteration {it}: non-finite loss")
+            dfail_if_any(not upd_ok, lambda e=upd_err: f"iteration {it}: update failed ({e})")
             if is_dist and it == 1:
                 check_params_match("iteration 1")
             note_qev(it, agg_mean, warm)
@@ -1520,6 +1523,7 @@ def main() -> None:
         dfail_if_any(len(slots) == 0, lambda: f"iteration {it}: collected 0 samples")
         warm = it <= args.value_warmup
         upd_ok2 = True
+        upd_err2 = ""
         try:
             agg_mean, t_update = ppo_update(
                 model, upd_model, opt, vopt, store, slots, adv_n, ret, rng, dev,
@@ -1529,10 +1533,11 @@ def main() -> None:
                 compile=args.compile, critic=critic, copt=copt,
                 priv_critic=bool(args.priv_critic), adv=args.adv, upd_critic=upd_critic,
                 hint=hint)
-        except RuntimeError:
+        except RuntimeError as e:  # includes CUDA OOM: report the real error
             upd_ok2 = False
+            upd_err2 = f"{type(e).__name__}: {str(e)[:300]}"
             agg_mean, t_update = {}, 0.0
-        dfail_if_any(not upd_ok2, lambda: f"iteration {it}: non-finite loss")
+        dfail_if_any(not upd_ok2, lambda e=upd_err2: f"iteration {it}: update failed ({e})")
         if is_dist and it == 1:
             check_params_match("iteration 1")
         note_qev(it, agg_mean, warm)
