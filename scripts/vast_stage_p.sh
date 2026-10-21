@@ -32,7 +32,9 @@ tick() { echo "$(date +%T) $1 $((SECONDS - T0)) s" | tee -a "$OUT/PROGRESS"; }
 INIT=${INIT:-data/cache/bv1/best.pt}; REF=${REF:-data/cache/base_r3/best.pt}; ITERS=${ITERS:-560}; MS_IT=${MS_IT:-160}
 [ -s "$INIT" ] && [ -s "$(dirname "$INIT")/metrics.jsonl" ] || { alert "missing $INIT or its metrics.jsonl"; exit 3; }
 MSE=(--eval-seeds 18 --ga-seeds 6); RLX=(); export YGO_NAN_DEBUG="$OUT/nan"  # saves the first skipped non-finite minibatch
-if [ "${SMOKE:-0}" = 1 ]; then ITERS=${SMOKE_ITERS:-6}; MS_IT=4; MSE=(--eval-seeds 1 --ga-seeds 1); RLX=(--rollout 4096 --envs 64 --eval-seeds 1 --value-warmup 1 --eval-every 2); fi
+if [ "${SMOKE:-0}" = 1 ]; then ITERS=${SMOKE_ITERS:-6}; MS_IT=4; MSE=(--eval-seeds 1 --ga-seeds 1); RLX=(--rollout 4096 --envs 64 --eval-seeds 1 --value-warmup 1); fi
+EVERY=40; [ "${SMOKE:-0}" = 1 ] && EVERY=2  # train_rl writes iter-*.pt only every --eval-every iterations
+[ $((MS_IT % EVERY)) = 0 ] || { alert "MS_IT $MS_IT is not a multiple of --eval-every $EVERY: no milestone checkpoint"; exit 3; }
 # train_rl's fixed eval decks (4 train + 4 holdout pool decks, random.Random(1234)): eval_ckpt needs the same names
 EVN=$(uv run --no-sync python - <<'EOF'
 import random
@@ -63,7 +65,7 @@ waste() {  # <tag>: own-T1 hand-trap games of the pilot (s) and ygo-agent (ya) i
 # 1. PPO
 touch "$OUT/train.txt"
 uv run --no-sync python scripts/train_rl.py --init "$INIT" --out "$OUT/rl" --device cuda --lr 4e-5 --iters "$ITERS" \
-  --hours "${RL_HOURS:-5.5}" --eval-every 40 "${RLX[@]}" ${RL_EXTRA:-} > "$OUT/train.txt" 2>&1 &
+  --hours "${RL_HOURS:-5.5}" --eval-every $EVERY "${RLX[@]}" ${RL_EXTRA:-} > "$OUT/train.txt" 2>&1 &
 TP=$!
 milestone() {
   local ck; ck=$(printf "%s/rl/iter-%04d.pt" "$OUT" "$MS_IT")
