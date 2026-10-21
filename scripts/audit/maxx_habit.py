@@ -53,9 +53,11 @@ def game_iter(dirs: list[Path], engine: Engine, seat: str, max_games: int):
     for fname, x in rows[: max_games or None]:
         r = json.loads(x)
         me = int(r["s_seat"]) if seat == "s" else 1 - int(r["s_seat"])
-        ddir = ROOT / ("decks/gauntlet" if (ROOT / "decks/gauntlet" / f"{r['decks'][0]}.ydk").exists() else "decks/pool")
-        cfg = DuelConfig(load_ydk(ddir / f"{r['decks'][0]}.ydk"), load_ydk(ddir / f"{r['decks'][1]}.ydk"),
-                         seed=int(r["seed"]))
+        def ydk(n: str) -> Path:  # gauntlet, pool, or new-card decks (head-to-head p-new)
+            return next(ROOT / d / f"{n}.ydk" for d in ("decks/gauntlet", "decks/pool", "decks/newcards")
+                        if (ROOT / d / f"{n}.ydk").exists())
+
+        cfg = DuelConfig(load_ydk(ydk(r["decks"][0])), load_ydk(ydk(r["decks"][1])), seed=int(r["seed"]))
         env = CppEnv(engine, cfg, True)
         obs = env.reset()
         for c in r["choices"]:
@@ -101,7 +103,9 @@ def main() -> int:
     ap.add_argument("--emb", default=str(ROOT / "data/cards/emb/qwen3-0.6b-d512.npz"))
     ap.add_argument("--name", default="")
     ap.add_argument("--out", type=Path, default=None)
+    ap.add_argument("--codes", default=str(MAXX), help="comma-separated card codes (default Maxx \"C\"; Mulcharmy: 42141493,84192580,87126721)")
     a = ap.parse_args()
+    codes = {int(c) for c in a.codes.split(",")}
     engine = Engine()
     pol = None
     if a.ckpt:
@@ -149,7 +153,7 @@ def main() -> int:
         if cm.any() and bool((obs["chain"][cm][:, 4] == 1).any()):
             continue
         mx = [i for i in range(len(mask)) if mask[i] and int(acts[i, 0]) == Kind.ACTIVATE
-              and int(acts[i, 7]) == LOC_HAND and int(acts[i, 2]) == MAXX]
+              and int(acts[i, 7]) == LOC_HAND and int(acts[i, 2]) in codes]
         if not mx:
             continue
         key = (gid, player)
