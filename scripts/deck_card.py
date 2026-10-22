@@ -21,6 +21,8 @@ import sys
 from pathlib import Path
 from typing import NoReturn
 
+import torch
+
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(ROOT / "scripts" / "audit"))
@@ -100,9 +102,27 @@ def shard(deals: list[dict], nproc: int, proc: int) -> list[dict]:
     return deals[proc::nproc]
 
 
+def build_arm_cmd(search_match: Path, ckpt: Path, value: Path | None, search: int, pairs: str,
+                 gauntlet_dir: Path, seeds: int, seed0: int, nproc: int, proc: int,
+                 out_arm: Path, device: str) -> list[str]:
+    """Pure command builder for one arm's search_match shard (tested: must contain --device <device>)."""
+    cmd = [sys.executable, str(search_match), "--ckpt", str(ckpt), "--opp", "ygoagent",
+           "--gauntlet-decks", str(gauntlet_dir), "--pairs", pairs,
+           "--seed-per-pair", "1", "--seeds", str(seeds), "--deal-seed0", str(seed0),
+           "--nproc", str(nproc), "--proc", str(proc), "--device", device,
+           "--out", str(out_arm)]  # fmt: skip
+    if search == 1:
+        if value is not None:
+            cmd += ["--value", str(value)]
+        cmd += PRODUCT_SEARCH
+    else:
+        cmd += ["--raw", "1"]
+    return cmd
+
+
 def run_arm(search_match: Path, ckpt: Path, value: Path | None, search: int, pairs: str,
             gauntlet_dir: Path, seeds: int, seed0: int, nproc: int, proc: int,
-            out_arm: Path, overwrite: bool, expected: int) -> None:
+            out_arm: Path, overwrite: bool, expected: int, device: str = "cpu") -> None:
     """Play one arm's shard with search_match (reuse the games file when it already holds the shard)."""
     out_arm.mkdir(parents=True, exist_ok=True)
     path = out_arm / f"games-{proc}.jsonl"
@@ -112,16 +132,8 @@ def run_arm(search_match: Path, ckpt: Path, value: Path | None, search: int, pai
             print(f"[{out_arm.name}] reuse {path} ({have} games)", flush=True)
             return
         print(f"[{out_arm.name}] {path} has {have} games, want {expected}: replaying", flush=True)
-    cmd = [sys.executable, str(search_match), "--ckpt", str(ckpt), "--opp", "ygoagent",
-           "--gauntlet-decks", str(gauntlet_dir), "--pairs", pairs,
-           "--seed-per-pair", "1", "--seeds", str(seeds), "--deal-seed0", str(seed0),
-           "--nproc", str(nproc), "--proc", str(proc), "--out", str(out_arm)]  # fmt: skip
-    if search == 1:
-        if value is not None:
-            cmd += ["--value", str(value)]
-        cmd += PRODUCT_SEARCH
-    else:
-        cmd += ["--raw", "1"]
+    cmd = build_arm_cmd(search_match, ckpt, value, search, pairs, gauntlet_dir,
+                        seeds, seed0, nproc, proc, out_arm, device)
     print(f"[{' '.join(cmd)}]", flush=True)
     r = subprocess.run(cmd, check=False)
     if r.returncode != 0:
@@ -221,6 +233,7 @@ def main() -> None:
     ap.add_argument("--proc", type=int, default=0)
     ap.add_argument("--summarize", action="store_true", help="write <out>/card.json after playing")
     ap.add_argument("--overwrite", action="store_true", help="replay even when the games file exists")
+    ap.add_argument("--device", default=None, help="cuda (default when available) | cpu")
     ap.add_argument("--dry-run", action="store_true", help="print the deal list size + first 5 deals, play nothing")
     args = ap.parse_args()
 
@@ -240,6 +253,7 @@ def main() -> None:
     arms = [parse_arm(s) for s in args.arm]
     if len({a[0] for a in arms}) != len(arms):
         fail("duplicate --arm names")
+    device = args.device or ("cuda" if torch.cuda.is_available() else "cpu")
     deals = build_deals(target_stem, opps, args.seeds, args.deal_seed0)
     print(f"deals: {len(deals)} ({len(opps)} opponents x 2 seats x {args.seeds} seeds), "
           f"S always pilots {target_stem}", flush=True)
@@ -255,7 +269,7 @@ def main() -> None:
     for name, ckpt, value in arms:
         run_arm(ROOT / "scripts" / "search_match.py", ckpt, value, args.search, pairs,
                 args.gauntlet_decks, args.seeds, args.deal_seed0,
-                args.nproc, args.proc, out / name, args.overwrite, len(mine))
+                args.nproc, args.proc, out / name, args.overwrite, len(mine), device)
     if args.summarize:
         summarize(out, arms)
 

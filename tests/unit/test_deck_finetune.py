@@ -284,3 +284,14 @@ def test_summarize_zero_games_fail(tmp_path):
     ckpt.write_bytes(b"a")
     with pytest.raises(SystemExit):
         dc.summarize(out, [("a", ckpt, None)])
+
+
+def test_build_arm_cmd_has_device():
+    dc = _load("deck_card")
+    cmd = dc.build_arm_cmd(Path("scripts/search_match.py"), Path("a.pt"), Path("v.pt"),
+                           1, "T:O", Path("decks/gauntlet"), 8, 9000, 4, 0, Path("out/ft"), "cuda")
+    assert "--device" in cmd and cmd[cmd.index("--device") + 1] == "cuda"
+    cmd0 = dc.build_arm_cmd(Path("scripts/search_match.py"), Path("a.pt"), None,
+                            0, "T:O", Path("decks/gauntlet"), 8, 9000, 4, 1, Path("out/base"), "cpu")
+    assert "--device" in cmd0 and cmd0[cmd0.index("--device") + 1] == "cpu"
+    assert "--raw" in cmd0
