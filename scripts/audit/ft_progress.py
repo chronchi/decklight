@@ -86,7 +86,7 @@ def main() -> None:
     recs = load_recs(args.metrics)
     for line in progress_lines(recs, args.tag, args.seen):
         print(line, flush=True)
-    if args.ms_it > 0:
+    if args.ms_it > 0 and args.seen < args.ms_it:  # once: the watcher passes the last it= it printed as --seen
         m = milestone_mean(recs, args.ms_it)
         if m is not None:
             if m < args.ms_min:
