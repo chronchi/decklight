@@ -10,3 +10,8 @@ dist/
 data/
 runs/
 src/ygo_zero/_ygoenv*.so
+
+# release: infra state and local-only files stay out of git
+data/vast_bad_machines.json
+docs/video_data_plan.md
+src/ygo_zero/cards/cards.cdb

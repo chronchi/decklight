@@ -1,0 +1,22 @@
+Decklight
+Copyright (C) 2026 chronchi
+
+This program is free software: you can redistribute it and/or modify it under the terms of the GNU Affero General
+Public License version 3 as published by the Free Software Foundation (see LICENSE).
+
+Third-party components
+----------------------
+- ygopro-core (edo9300, https://github.com/edo9300/ygopro-core), AGPL-3.0. A git submodule at
+  third_party/ygopro-core; we apply the patches in third_party/patches/ when building.
+- CardScripts and BabelCDB (Project Ignis, https://github.com/ProjectIgnis), AGPL-3.0. Card scripts and the card
+  database, as git submodules; they are not redistributed in this repository.
+- third_party/edopro-strings.conf: the Project Ignis English locale file (EDOPro), AGPL-3.0.
+- decks/gauntlet/: deck lists from ygo-agent (https://github.com/sbl1996/ygo-agent), MIT License,
+  Copyright (c) 2024 Hastur. ygo-agent's model is used only as an evaluation opponent and is not redistributed.
+- Card embeddings in the release bundle were computed with Qwen3-0.6B (Alibaba Cloud), Apache-2.0, over card text
+  from BabelCDB.
+- Card images are not included. The web client can optionally show images from YGOPRODeck (https://ygoprodeck.com),
+  fetched on demand when the user enables "Card art".
+
+Yu-Gi-Oh! and all card names, card text and card art are trademarks and copyrights of Konami. This is an unofficial,
+non-commercial research project, not affiliated with or endorsed by Konami.
