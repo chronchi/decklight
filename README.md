@@ -43,8 +43,10 @@ Then join `127.0.0.1:7911` from EDOPro's LAN mode.
 
 ### Reproduce the benchmark
 ```bash
-uv sync --group gauntlet                    # ygo-agent's tflite runtime
-# download 0546_26550M.tflite from https://github.com/sbl1996/ygo-agent/releases/tag/v0.1 into data/models/
+uv sync --group dev --group ml --group web --group gauntlet   # + ygo-agent's tflite runtime (uv sync is exact)
+curl -fL --create-dirs -o data/models/0546_26550M.tflite \
+    https://github.com/sbl1996/ygo-agent/releases/download/v0.1/0546_26550M.tflite
+# sha256 d4ad2a78b6a2a2c1a4560f8f12da6f4b3abb24735657115969e96d71a2364b10
 . scripts/product.sh
 uv run python scripts/search_match.py --ckpt "$PRODUCT_CKPT" --value "$PRODUCT_VALUE" $PRODUCT_SEARCH \
     --opp ygoagent --ga-seeds 6 --deal-seed0 9000 --out runs/my-card

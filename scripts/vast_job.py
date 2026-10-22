@@ -26,6 +26,7 @@ def main() -> None:
     ap.add_argument("--data", nargs="*", default=[], help="repo paths under data/ to ship with the code")
     ap.add_argument("--extra-query", default="", help='extra vast offer filter, e.g. "compute_cap>=800"')
     ap.add_argument("--min-gpu-ram", type=float, default=6)
+    ap.add_argument("--setup", default=None, help="replace the box setup (default: scripts/vast_setup.sh)")
     args = ap.parse_args()
     if args.cleanup:
         print("destroyed:", vast.destroy_strays())
@@ -42,6 +43,8 @@ def main() -> None:
         extra_query=args.extra_query,
         min_gpu_ram_gb=args.min_gpu_ram,
     )
+    if args.setup is not None:
+        spec.setup = args.setup
     res = vast.run_job(spec, max_hosts=5)
     print(res)
 
