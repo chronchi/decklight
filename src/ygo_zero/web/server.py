@@ -96,6 +96,9 @@ class Server:
         self.lock = asyncio.Lock()
         self.ws: WebSocket | None = None
         self.session = None  # DuelSession | None
+        # The thinking ticker resends this snapshot (taken on the event loop before the bot thread starts): querying the
+        # live duel while step_bot applies a move races on the core's query buffer (struct.error, fresh-clone-20261021-2108).
+        self._peek_msg: dict | None = None
         self.mode = opponent_default
         self.human_name = "human"
         self.prompt_id = 0
@@ -471,11 +474,14 @@ class Server:
                     await self.send_state()
                 if gen != self.gen:
                     return
+                self._peek_msg = self.state_message(peek=True)
                 try:
                     await asyncio.to_thread(s.step_bot)
                 except DriverDiverged as e:
                     await self._diverged(s, e, gen)
                     return
+                finally:
+                    self._peek_msg = None
                 if gen != self.gen:
                     return
                 if self._puzzle_failed(s):
@@ -592,8 +598,17 @@ class Server:
                 return
             except TimeoutError:
                 pass
-            if self.thinking_seconds() is not None:
-                await self.send_state(peek=True)
+            await self._send_peek()
+
+    async def _send_peek(self) -> None:
+        """The thinking ticker: the pre-move snapshot with the current `thinking.seconds` (never touches the duel)."""
+        msg, t = self._peek_msg, self.thinking_seconds()
+        if msg is None or t is None or self.ws is None:
+            return
+        try:
+            await self.ws.send_json({**msg, "thinking": {"seconds": t}})
+        except (WebSocketDisconnect, RuntimeError):
+            return
 
     async def _finish(self, s, reason: str) -> None:
         from ygo_zero.play.session import DriverDiverged
