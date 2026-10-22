@@ -66,6 +66,28 @@ def icon(name, mark):
 </svg>"""
 
 
+# "light" heavier than "deck", so the word is lit like the last card (user, 2026-10-22). Variants:
+# (label, weight family of "light", fill of "light", warm glow behind "light")
+LIGHT_VARIANTS = (
+    ("6-light-a", "Clear Sans Light", WASHI, False),
+    ("6-light-b", "Clear Sans", WASHI, False),
+    ("6-light-c", "Clear Sans Light", "#e6d8b6", True),
+)
+
+
+def lockup_light(name, mark, family, fill, glow, glow_cx=None):
+    halo = ""
+    if glow and glow_cx is not None:
+        halo = (f'<ellipse cx="{glow_cx:.1f}" cy="555" rx="230" ry="95" fill="url(#cardglow)"/>'
+                f'<ellipse cx="{glow_cx:.1f}" cy="555" rx="150" ry="60" fill="url(#cardglow)"/>')
+    return f"""<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="700" viewBox="0 0 1200 700">
+<title>decklight — {name}</title>{GLOW}
+<rect width="1200" height="700" fill="{BG}"/>
+{mark}{halo}
+<text x="600" y="590" text-anchor="middle" font-size="100" letter-spacing="14"><tspan font-family="Clear Sans Thin" fill="{WASHI}">deck</tspan><tspan id="light" font-family="{family}" fill="{fill}">light</tspan></text>
+</svg>"""
+
+
 if __name__ == "__main__":
     for name, gold in (("5-fan3-gold", True), ("5-fan3-washi", False)):
         open(f"{name}.svg", "w").write(lockup(name, fan3(600, 250, 260, gold)))
