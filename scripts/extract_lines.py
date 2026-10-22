@@ -14,14 +14,14 @@ import threading
 from collections import Counter
 from pathlib import Path
 
-from ygo_zero.demos import llm as _llm
-from ygo_zero.demos.extract import (
+from decklight.demos import llm as _llm
+from decklight.demos.extract import (
     extract_guide_decklist,
     extract_lines,
     sequence_overlap,
     step_card_sequence,
 )
-from ygo_zero.demos.names import CardNames
+from decklight.demos.names import CardNames
 
 
 def load_ydk(path: Path) -> set[int]:

@@ -1,4 +1,4 @@
-"""Aux-target shards for the evaluator heads (engine plan N3, `src/ygo_zero/eval/aux.py`).
+"""Aux-target shards for the evaluator heads (engine plan N3, `src/decklight/eval/aux.py`).
 
 Replays game records (the gold/selfplay record format written by
 `scripts/gen_selfplay.py`: config + choices + winner) in the C++ env and keeps
@@ -28,8 +28,8 @@ from pathlib import Path
 
 import numpy as np
 
-from ygo_zero.eval.aux import extract_targets
-from ygo_zero.model.bc_data import OBS_KEYS
+from decklight.eval.aux import extract_targets
+from decklight.model.bc_data import OBS_KEYS
 
 EXTRA_KEYS = ("d_lp", "d_cards", "ends", "turns_left", "mask", "turn", "game", "deck", "deck0",
               "deck1", "actor", "src")
@@ -39,7 +39,7 @@ _ENGINE = None
 
 def _init() -> None:
     global _ENGINE
-    from ygo_zero.engine.duel import Engine
+    from decklight.engine.duel import Engine
 
     _ENGINE = Engine()
 
@@ -52,8 +52,8 @@ def _offset(game_id: str, stride: int) -> int:
 
 def _shard_one(job: tuple) -> tuple[str, int, int, int]:
     """Replay a file's selected records; returns (out_file, games, states, masked)."""
-    from ygo_zero.demos.dataset import record_config
-    from ygo_zero.engine.cpp_env import CppEnv
+    from decklight.demos.dataset import record_config
+    from decklight.engine.cpp_env import CppEnv
 
     src_file, out_file, src_tag, rec_ids, game_ids, game_strs, stride = job
     import json

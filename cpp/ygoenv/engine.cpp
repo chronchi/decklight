@@ -1,4 +1,4 @@
-// Engine (card data + scripts) and Duel: port of src/ygo_zero/engine/{resources,duel,query}.py.
+// Engine (card data + scripts) and Duel: port of src/decklight/engine/{resources,duel,query}.py.
 #include <algorithm>
 #include <cstring>
 #include <fstream>

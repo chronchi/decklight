@@ -27,8 +27,8 @@ sys.path.insert(0, str(ROOT / "scripts" / "audit"))
 import hand_play as H
 from exit_filter import clean_z
 
-from ygo_zero.demos.dataset import record_config
-from ygo_zero.demos.game import _opts, describe_state, hidden_card, option_desc
+from decklight.demos.dataset import record_config
+from decklight.demos.game import _opts, describe_state, hidden_card, option_desc
 
 
 def _mean_se(xs: list[float]) -> tuple[float, float]:
@@ -52,7 +52,7 @@ def entries(files: list[str]) -> list[tuple[dict, dict]]:
 
 
 def show(rec: dict, e: dict, engine, nn: dict) -> list[str]:
-    from ygo_zero.engine.cpp_env import CppEnv
+    from decklight.engine.cpp_env import CppEnv
 
     env = CppEnv(engine, record_config(rec), rec.get("auto_single", True))
     obs = env.reset()
@@ -69,7 +69,7 @@ def show(rec: dict, e: dict, engine, nn: dict) -> list[str]:
 
 
 def stats(ents: list[tuple[dict, dict]], engine, nn: dict, cap: int) -> None:
-    from ygo_zero.engine.cpp_env import CppEnv
+    from decklight.engine.cpp_env import CppEnv
 
     turn = Counter(rec["turns"][e["k"]] for rec, e in ents)
     print(f"labels {len(ents)}; by turn {dict(sorted(turn.items()))}; "
@@ -103,8 +103,8 @@ def main() -> int:
     ap.add_argument("--stats", action="store_true")
     ap.add_argument("--cap", type=int, default=1500, help="overrides replayed for --stats kind counts")
     a = ap.parse_args()
-    from ygo_zero.demos.names import CardNames
-    from ygo_zero.engine.duel import Engine
+    from decklight.demos.names import CardNames
+    from decklight.engine.duel import Engine
 
     ents = entries(sorted(glob.glob(a.records)))
     if not ents:

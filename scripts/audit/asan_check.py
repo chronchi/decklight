@@ -23,14 +23,14 @@ if "--release" not in sys.argv:  # --release: the normal build (fast; for hangs,
     _ext = sorted((ROOT / "build/asan/ext").glob("_ygoenv*.so"))
     if not _ext:
         sys.exit("no ASan build: run scripts/build_asan.sh")
-    _spec = importlib.util.spec_from_file_location("ygo_zero._ygoenv", _ext[0])
+    _spec = importlib.util.spec_from_file_location("decklight._ygoenv", _ext[0])
     _mod = importlib.util.module_from_spec(_spec)
-    sys.modules["ygo_zero._ygoenv"] = _mod
+    sys.modules["decklight._ygoenv"] = _mod
     _spec.loader.exec_module(_mod)
 
-from ygo_zero.decks import load_ydk
-from ygo_zero.engine.cpp_env import CppEnv
-from ygo_zero.engine.duel import DuelConfig, Engine, Placement
+from decklight.decks import load_ydk
+from decklight.engine.cpp_env import CppEnv
+from decklight.engine.duel import DuelConfig, Engine, Placement
 
 
 def load_flight(f: Path) -> tuple[DuelConfig, list[int]]:

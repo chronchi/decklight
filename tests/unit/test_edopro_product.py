@@ -18,24 +18,24 @@ import numpy as np
 import pytest
 import torch
 
-from ygo_zero.decks import load_ydk
-from ygo_zero.edopro.bot import RandomBot
-from ygo_zero.edopro.host import DuelHost
-from ygo_zero.edopro.product_bot import (
+from decklight.decks import load_ydk
+from decklight.edopro.bot import RandomBot
+from decklight.edopro.host import DuelHost
+from decklight.edopro.product_bot import (
     ProductDriver,
     host_to_product,
     product_to_host,
 )
-from ygo_zero.engine.cpp_env import CppEnv
-from ygo_zero.engine.duel import DuelConfig
-from ygo_zero.engine.env import PyEnv
-from ygo_zero.eval.policies import GreedyPolicy
-from ygo_zero.model.bc_data import OBS_KEYS
-from ygo_zero.model.policy import PolicyNet
-from ygo_zero.search.honest import HonestRule
-from ygo_zero.search.play import argmax_select, search_game_gen
-from ygo_zero.search.product import RouteWindowSearch, seat_of, tag_game
-from ygo_zero.search.turn1 import _batch, drive_many
+from decklight.engine.cpp_env import CppEnv
+from decklight.engine.duel import DuelConfig
+from decklight.engine.env import PyEnv
+from decklight.eval.policies import GreedyPolicy
+from decklight.model.bc_data import OBS_KEYS
+from decklight.model.policy import PolicyNet
+from decklight.search.honest import HonestRule
+from decklight.search.play import argmax_select, search_game_gen
+from decklight.search.product import RouteWindowSearch, seat_of, tag_game
+from decklight.search.turn1 import _batch, drive_many
 
 
 def _load_sibling(name: str):

@@ -19,13 +19,13 @@ import time
 from collections import Counter
 from pathlib import Path
 
-from ygo_zero.decks import Deck
-from ygo_zero.demos.dataset import load_records
-from ygo_zero.demos.pool import failed_verdict, map_timeout
-from ygo_zero.demos.schema import ComboLine
-from ygo_zero.demos.verify import Verdict, verify_line
-from ygo_zero.engine.duel import Engine
-from ygo_zero.infra.remote import remote_verify
+from decklight.decks import Deck
+from decklight.demos.dataset import load_records
+from decklight.demos.pool import failed_verdict, map_timeout
+from decklight.demos.schema import ComboLine
+from decklight.demos.verify import Verdict, verify_line
+from decklight.engine.duel import Engine
+from decklight.infra.remote import remote_verify
 
 
 def default_jobs() -> int:

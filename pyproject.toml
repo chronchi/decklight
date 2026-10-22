@@ -1,5 +1,5 @@
 [project]
-name = "ygo-zero"
+name = "decklight"
 version = "0.0.1"
 description = "Learn to pilot any Yu-Gi-Oh! deck (edo9300 ocgcore)"
 requires-python = ">=3.12"
@@ -44,7 +44,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/ygo_zero"]
+packages = ["src/decklight"]
 
 [tool.ruff]
 line-length = 110

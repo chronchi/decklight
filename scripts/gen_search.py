@@ -5,7 +5,7 @@
     uv run python scripts/gen_search.py --policy greedy ...   # laptop / tests: no model
 
 gen (default): `--hands` going-first openings, each on a random pool TRAIN deck (holdout decks never) vs a random pool
-deck, seed `--seed + i`; player 0's turn 1 is searched (src/ygo_zero/search/turn1.py, top-`--k` rollouts) and saved as
+deck, seed `--seed + i`; player 0's turn 1 is searched (src/decklight/search/turn1.py, top-`--k` rollouts) and saved as
 a game record in `<out>/<deck>.jsonl` (labels "search" / "opp"; kind `search` once under data/demos/search/), with
 the policy's own greedy score, the searched score and the per-decision search log.
 --combo D: the combo test's hands instead (D decks with verified lines, half train / half holdout, `--hands` lines
@@ -25,10 +25,10 @@ from pathlib import Path
 
 import numpy as np
 
-from ygo_zero.decks import load_ydk
-from ygo_zero.engine.duel import DuelConfig, Engine
-from ygo_zero.eval.policies import _GREEDY
-from ygo_zero.search.turn1 import Turn1Search
+from decklight.decks import load_ydk
+from decklight.engine.duel import DuelConfig, Engine
+from decklight.eval.policies import _GREEDY
+from decklight.search.turn1 import Turn1Search
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
@@ -87,7 +87,7 @@ def gen(search: Turn1Search, args) -> None:
 def combo(search: Turn1Search, engine, args) -> None:
     from playtest import _replay_field, verified_end_boards, verified_records
 
-    from ygo_zero.demos.dataset import record_config
+    from decklight.demos.dataset import record_config
 
     pool, hold = pool_decks()
     rng = random.Random(args.seed)  # same deck sample as playtest.py --seed
@@ -140,7 +140,7 @@ def main() -> None:
     args = ap.parse_args()
     engine = Engine()
     if args.policy == "bc":
-        from ygo_zero.eval.bc_policy import BCPolicy
+        from decklight.eval.bc_policy import BCPolicy
 
         pol = BCPolicy(args.ckpt, args.emb, threads=args.threads, device=args.device, batch=args.batch)
         logits = pol.logits

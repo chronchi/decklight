@@ -32,15 +32,15 @@ from pathlib import Path
 import numpy as np
 import torch
 
-from ygo_zero.decks import load_ydk
-from ygo_zero.demos.game import Responder
-from ygo_zero.demos.names import CardNames
-from ygo_zero.engine.actions import Kind
-from ygo_zero.engine.cpp_env import CppEnv
-from ygo_zero.engine.duel import DuelConfig, Engine
-from ygo_zero.eval.bc_policy import BCPolicy
-from ygo_zero.eval.match import game_state, play_match, ring_pairs, wilson
-from ygo_zero.eval.policies import GreedyPolicy, RandomPolicy
+from decklight.decks import load_ydk
+from decklight.demos.game import Responder
+from decklight.demos.names import CardNames
+from decklight.engine.actions import Kind
+from decklight.engine.cpp_env import CppEnv
+from decklight.engine.duel import DuelConfig, Engine
+from decklight.eval.bc_policy import BCPolicy
+from decklight.eval.match import game_state, play_match, ring_pairs, wilson
+from decklight.eval.policies import GreedyPolicy, RandomPolicy
 
 ROOT = Path(__file__).resolve().parents[1]
 FIELD_LOCS = (3, 4)  # obs card column 1: 3 mzone, 4 szone (docs/obs_spec.md; not the OCG bit flags)
@@ -70,7 +70,7 @@ def verified_records(deck: str, limit: int = 12) -> list[dict]:
 def verified_end_boards(deck: str) -> list[int]:
     """Expert reference with the SAME measure as the policy: replay each record to the end of turn 1 and count the
     cards player 0 controls on the field."""
-    from ygo_zero.demos.dataset import record_config
+    from decklight.demos.dataset import record_config
 
     engine, sizes = Engine(), []
     for r in verified_records(deck):
@@ -132,7 +132,7 @@ def _turn1_fields(envs: list, pols: list) -> list[tuple[int, int]]:
 
 def _replay_field(engine, rec: dict) -> int:
     """The expert line's end field: replay ALL of the record's choices (both players, as recorded) through turn 1."""
-    from ygo_zero.demos.dataset import record_config
+    from decklight.demos.dataset import record_config
 
     env = CppEnv(engine, record_config(rec), rec.get("auto_single", True))
     obs, last = env.reset(), 0
@@ -164,7 +164,7 @@ def same_weights(a: Path, b: Path) -> bool:
 def combo_test(engine, pol: BCPolicy, deck_name: str, hands: int, sampler: BCPolicy | None = None, k: int = 0) -> dict:
     """Paired test on the expert's own hands: for each verified going-first line record (same config and seed, so the
     same opening hand), the policy plays turn 1 from scratch; compare its end field with the expert line's."""
-    from ygo_zero.demos.dataset import record_config
+    from decklight.demos.dataset import record_config
 
     pairs = []
     for r in verified_records(deck_name, limit=hands):
@@ -365,7 +365,7 @@ def main() -> None:
     match("greedy", GreedyPolicy(2), decks, deck_files, args.seeds)
     match("random", RandomPolicy(1), decks, deck_files, args.seeds)
     if args.ygoagent:
-        from ygo_zero.eval.ygoagent import YgoAgentPolicy
+        from decklight.eval.ygoagent import YgoAgentPolicy
 
         gfiles = sorted(args.gauntlet_decks.glob("*.ydk"))
         gdecks = [load_ydk(f) for f in gfiles]

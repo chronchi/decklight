@@ -1,5 +1,5 @@
 """Learned value v2: outcome shards, value training, calibration
-(scripts/build_value_shards.py, scripts/train_value.py, src/ygo_zero/eval/value.py).
+(scripts/build_value_shards.py, scripts/train_value.py, src/decklight/eval/value.py).
 
 Only a tiny randomly initialised model (d=32, layers=1) is instantiated here (RAM rule).
 """
@@ -30,9 +30,9 @@ train_value = _load("train_value")
 
 def _write_games(engine, tmp_path: Path) -> Path:
     """3 finished random-policy games (winner from the env) + 1 cut game (winner 3)."""
-    from ygo_zero.decks import load_ydk
-    from ygo_zero.engine.cpp_env import CppEnv
-    from ygo_zero.engine.duel import DuelConfig
+    from decklight.decks import load_ydk
+    from decklight.engine.cpp_env import CppEnv
+    from decklight.engine.duel import DuelConfig
 
     decks = sorted((FIXTURES / "decks").glob("*.ydk"))
     out = tmp_path / "rec" / "games.jsonl"
@@ -89,7 +89,7 @@ def _build(src: Path, tmp_path: Path) -> Path:
 
 
 def test_value_shards_label_z_and_skip_cut(engine, tmp_path):
-    from ygo_zero.model.bc_data import OBS_KEYS
+    from decklight.model.bc_data import OBS_KEYS
 
     src = _write_games(engine, tmp_path)
     out = _build(src, tmp_path)
@@ -125,9 +125,9 @@ def _tiny_emb(path: Path):
 def test_value_train_and_load(engine, tmp_path):
     import torch
 
-    from ygo_zero.eval.value import ValueNet
-    from ygo_zero.model.bc_data import OBS_KEYS
-    from ygo_zero.model.policy import PolicyNet
+    from decklight.eval.value import ValueNet
+    from decklight.model.bc_data import OBS_KEYS
+    from decklight.model.policy import PolicyNet
 
     src = _write_games(engine, tmp_path)
     shards = _build(src, tmp_path)

@@ -27,7 +27,7 @@ tick shards
 grep -q "^samples: 1483$" "$OUT/shards.txt" || { alert "hw shards: expected 1483 samples, got: $(tail -1 "$OUT/shards.txt")"; exit 3; }
 uv run --no-sync python -c "
 from pathlib import Path
-from ygo_zero.model.bc_data import load_shards
+from decklight.model.bc_data import load_shards
 d = load_shards(Path('$SH'))
 print(' '.join(sorted(set(map(str, d['deck'])))[::5]))" > "$OUT/hw_holdout.txt"
 [ "$(wc -w < "$OUT/hw_holdout.txt")" -ge 20 ] || { alert "hw holdout deck list too short"; exit 3; }

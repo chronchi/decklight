@@ -25,9 +25,9 @@ gen_window = _load("gen_window")
 
 
 def _random_games(engine, tmp_path: Path, n: int = 2) -> Path:
-    from ygo_zero.decks import load_ydk
-    from ygo_zero.engine.cpp_env import CppEnv
-    from ygo_zero.engine.duel import DuelConfig
+    from decklight.decks import load_ydk
+    from decklight.engine.cpp_env import CppEnv
+    from decklight.engine.duel import DuelConfig
 
     decks = sorted((FIXTURES / "decks").glob("*.ydk"))
     out = tmp_path / "src" / "games.jsonl"
@@ -67,8 +67,8 @@ def _window_out(engine, tmp_path, args):
 
 
 def test_target_sets_flow_to_samples_and_shards(engine, tmp_path):
-    from ygo_zero.demos.dataset import iter_samples
-    from ygo_zero.model.bc_data import _shard_one, equivalent_mask
+    from decklight.demos.dataset import iter_samples
+    from decklight.model.bc_data import _shard_one, equivalent_mask
 
     out = _window_out(engine, tmp_path, ["--own-frac", "0.2", "--horizons", "1", "3", "--tie-eps", "0.5"])
     recs = [json.loads(x) for f in out.glob("*.jsonl") for x in f.read_text().splitlines() if x.strip()]
@@ -88,8 +88,8 @@ def test_target_sets_flow_to_samples_and_shards(engine, tmp_path):
         assert rec["targets"][k] == a
         assert abs(w - 1.0 * float(rec["target_conf"][k])) < 1e-6 or rec["target_conf"][k] is None
     # Shard: equiv = equivalent_mask(target) OR legal alt options.
-    import ygo_zero.model.bc_data as bcd
-    from ygo_zero.model.bc_data import _ENGINE as _BE
+    import decklight.model.bc_data as bcd
+    from decklight.model.bc_data import _ENGINE as _BE
 
     bcd._ENGINE = engine
     try:

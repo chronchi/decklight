@@ -44,7 +44,7 @@ def main() -> None:
     ap.add_argument("--games-dir", type=Path, default=None, help="save every game here (rl.evaluate.save_games)")
     args = ap.parse_args()
 
-    from ygo_zero.rl.evaluate import format_eval_line, run_eval
+    from decklight.rl.evaluate import format_eval_line, run_eval
 
     hold = set((ROOT / "decks/pool/HOLDOUT").read_text().split()) | {"kewl-tune"}
     ev_names = [n for n in args.eval_names.split(",") if n]

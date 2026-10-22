@@ -8,7 +8,7 @@ import numpy as np
 import pytest
 import torch
 
-from ygo_zero.model.bc_data import equivalent_mask, load_shards
+from decklight.model.bc_data import equivalent_mask, load_shards
 
 ROOT = Path(__file__).resolve().parents[2]
 

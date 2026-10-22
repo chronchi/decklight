@@ -1,4 +1,4 @@
-# Model card: Decklight v0.1
+# Model card: decklight v0.1
 
 ## What it is
 A Yu-Gi-Oh! TCG duelist for the EDOPro engine. Given any legal deck it plays both its own turns

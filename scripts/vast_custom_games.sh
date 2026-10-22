@@ -26,7 +26,7 @@ uv run --no-sync python scripts/embed_cards.py --dim 512 --batch 128 --only-miss
 # every custom card in the deck must now have a non-zero embedding
 uv run --no-sync python - "$EMB" "$CUSTOM" <<'PY' >> "$OUT/PROGRESS" || { alert "custom cards missing from merged embeddings"; exit 5; }
 import sys, numpy as np
-from ygo_zero.decks.ydk import load_ydk
+from decklight.decks.ydk import load_ydk
 z = np.load(sys.argv[1]); idx = {int(c): i for i, c in enumerate(z["codes"])}
 d = load_ydk(f"decks/pool/{sys.argv[2]}.ydk")
 codes = sorted(set(d.main) | set(d.extra))

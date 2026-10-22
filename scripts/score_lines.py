@@ -35,13 +35,13 @@ import numpy as np
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from ygo_zero.demos.dataset import record_config  # noqa: E402
-from ygo_zero.engine.cpp_env import CppEnv  # noqa: E402
-from ygo_zero.engine.duel import Engine  # noqa: E402
-from ygo_zero.eval.bc_policy import BCPolicy  # noqa: E402
-from ygo_zero.eval.turn1 import stable_seed  # noqa: E402
-from ygo_zero.search.turn1 import drive_many  # noqa: E402
-from ygo_zero.search.window import WindowSearch  # noqa: E402
+from decklight.demos.dataset import record_config  # noqa: E402
+from decklight.engine.cpp_env import CppEnv  # noqa: E402
+from decklight.engine.duel import Engine  # noqa: E402
+from decklight.eval.bc_policy import BCPolicy  # noqa: E402
+from decklight.eval.turn1 import stable_seed  # noqa: E402
+from decklight.search.turn1 import drive_many  # noqa: E402
+from decklight.search.window import WindowSearch  # noqa: E402
 
 _W: dict = {}
 
@@ -56,7 +56,7 @@ def _init(cfg: dict) -> None:
                    threads=cfg["threads"], batch=cfg["batch"], device=cfg["device"])
     value = None
     if cfg.get("value"):
-        from ygo_zero.eval.value import ValueNet
+        from decklight.eval.value import ValueNet
 
         value = ValueNet(cfg["value"], cfg["emb"], device=cfg["device"],
                          batch=cfg["batch"], threads=cfg["threads"]).values

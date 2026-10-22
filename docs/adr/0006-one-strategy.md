@@ -59,7 +59,7 @@ User: "more teacher examples in diverse scenarios … many different turns and s
 … distill ygo-agent but also improve using muse … avoid running millions of games". Accepted; it widens M3:
 - **DAgger labels** (`scripts/gen_dagger.py`): our policy plays ygo-agent on its 31 lists, ygo-agent labels every
   one of our decisions (all turns; the states we actually reach). Kinds `dagger` / `dagger_pass`.
-- **Window search** (`src/ygo_zero/search/window.py`, `scripts/gen_window.py`): on recorded games (teacher, gold,
+- **Window search** (`src/decklight/search/window.py`, `scripts/gen_window.py`): on recorded games (teacher, gold,
   DAgger), every opponent-turn chain window where we can activate is searched (PASS vs each activation, played out to
   the end of the turn by the policy for both players, position score = board diff + 0.5 hand diff + LP diff/2000),
   plus 10% of own-turn decisions from turn 2. Any deck. Kinds `window` / `window_own`. Records carry `targets`

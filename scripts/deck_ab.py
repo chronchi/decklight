@@ -23,9 +23,9 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 
-from ygo_zero.decks import load_ydk  # noqa: E402
-from ygo_zero.engine.duel import Engine  # noqa: E402
-from ygo_zero.eval.match import play_match, wilson  # noqa: E402
+from decklight.decks import load_ydk  # noqa: E402
+from decklight.engine.duel import Engine  # noqa: E402
+from decklight.eval.match import play_match, wilson  # noqa: E402
 
 
 def _paired_math():
@@ -103,14 +103,14 @@ def make_side(spec: str, emb: Path, device: str, seed: int):
     """A fresh policy for one variant run (fresh so both runs draw identical sequences)."""
     if spec in BUILTIN_POLICIES:
         if spec == "ygoagent":
-            from ygo_zero.eval.ygoagent import YgoAgentPolicy
+            from decklight.eval.ygoagent import YgoAgentPolicy
 
             return YgoAgentPolicy(seed=seed), spec
-        from ygo_zero.eval.policies import GreedyPolicy, RandomPolicy
+        from decklight.eval.policies import GreedyPolicy, RandomPolicy
 
         cls = GreedyPolicy if spec == "greedy" else RandomPolicy
         return cls(seed), spec
-    from ygo_zero.eval.bc_policy import BCPolicy
+    from decklight.eval.bc_policy import BCPolicy
 
     pol = BCPolicy(spec, emb, device=device)
     return pol, getattr(pol, "name", spec)

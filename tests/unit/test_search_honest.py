@@ -1,10 +1,10 @@
-"""Honest-override rule (src/ygo_zero/search/honest.py) and its use in search_game_gen."""
+"""Honest-override rule (src/decklight/search/honest.py) and its use in search_game_gen."""
 
 import math
 
 import numpy as np
 
-from ygo_zero.search.honest import HonestRule, decide, decide_pair, decisive_label, paired_gap, semantic_key
+from decklight.search.honest import HonestRule, decide, decide_pair, decisive_label, paired_gap, semantic_key
 
 R = HonestRule(z=2.0, min_gap=0.05, s_max=8, step=4)
 
@@ -55,8 +55,8 @@ def _obs(rows, link_on_field=False):
 
 
 def test_semantic_key_merges_copies_and_zones():
-    from ygo_zero.engine.actions import Kind
-    from ygo_zero.search.honest import merge_candidates
+    from decklight.engine.actions import Kind
+    from decklight.search.honest import merge_candidates
 
     act = [Kind.ACTIVATE, 5, 111, 0, 1, 0, 16, 2, 0]
     act_copy = [Kind.ACTIVATE, 9, 111, 0, 1, 0, 16, 2, 0]  # another copy: differs only in row_of
@@ -72,10 +72,10 @@ def test_semantic_key_merges_copies_and_zones():
 def test_ho_game_logs_decisions_and_overrides_only_significant(engine):
     from test_search_play import _cfg, _tiny_forward
 
-    from ygo_zero.engine.cpp_env import CppEnv
-    from ygo_zero.search.play import argmax_select, search_game_gen
-    from ygo_zero.search.turn1 import drive_many
-    from ygo_zero.search.window import WindowSearch
+    from decklight.engine.cpp_env import CppEnv
+    from decklight.search.play import argmax_select, search_game_gen
+    from decklight.search.turn1 import drive_many
+    from decklight.search.window import WindowSearch
 
     def never(buf):
         raise AssertionError("unused")
@@ -119,11 +119,11 @@ def test_replicate_overrides_item(engine):
 
     from test_search_play import FIXTURES, _tiny_forward
 
-    from ygo_zero.decks import load_ydk
-    from ygo_zero.engine.duel import DuelConfig
-    from ygo_zero.search.play import argmax_select, search_game_gen
-    from ygo_zero.search.turn1 import drive_many
-    from ygo_zero.search.window import WindowSearch
+    from decklight.decks import load_ydk
+    from decklight.engine.duel import DuelConfig
+    from decklight.search.play import argmax_select, search_game_gen
+    from decklight.search.turn1 import drive_many
+    from decklight.search.window import WindowSearch
 
     root = Path(__file__).resolve().parents[2]
     spec = importlib.util.spec_from_file_location("replicate_overrides", root / "scripts/audit/replicate_overrides.py")
@@ -159,11 +159,11 @@ def test_replicate_hw_label_item(engine, tmp_path):
 
     from test_search_play import FIXTURES, _tiny_forward
 
-    from ygo_zero.decks import load_ydk
-    from ygo_zero.engine.cpp_env import CppEnv
-    from ygo_zero.engine.duel import DuelConfig
-    from ygo_zero.search.turn1 import drive_many
-    from ygo_zero.search.window import WindowSearch
+    from decklight.decks import load_ydk
+    from decklight.engine.cpp_env import CppEnv
+    from decklight.engine.duel import DuelConfig
+    from decklight.search.turn1 import drive_many
+    from decklight.search.window import WindowSearch
 
     root = Path(__file__).resolve().parents[2]
     spec = importlib.util.spec_from_file_location("replicate_overrides", root / "scripts/audit/replicate_overrides.py")

@@ -1,8 +1,8 @@
 import numpy as np
 import torch
 
-from ygo_zero.model.policy import PolicyNet
-from ygo_zero.rl.ppo import SlotStore, gae, masked_log_softmax, ppo_loss
+from decklight.model.policy import PolicyNet
+from decklight.rl.ppo import SlotStore, gae, masked_log_softmax, ppo_loss
 
 
 def _emb(d=8, n=10):

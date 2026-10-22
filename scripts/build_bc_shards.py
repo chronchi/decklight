@@ -1,4 +1,4 @@
-"""Replay every demo record source into BC shards (see ygo_zero.model.bc_data).
+"""Replay every demo record source into BC shards (see decklight.model.bc_data).
 
 uv run python scripts/build_bc_shards.py --out data/cache/bc_shards --jobs 2
 """
@@ -8,7 +8,7 @@ from pathlib import Path
 
 import numpy as np
 
-from ygo_zero.model.bc_data import build_shards, eval_only_decks
+from decklight.model.bc_data import build_shards, eval_only_decks
 
 SOURCES = {  # tag -> globs of record files (verified lines and their hand-variant expansions)
     # strict-d: retrain stage D strict re-verification of the lines strict_junk.py flagged (scripts/vast_stage_d.sh);

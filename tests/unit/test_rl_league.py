@@ -6,12 +6,12 @@ from pathlib import Path
 import numpy as np
 import torch
 
-from ygo_zero.decks import load_ydk
-from ygo_zero.engine.cpp_env import VecEnv
-from ygo_zero.model.policy import PolicyNet
-from ygo_zero.rl.league import BASE, SELF, YGO, League
-from ygo_zero.rl.ppo import SlotStore, gather
-from ygo_zero.rl.rollout import Collector
+from decklight.decks import load_ydk
+from decklight.engine.cpp_env import VecEnv
+from decklight.model.policy import PolicyNet
+from decklight.rl.league import BASE, SELF, YGO, League
+from decklight.rl.ppo import SlotStore, gather
+from decklight.rl.rollout import Collector
 
 FIXTURES = Path(__file__).resolve().parents[1] / "fixtures" / "decks"
 
@@ -136,7 +136,7 @@ def test_ygo_state_cleared_on_episode_end(engine):
 
 
 def test_reset_keys_drops_only_named_games():
-    from ygo_zero.eval.ygoagent import YgoAgentPolicy
+    from decklight.eval.ygoagent import YgoAgentPolicy
 
     pol = YgoAgentPolicy.__new__(YgoAgentPolicy)  # no TFLite needed: only the state table
     pol._states = {(5, 0): ("h5", "c5"), (6, 1): ("h6", "c6")}

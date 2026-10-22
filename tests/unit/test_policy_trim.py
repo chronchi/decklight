@@ -6,11 +6,11 @@ import numpy as np
 import pytest
 import torch
 
-from ygo_zero.decks import load_ydk
-from ygo_zero.engine.cpp_env import VecEnv
-from ygo_zero.engine.duel import Engine
-from ygo_zero.model.policy import PolicyNet, trim_obs
-from ygo_zero.rl.ppo import gather, to_torch
+from decklight.decks import load_ydk
+from decklight.engine.cpp_env import VecEnv
+from decklight.engine.duel import Engine
+from decklight.model.policy import PolicyNet, trim_obs
+from decklight.rl.ppo import gather, to_torch
 
 ROOT = Path(__file__).resolve().parents[2]
 

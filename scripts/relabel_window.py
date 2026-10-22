@@ -8,7 +8,7 @@ score from the search log, without re-running the search.
 value breaks ties), ties kept in candidate order (PASS first at a window, as in the search). Output: one record per
 game under data/demos/sw-<name>/ (files p<k>-<source name>; kind sw-<name> in dataset.py); targets, target_sets
 (the single best) and target_conf (share of the separating score keys whose top candidates include the target, as in
-src/ygo_zero/search/window.py) are replaced at searched decisions. --compare prints, for each pair of labellings,
+src/decklight/search/window.py) are replaced at searched decisions. --compare prints, for each pair of labellings,
 how often they pick the same option, and each one's fire rate at windows. Pure JSON: safe on the laptop.
 """
 

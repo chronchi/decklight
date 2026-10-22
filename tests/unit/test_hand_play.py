@@ -24,14 +24,14 @@ hand_play = _load("hand_play")
 
 
 def test_desc_text_system_string():
-    from ygo_zero.demos.game import desc_text
+    from decklight.demos.game import desc_text
 
     assert desc_text(0, 573) == "Add the card(s) to your hand"
 
 
 def test_desc_text_card_str():
-    from ygo_zero.demos.game import desc_text
-    from ygo_zero.engine.resources import default_cdbs
+    from decklight.demos.game import desc_text
+    from decklight.engine.resources import default_cdbs
 
     code, want = None, None
     for path in default_cdbs():
@@ -50,7 +50,7 @@ def test_desc_text_card_str():
 
 
 def _fake_obs(kinds_codes):
-    from ygo_zero.engine.actions import Kind
+    from decklight.engine.actions import Kind
 
     assert Kind.SELECT is not None
     actions = [[int(k), -1, code, 0, 0, 0, 0, 0, 0] for k, code in kinds_codes]
@@ -58,7 +58,7 @@ def _fake_obs(kinds_codes):
 
 
 def test_match_exact_name_beats_substring():
-    from ygo_zero.engine.actions import Kind
+    from decklight.engine.actions import Kind
 
     c1, c2 = 1111, 2222
     obs = _fake_obs([(Kind.SELECT, c1), (Kind.SELECT, c2)])
@@ -67,7 +67,7 @@ def test_match_exact_name_beats_substring():
 
 
 def test_pass_star_stops_at_undeclined_seat(tmp_path, monkeypatch):
-    from ygo_zero.engine.duel import Engine
+    from decklight.engine.duel import Engine
 
     monkeypatch.setattr(hand_play, "WORK", tmp_path / "work")
     monkeypatch.setattr(sys, "argv", ["hand_play.py", "new", "g", "snake-eye", "tenpai-dragon", "11"])
@@ -130,7 +130,7 @@ def _fake_obs_loc(items):
 
 
 def test_duplicate_names_get_location_suffix_and_match():
-    from ygo_zero.engine.actions import Kind
+    from decklight.engine.actions import Kind
 
     code = 99999
     obs = _fake_obs_loc([(Kind.SELECT, code, 5, 0), (Kind.SELECT, code, 2, 0)])
@@ -167,8 +167,8 @@ def test_check_runs_on_fresh_duel(tmp_path, monkeypatch, capsys):
 
 
 def test_compact_view_hides_unchanged_extra_deck(tmp_path, monkeypatch, capsys):
-    from ygo_zero.demos.names import CardNames
-    from ygo_zero.engine.duel import Engine
+    from decklight.demos.names import CardNames
+    from decklight.engine.duel import Engine
 
     monkeypatch.setattr(hand_play, "WORK", tmp_path / "work")
     monkeypatch.setattr(sys, "argv", ["hand_play.py", "new", "g", "snake-eye", "tenpai-dragon", "11"])
@@ -190,7 +190,7 @@ def test_compact_view_hides_unchanged_extra_deck(tmp_path, monkeypatch, capsys):
 
 def _chain_obs(live_codes, chain_len=0, turn=3):
     """Fake MSG_SELECT_CHAIN window: ACTIVATE options for `live_codes` plus the passive option."""
-    from ygo_zero.engine.actions import Kind
+    from decklight.engine.actions import Kind
 
     acts = [[int(Kind.ACTIVATE), -1, code, 0, 0, 0, 0x10, 2, 0, 0] for code in live_codes]
     acts.append([int(Kind.PASS), -1, 0, 0, 0, 0, 0x10, 0, -1, 0])
@@ -278,7 +278,7 @@ def test_check_battle_section_runs(tmp_path, monkeypatch, capsys):
 def test_same_zone_duplicates_get_zone_suffix_and_match():
     import numpy as np
 
-    from ygo_zero.engine.actions import Kind
+    from decklight.engine.actions import Kind
 
     code = 99999
     cards = np.zeros((2, 21), dtype=np.int32)
@@ -300,7 +300,7 @@ def test_same_zone_duplicates_get_zone_suffix_and_match():
 
 
 def test_number_options_show_values_and_match():
-    from ygo_zero.engine.actions import Kind
+    from decklight.engine.actions import Kind
 
     obs = {"actions": [[int(Kind.NUMBER), -1, 0, 0, 0, 5, 143, 0, -1, 0]], "action_mask": [1]}
     assert hand_play._display_names(obs, {}) == ["5"]
@@ -315,10 +315,10 @@ def test_saved_gold_games_replay_unchanged():
     """Every saved gold record replays to the end with all choices legal (hand_play logic unchanged)."""
     import json
 
-    from ygo_zero.demos.dataset import record_config
-    from ygo_zero.demos.game import _opts
-    from ygo_zero.engine.cpp_env import CppEnv
-    from ygo_zero.engine.duel import Engine
+    from decklight.demos.dataset import record_config
+    from decklight.demos.game import _opts
+    from decklight.engine.cpp_env import CppEnv
+    from decklight.engine.duel import Engine
 
     engine = Engine()
     paths = sorted((ROOT / "data" / "demos" / "gold").glob("*.jsonl"))
@@ -345,7 +345,7 @@ def _main_phase_battle_obs():
     SPSUMMON on offer (for the summon-then-attack scan)."""
     import numpy as np
 
-    from ygo_zero.engine.actions import Kind
+    from decklight.engine.actions import Kind
 
     acts = [
         [int(Kind.SPSUMMON), -1, 89631139, 0, 0, 0, 0xB, 7, 0, 0],  # Blue-Eyes, Extra Deck
@@ -404,7 +404,7 @@ def test_battle_helper_summon_then_attack():
 
 
 def test_p_never_answers_yes_no_prompts():
-    from ygo_zero.engine.actions import Kind
+    from decklight.engine.actions import Kind
 
     obs = _fake_obs([(Kind.YES, 0), (Kind.NO, 0)])
     assert hand_play._match(obs, "P", {}) is None
@@ -413,7 +413,7 @@ def test_p_never_answers_yes_no_prompts():
 
 
 def test_no_match_msg_for_p_on_yes_no_and_kinds():
-    from ygo_zero.engine.actions import Kind
+    from decklight.engine.actions import Kind
 
     g = [0] * 24
     g[21] = 0xD  # MSG_SELECT_YESNO
@@ -432,7 +432,7 @@ def test_no_match_msg_for_p_on_yes_no_and_kinds():
 
 
 def test_match_ignores_punctuation_and_case():
-    from ygo_zero.engine.actions import Kind
+    from decklight.engine.actions import Kind
 
     obs = _fake_obs([(Kind.SELECT, 111), (Kind.SELECT, 222), (Kind.SELECT, 333)])
     names = {
@@ -482,8 +482,8 @@ def test_pass_star_crosses_seats_with_only_declined_live(tmp_path, monkeypatch):
 
 def test_log_prints_turn_headers_and_decisions(tmp_path, monkeypatch, capsys):
     """`hand_play.py log <game>`: one turn header with LP plus one line per gold decision."""
-    from ygo_zero.demos.names import CardNames
-    from ygo_zero.engine.duel import Engine
+    from decklight.demos.names import CardNames
+    from decklight.engine.duel import Engine
 
     monkeypatch.setattr(hand_play, "WORK", tmp_path / "work")
     monkeypatch.setattr(sys, "argv", ["hand_play.py", "new", "g", "snake-eye", "tenpai-dragon", "11"])
@@ -529,7 +529,7 @@ def test_deck_sheet_brief_truncates_text():
 
 def _idle_obs_with(items, msg=0xB, turn=3):
     """Fake window with full 10-col option rows: items = (kind, code, board_row, arg)."""
-    from ygo_zero.engine.actions import Kind  # noqa: F401
+    from decklight.engine.actions import Kind  # noqa: F401
 
     actions = [[int(k), row, code, 0, 0, arg, 0, 0, -1, 0] for k, code, row, arg in items]
     g = [0] * 24
@@ -542,7 +542,7 @@ def test_battle_lines_use_probed_attackers_not_text():
     clean but whose engine direct flag is 0 is flagged engine-true (u33 Cooky class)."""
     import numpy as np
 
-    from ygo_zero.engine.actions import Kind
+    from decklight.engine.actions import Kind
 
     code = 12345
     cards = np.zeros((1, 21), dtype=np.int32)
@@ -559,7 +559,7 @@ def test_battle_lines_use_probed_attackers_not_text():
 
 def test_probe_returns_none_with_no_battle_option(tmp_path, monkeypatch):
     """First-turn graceful path: a fresh duel (turn 1, no Battle Phase) probes to None."""
-    from ygo_zero.engine.duel import Engine
+    from decklight.engine.duel import Engine
 
     monkeypatch.setattr(hand_play, "WORK", tmp_path / "work")
     monkeypatch.setattr(sys, "argv", ["hand_play.py", "new", "g", "snake-eye", "tenpai-dragon", "11"])
@@ -586,7 +586,7 @@ def _facedown_obs():
     """Two SELECT options: a set S/T (face-down) and a face-up monster."""
     import numpy as np
 
-    from ygo_zero.engine.actions import Kind
+    from decklight.engine.actions import Kind
 
     cards = np.zeros((2, 21), dtype=np.int32)
     cards[0, 0], cards[0, 1], cards[0, 2] = 1111, 4, 1
@@ -626,7 +626,7 @@ def test_sel_face_down_lists_several(capsys):
 
 
 def test_cancel_words_answer_passive():
-    from ygo_zero.engine.actions import Kind
+    from decklight.engine.actions import Kind
 
     g = [0] * 24
     g[21] = 0xF  # MSG_SELECT_CARD, not a yes/no prompt
@@ -656,7 +656,7 @@ def test_commands_are_case_insensitive(tmp_path, monkeypatch, capsys):
 
 
 def test_bp_no_match_names_the_prompt():
-    from ygo_zero.engine.actions import Kind
+    from decklight.engine.actions import Kind
 
     g = [0] * 24
     g[21] = 0x10  # MSG_SELECT_CHAIN
@@ -699,8 +699,8 @@ def _mon_row(code, seq, atk):
 def test_multi_attack_tokens_bridge_chain_windows(tmp_path, monkeypatch, capsys):
     """Several ATK: tokens in one `do`: after each attack the empty chain windows on the way back
     to MSG_SELECT_BATTLECMD are passed (like --auto-pass); both attacks land in one command."""
-    from ygo_zero.demos.names import CardNames
-    from ygo_zero.engine.actions import Kind
+    from decklight.demos.names import CardNames
+    from decklight.engine.actions import Kind
 
     hand_play._DECLINED.clear()
     codes = CardNames()
@@ -749,8 +749,8 @@ def test_material_lines_show_zone_and_link_rating(tmp_path, monkeypatch, capsys)
     """Link-material SELECT/UNSELECT lines name the card with its zone plus Link rating."""
     import numpy as np
 
-    from ygo_zero.demos.names import CardNames
-    from ygo_zero.engine.actions import Kind
+    from decklight.demos.names import CardNames
+    from decklight.engine.actions import Kind
 
     monkeypatch.setattr(hand_play, "WORK", tmp_path / "work")
     monkeypatch.setattr(sys, "argv", ["hand_play.py", "new", "g", "snake-eye", "tenpai-dragon", "11"])
@@ -797,7 +797,7 @@ def _zone_obs():
     own face-up monster (M0), opp face-down monster (M2)."""
     import numpy as np
 
-    from ygo_zero.engine.actions import Kind
+    from decklight.engine.actions import Kind
 
     cards = np.zeros((4, 21), dtype=np.int32)
     cards[0, 0], cards[0, 1], cards[0, 2] = 1111, 4, 1
@@ -852,7 +852,7 @@ def test_sel_ambiguous_lists_controller_and_zone():
 
 
 def test_sel_ambiguous_names_stop_but_identical_copies_pick_first():
-    from ygo_zero.engine.actions import Kind
+    from decklight.engine.actions import Kind
 
     obs = _fake_obs([(Kind.SELECT, 111), (Kind.SELECT, 222)])
     names = {111: "Mirror Force", 222: "Mirror Gate"}
@@ -868,7 +868,7 @@ def _sel_card_obs():
     """MSG_SELECT_CARD with two SELECT options and no ATTACK option."""
     import numpy as np
 
-    from ygo_zero.engine.actions import Kind
+    from decklight.engine.actions import Kind
 
     cards = np.zeros((2, 21), dtype=np.int32)
     cards[0, 0], cards[0, 1], cards[0, 2] = 2222, 3, 1
@@ -908,7 +908,7 @@ def test_atk_at_selection_stops_when_ambiguous():
 
 
 def test_atk_fallback_not_applicable_elsewhere():
-    from ygo_zero.engine.actions import Kind
+    from decklight.engine.actions import Kind
 
     obs, names = _sel_card_obs()
     obs["global"][21] = 0xB  # MSG_SELECT_IDLECMD: not a selection prompt

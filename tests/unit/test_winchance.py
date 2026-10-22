@@ -11,7 +11,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(ROOT / "scripts"))
 
-from ygo_zero.eval import winchance as W
+from decklight.eval import winchance as W
 
 
 def test_pav_monotone_on_random_data():
@@ -122,7 +122,7 @@ def test_fit_script_identity_fallback_on_worse_bucket(tmp_path, monkeypatch):
     """Strict gate: a bucket worse after calibration gets an identity map + exit 2."""
     import fit_winchance
 
-    from ygo_zero.eval import winchance as W
+    from decklight.eval import winchance as W
 
     rng = np.random.default_rng(7)
     arm = "hppo-p2"

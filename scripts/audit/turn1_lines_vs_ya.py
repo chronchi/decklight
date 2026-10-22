@@ -15,7 +15,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import show_divergence as S  # noqa: E402
 
-from ygo_zero.demos.game import _opts, hidden_card, option_desc  # noqa: E402
+from decklight.demos.game import _opts, hidden_card, option_desc  # noqa: E402
 
 FIELD = (3, 4)  # obs loc column: mzone, szone (as eval/turn1.FIELD_LOCS)
 
@@ -32,7 +32,7 @@ def cards(obs, me: int, seat: int, locs) -> list[str]:
 
 
 def dump(g: dict, engine) -> dict:
-    from ygo_zero.engine.cpp_env import CppEnv
+    from decklight.engine.cpp_env import CppEnv
 
     env = CppEnv(engine, S._config(g), True)
     obs = env.reset()
@@ -66,8 +66,8 @@ def dump(g: dict, engine) -> dict:
 
 
 if __name__ == "__main__":
-    from ygo_zero.demos.names import CardNames
-    from ygo_zero.engine.duel import Engine
+    from decklight.demos.names import CardNames
+    from decklight.engine.duel import Engine
 
     NN = CardNames().names
     eng = Engine()

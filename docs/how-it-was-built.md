@@ -1,4 +1,4 @@
-# How Decklight was built
+# How decklight was built
 
 One person directed the project; AI coding agents did most of the engineering. This page describes the setup and the
 rules that kept results trustworthy.

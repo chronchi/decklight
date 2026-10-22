@@ -7,11 +7,11 @@ import argparse
 import time
 from pathlib import Path
 
-from ygo_zero.decks import load_ydk
-from ygo_zero.engine.duel import Engine
-from ygo_zero.eval.match import play_match, report
-from ygo_zero.eval.policies import GreedyPolicy, RandomPolicy
-from ygo_zero.eval.ygoagent import YgoAgentPolicy
+from decklight.decks import load_ydk
+from decklight.engine.duel import Engine
+from decklight.eval.match import play_match, report
+from decklight.eval.policies import GreedyPolicy, RandomPolicy
+from decklight.eval.ygoagent import YgoAgentPolicy
 
 POLICIES = {"random": RandomPolicy, "greedy": GreedyPolicy, "ygoagent": YgoAgentPolicy}
 

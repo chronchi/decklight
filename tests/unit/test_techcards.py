@@ -11,9 +11,9 @@ import pytest
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "src"))
 
-from ygo_zero.decks import load_ydk
-from ygo_zero.engine.duel import shuffle_main
-from ygo_zero.eval.techcards import (
+from decklight.decks import load_ydk
+from decklight.engine.duel import shuffle_main
+from decklight.eval.techcards import (
     apply_swaps,
     card_name,
     find_code,
@@ -136,7 +136,7 @@ def test_missing_card_fails_fast():
 
 
 def test_write_ydk_roundtrip(tmp_path):
-    from ygo_zero.eval.techcards import write_ydk
+    from decklight.eval.techcards import write_ydk
 
     d = load_ydk(FIX / "BlueEyes.ydk")
     b = swap(d, d.main[0], 15025844, 1)

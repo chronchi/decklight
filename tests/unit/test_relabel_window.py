@@ -3,7 +3,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from ygo_zero.demos.dataset import sample_kind
+from decklight.demos.dataset import sample_kind
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "scripts"))

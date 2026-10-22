@@ -2,7 +2,7 @@
 
 import pytest
 
-from ygo_zero.cards import lua_effects as L
+from decklight.cards import lua_effects as L
 
 CONST_LUA = L.REPO_ROOT / "third_party" / "CardScripts" / "official" / ".." / "constant.lua"
 OFFICIAL = L.OFFICIAL_DIR

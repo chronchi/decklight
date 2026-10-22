@@ -4,7 +4,7 @@
         --games 500 --out runs/<name>/window/p0 [--k 4] [--horizon 1] [--own-frac 0.1] [--proc 0 --nproc 8]
     uv run python scripts/gen_window.py --policy greedy ...   # laptop / tests: no model
 
-Each source game is replayed; selected decisions (src/ygo_zero/search/window.py: chain windows on the opponent's
+Each source game is replayed; selected decisions (src/decklight/search/window.py: chain windows on the opponent's
 turn where the actor can activate, plus a sample of own-turn decisions) get a searched target. Output: one record per
 game in `<out>/<source file name>`: the source's config/choices/actors/turns, `targets` (searched option or null,
 aligned with choices), `labels` ("window" / "own" at searched decisions, "skip" elsewhere), the search log, and the
@@ -27,10 +27,10 @@ sys.path.insert(0, str(ROOT / "scripts"))
 
 from gen_search import greedy_logits
 
-from ygo_zero.demos.dataset import record_config
-from ygo_zero.engine.duel import Engine
-from ygo_zero.search.honest import HonestRule
-from ygo_zero.search.window import WindowSearch
+from decklight.demos.dataset import record_config
+from decklight.engine.duel import Engine
+from decklight.search.honest import HonestRule
+from decklight.search.window import WindowSearch
 
 KEEP = ("decks", "config", "auto_single", "choices", "actors", "turns", "winner", "end_turn", "level")
 
@@ -92,7 +92,7 @@ def main() -> None:
     ap.add_argument("--out", type=Path, required=True)
     args = ap.parse_args()
     if args.policy == "bc":
-        from ygo_zero.eval.bc_policy import BCPolicy
+        from decklight.eval.bc_policy import BCPolicy
 
         pol = BCPolicy(args.ckpt, args.emb, threads=1, device=args.device, batch=args.batch)
         logits = pol.logits
@@ -106,7 +106,7 @@ def main() -> None:
         logits = greedy_logits
     value = None
     if args.value:
-        from ygo_zero.eval.value import ValueNet
+        from decklight.eval.value import ValueNet
 
         value = ValueNet(args.value, args.emb, device=args.device, batch=args.batch).values
     ws = WindowSearch(Engine(), logits, k=args.k, horizon=args.horizon, own_frac=args.own_frac, batch=args.batch,

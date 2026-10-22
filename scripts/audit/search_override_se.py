@@ -18,7 +18,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import show_divergence as S  # noqa: E402
 
-from ygo_zero.demos.game import _opts  # noqa: E402
+from decklight.demos.game import _opts  # noqa: E402
 
 
 def gap_se(a: list[float], b: list[float]) -> tuple[float, float]:
@@ -33,8 +33,8 @@ def main() -> int:
     ap.add_argument("run")
     ap.add_argument("--max-games", type=int, default=0)
     a = ap.parse_args()
-    from ygo_zero.engine.cpp_env import CppEnv
-    from ygo_zero.engine.duel import Engine
+    from decklight.engine.cpp_env import CppEnv
+    from decklight.engine.duel import Engine
 
     eng = Engine()
     G = list(S.load(a.run).values())

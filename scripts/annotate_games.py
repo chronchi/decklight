@@ -23,7 +23,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(ROOT / "scripts"))
 
-from ygo_zero.analysis import annotate as A
+from decklight.analysis import annotate as A
 
 _ENGINE = None
 _NAMES = None
@@ -31,8 +31,8 @@ _NAMES = None
 
 def _worker_init() -> None:
     global _ENGINE, _NAMES
-    from ygo_zero.demos.names import CardNames
-    from ygo_zero.engine.duel import Engine
+    from decklight.demos.names import CardNames
+    from decklight.engine.duel import Engine
 
     _ENGINE = Engine()
     _NAMES = CardNames().names
@@ -41,7 +41,7 @@ def _worker_init() -> None:
 def _annotate_one(payload: tuple[dict, dict | None]) -> dict:
     import render_showcase as R
 
-    from ygo_zero.decks import load_ydk
+    from decklight.decks import load_ydk
 
     rec, values = payload
 

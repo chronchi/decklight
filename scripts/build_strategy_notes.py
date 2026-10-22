@@ -28,12 +28,12 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 
-from ygo_zero.decks import load_ydk
-from ygo_zero.demos import llm as _llm
-from ygo_zero.demos.names import CardNames
-from ygo_zero.demos.plan import card_sheet, compact_line_json
-from ygo_zero.demos.strategy import NOTES_DIR, notes_path
-from ygo_zero.engine.duel import Engine
+from decklight.decks import load_ydk
+from decklight.demos import llm as _llm
+from decklight.demos.names import CardNames
+from decklight.demos.plan import card_sheet, compact_line_json
+from decklight.demos.strategy import NOTES_DIR, notes_path
+from decklight.engine.duel import Engine
 
 MODEL = "opencode/muse-spark-1.3-contributor-free"
 

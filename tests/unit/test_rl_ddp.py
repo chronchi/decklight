@@ -18,9 +18,9 @@ import torch
 import torch.distributed as dist
 import torch.multiprocessing as mp
 
-from ygo_zero.model.policy import PolicyNet
-from ygo_zero.rl import dist as distmod
-from ygo_zero.rl.ppo import SlotStore
+from decklight.model.policy import PolicyNet
+from decklight.rl import dist as distmod
+from decklight.rl.ppo import SlotStore
 
 _TRAIN_RL = None
 

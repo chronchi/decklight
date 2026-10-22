@@ -19,8 +19,8 @@ from pathlib import Path
 
 import numpy as np
 
-from ygo_zero.cards.embed import MAX_EFFECTS, card_texts, split_effects
-from ygo_zero.cards.lua_effects import OFFICIAL_DIR, load_constants, parse_script
+from decklight.cards.embed import MAX_EFFECTS, card_texts, split_effects
+from decklight.cards.lua_effects import OFFICIAL_DIR, load_constants, parse_script
 
 ROOT = Path(__file__).resolve().parents[2]
 EMB = ROOT / "data" / "cards" / "emb" / "qwen3-0.6b-d512.npz"

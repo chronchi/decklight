@@ -41,7 +41,7 @@ def test_same_weights_guard(tmp_path):
 
 
 def test_relay_alerts_appends_only_new_lines(tmp_path, monkeypatch):
-    from ygo_zero.infra import vast
+    from decklight.infra import vast
 
     remote = ["ALERT train-ft-dw: best.pt is the --init weights"]
 
@@ -84,7 +84,7 @@ def test_selfwin_crashwatch_alerts_once(tmp_path):
 
 
 def test_stall_check_alerts_once_and_clears(tmp_path, monkeypatch):
-    from ygo_zero.infra import vast
+    from decklight.infra import vast
 
     recent = {"out": ""}  # find's output: empty = nothing changed recently
 

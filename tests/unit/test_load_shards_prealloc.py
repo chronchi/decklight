@@ -1,6 +1,6 @@
 import numpy as np
 
-from ygo_zero.model import bc_data
+from decklight.model import bc_data
 
 
 def _shard(path, n, nlog, tag):

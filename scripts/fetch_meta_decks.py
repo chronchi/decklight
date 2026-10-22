@@ -28,9 +28,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from build_decks import EXTRA_T, smoke, validate_codes
 
-from ygo_zero.decks import Deck
-from ygo_zero.demos.names import CardNames
-from ygo_zero.engine.duel import Engine
+from decklight.decks import Deck
+from decklight.demos.names import CardNames
+from decklight.engine.duel import Engine
 
 ROOT = Path(__file__).resolve().parents[1]
 POOL = ROOT / "decks" / "pool"

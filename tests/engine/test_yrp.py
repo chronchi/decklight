@@ -2,9 +2,9 @@
 
 import random
 
-from ygo_zero.demos import yrp as Y
-from ygo_zero.engine.duel import DuelConfig
-from ygo_zero.engine.env import PyEnv
+from decklight.demos import yrp as Y
+from decklight.engine.duel import DuelConfig
+from decklight.engine.env import PyEnv
 
 
 def _game(engine, decks, seed=3):

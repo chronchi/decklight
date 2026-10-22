@@ -130,8 +130,8 @@ def _expand_tree(tmp_path: Path) -> tuple[Path, Path, Path]:
 
 
 def _fake_verdicts():
-    from ygo_zero.decks import Deck
-    from ygo_zero.engine.duel import DuelConfig, Placement
+    from decklight.decks import Deck
+    from decklight.engine.duel import DuelConfig, Placement
 
     cfg = DuelConfig(Deck((1, 2), (), (), "d0"), Deck((4,), (), (), "d1"),
                      seed=0, setup=(Placement(0, 9, 2, 0),))

@@ -14,8 +14,8 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-from ygo_zero.demos import llm
-from ygo_zero.demos.extract import SYSTEM, _parse_json, _prompt, split_header, split_sections
+from decklight.demos import llm
+from decklight.demos.extract import SYSTEM, _parse_json, _prompt, split_header, split_sections
 
 GUIDES = [  # (deck, guide file, section title substring)
     ("blue-eyes", "data/guides/blue-eyes/02_game8.txt", None),

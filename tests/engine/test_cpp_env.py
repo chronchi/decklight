@@ -6,10 +6,10 @@ import zlib
 import numpy as np
 import pytest
 
-from ygo_zero.engine.duel import DuelConfig
-from ygo_zero.engine.env import PyEnv
+from decklight.engine.duel import DuelConfig
+from decklight.engine.env import PyEnv
 
-cpp_env = pytest.importorskip("ygo_zero.engine.cpp_env", reason="extension not built: scripts/build_ext.sh")
+cpp_env = pytest.importorskip("decklight.engine.cpp_env", reason="extension not built: scripts/build_ext.sh")
 
 
 def lockstep(engine, config, seed, max_steps=100_000):

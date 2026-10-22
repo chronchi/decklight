@@ -1,4 +1,4 @@
-"""Warm vast.ai session box for remote verification (see ygo_zero.infra.vast).
+"""Warm vast.ai session box for remote verification (see decklight.infra.vast).
 
 The planner LLM calls stay on the laptop; only CPU-heavy engine verification batches go to the box:
 
@@ -13,7 +13,7 @@ from __future__ import annotations
 import argparse
 import time
 
-from ygo_zero.infra import vast
+from decklight.infra import vast
 
 
 def cmd_start(args: argparse.Namespace) -> None:

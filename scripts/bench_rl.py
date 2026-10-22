@@ -29,13 +29,13 @@ import torch
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from train_rl import load_net  # architecture, as in train_rl
 
-from ygo_zero.decks import load_ydk
-from ygo_zero.engine.cpp_env import VecEnv
-from ygo_zero.engine.duel import Engine
-from ygo_zero.eval.bc_policy import _run_args
-from ygo_zero.model.policy import PolicyNet
-from ygo_zero.rl.ppo import SlotStore, gather, masked_log_softmax, ppo_loss, to_torch
-from ygo_zero.rl.rollout import Collector
+from decklight.decks import load_ydk
+from decklight.engine.cpp_env import VecEnv
+from decklight.engine.duel import Engine
+from decklight.eval.bc_policy import _run_args
+from decklight.model.policy import PolicyNet
+from decklight.rl.ppo import SlotStore, gather, masked_log_softmax, ppo_loss, to_torch
+from decklight.rl.rollout import Collector
 
 ROOT = Path(__file__).resolve().parents[1]
 POOL_N = 8192  # capture pool rows (numpy, host), shared by infer and update

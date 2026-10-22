@@ -18,11 +18,11 @@ import numpy as np
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from ygo_zero.decks import load_ydk  # noqa: E402
-from ygo_zero.engine import constants as C  # noqa: E402
-from ygo_zero.engine.cpp_env import CppEnv  # noqa: E402
-from ygo_zero.engine.duel import DuelConfig, Engine  # noqa: E402
-from ygo_zero.search.determinize import Determinizer, SeenTracker, key_rank_of_choice  # noqa: E402
+from decklight.decks import load_ydk  # noqa: E402
+from decklight.engine import constants as C  # noqa: E402
+from decklight.engine.cpp_env import CppEnv  # noqa: E402
+from decklight.engine.duel import DuelConfig, Engine  # noqa: E402
+from decklight.search.determinize import Determinizer, SeenTracker, key_rank_of_choice  # noqa: E402
 
 
 def _deck_top(cards: dict, team: int) -> int | None:

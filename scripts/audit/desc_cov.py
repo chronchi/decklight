@@ -5,8 +5,8 @@ from collections import Counter
 from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "src"))
-from ygo_zero.demos.dataset import iter_samples
-from ygo_zero.engine.duel import Engine
+from decklight.demos.dataset import iter_samples
+from decklight.engine.duel import Engine
 files = sorted((ROOT / "data/demos/teacher").glob("*.jsonl")); random.Random(0).shuffle(files)
 eng = Engine(); c = Counter(); n = 0
 import numpy as np

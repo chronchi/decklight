@@ -24,10 +24,10 @@ sys.path.insert(0, str(ROOT / "src"))
 
 from render_games import render_one
 
-from ygo_zero.demos.names import CardNames
-from ygo_zero.engine.cpp_env import CppEnv
-from ygo_zero.engine.duel import Engine
-from ygo_zero.eval.turn1 import config_from_dict
+from decklight.demos.names import CardNames
+from decklight.engine.cpp_env import CppEnv
+from decklight.engine.duel import Engine
+from decklight.eval.turn1 import config_from_dict
 
 
 def turns_of(engine: Engine, r: dict) -> list[int]:

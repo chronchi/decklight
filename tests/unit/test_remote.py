@@ -5,11 +5,11 @@ import shutil
 import subprocess
 from pathlib import Path
 
-from ygo_zero.decks import Deck
-from ygo_zero.demos.schema import ComboLine, Step
-from ygo_zero.demos.verify import Verdict
-from ygo_zero.engine.duel import DuelConfig, Placement
-from ygo_zero.infra import remote, vast
+from decklight.decks import Deck
+from decklight.demos.schema import ComboLine, Step
+from decklight.demos.verify import Verdict
+from decklight.engine.duel import DuelConfig, Placement
+from decklight.infra import remote, vast
 
 ROOT = Path(__file__).resolve().parents[2]
 

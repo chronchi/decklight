@@ -29,10 +29,10 @@ sys.path.insert(0, str(ROOT / "scripts" / "audit"))
 
 from principles import LOC_HAND  # noqa: E402
 
-from ygo_zero.decks import load_ydk  # noqa: E402
-from ygo_zero.engine.actions import Kind  # noqa: E402
-from ygo_zero.engine.cpp_env import CppEnv  # noqa: E402
-from ygo_zero.engine.duel import DuelConfig, Engine  # noqa: E402
+from decklight.decks import load_ydk  # noqa: E402
+from decklight.engine.actions import Kind  # noqa: E402
+from decklight.engine.cpp_env import CppEnv  # noqa: E402
+from decklight.engine.duel import DuelConfig, Engine  # noqa: E402
 
 MAXX = 23434538
 

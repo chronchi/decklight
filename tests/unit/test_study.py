@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-from ygo_zero.engine.resources import CORE_LIB
+from decklight.engine.resources import CORE_LIB
 
 
 def _swapped_ydk(src_text: str, subs: list[tuple[int, int]]) -> str:
@@ -50,9 +50,9 @@ def _run_study(monkeypatch, root, ydk_text: str, tag: str) -> tuple:
 
 
 def test_study_deck_no_score(tmp_path, monkeypatch):
-    from ygo_zero.analysis import events
-    from ygo_zero.analysis.primer import hash_of
-    from ygo_zero.decks import load_ydk, parse_ydk
+    from decklight.analysis import events
+    from decklight.analysis.primer import hash_of
+    from decklight.decks import load_ydk, parse_ydk
 
     if not CORE_LIB.exists():
         pytest.skip("core not built: run scripts/build_core.sh")

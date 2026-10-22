@@ -1,4 +1,4 @@
-// C++ port of the Python reference env (src/ygo_zero/engine/{duel,query,actions,obs,env}.py).
+// C++ port of the Python reference env (src/decklight/engine/{duel,query,actions,obs,env}.py).
 // The contract test (tests/engine/test_cpp_env.py) requires identical observations, step for step.
 #pragma once
 
@@ -123,7 +123,7 @@ class Duel {
    uint64_t select_hint = 0;  // HINT_SELECTMSG sent just before the pending select message (0 = none)
    // Card-knowledge memory (docs/obs_spec.md v2 annex): per hand seq, whether the other player
    // knows the card's identity (+ the true codes, for the shuffle realignment). Lockstep with
-   // HandMemory in src/ygo_zero/engine/knowledge.py.
+   // HandMemory in src/decklight/engine/knowledge.py.
    std::vector<uint8_t> hand_known_[2];
    std::vector<uint32_t> hand_codes_[2];
    int knowledge_resyncs_ = 0;

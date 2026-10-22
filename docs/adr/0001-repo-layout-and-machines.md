@@ -36,8 +36,8 @@ ygo-zero/
 ├── pyproject.toml uv.lock .gitignore .gitmodules
 ├── third_party/        # pinned submodules (never edited): ygopro-core, CardScripts, BabelCDB
 ├── cpp/ygoenv/         # C++ env: core wrapper, message parsing, featurizer, batched env,
-│                       #   replay-clone, puzzle start; pybind11 → ygo_zero._ygoenv
-├── src/ygo_zero/
+│                       #   replay-clone, puzzle start; pybind11 → decklight._ygoenv
+├── src/decklight/
 │   ├── engine/         # ctypes reference driver (correctness oracle) + wrappers over the extension
 │   ├── cards/          # cdb access, Lua effect parser, PSCT segmentation, card tokens
 │   ├── decks/          # .ydk I/O, pool / hold-out registry

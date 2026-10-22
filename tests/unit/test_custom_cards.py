@@ -10,9 +10,9 @@ import sys
 import numpy as np
 import pytest
 
-from ygo_zero.cards import effect_strings as ES
-from ygo_zero.cards import embed as E
-from ygo_zero.engine import resources as R
+from decklight.cards import effect_strings as ES
+from decklight.cards import embed as E
+from decklight.engine import resources as R
 
 DIM = 8
 CODE = 999999001
@@ -198,8 +198,8 @@ def test_fake_encode_never_touches_model(monkeypatch, tmp_path):
 
 def test_env_overrides_for_merged_tables(monkeypatch, tmp_path):
     """`$YGO_EMB` / `$YGO_STRINGS` / `$YGO_LUA` redirect the product's table loading."""
-    from ygo_zero.model import policy_v3 as P3
-    from ygo_zero.search import product as PR
+    from decklight.model import policy_v3 as P3
+    from decklight.search import product as PR
 
     emb = tmp_path / "emb.npz"
     rng = np.random.default_rng(3)

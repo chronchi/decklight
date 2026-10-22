@@ -1,6 +1,6 @@
 import numpy as np
 
-from ygo_zero.eval.loopguard import LoopGuard
+from decklight.eval.loopguard import LoopGuard
 
 
 def _obs(turn: int, sel: int) -> dict:

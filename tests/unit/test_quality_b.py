@@ -7,11 +7,11 @@ from types import SimpleNamespace
 
 import numpy as np
 
-from ygo_zero.decks import Deck
-from ygo_zero.demos import game as G
-from ygo_zero.engine import constants as C
-from ygo_zero.engine.actions import Kind
-from ygo_zero.engine.duel import DuelConfig
+from decklight.decks import Deck
+from decklight.demos import game as G
+from decklight.engine import constants as C
+from decklight.engine.actions import Kind
+from decklight.engine.duel import DuelConfig
 
 ROOT = Path(__file__).resolve().parents[2]
 

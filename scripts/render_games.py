@@ -23,10 +23,10 @@ sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(ROOT / "scripts"))
 
 import hand_play as H
-from ygo_zero.demos.game import _opts, hidden_card, option_desc
-from ygo_zero.demos.names import CardNames
-from ygo_zero.engine.cpp_env import CppEnv
-from ygo_zero.engine.duel import Engine
+from decklight.demos.game import _opts, hidden_card, option_desc
+from decklight.demos.names import CardNames
+from decklight.engine.cpp_env import CppEnv
+from decklight.engine.duel import Engine
 
 
 def result_of(meta: dict) -> str:

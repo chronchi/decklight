@@ -3,10 +3,10 @@ import random
 import numpy as np
 import pytest
 
-from ygo_zero.engine import constants as C
-from ygo_zero.engine import obs as O
-from ygo_zero.engine.duel import DuelConfig
-from ygo_zero.engine.env import PyEnv
+from decklight.engine import constants as C
+from decklight.engine import obs as O
+from decklight.engine.duel import DuelConfig
+from decklight.engine.env import PyEnv
 
 
 def _play(env, seed, max_steps=3000):

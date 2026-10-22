@@ -1,13 +1,13 @@
 import json
 
-from ygo_zero.demos.extract import (
+from decklight.demos.extract import (
     extract_guide_decklist,
     extract_lines,
     sequence_overlap,
     split_sections,
 )
-from ygo_zero.demos.names import CardNames, normalize, resolve_many_in_pool
-from ygo_zero.demos.schema import ComboLine, Step
+from decklight.demos.names import CardNames, normalize, resolve_many_in_pool
+from decklight.demos.schema import ComboLine, Step
 
 NAMES = CardNames()
 

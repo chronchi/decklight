@@ -31,9 +31,9 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(ROOT / "scripts"))
 
-from ygo_zero.demos.dataset import record_config  # noqa: E402
-from ygo_zero.engine.duel import Engine  # noqa: E402
-from ygo_zero.search.window import WindowSearch  # noqa: E402
+from decklight.demos.dataset import record_config  # noqa: E402
+from decklight.engine.duel import Engine  # noqa: E402
+from decklight.search.window import WindowSearch  # noqa: E402
 
 MUSE, POLICY = 0, 1
 
@@ -95,14 +95,14 @@ def main() -> int:
         return 2
 
     if args.policy == "bc":
-        from ygo_zero.eval.bc_policy import BCPolicy
+        from decklight.eval.bc_policy import BCPolicy
 
         logits = BCPolicy(args.ckpt, args.emb, threads=1, device=args.device, batch=args.batch).logits
     else:
         from gen_search import greedy_logits as logits
     value = None
     if args.value:
-        from ygo_zero.eval.value import ValueNet
+        from decklight.eval.value import ValueNet
 
         value = ValueNet(args.value, args.emb, device=args.device, batch=args.batch).values
     ws = WindowSearch(Engine(), logits, horizon=args.horizon, batch=args.batch, seed=args.seed, value=value,

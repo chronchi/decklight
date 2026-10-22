@@ -49,15 +49,15 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(ROOT / "scripts"))
 
-from ygo_zero.engine.cpp_env import CppEnv  # noqa: E402
-from ygo_zero.engine.duel import DuelConfig, Engine  # noqa: E402
-from ygo_zero.eval.turn1 import (  # noqa: E402
+from decklight.engine.cpp_env import CppEnv  # noqa: E402
+from decklight.engine.duel import DuelConfig, Engine  # noqa: E402
+from decklight.eval.turn1 import (  # noqa: E402
     config_to_dict,
     replay_prefix,
     resolve_decks,
 )
-from ygo_zero.search.play import argmax_select, search_game_gen  # noqa: E402
-from ygo_zero.search.turn1 import _batch, drive_many  # noqa: E402
+from decklight.search.play import argmax_select, search_game_gen  # noqa: E402
+from decklight.search.turn1 import _batch, drive_many  # noqa: E402
 
 from search_match import RouteWindowSearch, tag_game  # noqa: E402  # sharded-driver routing
 
@@ -145,7 +145,7 @@ def slot_candidates(slots: Path, starts: Path, n: int, seed: int, max_p: float, 
 
 def start_state(engine: Engine, row: dict) -> tuple[DuelConfig, CppEnv, dict, int, int]:
     """Replay a starts row's prefix; returns (cfg, env, obs, actor, turn_start)."""
-    from ygo_zero.eval.turn1 import dags_config
+    from decklight.eval.turn1 import dags_config
 
     cfg = dags_config(row)
     env, obs = replay_prefix(engine, cfg, [int(c) for c in row.get("prefix", [])])
@@ -305,7 +305,7 @@ def main(argv: list[str] | None = None) -> None:
     if not 1 <= args.min_wins <= args.games or (args.opp2_ckpt and not 1 <= args.opp2_min_wins <= args.games):
         ap.error("--min-wins / --opp2-min-wins must be in 1..--games")
 
-    from ygo_zero.eval.bc_policy import BCPolicy
+    from decklight.eval.bc_policy import BCPolicy
 
     t0 = time.time()
     engine = Engine()
@@ -332,7 +332,7 @@ def main(argv: list[str] | None = None) -> None:
                              batch=args.batch))
     value = None
     if args.value:
-        from ygo_zero.eval.value import ValueNet
+        from decklight.eval.value import ValueNet
 
         value = ValueNet(args.value, args.emb, device=args.device, batch=args.batch).values
 

@@ -1,4 +1,4 @@
-"""Honest (determinized) search worlds (src/ygo_zero/search/determinize.py).
+"""Honest (determinized) search worlds (src/decklight/search/determinize.py).
 
 Engine only (uniform random over legal options, the search tests' "random-policy games"); a tiny
 d=16 net only where a policy is needed (test 5, as the existing search tests).
@@ -8,10 +8,10 @@ import random
 
 import numpy as np
 
-from ygo_zero.engine import constants as C
-from ygo_zero.engine.cpp_env import CppEnv
-from ygo_zero.engine.duel import DuelConfig
-from ygo_zero.search.determinize import (
+from decklight.engine import constants as C
+from decklight.engine.cpp_env import CppEnv
+from decklight.engine.duel import DuelConfig
+from decklight.search.determinize import (
     Determinizer, SeenTracker, _Deck, find_by_key_rank, key_rank_of_choice,
     obs_equal, prefix_keys_for, root_obs_equal,
 )
@@ -240,8 +240,8 @@ def test_semantic_accepts_more_than_index(engine, decks):
 
 def test_rollouts_worlds_none_unchanged_and_true_world_matches(engine, decks):
     """rollouts_gen(worlds=None) is today's behaviour; worlds=[(true config, true prefix)] scores the same."""
-    from ygo_zero.search.turn1 import drive_many
-    from ygo_zero.search.window import WindowSearch
+    from decklight.search.turn1 import drive_many
+    from decklight.search.window import WindowSearch
 
     cfg = _cfg(decks, 3)
     env, _ = _random_game(engine, cfg, seed=9, max_steps=40)
@@ -286,11 +286,11 @@ def test_search_game_honest_ends_with_det_counters(engine, decks):
     det counters > 0."""
     import torch
 
-    from ygo_zero.model.bc_data import OBS_KEYS
-    from ygo_zero.model.policy import PolicyNet
-    from ygo_zero.search.play import argmax_select, search_game_gen
-    from ygo_zero.search.turn1 import drive_many
-    from ygo_zero.search.window import WindowSearch
+    from decklight.model.bc_data import OBS_KEYS
+    from decklight.model.policy import PolicyNet
+    from decklight.search.play import argmax_select, search_game_gen
+    from decklight.search.turn1 import drive_many
+    from decklight.search.window import WindowSearch
 
     names = sorted(decks)
     codes = sorted({c for n in names for c in list(decks[n].main) + list(decks[n].extra)} - {0})

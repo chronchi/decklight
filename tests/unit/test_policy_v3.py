@@ -1,9 +1,9 @@
 import numpy as np
 import torch
 
-from ygo_zero.engine.actions import Kind
-from ygo_zero.model.policy import PolicyNet
-from ygo_zero.model.policy_v3 import PolicyNetV3, lua_bits, make_policy, phase_index
+from decklight.engine.actions import Kind
+from decklight.model.policy import PolicyNet
+from decklight.model.policy_v3 import PolicyNetV3, lua_bits, make_policy, phase_index
 
 
 def _emb(d=8, n=10):
@@ -129,7 +129,7 @@ def test_make_policy_v1_is_plain_policynet_and_v3_heads(tmp_path):
 
 def test_sentence_attn_chunking_is_exact():
     """Chunked sentence attention (CUDA batch limit, stage-b-20261013-0544) equals one call."""
-    from ygo_zero.model.policy_v3 import SentenceAttn
+    from decklight.model.policy_v3 import SentenceAttn
 
     torch.manual_seed(0)
     sa = SentenceAttn(16, 2, 0.0).eval()

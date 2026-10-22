@@ -5,7 +5,7 @@
 
 Reads every ``games-*.jsonl`` in --games (or a single file), replays each record in the
 Python reference env and writes one JSON line per game (``game_idx``, ``seed``,
-``decks`` plus ``src/ygo_zero/analysis/events.py:events``). Truncated records are
+``decks`` plus ``src/decklight/analysis/events.py:events``). Truncated records are
 skipped (no full trace). Exit 2 when 0 games were processed or any invariant fails.
 """
 
@@ -25,13 +25,13 @@ _ENGINE = None
 
 def _worker_init() -> None:
     global _ENGINE
-    from ygo_zero.engine.duel import Engine
+    from decklight.engine.duel import Engine
 
     _ENGINE = Engine()
 
 
 def _one(payload: str) -> str:
-    from ygo_zero.analysis.events import events
+    from decklight.analysis.events import events
 
     rec = json.loads(payload)
     if rec.get("truncated"):

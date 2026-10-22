@@ -8,8 +8,8 @@ from pathlib import Path
 
 import numpy as np
 
-from ygo_zero.demos.dataset import iter_samples
-from ygo_zero.model.bc_data import history_window
+from decklight.demos.dataset import iter_samples
+from decklight.model.bc_data import history_window
 
 GOLD = Path(__file__).resolve().parents[2] / "data" / "demos" / "gold"
 

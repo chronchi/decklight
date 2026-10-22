@@ -13,9 +13,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tests" / "engine")
 
 from test_cpp_env import lockstep
 
-from ygo_zero.decks import load_ydk
-from ygo_zero.engine.cpp_env import CppEnv
-from ygo_zero.engine.duel import DuelConfig, Engine
+from decklight.decks import load_ydk
+from decklight.engine.cpp_env import CppEnv
+from decklight.engine.duel import DuelConfig, Engine
 
 
 def main() -> None:

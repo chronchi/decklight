@@ -2,7 +2,7 @@
 
 import json
 
-from ygo_zero.model import bc_data as b
+from decklight.model import bc_data as b
 
 
 def test_exclusions_scope_ids_and_bases(tmp_path):

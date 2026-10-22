@@ -25,12 +25,12 @@ from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-from ygo_zero.decks import Deck
-from ygo_zero.demos import llm
-from ygo_zero.demos.names import CardNames
-from ygo_zero.engine import constants as C
-from ygo_zero.engine.cpp_env import CppEnv
-from ygo_zero.engine.duel import DuelConfig, Engine
+from decklight.decks import Deck
+from decklight.demos import llm
+from decklight.demos.names import CardNames
+from decklight.engine import constants as C
+from decklight.engine.cpp_env import CppEnv
+from decklight.engine.duel import DuelConfig, Engine
 
 ROOT = Path(__file__).resolve().parents[1]
 POOL = ROOT / "decks" / "pool"

@@ -26,10 +26,10 @@ def main() -> int:
     ap.add_argument("--out", type=Path, default=None, help="write the review JSON here (default: stdout)")
     a = ap.parse_args()
 
-    from ygo_zero.analysis.review import load_record, review_game
-    from ygo_zero.edopro.product_bot import ProductLauncher
-    from ygo_zero.engine.duel import Engine
-    from ygo_zero.eval.winchance import load_calib
+    from decklight.analysis.review import load_record, review_game
+    from decklight.edopro.product_bot import ProductLauncher
+    from decklight.engine.duel import Engine
+    from decklight.eval.winchance import load_calib
 
     rec, cfg, _hs, _d = load_record(a.record)
     if rec.get("mode") not in (None, "product", "fast"):

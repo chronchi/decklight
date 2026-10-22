@@ -56,7 +56,7 @@ def test_kl_matches_reference_math():
 
 
 def _tiny_net(seed=0):
-    from ygo_zero.model.policy import PolicyNet
+    from decklight.model.policy import PolicyNet
 
     rng = np.random.default_rng(42)
     codes = np.arange(1, 50)
@@ -69,7 +69,7 @@ def _tiny_net(seed=0):
 
 def _tiny_obs(model, batch=8, seed=1):
     """Synthetic obs straight through PolicyNet: random legal masks, random rows."""
-    from ygo_zero.model.bc_data import OBS_KEYS
+    from decklight.model.bc_data import OBS_KEYS
 
     torch.manual_seed(seed)
     shapes = {"cards": (batch, 160, 21), "card_mask": (batch, 160), "global": (batch, 24),

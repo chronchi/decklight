@@ -26,8 +26,8 @@ from pathlib import Path
 import numpy as np
 import torch
 
-from ygo_zero.model.bc_data import OBS_KEYS
-from ygo_zero.model.policy_v3 import make_policy
+from decklight.model.bc_data import OBS_KEYS
+from decklight.model.policy_v3 import make_policy
 
 TURN_BUCKETS = ("1", "2", "3-4", "5-8", "9+")
 

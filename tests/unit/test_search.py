@@ -1,4 +1,4 @@
-"""Turn-1 search teacher (src/ygo_zero/search/turn1.py, scripts/gen_search.py) with the deterministic stand-in policy."""
+"""Turn-1 search teacher (src/decklight/search/turn1.py, scripts/gen_search.py) with the deterministic stand-in policy."""
 
 import importlib.util
 import json
@@ -24,8 +24,8 @@ gen_search = _load("gen_search")
 
 
 def _configs(n: int):
-    from ygo_zero.decks import load_ydk
-    from ygo_zero.engine.duel import DuelConfig
+    from decklight.decks import load_ydk
+    from decklight.engine.duel import DuelConfig
 
     decks = [load_ydk(f) for f in sorted((FIXTURES / "decks").glob("*.ydk"))]
     return [DuelConfig(decks[i % len(decks)], decks[(i + 1) % len(decks)], seed=100 + i) for i in range(n)]
@@ -33,7 +33,7 @@ def _configs(n: int):
 
 def test_search_never_worse_than_its_policy(engine):
     """Rollout improvement: with a deterministic policy, the searched turn ends with a board >= the policy's own."""
-    from ygo_zero.search.turn1 import Turn1Search
+    from decklight.search.turn1 import Turn1Search
 
     s = Turn1Search(engine, gen_search.greedy_logits, k=3)
     for cfg in _configs(4):
@@ -45,7 +45,7 @@ def test_search_never_worse_than_its_policy(engine):
 
 
 def test_k1_is_the_policy(engine):
-    from ygo_zero.search.turn1 import Turn1Search
+    from decklight.search.turn1 import Turn1Search
 
     s = Turn1Search(engine, gen_search.greedy_logits, k=1)
     for cfg in _configs(2):
@@ -55,9 +55,9 @@ def test_k1_is_the_policy(engine):
 
 
 def test_records_replay_and_map_to_search_kind(engine, tmp_path):
-    from ygo_zero.demos.dataset import iter_samples, record_config
-    from ygo_zero.engine.cpp_env import CppEnv
-    from ygo_zero.search.turn1 import board_score
+    from decklight.demos.dataset import iter_samples, record_config
+    from decklight.engine.cpp_env import CppEnv
+    from decklight.search.turn1 import board_score
 
     out = tmp_path / "search"
     old = sys.argv
@@ -87,7 +87,7 @@ def test_records_replay_and_map_to_search_kind(engine, tmp_path):
 
 def test_run_many_matches_one_by_one(engine):
     """The batched driver gives the same results as driving each hand alone (any completion order)."""
-    from ygo_zero.search.turn1 import Turn1Search
+    from decklight.search.turn1 import Turn1Search
 
     s = Turn1Search(engine, gen_search.greedy_logits, k=3, batch=7)
     cfgs = _configs(5)

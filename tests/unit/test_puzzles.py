@@ -3,8 +3,8 @@
 import json
 from pathlib import Path
 
-from ygo_zero.analysis.events import deck_path
-from ygo_zero.analysis.puzzles import (
+from decklight.analysis.events import deck_path
+from decklight.analysis.puzzles import (
     NAIVE_KEEP_MAX,
     count_plays,
     difficulty,
@@ -14,9 +14,9 @@ from ygo_zero.analysis.puzzles import (
     replay_false,
     verify_puzzle,
 )
-from ygo_zero.decks import load_ydk
-from ygo_zero.edopro.product_bot import DriverError
-from ygo_zero.engine.duel import DuelConfig, Engine
+from decklight.decks import load_ydk
+from decklight.edopro.product_bot import DriverError
+from decklight.engine.duel import DuelConfig, Engine
 
 FIXTURE = Path("tests/fixtures/puzzle_game.jsonl")
 
@@ -73,7 +73,7 @@ class _FakeLauncher:
 
 def _fake_parts(engine, rec, puzzle):
     """Decisions + bot choices from a host-space replay of prefix + solution."""
-    from ygo_zero.engine.env import PyEnv
+    from decklight.engine.env import PyEnv
 
     cfg = _cfg(rec)
     env = PyEnv(engine, cfg, auto_single=False)
@@ -135,12 +135,12 @@ def test_n_plays_counting_and_difficulty_buckets():
 
 def _solver_multi(engine, puzzle):
     """Recorded solver multi-option choices in order (what the naive sampler replays)."""
-    from ygo_zero.engine.env import PyEnv
+    from decklight.engine.env import PyEnv
 
     cfg = _cfg(_record())
     # Rebuild from the puzzle's own decks/seed (same as mine_candidates).
-    from ygo_zero.analysis.events import deck_path as _dp
-    from ygo_zero.decks import load_ydk as _ld
+    from decklight.analysis.events import deck_path as _dp
+    from decklight.decks import load_ydk as _ld
 
     decks = [_ld(_dp(d)) for d in puzzle["decks"]]
     cfg = DuelConfig(decks[0], decks[1], seed=puzzle["seed"])

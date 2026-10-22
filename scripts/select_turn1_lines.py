@@ -30,11 +30,11 @@ import numpy as np
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from ygo_zero.demos.game import _opts  # noqa: E402
-from ygo_zero.engine.cpp_env import CppEnv  # noqa: E402
-from ygo_zero.engine.duel import Engine  # noqa: E402
-from ygo_zero.demos.dataset import record_config  # noqa: E402
-from ygo_zero.eval.turn1 import FIELD_LOCS, actor_field_of, config_from_dict, my_field  # noqa: E402
+from decklight.demos.game import _opts  # noqa: E402
+from decklight.engine.cpp_env import CppEnv  # noqa: E402
+from decklight.engine.duel import Engine  # noqa: E402
+from decklight.demos.dataset import record_config  # noqa: E402
+from decklight.eval.turn1 import FIELD_LOCS, actor_field_of, config_from_dict, my_field  # noqa: E402
 
 
 def _turn(obs) -> int:

@@ -14,12 +14,12 @@ from pathlib import Path
 import numpy as np
 import torch
 
-from ygo_zero.decks import load_ydk
-from ygo_zero.engine.cpp_env import VecEnv
-from ygo_zero.model.policy import PolicyNet
-from ygo_zero.rl.league import BASE, GREEDY, SELF, YGO, League, pfsp_weight
-from ygo_zero.rl.ppo import SlotStore, gather
-from ygo_zero.rl.rollout import Collector
+from decklight.decks import load_ydk
+from decklight.engine.cpp_env import VecEnv
+from decklight.model.policy import PolicyNet
+from decklight.rl.league import BASE, GREEDY, SELF, YGO, League, pfsp_weight
+from decklight.rl.ppo import SlotStore, gather
+from decklight.rl.rollout import Collector
 
 ROOT = Path(__file__).resolve().parents[2]
 N_ENVS, ROUNDS = 8, 250  # 2000 episode draws
@@ -156,7 +156,7 @@ def test_probs_cover_fixed_and_greedy():
 
 
 def test_vecenv_ga_pool(engine):
-    from ygo_zero.decks import load_ydk as _load
+    from decklight.decks import load_ydk as _load
 
     decks = [_load(p) for p in sorted((Path(__file__).resolve().parents[1] / "fixtures" / "decks").glob("*.ydk"))]
     n = len(decks)
@@ -182,7 +182,7 @@ def test_vecenv_ga_pool(engine):
 
 def test_vecenv_pool_count(engine):
     """set_pool_count(n): ordinary draws stay in [0, n); no call = old draws."""
-    from ygo_zero.decks import load_ydk as _load
+    from decklight.decks import load_ydk as _load
 
     decks = [_load(p) for p in sorted((Path(__file__).resolve().parents[1] / "fixtures" / "decks").glob("*.ydk"))]
     n = len(decks)
@@ -206,7 +206,7 @@ def test_vecenv_pool_count(engine):
 
 def test_vecenv_ga_mixed(engine):
     """Mixed ga episodes: exactly one seat gauntlet, buf['ga'] 1/2 matches it, ~half each."""
-    from ygo_zero.decks import load_ydk as _load
+    from decklight.decks import load_ydk as _load
 
     decks = [_load(p) for p in sorted((Path(__file__).resolve().parents[1] / "fixtures" / "decks").glob("*.ydk"))]
     n = len(decks)

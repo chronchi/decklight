@@ -24,12 +24,12 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from ygo_zero.decks import Deck, load_ydk
-from ygo_zero.demos.names import normalize
-from ygo_zero.engine import constants as C
-from ygo_zero.engine.actions import Kind
-from ygo_zero.engine.cpp_env import CppEnv
-from ygo_zero.engine.duel import DuelConfig, Engine, Placement
+from decklight.decks import Deck, load_ydk
+from decklight.demos.names import normalize
+from decklight.engine import constants as C
+from decklight.engine.actions import Kind
+from decklight.engine.cpp_env import CppEnv
+from decklight.engine.duel import DuelConfig, Engine, Placement
 
 POOL = ROOT / "decks" / "pool"
 MAX_DECISIONS = 600
@@ -48,7 +48,7 @@ def pool_decks() -> tuple[list[str], set[str]]:
 
 
 def load_names():
-    from ygo_zero.demos.names import CardNames
+    from decklight.demos.names import CardNames
 
     return CardNames()
 
@@ -298,7 +298,7 @@ def play_files(
     out.mkdir(parents=True, exist_ok=True)
     pol = None
     if policy == "bc":
-        from ygo_zero.eval.bc_policy import BCPolicy
+        from decklight.eval.bc_policy import BCPolicy
 
         pol = BCPolicy(ckpt, ROOT / "data/cards/emb/qwen3-0.6b-d512.npz", temperature=1.0, device=device)
     elif policy == "greedy":

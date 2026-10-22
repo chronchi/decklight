@@ -63,9 +63,9 @@ def _boot(diffs: list[float], rng: random.Random) -> tuple[float, float, float]:
 
 
 def main(argv=None) -> int:
-    import ygo_zero.analysis.primer as P
-    from ygo_zero.engine.resources import load_cards
-    from ygo_zero.web.view import DB
+    import decklight.analysis.primer as P
+    from decklight.engine.resources import load_cards
+    from decklight.web.view import DB
 
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("run", type=Path)
@@ -138,8 +138,8 @@ def main(argv=None) -> int:
 
     def deck_hash(name):
         if name not in hash_of_name:
-            from ygo_zero.analysis.events import deck_path
-            from ygo_zero.decks import load_ydk
+            from decklight.analysis.events import deck_path
+            from decklight.decks import load_ydk
 
             hash_of_name[name] = P.hash_of(load_ydk(deck_path(name)))
         return hash_of_name[name]

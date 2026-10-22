@@ -3,18 +3,18 @@
 import json
 from types import SimpleNamespace
 
-from ygo_zero.decks import Deck
-from ygo_zero.demos.names import CardNames
-from ygo_zero.demos.plan import (
+from decklight.decks import Deck
+from decklight.demos.names import CardNames
+from decklight.demos.plan import (
     card_sheet,
     plan_hands,
     plan_prompt,
     repair_prompt,
     sample_hands,
 )
-from ygo_zero.demos.records import make_record
-from ygo_zero.demos.schema import ComboLine, Step
-from ygo_zero.demos.verify import Verdict
+from decklight.demos.records import make_record
+from decklight.demos.schema import ComboLine, Step
+from decklight.demos.verify import Verdict
 
 NAMES = CardNames()
 SAGE, PWWB, BLUE_EYES = 8240199, 63356631, 89631139
@@ -169,7 +169,7 @@ def test_make_record_keys_and_values():
 
 
 def test_plan_prompt_schema_matches_extract():
-    from ygo_zero.demos import extract
+    from decklight.demos import extract
 
     assert "ONLY the cards that THIS step itself puts into" in extract._prompt("t", "x", "d")
     p = plan_prompt("d", "sheet", ["A"], [])

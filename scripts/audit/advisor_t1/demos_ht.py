@@ -5,9 +5,9 @@ from collections import Counter, defaultdict
 from pathlib import Path
 ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT / "src"))
-from ygo_zero.demos.dataset import iter_samples
-from ygo_zero.demos.game import _opts
-from ygo_zero.engine.duel import Engine
+from decklight.demos.dataset import iter_samples
+from decklight.demos.game import _opts
+from decklight.engine.duel import Engine
 HT = {23434538: "MaxxC", 24224830: "CBTG", 14558127: "Ash", 10045474: "Imperm", 97268402: "Veiler", 94145021: "Droll", 59438930: "Ogre", 73642296: "Belle", 44146295: "Mirrorjade"}
 PH = {1: "draw", 2: "standby", 4: "main1", 512: "end"}
 src, nfiles, tmax = sys.argv[1], int(sys.argv[2]), float(sys.argv[3])

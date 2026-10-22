@@ -39,7 +39,7 @@ for src in $SRCS; do
     || { alert "$src: line filter failed: $(tail -1 "$d/filter.txt")"; continue; }
 import json, sys
 from pathlib import Path
-from ygo_zero.model.bc_data import eval_only_decks
+from decklight.model.bc_data import eval_only_decks
 hold, new = eval_only_decks()
 only = None if sys.argv[3] == "none" else set(json.loads(Path(sys.argv[3]).read_text())[sys.argv[4]]["lines"])
 keep, drop = [], 0

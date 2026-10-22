@@ -27,7 +27,7 @@ def _fixture() -> dict:
 
 
 def test_fixture_validates(engine):
-    from ygo_zero.engine.cpp_env import CppEnv
+    from decklight.engine.cpp_env import CppEnv
 
     names = scenarios.load_names()
     sc = _fixture()
@@ -58,9 +58,9 @@ def test_bad_scenarios_fail_with_reason():
 
 
 def test_play_replays_exactly_and_shrinks_decks(engine, tmp_path):
-    from ygo_zero.decks import load_ydk
-    from ygo_zero.demos.dataset import record_config
-    from ygo_zero.engine.cpp_env import CppEnv
+    from decklight.decks import load_ydk
+    from decklight.demos.dataset import record_config
+    from decklight.engine.cpp_env import CppEnv
 
     names = scenarios.load_names()
     out = tmp_path / "games"
@@ -100,7 +100,7 @@ def test_play_replays_exactly_and_shrinks_decks(engine, tmp_path):
 
 
 def test_turn2_first_decision_is_player1_turn2(engine):
-    from ygo_zero.engine.cpp_env import CppEnv
+    from decklight.engine.cpp_env import CppEnv
 
     names = scenarios.load_names()
     sc = _fixture()

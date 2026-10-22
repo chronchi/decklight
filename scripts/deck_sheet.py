@@ -15,11 +15,11 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from ygo_zero.decks import load_ydk
-from ygo_zero.demos.game import _effect_text
-from ygo_zero.demos.names import CardNames
-from ygo_zero.engine import constants as C
-from ygo_zero.engine.resources import load_cards
+from decklight.decks import load_ydk
+from decklight.demos.game import _effect_text
+from decklight.demos.names import CardNames
+from decklight.engine import constants as C
+from decklight.engine.resources import load_cards
 
 _ATTR = {
     C.ATTRIBUTE_EARTH: "EARTH", C.ATTRIBUTE_WATER: "WATER", C.ATTRIBUTE_FIRE: "FIRE",

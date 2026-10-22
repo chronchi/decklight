@@ -4,10 +4,10 @@ import random
 
 import numpy as np
 
-from ygo_zero.engine import responses as R
-from ygo_zero.engine.duel import DuelConfig
-from ygo_zero.engine.env import PyEnv
-from ygo_zero.engine.inverse import MSG_NAMES, choices_for_response, decision_groups
+from decklight.engine import responses as R
+from decklight.engine.duel import DuelConfig
+from decklight.engine.env import PyEnv
+from decklight.engine.inverse import MSG_NAMES, choices_for_response, decision_groups
 
 GAMES = [  # (deck0, deck1, seed): 5 random-policy games across all 4 fixture decks
     ("BlueEyes", "Branded", 1000),

@@ -54,9 +54,9 @@ def main(argv=None) -> int:
     ap.add_argument("--no-score", action="store_true", help="stop after the frequency primer")
     args = ap.parse_args(argv)
 
-    import ygo_zero.analysis.primer as P
-    from ygo_zero.analysis.primer import aggregate
-    from ygo_zero.decks import parse_ydk
+    import decklight.analysis.primer as P
+    from decklight.analysis.primer import aggregate
+    from decklight.decks import parse_ydk
 
     P.MIN_GAMES = 1  # studied lists are served from few games; lookup still uses MIN_GAMES
 
@@ -87,7 +87,7 @@ def main(argv=None) -> int:
         with log_path.open("a", encoding="utf-8") as f:
             f.write(line + "\n")
 
-    from ygo_zero.search.product import resolve_product_paths
+    from decklight.search.product import resolve_product_paths
 
     try:
         ckpt_p, _, _ = resolve_product_paths()
@@ -146,8 +146,8 @@ def main(argv=None) -> int:
         say("STUDY failed: 0 games played")
         return fail("0 games played")
 
-    from ygo_zero.engine.resources import load_cards
-    from ygo_zero.web.view import DB
+    from decklight.engine.resources import load_cards
+    from decklight.web.view import DB
 
     cards, names = load_cards(), DB.names()
     files = sorted(games_out.glob("games-*.jsonl"))

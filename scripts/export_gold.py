@@ -35,13 +35,13 @@ sys.path.insert(0, str(ROOT / "scripts"))
 
 import hand_play
 
-from ygo_zero.demos.dataset import record_config
-from ygo_zero.demos.game import _opts
-from ygo_zero.demos.names import CardNames
-from ygo_zero.engine import constants as C
-from ygo_zero.engine.actions import Kind
-from ygo_zero.engine.cpp_env import CppEnv
-from ygo_zero.engine.duel import Engine
+from decklight.demos.dataset import record_config
+from decklight.demos.game import _opts
+from decklight.demos.names import CardNames
+from decklight.engine import constants as C
+from decklight.engine.actions import Kind
+from decklight.engine.cpp_env import CppEnv
+from decklight.engine.duel import Engine
 
 GOLD = ROOT / "data" / "demos" / "gold"
 _MULTI_MSGS = frozenset(

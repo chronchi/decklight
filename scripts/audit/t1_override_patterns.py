@@ -20,7 +20,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import show_divergence as S
 from search_override_se import gap_se
 
-from ygo_zero.demos.game import _opts
+from decklight.demos.game import _opts
 
 
 def main() -> int:
@@ -29,11 +29,11 @@ def main() -> int:
     ap.add_argument("--z", type=float, default=3.0)
     ap.add_argument("--max-games", type=int, default=0)
     a = ap.parse_args()
-    from ygo_zero.analysis.events import deck_path
-    from ygo_zero.decks import load_ydk
-    from ygo_zero.demos.names import CardNames
-    from ygo_zero.engine.cpp_env import CppEnv
-    from ygo_zero.engine.duel import DuelConfig, Engine
+    from decklight.analysis.events import deck_path
+    from decklight.decks import load_ydk
+    from decklight.demos.names import CardNames
+    from decklight.engine.cpp_env import CppEnv
+    from decklight.engine.duel import DuelConfig, Engine
 
     nn = CardNames().names
     eng = Engine()

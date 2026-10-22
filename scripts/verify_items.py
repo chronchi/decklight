@@ -1,6 +1,6 @@
 """Verify combo-line / turn-plan items on the (vast session) box.
 
-Reads the items jsonl written by `ygo_zero.infra.remote` (the same tuples `plan_lines._verify_job`
+Reads the items jsonl written by `decklight.infra.remote` (the same tuples `plan_lines._verify_job`
 takes, plus {"kind": "plan", ...} dicts for `plan_from_state`), verifies them with `map_timeout`,
 and writes one verdict json per line, in input order.
 
@@ -16,12 +16,12 @@ import json
 import os
 from pathlib import Path
 
-from ygo_zero.decks import Deck
-from ygo_zero.demos.pool import failed_verdict, map_timeout
-from ygo_zero.demos.schema import ComboLine
-from ygo_zero.demos.verify import Verdict, plan_from_state, verify_line
-from ygo_zero.engine.duel import Engine
-from ygo_zero.infra.remote import _config_from_json, _deck_from_json, read_items, verdict_to_json
+from decklight.decks import Deck
+from decklight.demos.pool import failed_verdict, map_timeout
+from decklight.demos.schema import ComboLine
+from decklight.demos.verify import Verdict, plan_from_state, verify_line
+from decklight.engine.duel import Engine
+from decklight.infra.remote import _config_from_json, _deck_from_json, read_items, verdict_to_json
 
 _WORKER_ENGINE: Engine | None = None
 
@@ -78,7 +78,7 @@ def default_jobs() -> int:
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--in", dest="inp", required=True, help="items jsonl (see ygo_zero.infra.remote)")
+    ap.add_argument("--in", dest="inp", required=True, help="items jsonl (see decklight.infra.remote)")
     ap.add_argument("--out", dest="outp", required=True, help="verdict jsonl to write, same order as input")
     ap.add_argument("--timeout", type=float, required=True, help="seconds per item before it is killed")
     ap.add_argument("--jobs", type=int, default=None, help="worker processes (default: cgroup cpu quota)")

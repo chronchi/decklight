@@ -8,7 +8,7 @@ Decks are the report card's base-match sample (scripts/playtest.py: half train,
 half holdout pool decks with verified lines, seeded the same way); every
 ordered deck pair plays `--seeds` seeds twice with S in each seat (seat and
 deck advantages cancel, as in playtest matches). S searches its window and
-own-turn decisions (src/ygo_zero/search/play.py); R plays the raw policy.
+own-turn decisions (src/decklight/search/play.py); R plays the raw policy.
 `<out>/games-<proc>.jsonl` holds one line per game; `--summarize` merges all
 procs into `summary.json` (S win rate with a Wilson 95% CI, per-deck win
 rates, searched decisions per game, override rate, seconds per searched
@@ -50,13 +50,13 @@ sys.path.insert(0, str(ROOT / "scripts"))
 
 from playtest import verified_end_boards  # same deck sample as the report card
 
-from ygo_zero.decks import load_ydk
-from ygo_zero.engine.duel import DuelConfig, Engine
-from ygo_zero.eval.match import ring_pairs, wilson
-from ygo_zero.search.honest import HonestRule
-from ygo_zero.search.play import argmax_select, search_game_gen
-from ygo_zero.search.turn1 import _batch, drive_many
-from ygo_zero.search.window import WindowSearch
+from decklight.decks import load_ydk
+from decklight.engine.duel import DuelConfig, Engine
+from decklight.eval.match import ring_pairs, wilson
+from decklight.search.honest import HonestRule
+from decklight.search.play import argmax_select, search_game_gen
+from decklight.search.turn1 import _batch, drive_many
+from decklight.search.window import WindowSearch
 
 
 def ga_schedule(names: list[str], ga_opps: int, ga_seeds: int, seed0: int = 0) -> list[tuple[int, int, int, int, int]]:
@@ -70,9 +70,9 @@ def ga_schedule(names: list[str], ga_opps: int, ga_seeds: int, seed0: int = 0) -
     return sched
 
 
-# D3: RouteWindowSearch/tag_game/seat_of moved verbatim to src/ygo_zero/search/product.py
+# D3: RouteWindowSearch/tag_game/seat_of moved verbatim to src/decklight/search/product.py
 # (the EDOPro host driver reuses them); search_match behaviour is bit-identical.
-from ygo_zero.search.product import RouteWindowSearch, seat_of, tag_game
+from decklight.search.product import RouteWindowSearch, seat_of, tag_game
 
 
 def sample_decks(n: int, seed: int) -> list[str]:
@@ -345,7 +345,7 @@ def main() -> None:
     PROF = bool(args.prof)
     LAT = bool(args.latency)
 
-    from ygo_zero.eval.bc_policy import BCPolicy
+    from decklight.eval.bc_policy import BCPolicy
 
     t0 = time.time()
     engine = Engine()
@@ -354,7 +354,7 @@ def main() -> None:
     if args.value_priv and not (args.value and args.honest):
         raise SystemExit("--value-priv 1 needs --value <critic.pt> and --honest 1 (it would see the real hidden cards)")
     if args.value:
-        from ygo_zero.eval.value import PrivValueNet, ValueNet
+        from decklight.eval.value import PrivValueNet, ValueNet
 
         vcls = PrivValueNet if args.value_priv else ValueNet
         value = vcls(args.value, args.emb, device=args.device, batch=args.batch).values
@@ -424,7 +424,7 @@ def main() -> None:
         hold = set((ROOT / "decks/pool/HOLDOUT").read_text().split()) | {"kewl-tune"}
     opp = None
     if args.opp == "ygoagent":
-        from ygo_zero.eval.ygoagent import YgoAgentPolicy
+        from decklight.eval.ygoagent import YgoAgentPolicy
 
         opp = YgoAgentPolicy(seed=3)  # as in playtest's --ygoagent match
         gfiles = sorted(args.gauntlet_decks.glob("*.ydk"))
@@ -518,7 +518,7 @@ def main() -> None:
             return lg
 
     elif args.opp == "greedy":
-        from ygo_zero.eval.policies import GreedyPolicy
+        from decklight.eval.policies import GreedyPolicy
 
         opp = GreedyPolicy(seed=3)
     if args.s_seat_only in (0, 1):  # idx stays the full schedule's, so games pair by (decks, seed) with full arms
@@ -705,8 +705,8 @@ def main() -> None:
     def write_teacher_record(idx: int, s_seat: int, seat_decks: list[str], res) -> int:
         """Append one gen_window-format teacher record for S's deck; replay-check it first.
         Returns the label count (non-skip labels == searched S decisions)."""
-        from ygo_zero.demos.dataset import record_config
-        from ygo_zero.engine.cpp_env import CppEnv
+        from decklight.demos.dataset import record_config
+        from decklight.engine.cpp_env import CppEnv
 
         n = len(res.choices)
         if len(res.actors) != n or len(res.decision_turns) != n:

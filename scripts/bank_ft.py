@@ -64,11 +64,11 @@ def split_bank(rows: list[dict], held_frac: float, seed: int) -> tuple[list, lis
 def cmd_train(args) -> None:
     import torch
 
-    from ygo_zero.engine.duel import Engine
-    from ygo_zero.eval.bc_policy import _run_args
-    from ygo_zero.model.policy_v3 import make_policy
-    from ygo_zero.rl.hints import replay_rows
-    from ygo_zero.rl.ppo import masked_log_softmax, model_keys, to_torch
+    from decklight.engine.duel import Engine
+    from decklight.eval.bc_policy import _run_args
+    from decklight.model.policy_v3 import make_policy
+    from decklight.rl.hints import replay_rows
+    from decklight.rl.ppo import masked_log_softmax, model_keys, to_torch
 
     rows = [json.loads(x) for x in args.bank.read_text().splitlines() if x.strip()]
     if not rows:
@@ -164,9 +164,9 @@ def cmd_train(args) -> None:
 def cmd_play(args) -> None:
     from hint_bank import raw_game
 
-    from ygo_zero.engine.duel import Engine
-    from ygo_zero.eval.bc_policy import BCPolicy
-    from ygo_zero.eval.turn1 import config_from_dict
+    from decklight.engine.duel import Engine
+    from decklight.eval.bc_policy import BCPolicy
+    from decklight.eval.turn1 import config_from_dict
 
     split = json.loads((args.out / "split.json").read_text())
     rows = [json.loads(x) for x in Path(split["bank"]).read_text().splitlines() if x.strip()]

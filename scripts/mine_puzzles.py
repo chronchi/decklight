@@ -21,7 +21,7 @@ DEFAULT_DIRS = [
     ROOT / "runs" / "value-p2-20261015-2044" / "hppo-p",
     ROOT / "runs" / "value-p2-20261015-2044" / "hppo-p2",
 ]
-COMMIT_COPY = ROOT / "src" / "ygo_zero" / "web" / "puzzles.json"
+COMMIT_COPY = ROOT / "src" / "decklight" / "web" / "puzzles.json"
 COMMIT_LIMIT = 300 * 1024
 
 
@@ -70,8 +70,8 @@ def read_records(dirs, pattern, max_games):
 
 
 def main(argv=None) -> int:
-    from ygo_zero.analysis import puzzles as P
-    from ygo_zero.engine.duel import Engine
+    from decklight.analysis import puzzles as P
+    from decklight.engine.duel import Engine
 
     args = parse_args(argv)
     recs = read_records(args.games or DEFAULT_DIRS, args.pattern, args.max_games)
@@ -102,7 +102,7 @@ def main(argv=None) -> int:
         ordered = ordered[i::n]
         print(f"shard {i}/{n}: {len(ordered)} candidates", flush=True)
 
-    from ygo_zero.edopro.product_bot import ProductLauncher
+    from decklight.edopro.product_bot import ProductLauncher
 
     launcher = ProductLauncher(device="cpu", fast=args.fast, replay_threads=1)
     verified: list[dict] = []

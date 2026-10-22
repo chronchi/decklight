@@ -51,10 +51,10 @@ def alert(msg: str) -> None:
 def collect(a) -> int:
     import show_divergence as S
 
-    from ygo_zero.demos.game import _opts
-    from ygo_zero.engine.cpp_env import CppEnv
-    from ygo_zero.engine.duel import Engine
-    from ygo_zero.model.bc_data import OBS_KEYS
+    from decklight.demos.game import _opts
+    from decklight.engine.cpp_env import CppEnv
+    from decklight.engine.duel import Engine
+    from decklight.model.bc_data import OBS_KEYS
 
     games = []
     for d in a.games:
@@ -157,7 +157,7 @@ def logreg(X: np.ndarray, y: np.ndarray, groups: np.ndarray, multiclass: bool = 
 def probe(a) -> int:
     import torch
 
-    from ygo_zero.model.policy import PolicyNet
+    from decklight.model.policy import PolicyNet
 
     out = Path(a.out)
     st = load_states(out)
@@ -181,7 +181,7 @@ def probe(a) -> int:
             has_q = any(k.startswith("q_head") for k in sd)
             from train_bc import _run_args
 
-            from ygo_zero.model.policy_v3 import make_policy
+            from decklight.model.policy_v3 import make_policy
 
             ra = _run_args(Path(ckpt))  # a v3 checkpoint (B-v3) needs its own network class
             net = (make_policy(emb, ra, value=has_v, q=has_q) if ra.get("v3")

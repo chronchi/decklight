@@ -19,11 +19,11 @@ from pathlib import Path
 
 import numpy as np
 
-from ygo_zero.decks import load_ydk
-from ygo_zero.engine.cpp_env import VecEnv
-from ygo_zero.engine.duel import Engine
-from ygo_zero.eval.bc_policy import BCPolicy
-from ygo_zero.eval.ygoagent import YgoAgentPolicy
+from decklight.decks import load_ydk
+from decklight.engine.cpp_env import VecEnv
+from decklight.engine.duel import Engine
+from decklight.eval.bc_policy import BCPolicy
+from decklight.eval.ygoagent import YgoAgentPolicy
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -125,7 +125,7 @@ def main() -> None:
 
 
 def compare(args) -> None:
-    from ygo_zero.eval.match import ring_pairs
+    from decklight.eval.match import ring_pairs
 
     files = sorted((args.deck_dir or ROOT / "tests/fixtures/decks").resolve().glob("*.ydk"))
     decks = [load_ydk(f) for f in files]

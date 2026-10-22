@@ -1,9 +1,9 @@
-"""Card-level holdout audit (src/ygo_zero/decks/holdout.py), all on temp dirs."""
+"""Card-level holdout audit (src/decklight/decks/holdout.py), all on temp dirs."""
 
 import json
 from pathlib import Path
 
-from ygo_zero.decks.holdout import (
+from decklight.decks.holdout import (
     card_holdout_codes,
     check_records,
     deck_audit_rows,
@@ -14,7 +14,7 @@ from ygo_zero.decks.holdout import (
     staples,
     training_cards,
 )
-from ygo_zero.decks.ydk import load_ydk
+from decklight.decks.ydk import load_ydk
 
 STAPLE = 90000001
 A_CARD = 90000002

@@ -50,7 +50,7 @@ tick "selfplay $n_sp games ($SPP procs)"
 # eval-only decks must not appear (holdout / newcards / gauntlet stems)
 uv run --no-sync python - "$OUT" <<'EOF' || { alert "eval-only deck in selfplay"; exit 2; }
 import glob, json, sys
-from ygo_zero.model.bc_data import eval_only_decks
+from decklight.model.bc_data import eval_only_decks
 hold, new = eval_only_decks()
 bad = {d for f in glob.glob(f"{sys.argv[1]}/selfplay/p*/*.jsonl") for x in open(f) for d in json.loads(x)["decks"]
        if d in hold or d in new}

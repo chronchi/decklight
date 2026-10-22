@@ -24,9 +24,9 @@ import numpy as np
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from ygo_zero.engine.cpp_env import CppEnv  # noqa: E402
-from ygo_zero.engine.duel import Engine  # noqa: E402
-from ygo_zero.rl import dags  # noqa: E402
+from decklight.engine.cpp_env import CppEnv  # noqa: E402
+from decklight.engine.duel import Engine  # noqa: E402
+from decklight.rl import dags  # noqa: E402
 
 _ENGINE = None
 

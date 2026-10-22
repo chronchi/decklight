@@ -29,8 +29,8 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from ygo_zero.demos import llm
-from ygo_zero.infra import vast
+from decklight.demos import llm
+from decklight.infra import vast
 
 ROOT = Path(__file__).resolve().parents[1]
 RUNS_CACHE = ROOT / "data" / "cache" / "runs"

@@ -13,10 +13,10 @@ from pathlib import Path
 import numpy as np
 from starlette.testclient import TestClient
 
-from ygo_zero.analysis.hints import compute_hint
-from ygo_zero.analysis.review import load_record
-from ygo_zero.engine.env import PyEnv
-from ygo_zero.web.server import create_app
+from decklight.analysis.hints import compute_hint
+from decklight.analysis.review import load_record
+from decklight.engine.env import PyEnv
+from decklight.web.server import create_app
 
 FIXTURE = Path("tests/fixtures/web/mitsurugi-20261016")
 FIXTURES = Path("tests/fixtures/decks")
@@ -154,9 +154,9 @@ def test_hint_cost_cap_fake_launcher(engine):
 def _tiny_forward():
     import torch
 
-    from ygo_zero.decks import load_ydk
-    from ygo_zero.model.bc_data import OBS_KEYS
-    from ygo_zero.model.policy import PolicyNet
+    from decklight.decks import load_ydk
+    from decklight.model.bc_data import OBS_KEYS
+    from decklight.model.policy import PolicyNet
 
     decks = [load_ydk(p) for p in sorted(FIXTURES.glob("*.ydk"))]
     codes = sorted({c for d in decks for c in list(d.main) + list(d.extra)} - {0})
@@ -189,7 +189,7 @@ class _TinyLauncher:
     def start_duel(
         self, engine, config, bot_seat, *, game_seed, ws_seed, human_fn=None, prefix=(), prefix_decisions=None
     ):
-        from ygo_zero.edopro.product_bot import ProductDriver
+        from decklight.edopro.product_bot import ProductDriver
 
         return ProductDriver(
             engine,

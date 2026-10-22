@@ -4,10 +4,10 @@ import importlib.util
 import json
 from pathlib import Path
 
-from ygo_zero.decks import load_ydk
-from ygo_zero.eval.match import play_match
-from ygo_zero.eval.policies import GreedyPolicy, RandomPolicy
-from ygo_zero.rl.evaluate import save_games
+from decklight.decks import load_ydk
+from decklight.eval.match import play_match
+from decklight.eval.policies import GreedyPolicy, RandomPolicy
+from decklight.rl.evaluate import save_games
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -34,7 +34,7 @@ def test_saved_eval_games_pair_and_replay(engine, tmp_path):
         ("abc-dragon.ydk", s, f) for s in range(2) for f in (True, False)}
     assert all(r["decks"][r["a_seat"]] == names[0] for r in rows)  # seat-ordered deck paths
     m = _compare_mod()
-    from ygo_zero.engine.duel import Engine
+    from decklight.engine.duel import Engine
 
     eng = Engine()
     x, y, z = (m.load(tmp_path, t) for t in "xyz")

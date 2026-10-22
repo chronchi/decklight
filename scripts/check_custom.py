@@ -20,11 +20,11 @@ import sqlite3
 import sys
 from pathlib import Path
 
-from ygo_zero.decks import load_ydk
-from ygo_zero.engine.actions import Kind
-from ygo_zero.engine.duel import DuelConfig, Engine
-from ygo_zero.engine.env import PyEnv
-from ygo_zero.engine.resources import default_cdbs, extra_card_dirs
+from decklight.decks import load_ydk
+from decklight.engine.actions import Kind
+from decklight.engine.duel import DuelConfig, Engine
+from decklight.engine.env import PyEnv
+from decklight.engine.resources import default_cdbs, extra_card_dirs
 
 ROOT = Path(__file__).resolve().parents[1]
 LOG_ERROR = 0  # OCG_LOG_TYPE_ERROR (ocgapi_types.h)

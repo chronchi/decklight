@@ -5,9 +5,9 @@ import random
 
 import pytest
 
-from ygo_zero.analysis.events import COUNTERS, events
-from ygo_zero.engine.duel import DuelConfig
-from ygo_zero.engine.env import PyEnv
+from decklight.analysis.events import COUNTERS, events
+from decklight.engine.duel import DuelConfig
+from decklight.engine.env import PyEnv
 
 
 def _play_random(engine, cfg: DuelConfig, seed: int) -> PyEnv:

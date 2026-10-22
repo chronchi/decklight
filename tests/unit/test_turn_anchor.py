@@ -17,7 +17,7 @@ from test_window import _random_games  # noqa: E402
 def test_anchor_arms(engine, tmp_path):
     import json
 
-    from ygo_zero.search.window import WindowSearch
+    from decklight.search.window import WindowSearch
 
     rec = json.loads((_random_games(engine, tmp_path, n=1, max_len=80)).read_text().splitlines()[0])
     k = 40

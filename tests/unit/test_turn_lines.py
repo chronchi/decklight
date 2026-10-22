@@ -10,10 +10,10 @@ import pytest
 
 from test_turn1_lines import _deck_names, _make_ckpts
 
-from ygo_zero.demos.dataset import iter_samples
-from ygo_zero.engine.cpp_env import CppEnv
-from ygo_zero.engine.duel import DuelConfig
-from ygo_zero.eval.turn1 import (
+from decklight.demos.dataset import iter_samples
+from decklight.engine.cpp_env import CppEnv
+from decklight.engine.duel import DuelConfig
+from decklight.eval.turn1 import (
     actor_field_of,
     config_to_dict,
     dags_config,
@@ -48,7 +48,7 @@ def _run_turn1(mod, ck: dict, out: Path, opp: str = "policy") -> int:
 
 
 def _replay_field(engine, row: dict) -> dict:
-    from ygo_zero.demos.dataset import record_config
+    from decklight.demos.dataset import record_config
 
     env = CppEnv(engine, record_config({"config": row["config"]}), row.get("auto_single", True))
     obs = env.reset()
@@ -75,7 +75,7 @@ def test_turn1_active_opponent_rows_replay(engine, tmp_path):
     assert all("v_p0" not in r and "v_actor" not in r for r in rows), "no critic -> no value fields"
     for r in rows:  # the full choices replay to the same actor field in a fresh env
         assert _replay_field(engine, r)["field"] == r["field"], (r["deck"], r["hand"], r["kind"])
-        got = replay_turn(engine, __import__("ygo_zero.demos.dataset", fromlist=["record_config"]).record_config(
+        got = replay_turn(engine, __import__("decklight.demos.dataset", fromlist=["record_config"]).record_config(
             {"config": r["config"]}), [int(c) for c in r["choices"]], int(r["actor"]), int(r["turn_start"]),
             r.get("auto_single", True))
         assert got["field"] == r["field"]
@@ -87,8 +87,8 @@ def test_turn1_active_opponent_rows_replay(engine, tmp_path):
 
 def _play_game(engine, names, seed: int):
     """A short real game with rule-based play; returns (config dict, choices, turns) or None."""
-    from ygo_zero.decks import load_ydk
-    from ygo_zero.demos.game import Responder, _opts
+    from decklight.decks import load_ydk
+    from decklight.demos.game import Responder, _opts
 
     d0, d1 = (load_ydk(FIXTURES / f"{n}.ydk") for n in names[:2])
     cfg = DuelConfig(d0, d1, seed=seed)
@@ -114,7 +114,7 @@ def _play_game(engine, names, seed: int):
 
 
 def _make_starts(engine, tmp_path: Path) -> Path:
-    from ygo_zero.decks import load_ydk
+    from decklight.decks import load_ydk
 
     names = _deck_names()
     recs = []
@@ -224,7 +224,7 @@ def test_score_actor1_view(engine, tmp_path):
     scored = _rows(out)
     assert scored and all(np.isfinite(r["rollout"]) for r in scored)
     # sign check: the board score from player 1's view is the negation of player 0's view
-    from ygo_zero.search.window import position_score
+    from decklight.search.window import position_score
 
     g = np.zeros(24, np.int32)
     g[0], g[1] = 8000, 7000

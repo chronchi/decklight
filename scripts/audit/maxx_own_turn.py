@@ -21,18 +21,18 @@ sys.path.insert(0, str(ROOT / "scripts" / "audit"))
 
 from principles import LOC_HAND, iter_games  # noqa: E402
 
-from ygo_zero.cards.embed import card_texts  # noqa: E402
+from decklight.cards.embed import card_texts  # noqa: E402
 
-from ygo_zero.engine.actions import Kind  # noqa: E402
-from ygo_zero.engine.cpp_env import CppEnv  # noqa: E402
-from ygo_zero.engine.duel import DuelConfig, Engine  # noqa: E402
+from decklight.engine.actions import Kind  # noqa: E402
+from decklight.engine.cpp_env import CppEnv  # noqa: E402
+from decklight.engine.duel import DuelConfig, Engine  # noqa: E402
 
 MAXX = 23434538
 
 
 def iter_records(pattern: str, engine: Engine, max_games: int):
     """Teacher records (`choices` + `config`, already-shuffled mains): every decision, tagged by the record's source."""
-    from ygo_zero.demos.dataset import record_config
+    from decklight.demos.dataset import record_config
 
     files = sorted(glob.glob(pattern, recursive=True))
     random.Random(0).shuffle(files)

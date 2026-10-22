@@ -6,14 +6,14 @@ from pathlib import Path
 import numpy as np
 import torch
 
-from ygo_zero.decks import load_ydk
-from ygo_zero.engine import constants as C
-from ygo_zero.engine.cpp_env import CppEnv, VecEnv
-from ygo_zero.engine.duel import DuelConfig
-from ygo_zero.model.policy import PolicyNet
-from ygo_zero.rl.critic import critic_obs
-from ygo_zero.rl.ppo import SlotStore, gather, to_torch
-from ygo_zero.rl.rollout import Collector
+from decklight.decks import load_ydk
+from decklight.engine import constants as C
+from decklight.engine.cpp_env import CppEnv, VecEnv
+from decklight.engine.duel import DuelConfig
+from decklight.model.policy import PolicyNet
+from decklight.rl.critic import critic_obs
+from decklight.rl.ppo import SlotStore, gather, to_torch
+from decklight.rl.rollout import Collector
 
 FIXTURES = Path(__file__).resolve().parents[1] / "fixtures" / "decks"
 LOC_OF_ID = {1: C.LOCATION_DECK, 2: C.LOCATION_HAND, 3: C.LOCATION_MZONE, 4: C.LOCATION_SZONE,
@@ -111,7 +111,7 @@ def test_critic_obs_reveals_hidden_hand(engine):
 
 
 def test_gather_priv_opt_in():
-    from ygo_zero.rl.ppo import model_keys
+    from decklight.rl.ppo import model_keys
     buf = {k: np.zeros((2, 160), np.int32) for k in model_keys(0, False) if k not in ("cards",)}
     buf["cards"] = np.zeros((2, 160, 21), np.int32)
     buf["card_known"] = np.zeros((2, 160), np.uint8)

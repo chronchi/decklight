@@ -49,7 +49,7 @@ def _obs(rows, msg=16, turn=3, mine_turn=True):
 
 
 def test_tag_ht_window():
-    from ygo_zero.engine.actions import Kind
+    from decklight.engine.actions import Kind
 
     act_hand = [Kind.ACTIVATE, 5, 111, 0, 1, 0, 16, 2, 0, 0]  # loc 2 = hand
     act_field = [Kind.ACTIVATE, 6, 222, 0, 1, 0, 16, 3, 0, 0]  # loc 3 = field
@@ -59,9 +59,9 @@ def test_tag_ht_window():
 
 
 def test_tag_place_and_t1_and_single():
-    from ygo_zero.engine import constants as C
-    from ygo_zero.engine.actions import Kind
-    from ygo_zero.engine.obs import LOC_ID
+    from decklight.engine import constants as C
+    from decklight.engine.actions import Kind
+    from decklight.engine.obs import LOC_ID
 
     assert LOC_ID[C.LOCATION_HAND] == 2
     z1 = [Kind.PLACE, 0, 0, 0, 0, 1, 18, 0, 0, 0]
@@ -76,10 +76,10 @@ def test_tag_place_and_t1_and_single():
 def test_last_samples_all_matches_last_samples(engine, decks):
     """Tiny engine rollouts_gen (no value net): last_samples == last_samples_all[select key],
     and the per-key means match the returned averages."""
-    from ygo_zero.engine.cpp_env import CppEnv
-    from ygo_zero.engine.duel import DuelConfig
-    from ygo_zero.search.turn1 import drive_many
-    from ygo_zero.search.window import WindowSearch
+    from decklight.engine.cpp_env import CppEnv
+    from decklight.engine.duel import DuelConfig
+    from decklight.search.turn1 import drive_many
+    from decklight.search.window import WindowSearch
 
     names = sorted(decks)
     cfg = DuelConfig(decks[names[0]], decks[names[1]], seed=1)

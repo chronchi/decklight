@@ -10,9 +10,9 @@ from pathlib import Path
 
 import numpy as np
 
-from ygo_zero.decks import load_ydk
-from ygo_zero.engine.cpp_env import VecEnv
-from ygo_zero.engine.duel import Engine
+from decklight.decks import load_ydk
+from decklight.engine.cpp_env import VecEnv
+from decklight.engine.duel import Engine
 
 
 def _maybe_window(mode, t, t0, w0, wsteps, window, now):

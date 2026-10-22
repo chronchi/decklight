@@ -1,9 +1,9 @@
 """Merge per-file puzzle shards (scripts/vast_mine_puzzles.sh) into the web's puzzle set.
 
 Reads ``<shards>/*.json`` (lists of verified puzzles), drops duplicate ids, orders them with
-:func:`ygo_zero.analysis.puzzles.select` (variety first: round-robin over deck pair and turn, at most 2 each), keeps
+:func:`decklight.analysis.puzzles.select` (variety first: round-robin over deck pair and turn, at most 2 each), keeps
 ``--target``, and writes ``data/puzzles/puzzles.json`` plus the committed copy without ``solution_steps``
-(``src/ygo_zero/web/puzzles.json``, at most 300 KB). Fails loud: exit 2 on 0 puzzles or an oversized copy.
+(``src/decklight/web/puzzles.json``, at most 300 KB). Fails loud: exit 2 on 0 puzzles or an oversized copy.
 """
 
 from __future__ import annotations
@@ -15,7 +15,7 @@ from collections import Counter
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-COMMIT_COPY = ROOT / "src" / "ygo_zero" / "web" / "puzzles.json"
+COMMIT_COPY = ROOT / "src" / "decklight" / "web" / "puzzles.json"
 COMMIT_LIMIT = 300 * 1024
 
 

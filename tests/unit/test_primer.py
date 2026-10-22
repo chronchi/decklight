@@ -1,6 +1,6 @@
 """Opponent deck primer unit tests (web-ux-plan step 5, item 7)."""
 
-from ygo_zero.analysis.primer import (
+from decklight.analysis.primer import (
     MIN_GAMES,
     OTHER_DECKS_NOTE,
     SIMILAR_MIN,
@@ -9,10 +9,10 @@ from ygo_zero.analysis.primer import (
     hash_of,
     primer_for,
 )
-from ygo_zero.decks import Deck, load_ydk
-from ygo_zero.engine import constants as C
-from ygo_zero.engine.resources import load_cards
-from ygo_zero.web.view import DB
+from decklight.decks import Deck, load_ydk
+from decklight.engine import constants as C
+from decklight.engine.resources import load_cards
+from decklight.web.view import DB
 
 HAND = C.LOCATION_HAND
 DECK_A = "Pachycephalo"
@@ -24,7 +24,7 @@ def _cards_names():
 
 
 def _deck(name):
-    from ygo_zero.analysis.events import deck_path
+    from decklight.analysis.events import deck_path
 
     return load_ydk(deck_path(name))
 
@@ -185,7 +185,7 @@ def test_credit_and_answer_rules():
     opener = store["decks"][ha]["openers"][0]
     assert opener["plays"] == [11] and opener["w_after"] == 55.0
     # primer_for passes the gains through to your_answers hits.
-    from ygo_zero.decks import parse_ydk
+    from decklight.decks import parse_ydk
 
     human_ht = parse_ydk("#main\n99\n!side\n", "human")
     p = primer_for(store, _deck(DECK_A), human_ht)
@@ -301,7 +301,7 @@ def test_hand_trap_seen_and_primer_for():
     bot, human = _deck(DECK_A), _deck(DECK_B)
     assert primer_for(store, bot, human) is None or True  # human may lack the cards
     # A human deck holding the hand trap gets your_answers with hits vs this deck.
-    from ygo_zero.decks import parse_ydk
+    from decklight.decks import parse_ydk
 
     human_ht = parse_ydk(f"#main\n{ht}\n!side\n", "human")
     p = primer_for(store, bot, human_ht)

@@ -46,8 +46,8 @@ def _by_k(recs: list[dict]) -> list[dict]:
 
 
 def test_dagger_stub_games_replay(engine, tmp_path):
-    from ygo_zero.demos.dataset import record_config
-    from ygo_zero.engine.cpp_env import CppEnv, VecEnv
+    from decklight.demos.dataset import record_config
+    from decklight.engine.cpp_env import CppEnv, VecEnv
 
     recs = _records(_generate(tmp_path))
     assert len(recs) == 6
@@ -80,8 +80,8 @@ def test_dagger_stub_games_replay(engine, tmp_path):
 
 
 def test_dagger_samples_train_targets(engine, tmp_path):
-    from ygo_zero.demos.dataset import iter_samples, record_config, sample_kind
-    from ygo_zero.engine.cpp_env import CppEnv
+    from decklight.demos.dataset import iter_samples, record_config, sample_kind
+    from decklight.engine.cpp_env import CppEnv
 
     assert sample_kind("data/demos/dagger/x.jsonl", "pass") == "dagger_pass"
     assert sample_kind("data/demos/dagger/x.jsonl", "gold") == "dagger"
@@ -112,7 +112,7 @@ def test_dagger_samples_train_targets(engine, tmp_path):
 
 
 def test_samples_without_targets_yield_choices(engine, tmp_path):
-    from ygo_zero.demos.dataset import iter_samples
+    from decklight.demos.dataset import iter_samples
 
     out = _generate(tmp_path)
     rec = _records(out)[0]

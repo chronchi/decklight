@@ -25,7 +25,7 @@ def _load(name: str):
 def test_ga_schedule_matches_playtest_ygoagent_deals():
     """ga_schedule = playtest's ygo-agent match deals: ring pairs over the sorted gauntlet
     stems, one seed, both seats (S plays deck di, like A's deck in playtest's per_game)."""
-    from ygo_zero.eval.match import ring_pairs
+    from decklight.eval.match import ring_pairs
 
     search_match = _load("search_match")
     names = sorted(p.stem for p in (ROOT / "decks/gauntlet").glob("*.ydk"))
@@ -44,9 +44,9 @@ def test_ga_schedule_matches_playtest_ygoagent_deals():
 
 def test_seat_of_matches_env_player():
     """seat_of(obs) recovers the acting seat: global[4] is 1 iff seat 0 (first player) acts."""
-    from ygo_zero.decks import load_ydk
-    from ygo_zero.engine.cpp_env import CppEnv
-    from ygo_zero.engine.duel import DuelConfig, Engine
+    from decklight.decks import load_ydk
+    from decklight.engine.cpp_env import CppEnv
+    from decklight.engine.duel import DuelConfig, Engine
 
     search_match = _load("search_match")
     decks = [load_ydk(p) for p in sorted((FIXTURES / "decks").glob("*.ydk"))]
@@ -66,8 +66,8 @@ def test_seat_of_matches_env_player():
 
 def _tiny_ckpt(tmp_path: Path):
     """A real (random) d=16 BC checkpoint + emb over the fixture decks' codes."""
-    from ygo_zero.decks import load_ydk
-    from ygo_zero.model.policy import PolicyNet
+    from decklight.decks import load_ydk
+    from decklight.model.policy import PolicyNet
 
     decks = [load_ydk(p) for p in sorted((FIXTURES / "decks").glob("*.ydk"))]
     codes = sorted({c for d in decks for c in list(d.main) + list(d.extra)} - {0})
@@ -140,7 +140,7 @@ def test_ygoagent_two_games(tmp_path):
 def test_ygoagent_drives_r_and_only_r(tmp_path):
     """R's outer moves are ygo-agent's own picks (replayed with a fresh YgoAgentPolicy, no loop guard), and
     ygo-agent scored exactly the outer R decisions (no rollout leak)."""
-    from ygo_zero.eval import ygoagent as yg
+    from decklight.eval import ygoagent as yg
 
     model = ROOT / "data/models/0546_26550M.tflite"
     codes = ROOT / "data/models/code_list.txt"
@@ -174,9 +174,9 @@ def test_ygoagent_drives_r_and_only_r(tmp_path):
     finally:
         sys.argv = old
         yg.YgoAgentPolicy.__call__ = orig_call
-    from ygo_zero.decks import load_ydk
-    from ygo_zero.engine.cpp_env import CppEnv
-    from ygo_zero.engine.duel import DuelConfig, Engine
+    from decklight.decks import load_ydk
+    from decklight.engine.cpp_env import CppEnv
+    from decklight.engine.duel import DuelConfig, Engine
 
     engine = Engine()
     pol = yg.YgoAgentPolicy(seed=3)

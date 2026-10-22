@@ -15,13 +15,13 @@ import struct
 from collections import Counter
 from pathlib import Path
 
-from ygo_zero.decks import load_ydk
-from ygo_zero.engine import constants as C
-from ygo_zero.engine.duel import DuelConfig
-from ygo_zero.engine.env import PyEnv
-from ygo_zero.engine.obs import Board
-from ygo_zero.engine.query import lps
-from ygo_zero.web.cues import KNOWN_CUE_TYPES, build_cues, cues_for_trace
+from decklight.decks import load_ydk
+from decklight.engine import constants as C
+from decklight.engine.duel import DuelConfig
+from decklight.engine.env import PyEnv
+from decklight.engine.obs import Board
+from decklight.engine.query import lps
+from decklight.web.cues import KNOWN_CUE_TYPES, build_cues, cues_for_trace
 
 FIXTURES = Path("tests/fixtures/decks")
 GAMES = [(1000, "BlueEyes", "SkyStrikerAce"), (1001, "Branded", "SkyStrikerAce"),

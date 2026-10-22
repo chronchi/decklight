@@ -38,11 +38,11 @@ import torch
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from ygo_zero.decks import Deck, load_ydk  # noqa: E402
-from ygo_zero.engine.cpp_env import CppEnv  # noqa: E402
-from ygo_zero.engine.duel import Engine  # noqa: E402
-from ygo_zero.eval.bc_policy import BCPolicy  # noqa: E402
-from ygo_zero.eval.turn1 import (  # noqa: E402
+from decklight.decks import Deck, load_ydk  # noqa: E402
+from decklight.engine.cpp_env import CppEnv  # noqa: E402
+from decklight.engine.duel import Engine  # noqa: E402
+from decklight.eval.bc_policy import BCPolicy  # noqa: E402
+from decklight.eval.turn1 import (  # noqa: E402
     CAP,
     actor_field_of,
     config_to_dict,
@@ -147,7 +147,7 @@ def _start_task(task: dict) -> dict:
             for c in prefix:
                 if ob is None:
                     raise ValueError("game ended inside the prefix")
-                from ygo_zero.demos.game import _opts
+                from decklight.demos.game import _opts
 
                 if not 0 <= int(c) < len(_opts(ob)):
                     raise ValueError(f"prefix choice {c} illegal")

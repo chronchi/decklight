@@ -5,11 +5,11 @@ import random
 import numpy as np
 import pytest
 
-from ygo_zero.decks import Deck
-from ygo_zero.engine import constants as C
-from ygo_zero.engine import obs as O
-from ygo_zero.engine.duel import DuelConfig, Placement
-from ygo_zero.engine.env import PyEnv
+from decklight.decks import Deck
+from decklight.engine import constants as C
+from decklight.engine import obs as O
+from decklight.engine.duel import DuelConfig, Placement
+from decklight.engine.env import PyEnv
 
 
 def _puzzle(decks, seed=1):
@@ -49,7 +49,7 @@ def test_puzzle_board_is_as_placed(engine, decks):
 
 
 def test_puzzle_plays_out_and_matches_cpp(engine, decks):
-    cpp_env = pytest.importorskip("ygo_zero.engine.cpp_env")
+    cpp_env = pytest.importorskip("decklight.engine.cpp_env")
     config = _puzzle(decks, seed=3)
     py, cc = PyEnv(engine, config), cpp_env.CppEnv(engine, config)
     a, b, rng = py.reset(), cc.reset(), random.Random(0)

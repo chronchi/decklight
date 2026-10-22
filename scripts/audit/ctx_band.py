@@ -33,10 +33,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from principles import LOC_HAND, HandTraps  # noqa: E402
 
-from ygo_zero.demos.dataset import iter_samples  # noqa: E402
-from ygo_zero.engine.actions import Kind  # noqa: E402
-from ygo_zero.engine.duel import Engine  # noqa: E402
-from ygo_zero.model.bc_data import base_line  # noqa: E402
+from decklight.demos.dataset import iter_samples  # noqa: E402
+from decklight.engine.actions import Kind  # noqa: E402
+from decklight.engine.duel import Engine  # noqa: E402
+from decklight.model.bc_data import base_line  # noqa: E402
 
 PHASE = {0x1: "draw", 0x2: "standby", 0x4: "main1", 0x8: "battle", 0x10: "battle", 0x20: "battle", 0x40: "battle",
          0x80: "battle", 0x100: "main2", 0x200: "end"}
@@ -63,7 +63,7 @@ def main() -> int:
     ap.add_argument("--out", type=Path, required=True)
     args = ap.parse_args()
 
-    from ygo_zero.eval.bc_policy import BCPolicy
+    from decklight.eval.bc_policy import BCPolicy
 
     pol = BCPolicy(args.ckpt, args.emb, device=args.device, threads=4, loop_guard=False)
     engine = Engine()

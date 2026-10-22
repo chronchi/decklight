@@ -1,6 +1,6 @@
 # Line executor / verifier (ADR 0002 stage 3) — design
 
-Goal: turn an extracted `ComboLine` (`src/ygo_zero/demos/schema.py`) into a **verified env trajectory**, or reject it
+Goal: turn an extracted `ComboLine` (`src/decklight/demos/schema.py`) into a **verified env trajectory**, or reject it
 with a reason. This is the only gate between internet text and training data, so it errs on the side of rejecting.
 
 ## Setup (turn-1 solitaire)

@@ -11,9 +11,9 @@ import numpy as np
 import pytest
 import torch
 
-from ygo_zero.engine.cpp_env import CppEnv
-from ygo_zero.engine.duel import DuelConfig
-from ygo_zero.search.determinize import (
+from decklight.engine.cpp_env import CppEnv
+from decklight.engine.duel import DuelConfig
+from decklight.search.determinize import (
     Determinizer,
     SeenTracker,
     key_rank_of_choice,
@@ -103,8 +103,8 @@ def test_sample_many_none_pool_is_sequential(engine, decks):
 
 
 def _tiny_forward(decks):
-    from ygo_zero.model.bc_data import OBS_KEYS
-    from ygo_zero.model.policy import PolicyNet
+    from decklight.model.bc_data import OBS_KEYS
+    from decklight.model.policy import PolicyNet
 
     names = sorted(decks)
     codes = sorted({c for n in names for c in list(decks[n].main) + list(decks[n].extra)} - {0})
@@ -124,9 +124,9 @@ def _tiny_forward(decks):
 
 
 def _play(engine, decks, forward, pool, game_seed):
-    from ygo_zero.search.play import argmax_select, search_game_gen
-    from ygo_zero.search.turn1 import drive_many
-    from ygo_zero.search.window import WindowSearch
+    from decklight.search.play import argmax_select, search_game_gen
+    from decklight.search.turn1 import drive_many
+    from decklight.search.window import WindowSearch
 
     def never(buf):
         raise AssertionError("unused")
@@ -160,7 +160,7 @@ def test_game_pool3_matches_pool1(engine, decks):
 
 def test_branch_setup_pool_matches_sequential(engine, decks):
     """_branch_envs with a pool returns the same obs list (every array) as the loop."""
-    from ygo_zero.search.window import WindowSearch
+    from decklight.search.window import WindowSearch
 
     cfg = _cfg(decks, 3)
     rng = random.Random(9)

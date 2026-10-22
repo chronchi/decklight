@@ -7,7 +7,7 @@ from test_hint_bank import _load, _starts_file, _tiny_ckpt
 
 def _bank(engine, tmp_path):
     """4 bank rows = 2 starts x 2 actor seats; each row is 8 decisions of option 0 from the deal."""
-    from ygo_zero.eval.turn1 import config_to_dict, dags_config, replay_prefix
+    from decklight.eval.turn1 import config_to_dict, dags_config, replay_prefix
 
     rows = []
     for sid, st in enumerate(json.loads(x) for x in _starts_file(tmp_path).read_text().splitlines()):

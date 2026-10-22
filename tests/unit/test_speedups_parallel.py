@@ -13,7 +13,7 @@ import threading
 import time
 from pathlib import Path
 
-from ygo_zero.demos import llm
+from decklight.demos import llm
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -164,8 +164,8 @@ def _guide(path: Path, n: int = 3) -> None:
 
 
 def test_extract_sections_run_concurrently(tmp_path):
-    from ygo_zero.demos.extract import extract_lines
-    from ygo_zero.demos.names import CardNames
+    from decklight.demos.extract import extract_lines
+    from decklight.demos.names import CardNames
 
     guide = tmp_path / "g.txt"
     _guide(guide)
@@ -194,8 +194,8 @@ def test_extract_sections_run_concurrently(tmp_path):
 
 
 def test_extract_skips_failed_section(tmp_path):
-    from ygo_zero.demos.extract import extract_lines
-    from ygo_zero.demos.names import CardNames
+    from decklight.demos.extract import extract_lines
+    from decklight.demos.names import CardNames
 
     guide = tmp_path / "g.txt"
     _guide(guide)

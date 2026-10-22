@@ -9,10 +9,10 @@ import random
 import time
 from pathlib import Path
 
-from ygo_zero.decks import load_ydk
-from ygo_zero.engine.actions import Kind
-from ygo_zero.engine.duel import DuelConfig, Engine
-from ygo_zero.engine.env import PyEnv
+from decklight.decks import load_ydk
+from decklight.engine.actions import Kind
+from decklight.engine.duel import DuelConfig, Engine
+from decklight.engine.env import PyEnv
 
 
 def main() -> None:

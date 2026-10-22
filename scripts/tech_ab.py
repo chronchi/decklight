@@ -39,10 +39,10 @@ sys.path.insert(0, str(ROOT / "src"))
 
 import deck_ab as _ab
 
-from ygo_zero.decks import load_ydk
-from ygo_zero.engine.duel import Engine
-from ygo_zero.eval.match import play_match
-from ygo_zero.eval.techcards import (
+from decklight.decks import load_ydk
+from decklight.engine.duel import Engine
+from decklight.eval.match import play_match
+from decklight.eval.techcards import (
     HAND_SIZE,
     apply_swaps,
     card_name,

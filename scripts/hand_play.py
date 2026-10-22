@@ -61,8 +61,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from ygo_zero.decks import load_ydk
-from ygo_zero.demos.game import (
+from decklight.decks import load_ydk
+from decklight.demos.game import (
     _effect_text,
     _opts,
     chain_names,
@@ -71,12 +71,12 @@ from ygo_zero.demos.game import (
     hidden_card,
     option_desc,
 )
-from ygo_zero.demos.names import CardNames
-from ygo_zero.engine import constants as C
-from ygo_zero.engine.actions import Kind
-from ygo_zero.engine.cpp_env import CppEnv
-from ygo_zero.engine.duel import DuelConfig, Engine
-from ygo_zero.engine.resources import load_cards
+from decklight.demos.names import CardNames
+from decklight.engine import constants as C
+from decklight.engine.actions import Kind
+from decklight.engine.cpp_env import CppEnv
+from decklight.engine.duel import DuelConfig, Engine
+from decklight.engine.resources import load_cards
 
 WORK = ROOT / "data" / "demos" / "gold_work"
 OUT = ROOT / "data" / "demos" / "gold"
@@ -104,7 +104,7 @@ def _store(game: str, st: dict) -> None:
 
 def _config(st: dict) -> DuelConfig:
     if "config" in st:  # a full config dict (eval.turn1.config_to_dict: DAGS starts, hint-bank rows)
-        from ygo_zero.eval.turn1 import config_from_dict
+        from decklight.eval.turn1 import config_from_dict
 
         return config_from_dict(st["config"])
     # a pool deck name, or a repo path ending in .ydk (e.g. the gauntlet's tests/fixtures/decks/BlueEyes.ydk)

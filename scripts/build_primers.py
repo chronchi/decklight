@@ -1,7 +1,7 @@
 """Build opponent deck primers from bot-vs-bot game records.
 
 Reads ``games-*.jsonl`` files, aggregates per-deck primers (see
-:mod:`ygo_zero.analysis.primer`) and writes ``primers.json``. Fails loud:
+:mod:`decklight.analysis.primer`) and writes ``primers.json``. Fails loud:
 exit 2 when 0 games were read or a record fails to replay.
 """
 
@@ -19,7 +19,7 @@ DEFAULT_DIRS = [
 ]
 # Committed copy: compact gzip without the per-deck file lists (the full store is ~840 KB of JSON for 220 decks;
 # gzip brings it to ~110 KB). The web server reads this file.
-COMMIT_COPY = ROOT / "src" / "ygo_zero" / "web" / "primers.json.gz"
+COMMIT_COPY = ROOT / "src" / "decklight" / "web" / "primers.json.gz"
 COMMIT_LIMIT = 300 * 1024
 
 
@@ -72,7 +72,7 @@ _W: dict = {}
 
 def _summarize_file(job: tuple) -> tuple[str, list[dict], list[str], int, int]:
     """Worker: summarize every record of one games file (engine and card tables built once per process)."""
-    from ygo_zero.analysis.primer import _summarize_game
+    from decklight.analysis.primer import _summarize_game
 
     if len(job) == 2:
         fname, cap = job
@@ -80,15 +80,15 @@ def _summarize_file(job: tuple) -> tuple[str, list[dict], list[str], int, int]:
     else:
         fname, cap, score, device = job
     if not _W:
-        from ygo_zero.engine.duel import Engine
-        from ygo_zero.engine.resources import load_cards
-        from ygo_zero.web.view import DB
+        from decklight.engine.duel import Engine
+        from decklight.engine.resources import load_cards
+        from decklight.web.view import DB
 
         _W.update(engine=Engine(), cards=load_cards(), names=DB.names())
     value_fn = calib = None
     if score and "value_fn" not in _W:
-        from ygo_zero.eval.winchance import load_calib
-        from ygo_zero.search.product import load_value, resolve_product_paths
+        from decklight.eval.winchance import load_calib
+        from decklight.search.product import load_value, resolve_product_paths
 
         _, value_p, emb_p = resolve_product_paths()
         _W["value_fn"] = load_value(value_p, emb_p, device=device)
@@ -124,16 +124,16 @@ def _summarize_file(job: tuple) -> tuple[str, list[dict], list[str], int, int]:
 
 
 def main(argv=None) -> int:
-    import ygo_zero.analysis.primer as P
-    from ygo_zero.analysis.primer import (  # noqa: F401  # noqa: F401
+    import decklight.analysis.primer as P
+    from decklight.analysis.primer import (  # noqa: F401  # noqa: F401
         MIN_GAMES,
         _summarize_game,
         aggregate,
         load_store,
         names_of,
     )
-    from ygo_zero.engine.resources import load_cards
-    from ygo_zero.web.view import DB
+    from decklight.engine.resources import load_cards
+    from decklight.web.view import DB
 
     args = parse_args(argv)
     overrides: dict[str, str] = {}
@@ -239,7 +239,7 @@ def main(argv=None) -> int:
     lobby = sorted((ROOT / "decks" / "pool").glob("*.ydk")) + sorted(
         (ROOT / "decks" / "newcards").glob("*.ydk")
     )
-    from ygo_zero.decks import load_ydk
+    from decklight.decks import load_ydk
 
     covered = uncovered = 0
     for p in lobby:
@@ -307,7 +307,7 @@ def _print_impact_sanity(summaries: list[dict], store: dict, names: dict) -> Non
         W = [float(st["w"]) for st in steps] + [float(s["w_end"])]
         if any(math.isnan(v) or not 0.0 <= v <= 1.0 for v in W):
             continue
-        from ygo_zero.analysis.primer import _play_credits
+        from decklight.analysis.primer import _play_credits
 
         for c in _play_credits(steps, float(s["w_end"])).values():
             play_abs += abs(c)

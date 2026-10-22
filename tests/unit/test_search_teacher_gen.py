@@ -28,7 +28,7 @@ def _load(name: str):
 
 def _pool_emb(tmp_path: Path) -> Path:
     """Random embeddings covering every pool + gauntlet + newcards card code (train deals draw real decks)."""
-    from ygo_zero.decks import load_ydk
+    from decklight.decks import load_ydk
 
     files = [f for d in ("pool", "gauntlet", "newcards") for f in sorted((ROOT / "decks" / d).glob("*.ydk"))]
     codes = sorted({c for f in files for c in list(load_ydk(f).main) + list(load_ydk(f).extra)} - {0})
@@ -45,7 +45,7 @@ def _pool_emb(tmp_path: Path) -> Path:
 def _tiny_ckpt(tmp_path: Path, emb: Path, tag: str, seed: int) -> Path:
     """A confident tiny ckpt (x8 weights): decisive play like a trained policy, so conf-skip
     fires selectively and laptop games stay fast."""
-    from ygo_zero.model.policy import PolicyNet
+    from decklight.model.policy import PolicyNet
 
     net = PolicyNet(dict(np.load(emb)), d=16, layers=1, heads=2, dropout=0.0).eval()
     torch.manual_seed(seed)
@@ -79,9 +79,9 @@ def _run_kind(search_match, tmp_path: Path, emb: Path, ckpt: Path, kind: str, ex
 
 def _check_records(engine, recdir: Path, decks_dir: Path | list[Path]) -> None:
     """Records replay from their own config, load as window/window_own soft-target samples."""
-    from ygo_zero.decks import load_ydk
-    from ygo_zero.demos.dataset import iter_samples, record_config, sample_kind, search_soft_targets
-    from ygo_zero.engine.cpp_env import CppEnv
+    from decklight.decks import load_ydk
+    from decklight.demos.dataset import iter_samples, record_config, sample_kind, search_soft_targets
+    from decklight.engine.cpp_env import CppEnv
 
     recs = [json.loads(x) for f in sorted(recdir.glob("*.jsonl"))
             for x in f.read_text().splitlines() if x.strip()]

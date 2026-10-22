@@ -13,7 +13,7 @@ NAME="$1"; OUT="runs/$NAME"; mkdir -p "$OUT"
 alert() { echo "ALERT $*" | tee -a "$OUT/ALERT"; }
 P=data/cache/P/best.pt; VP=data/cache/value_p/best.pt; GS=${GA_SEEDS:-4}
 [ -s "$P" ] && [ -s "$VP" ] || { alert "missing P or value_p"; exit 3; }
-grep -q "KIND_PASS" src/ygo_zero/eval/loopguard.py || { alert "loopguard fix not in this tree"; exit 3; }
+grep -q "KIND_PASS" src/decklight/eval/loopguard.py || { alert "loopguard fix not in this tree"; exit 3; }
 H="--honest 1 --det-tries 32 --det-fallback skip --horizon 1 --claim 1"
 SM="--k 4 --samples 4 --conf-skip 0.9 --deal-seed0 6000"
 habit() {  # $1 = variant tag

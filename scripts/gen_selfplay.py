@@ -37,9 +37,9 @@ import numpy as np
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from ygo_zero.decks import load_ydk
-from ygo_zero.engine.cpp_env import VecEnv
-from ygo_zero.engine.duel import Engine
+from decklight.decks import load_ydk
+from decklight.engine.cpp_env import VecEnv
+from decklight.engine.duel import Engine
 
 MAX_DECISIONS = 3000
 ALWAYS_EXCLUDED = {"kewl-tune"}
@@ -94,7 +94,7 @@ def make_policies(policy: str, ckpt: Path | None, entries: list[tuple[str, Path 
                   emb: Path, device: str, seed: int, temp: float):
     """Student policy plus one policy object per league entry (separate objects, reused across games)."""
     if policy == "stub":
-        from ygo_zero.eval.policies import GreedyPolicy, RandomPolicy
+        from decklight.eval.policies import GreedyPolicy, RandomPolicy
 
         student = RandomPolicy(seed)
         league_pols = {}
@@ -103,9 +103,9 @@ def make_policies(policy: str, ckpt: Path | None, entries: list[tuple[str, Path 
         return student, league_pols, "stub"
     if ckpt is None:
         raise SystemExit("--ckpt is required unless --policy stub")
-    from ygo_zero.eval.bc_policy import BCPolicy
-    from ygo_zero.eval.policies import GreedyPolicy, RandomPolicy
-    from ygo_zero.eval.ygoagent import YgoAgentPolicy
+    from decklight.eval.bc_policy import BCPolicy
+    from decklight.eval.policies import GreedyPolicy, RandomPolicy
+    from decklight.eval.ygoagent import YgoAgentPolicy
 
     student = BCPolicy(ckpt, emb, temperature=temp, seed=seed, device=device)
     league_pols = {}

@@ -13,19 +13,19 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from ygo_zero.analysis.hints import compute_hint
-from ygo_zero.analysis.review import load_record
-from ygo_zero.engine.duel import Engine
-from ygo_zero.engine.env import PyEnv
-from ygo_zero.eval.winchance import load_calib
+from decklight.analysis.hints import compute_hint
+from decklight.analysis.review import load_record
+from decklight.engine.duel import Engine
+from decklight.engine.env import PyEnv
+from decklight.eval.winchance import load_calib
 
 FIXTURE = ROOT / "tests" / "fixtures" / "web" / "mitsurugi-20261016"
 BUDGET_MS = 3000.0
 
 
 def main() -> int:
-    from ygo_zero.edopro.product_bot import ProductLauncher
-    from ygo_zero.search.product import PRODUCT_CKPT, PRODUCT_VALUE, resolve_product_paths
+    from decklight.edopro.product_bot import ProductLauncher
+    from decklight.search.product import PRODUCT_CKPT, PRODUCT_VALUE, resolve_product_paths
 
     ckpt_p, value_p, _emb_p = resolve_product_paths()
     assert ckpt_p == PRODUCT_CKPT and value_p == PRODUCT_VALUE, (ckpt_p, value_p)

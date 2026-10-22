@@ -32,11 +32,11 @@ sys.path.insert(0, str(ROOT / "scripts" / "audit"))
 
 from principles import LOC_HAND  # noqa: E402
 
-from ygo_zero.engine.actions import Kind  # noqa: E402
-from ygo_zero.eval.loopguard import state_key  # noqa: E402
-from ygo_zero.engine.cpp_env import CppEnv  # noqa: E402
-from ygo_zero.engine.duel import DuelConfig, Engine  # noqa: E402
-from ygo_zero.model.bc_data import OBS_KEYS  # noqa: E402
+from decklight.engine.actions import Kind  # noqa: E402
+from decklight.eval.loopguard import state_key  # noqa: E402
+from decklight.engine.cpp_env import CppEnv  # noqa: E402
+from decklight.engine.duel import DuelConfig, Engine  # noqa: E402
+from decklight.model.bc_data import OBS_KEYS  # noqa: E402
 
 # v3 / --known checkpoints also read these (CppEnv obs carry them)
 POL_KEYS = (*OBS_KEYS, "hist_long", "hist_long_mask", "card_known", "known_code")
@@ -46,7 +46,7 @@ MAXX = 23434538
 
 def game_iter(dirs: list[Path], engine: Engine, seat: str, max_games: int):
     """(game id, player, obs, choice) for one seat of search_match games (s = our pilot, ya = the other seat)."""
-    from ygo_zero.decks import load_ydk
+    from decklight.decks import load_ydk
 
     rows = [(f.name, x) for d in dirs for f in sorted(d.glob("games-*.jsonl")) for x in f.read_text().splitlines()]
     random.Random(0).shuffle(rows)
@@ -70,7 +70,7 @@ def game_iter(dirs: list[Path], engine: Engine, seat: str, max_games: int):
 
 def record_iter(pattern: str, engine: Engine, max_games: int):
     """Teacher records (ygo-agent vs ygo-agent): both players' decisions; game id tagged sampled / argmax."""
-    from ygo_zero.demos.dataset import record_config
+    from decklight.demos.dataset import record_config
 
     files = sorted(glob.glob(pattern, recursive=True))
     random.Random(0).shuffle(files)
@@ -109,7 +109,7 @@ def main() -> int:
     engine = Engine()
     pol = None
     if a.ckpt:
-        from ygo_zero.eval.bc_policy import BCPolicy
+        from decklight.eval.bc_policy import BCPolicy
 
         pol = BCPolicy(a.ckpt, a.emb, threads=1, loop_guard=False)
     src = record_iter(a.records, engine, a.max_games) if a.records else game_iter(a.games, engine, a.seat, a.max_games)

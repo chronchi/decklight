@@ -1,4 +1,4 @@
-// pybind11 module `ygo_zero._ygoenv`. Thin: the Python wrapper is src/ygo_zero/engine/cpp_env.py.
+// pybind11 module `decklight._ygoenv`. Thin: the Python wrapper is src/decklight/engine/cpp_env.py.
 #include <pybind11/numpy.h>
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>

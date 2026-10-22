@@ -68,7 +68,7 @@ def test_different_decks_report_shape(tmp_path, capsys):
 
 def test_resequence_contract_records_not_asserts(tmp_path, capsys):
     """Same multiset, different card order: record whether games are identical (no assert either way)."""
-    from ygo_zero.decks import load_ydk
+    from decklight.decks import load_ydk
 
     mod = _mod()
     d = load_ydk(FIX / "BlueEyes.ydk")
@@ -91,7 +91,7 @@ def test_resequence_contract_records_not_asserts(tmp_path, capsys):
 
 def test_duplicate_copies_play_and_pair(tmp_path, capsys):
     """3 copies of a card vs 2 copies + 1 other card: both legal, every game pairs."""
-    from ygo_zero.decks import load_ydk
+    from decklight.decks import load_ydk
 
     mod = _mod()
     d = load_ydk(FIX / "BlueEyes.ydk")

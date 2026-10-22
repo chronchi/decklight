@@ -32,15 +32,15 @@ import numpy as np
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "src"))
 
-from ygo_zero.engine import constants as C
-from ygo_zero.engine.actions import Kind
-from ygo_zero.engine.cpp_env import CppEnv
-from ygo_zero.engine.duel import DuelConfig, Engine
-from ygo_zero.engine.obs import LOC_ID
-from ygo_zero.search.determinize import Determinizer, SeenTracker, key_rank_of_choice
-from ygo_zero.search.honest import paired_gap
-from ygo_zero.search.turn1 import _batch, _masked, drive_many
-from ygo_zero.search.window import WindowSearch
+from decklight.engine import constants as C
+from decklight.engine.actions import Kind
+from decklight.engine.cpp_env import CppEnv
+from decklight.engine.duel import DuelConfig, Engine
+from decklight.engine.obs import LOC_ID
+from decklight.search.determinize import Determinizer, SeenTracker, key_rank_of_choice
+from decklight.search.honest import paired_gap
+from decklight.search.turn1 import _batch, _masked, drive_many
+from decklight.search.window import WindowSearch
 
 CATS = ("ht", "place", "t1", "any")
 _HAND = LOC_ID[C.LOCATION_HAND]
@@ -82,8 +82,8 @@ def load_games(games_dir: Path) -> list[dict]:
 
 def pass1(engine, recs: list[dict], seed: int, n_per: int):
     """Replay every game; return (sampled decisions, stats dict, n_games)."""
-    from ygo_zero.analysis.events import deck_path
-    from ygo_zero.decks import load_ydk
+    from decklight.analysis.events import deck_path
+    from decklight.decks import load_ydk
 
     per_game: list[dict] = []  # {game_idx, k, tags, actor, turn, deck, n_opts, played}
     cat_n: Counter = Counter()
@@ -493,10 +493,10 @@ def main() -> None:
 
     if args.ckpt is None or args.value is None:
         fail("pass 2 needs --ckpt and --value")
-    from ygo_zero.analysis.events import deck_path
-    from ygo_zero.decks import load_ydk
-    from ygo_zero.eval.bc_policy import BCPolicy
-    from ygo_zero.eval.value import ValueNet
+    from decklight.analysis.events import deck_path
+    from decklight.decks import load_ydk
+    from decklight.eval.bc_policy import BCPolicy
+    from decklight.eval.value import ValueNet
 
     mine = sampled[args.proc :: args.nproc]
     pol = BCPolicy(args.ckpt, args.emb, threads=1, device=args.device, batch=args.batch)

@@ -13,11 +13,11 @@ produced it. Win rates are for our seat; 95% confidence intervals are in bracket
   human feedback games are the next step.
 
 ## The product today
-**Decklight = policy P + value net value_p2 + honest search with the honest override (`--ho`).**
+**decklight = policy P + value net value_p2 + honest search with the honest override (`--ho`).**
 
 | | vs ygo-agent | n | run |
 |---|---|---|---|
-| **Decklight (P + value_p2 + search + ho)** | **0.623** [0.598, 0.647] | 1,488 | `full-p-ho-20261021-1204` |
+| **decklight (P + value_p2 + search + ho)** | **0.623** [0.598, 0.647] | 1,488 | `full-p-ho-20261021-1204` |
 | same without the override rule | 0.629 [0.604, 0.653] | 1,488 | `value-p2-20261015-2044` |
 | P alone (no search) | 0.487 [0.456, 0.518] | 992 | `guardfix-20261014-1704` |
 

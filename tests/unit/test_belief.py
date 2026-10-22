@@ -88,7 +88,7 @@ def test_belief_shards_labels_match_priv(engine, tmp_path):
 
 
 def _tiny_init(tmp_path: Path, emb: Path) -> Path:
-    from ygo_zero.model.policy import PolicyNet
+    from decklight.model.policy import PolicyNet
 
     torch.manual_seed(0)
     net = PolicyNet(dict(np.load(emb)), d=16, layers=1, heads=2, dropout=0.0)
@@ -101,8 +101,8 @@ def _tiny_init(tmp_path: Path, emb: Path) -> Path:
 
 
 def test_init_trunk_widens_and_zeroes(tmp_path):
-    from ygo_zero.model.belief import BeliefNet, init_trunk
-    from ygo_zero.model.policy import PolicyNet
+    from decklight.model.belief import BeliefNet, init_trunk
+    from decklight.model.policy import PolicyNet
 
     emb_p = tmp_path / "emb.npz"
     _tiny_emb(emb_p)

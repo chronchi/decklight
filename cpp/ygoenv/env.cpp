@@ -1,4 +1,4 @@
-// Port of src/ygo_zero/engine/{obs,env}.py.
+// Port of src/decklight/engine/{obs,env}.py.
 #include <algorithm>
 #include <chrono>
 #include <cstdio>

@@ -13,7 +13,7 @@ the gate uses the mean held-out ECE/Brier change per bucket. Decisions within
 a game are correlated, so one split is too noisy to trust. The stored map is
 fit on 100% of the games once the gate passes.
 
-Writes ``src/ygo_zero/web/winchance_calib.json`` (committed) and writes the
+Writes ``src/decklight/web/winchance_calib.json`` (committed) and writes the
 report fresh to ``docs/annotations/2026-10-16-hppo-p2/winchance-calibration.md``
 (one report per run, never appended).
 
@@ -43,7 +43,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(ROOT / "scripts"))
 
-from ygo_zero.eval import winchance as W
+from decklight.eval import winchance as W
 
 
 def fail(msg: str) -> NoReturn:
@@ -56,7 +56,7 @@ def main() -> int:
     ap.add_argument("--score-dir", type=Path, default=ROOT / "runs" / "score-20261016-1001")
     ap.add_argument("--src", type=Path, default=ROOT / "runs" / "value-p2-20261015-2044")
     ap.add_argument("--arms", nargs="+", default=["hppo-p", "hppo-p2"])
-    ap.add_argument("--out", type=Path, default=ROOT / "src" / "ygo_zero" / "web" / "winchance_calib.json")
+    ap.add_argument("--out", type=Path, default=ROOT / "src" / "decklight" / "web" / "winchance_calib.json")
     ap.add_argument("--report", type=Path,
                     default=ROOT / "docs" / "annotations" / "2026-10-16-hppo-p2" / "winchance-calibration.md")
     ap.add_argument("--seed", type=int, default=0)

@@ -33,7 +33,7 @@ from pathlib import Path
 
 import numpy as np
 
-from ygo_zero.model.bc_data import KNOWN_KEYS, OBS_KEYS
+from decklight.model.bc_data import KNOWN_KEYS, OBS_KEYS
 
 MAX_CAND = 64
 LOC_HAND, LOC_MZONE, LOC_SZONE, LOC_EXTRA = 2, 3, 4, 7
@@ -42,7 +42,7 @@ _ENGINE = None
 
 def _init() -> None:
     global _ENGINE
-    from ygo_zero.engine.duel import Engine
+    from decklight.engine.duel import Engine
 
     _ENGINE = Engine()
 
@@ -110,8 +110,8 @@ def belief_target(obs: dict, opp_main: list[int]) -> tuple[np.ndarray, np.ndarra
 
 
 def _shard_one(job: tuple) -> tuple[str, int, int, int]:
-    from ygo_zero.demos.dataset import record_config
-    from ygo_zero.engine.cpp_env import CppEnv
+    from decklight.demos.dataset import record_config
+    from decklight.engine.cpp_env import CppEnv
 
     src_file, out_file, src_tag, rec_ids, game_ids, game_strs, stride, hist = job
     recs = [json.loads(line) for line in Path(src_file).read_text().splitlines() if line.strip()]

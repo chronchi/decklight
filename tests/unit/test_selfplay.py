@@ -49,8 +49,8 @@ def _records(out: Path) -> list[dict]:
 
 
 def test_selfplay_stub_games_replay(engine, tmp_path):
-    from ygo_zero.demos.dataset import record_config
-    from ygo_zero.engine.cpp_env import CppEnv, VecEnv
+    from decklight.demos.dataset import record_config
+    from decklight.engine.cpp_env import CppEnv, VecEnv
 
     out = _generate(tmp_path)
     recs = _records(out)

@@ -5,7 +5,7 @@ import sys
 import time
 from pathlib import Path
 
-from ygo_zero.rl.evaluate import AsyncEvaluator, format_eval_line
+from decklight.rl.evaluate import AsyncEvaluator, format_eval_line
 
 
 def _write_cmd(evals: Path, it: int, sleep: float = 0.0) -> list[str]:

@@ -18,8 +18,8 @@ sys.path.insert(0, str(ROOT / "scripts"))
 
 from render_games import decisions_lines
 
-from ygo_zero.demos.names import CardNames
-from ygo_zero.engine.duel import Engine
+from decklight.demos.names import CardNames
+from decklight.engine.duel import Engine
 
 LINE = re.compile(r"\[(\d+)\] T(\d+) P(\d) CHAIN (\S+) (.*?) '.*/(\d+)$")
 

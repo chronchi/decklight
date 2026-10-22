@@ -1,6 +1,6 @@
 # Action spec (v1)
 
-Status: v1, 2026-10-01. Reference implementation: `src/ygo_zero/engine/actions.py`. The C++ env must produce
+Status: v1, 2026-10-01. Reference implementation: `src/decklight/engine/actions.py`. The C++ env must produce
 the same option lists in the same order, and the same core responses.
 
 Every decision is a **choice of one option** from a list of legal options (≤ MAX_OPTIONS = 64). Core
@@ -99,5 +99,5 @@ it. Measured rate: see NOTEBOOK (target: never in the deck pool).
 ## Replays
 
 An env game is reproduced by (DuelConfig, env spec version, `auto_single`, list of chosen option indices;
-automatic steps are not in the list). Reference: `PyEnv.replay` in `src/ygo_zero/engine/env.py`. Option lists
+automatic steps are not in the list). Reference: `PyEnv.replay` in `src/decklight/engine/env.py`. Option lists
 are deterministic given the core state, so replaying the indices rebuilds every observation.

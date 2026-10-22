@@ -5,13 +5,13 @@ import json
 import sys
 from pathlib import Path
 
-from ygo_zero.demos.dataset import iter_samples, sample_kind
-from ygo_zero.demos.game import legal_actions
-from ygo_zero.demos.names import CardNames
-from ygo_zero.demos.plan import card_sheet
-from ygo_zero.engine import constants as C
-from ygo_zero.engine.cpp_env import CppEnv
-from ygo_zero.engine.duel import DuelConfig
+from decklight.demos.dataset import iter_samples, sample_kind
+from decklight.demos.game import legal_actions
+from decklight.demos.names import CardNames
+from decklight.demos.plan import card_sheet
+from decklight.engine import constants as C
+from decklight.engine.cpp_env import CppEnv
+from decklight.engine.duel import DuelConfig
 
 ROOT = Path(__file__).resolve().parents[2]
 FIXTURES = Path(__file__).resolve().parents[1] / "fixtures" / "decks"

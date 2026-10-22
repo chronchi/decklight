@@ -42,8 +42,8 @@ sys.path.insert(0, str(ROOT / "scripts"))
 import deck_sheet
 import hand_play
 
-from ygo_zero.demos.names import CardNames
-from ygo_zero.engine.duel import Engine
+from decklight.demos.names import CardNames
+from decklight.engine.duel import Engine
 
 BRIEFS = ROOT / "data" / "cache" / "briefs"
 RUNS = BRIEFS / "runs.tsv"

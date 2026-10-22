@@ -4,9 +4,9 @@ back the v1 32-entry history window reaches. Usage: taskset -c 0-3 uv run python
 """
 import json, glob, random, sys
 import numpy as np
-from ygo_zero.engine.duel import Engine
-from ygo_zero.engine.cpp_env import CppEnv
-from ygo_zero.demos.dataset import record_config
+from decklight.engine.duel import Engine
+from decklight.engine.cpp_env import CppEnv
+from decklight.demos.dataset import record_config
 random.seed(0)
 files = sorted(glob.glob("data/demos/sw-t1/*.jsonl"))
 recs = []

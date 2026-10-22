@@ -24,13 +24,13 @@ sys.path.insert(0, str(ROOT / "scripts"))
 
 import hand_play as H
 
-from ygo_zero.decks import load_ydk
-from ygo_zero.demos.game import _opts, hidden_card, option_desc
-from ygo_zero.demos.names import CardNames
-from ygo_zero.engine import constants as C
-from ygo_zero.engine.actions import Kind
-from ygo_zero.engine.cpp_env import CppEnv
-from ygo_zero.engine.duel import DuelConfig, Engine
+from decklight.decks import load_ydk
+from decklight.demos.game import _opts, hidden_card, option_desc
+from decklight.demos.names import CardNames
+from decklight.engine import constants as C
+from decklight.engine.actions import Kind
+from decklight.engine.cpp_env import CppEnv
+from decklight.engine.duel import DuelConfig, Engine
 
 VERB = {
     Kind.SUMMON: "Normal Summons", Kind.SPSUMMON: "Special Summons", Kind.REPOS: "changes the position of",

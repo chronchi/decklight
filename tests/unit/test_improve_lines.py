@@ -10,11 +10,11 @@ import sys
 from pathlib import Path
 from types import SimpleNamespace
 
-from ygo_zero.decks import Deck
-from ygo_zero.demos.names import CardNames
-from ygo_zero.demos.plan import compact_line_json, improve_prompt
-from ygo_zero.demos.schema import ComboLine
-from ygo_zero.demos.verify import Verdict
+from decklight.decks import Deck
+from decklight.demos.names import CardNames
+from decklight.demos.plan import compact_line_json, improve_prompt
+from decklight.demos.schema import ComboLine
+from decklight.demos.verify import Verdict
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -50,7 +50,7 @@ def _old(id_: str, end: list[str], steps: int = 2) -> ComboLine:
         end_board=list(end),
         going="first",
     )
-    from ygo_zero.demos.schema import Step
+    from decklight.demos.schema import Step
 
     line.steps = [
         Step(i=j, action="normal_summon" if j == 0 else "activate",

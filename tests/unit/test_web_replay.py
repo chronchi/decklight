@@ -3,9 +3,9 @@
 import json
 from pathlib import Path
 
-from ygo_zero.decks import load_ydk
-from ygo_zero.engine.duel import DuelConfig
-from ygo_zero.web.replay import replay_frames
+from decklight.decks import load_ydk
+from decklight.engine.duel import DuelConfig
+from decklight.web.replay import replay_frames
 
 FIXTURE = Path("tests/fixtures/web/mitsurugi-20261016")
 

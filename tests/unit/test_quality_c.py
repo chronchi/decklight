@@ -22,7 +22,7 @@ def _load(name: str):
 
 _judge = _load("judge_games")
 
-from ygo_zero.demos import dataset as _ds
+from decklight.demos import dataset as _ds
 
 
 def _obs():
@@ -157,8 +157,8 @@ def test_parse_judgement_valid_fenced_and_garbage():
     reason="game record absent (data/ is gitignored)",
 )
 def test_narrative_on_tiny_real_record():
-    from ygo_zero.demos.names import CardNames
-    from ygo_zero.engine.duel import Engine
+    from decklight.demos.names import CardNames
+    from decklight.engine.duel import Engine
 
     rec = json.loads((ROOT / "data/demos/games/blue-eyes-vs-altergeist.jsonl").read_text().splitlines()[0])
     for k in ("choices", "labels", "actors", "turns"):

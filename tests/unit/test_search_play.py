@@ -1,4 +1,4 @@
-"""Live search match (src/ygo_zero/search/play.py, scripts/search_match.py --summarize) over a tiny PolicyNet."""
+"""Live search match (src/decklight/search/play.py, scripts/search_match.py --summarize) over a tiny PolicyNet."""
 
 import importlib.util
 import json
@@ -24,9 +24,9 @@ def _load(name: str):
 
 def _tiny_forward():
     """A tiny d=16 PolicyNet on synthetic embeddings (as the search/RL tests do), as a batched logits fn."""
-    from ygo_zero.decks import load_ydk
-    from ygo_zero.model.bc_data import OBS_KEYS
-    from ygo_zero.model.policy import PolicyNet
+    from decklight.decks import load_ydk
+    from decklight.model.bc_data import OBS_KEYS
+    from decklight.model.policy import PolicyNet
 
     decks = [load_ydk(p) for p in sorted((FIXTURES / "decks").glob("*.ydk"))]
     codes = sorted({c for d in decks for c in list(d.main) + list(d.extra)} - {0})
@@ -46,17 +46,17 @@ def _tiny_forward():
 
 
 def _cfg():
-    from ygo_zero.decks import load_ydk
-    from ygo_zero.engine.duel import DuelConfig
+    from decklight.decks import load_ydk
+    from decklight.engine.duel import DuelConfig
 
     decks = [load_ydk(p) for p in sorted((FIXTURES / "decks").glob("*.ydk"))]
     return DuelConfig(decks[2], decks[3], seed=8)
 
 
 def _play(engine, forward, **kw):
-    from ygo_zero.search.play import argmax_select, search_game_gen
-    from ygo_zero.search.turn1 import drive_many
-    from ygo_zero.search.window import WindowSearch
+    from decklight.search.play import argmax_select, search_game_gen
+    from decklight.search.turn1 import drive_many
+    from decklight.search.window import WindowSearch
 
     def never(buf):
         raise AssertionError("unused")
@@ -71,7 +71,7 @@ def _play(engine, forward, **kw):
 def test_full_game_searches_and_replays(engine):
     """One live game under drive_many: it ends, S searches >= 1 decision, and the choice list
     replays to the same winner on a fresh env."""
-    from ygo_zero.engine.cpp_env import CppEnv
+    from decklight.engine.cpp_env import CppEnv
 
     res, cfg = _play(engine, _tiny_forward(), conf_skip=1.01, own_frac=1.0)
     assert not res.truncated
@@ -89,10 +89,10 @@ def test_full_game_searches_and_replays(engine):
 
 def test_conf_skip_gates_search(engine):
     """conf_skip=0.0 searches nothing; conf_skip=1.01 searches every eligible S decision."""
-    from ygo_zero.engine.cpp_env import CppEnv
-    from ygo_zero.eval.loopguard import LoopGuard
-    from ygo_zero.search.turn1 import _masked
-    from ygo_zero.search.window import WindowSearch, is_window
+    from decklight.engine.cpp_env import CppEnv
+    from decklight.eval.loopguard import LoopGuard
+    from decklight.search.turn1 import _masked
+    from decklight.search.window import WindowSearch, is_window
 
     forward = _tiny_forward()
     res0, _ = _play(engine, forward, conf_skip=0.0, own_frac=1.0)
@@ -206,8 +206,8 @@ def test_guard_modes_validate_and_play(engine):
 
 def _tiny_critic(tmp_path, priv=True):
     """A tiny d=16 privileged critic checkpoint (known + value head) with train_rl-style metrics args."""
-    from ygo_zero.decks import load_ydk
-    from ygo_zero.model.policy import PolicyNet
+    from decklight.decks import load_ydk
+    from decklight.model.policy import PolicyNet
 
     decks = [load_ydk(p) for p in sorted((FIXTURES / "decks").glob("*.ydk"))]
     codes = sorted({c for d in decks for c in list(d.main) + list(d.extra)} - {0})
@@ -229,10 +229,10 @@ def _tiny_critic(tmp_path, priv=True):
 def test_priv_value_scores_sampled_worlds(engine, tmp_path):
     """Honest search with the privileged critic as leaf value: leaf obs carry priv_code (sampled world's hidden
     cards), the critic reads it (values move when it is zeroed), and the game ends."""
-    from ygo_zero.eval.value import PrivValueNet
-    from ygo_zero.search.play import argmax_select, search_game_gen
-    from ygo_zero.search.turn1 import drive_many
-    from ygo_zero.search.window import WindowSearch
+    from decklight.eval.value import PrivValueNet
+    from decklight.search.play import argmax_select, search_game_gen
+    from decklight.search.turn1 import drive_many
+    from decklight.search.window import WindowSearch
 
     ckpt, emb = _tiny_critic(tmp_path)
     pv = PrivValueNet(ckpt, emb)
@@ -259,7 +259,7 @@ def test_priv_value_scores_sampled_worlds(engine, tmp_path):
 
 
 def test_priv_value_rejects_non_priv_ckpt(tmp_path):
-    from ygo_zero.eval.value import PrivValueNet
+    from decklight.eval.value import PrivValueNet
 
     ckpt, emb = _tiny_critic(tmp_path, priv=False)
     with pytest.raises(ValueError):

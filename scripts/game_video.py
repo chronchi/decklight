@@ -5,7 +5,7 @@
         --name0 "Snake-Eye" --name1 "Wiccanthrope" --out data/cache/video/g2.mp4
 
 The input is a `search_match` games-*.jsonl record (the same input
-`scripts/export_yrp.py` takes). Frames come from `src/ygo_zero/web/replay.py`
+`scripts/export_yrp.py` takes). Frames come from `src/decklight/web/replay.py`
 and are served to web/app.js `?replay=` mode by the real Starlette app; each
 frame is screenshotted with Playwright Chromium and encoded to H.264 with
 imageio-ffmpeg.
@@ -110,9 +110,9 @@ def main() -> int:
         print(f"ALERT game {a.idx}: record is truncated", file=sys.stderr)
         sys.exit(2)
     d0, d1 = rec["decks"]
-    from ygo_zero.decks import load_ydk
-    from ygo_zero.engine.duel import DuelConfig, Engine
-    from ygo_zero.web.replay import replay_frames
+    from decklight.decks import load_ydk
+    from decklight.engine.duel import DuelConfig, Engine
+    from decklight.web.replay import replay_frames
 
     cfg = DuelConfig(load_ydk(a.deck0 or deck_path(d0)),
                      load_ydk(a.deck1 or deck_path(d1)), seed=rec["seed"])
@@ -132,7 +132,7 @@ def main() -> int:
         frames = frames[: a.max_frames]
     w, h = (int(x) for x in a.size.lower().split("x"))
 
-    from ygo_zero.web.server import create_app
+    from decklight.web.server import create_app
 
     token = secrets.token_hex(8)
     app = create_app(token=token)

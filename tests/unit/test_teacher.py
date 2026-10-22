@@ -42,8 +42,8 @@ def _records(out: Path) -> list[dict]:
 
 
 def test_teacher_random_games_replay(engine, tmp_path):
-    from ygo_zero.demos.dataset import record_config
-    from ygo_zero.engine.cpp_env import CppEnv
+    from decklight.demos.dataset import record_config
+    from decklight.engine.cpp_env import CppEnv
 
     recs = _records(_generate(tmp_path))
     assert len(recs) == 6
@@ -65,7 +65,7 @@ def test_teacher_random_games_replay(engine, tmp_path):
 
 
 def test_teacher_samples_kinds_only(engine, tmp_path):
-    from ygo_zero.demos.dataset import iter_samples, sample_kind
+    from decklight.demos.dataset import iter_samples, sample_kind
 
     assert sample_kind("data/demos/teacher/x.jsonl", "pass") == "teacher_pass"
     assert sample_kind("data/demos/teacher/x.jsonl", "gold") == "teacher"

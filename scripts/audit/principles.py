@@ -37,10 +37,10 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "src"))
 
-from ygo_zero.cards.lua_effects import OFFICIAL_DIR, load_constants, parse_script  # noqa: E402
-from ygo_zero.engine import constants as C  # noqa: E402
-from ygo_zero.engine.actions import Kind  # noqa: E402
-from ygo_zero.engine.duel import Engine  # noqa: E402
+from decklight.cards.lua_effects import OFFICIAL_DIR, load_constants, parse_script  # noqa: E402
+from decklight.engine import constants as C  # noqa: E402
+from decklight.engine.actions import Kind  # noqa: E402
+from decklight.engine.duel import Engine  # noqa: E402
 
 QUICK, HAND = 0x100 | 0x400, 0x2
 LOC_HAND = 2  # obs/action location numbering (docs/obs_spec.md)
@@ -142,9 +142,9 @@ class Audit:
 
 
 def iter_games(dirs: list[Path], engine: Engine, seat: str):
-    from ygo_zero.decks import load_ydk
-    from ygo_zero.engine.cpp_env import CppEnv
-    from ygo_zero.engine.duel import DuelConfig
+    from decklight.decks import load_ydk
+    from decklight.engine.cpp_env import CppEnv
+    from decklight.engine.duel import DuelConfig
 
     for d in dirs:
         # search_match games-*.jsonl (s_seat, deck names) or rl.evaluate games.jsonl (a_seat, repo-relative deck paths)
@@ -183,14 +183,14 @@ def main() -> int:
     ap.add_argument("--drops", type=Path, default=None, help="write the per-line drop list (jsonl)")
     args = ap.parse_args()
 
-    from ygo_zero.cards.embed import card_texts
+    from decklight.cards.embed import card_texts
 
     engine = Engine()
     texts = card_texts()
     audit = Audit(HandTraps(engine), lambda c: texts.get(int(c), (str(c), ""))[0] or str(c))
     t0, n = time.time(), 0
     if args.records:
-        from ygo_zero.demos.dataset import iter_samples
+        from decklight.demos.dataset import iter_samples
 
         files = sorted({Path(f) for g in args.records for f in glob.glob(g)})
         if args.max_files:

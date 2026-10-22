@@ -25,8 +25,8 @@ import torch
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from train_bc import _run_args, batches
 
-from ygo_zero.model.bc_data import load_shards, split_masks
-from ygo_zero.model.policy_v3 import make_policy
+from decklight.model.bc_data import load_shards, split_masks
+from decklight.model.policy_v3 import make_policy
 
 
 def mcnemar_one_sided(fixes: int, breaks: int) -> float:

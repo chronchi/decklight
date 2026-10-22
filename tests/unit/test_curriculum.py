@@ -4,13 +4,13 @@ import numpy as np
 import pytest
 import torch
 
-from ygo_zero.decks import load_ydk
-from ygo_zero.engine.cpp_env import CppEnv, VecEnv
-from ygo_zero.engine.duel import DuelConfig
-from ygo_zero.model.policy import PolicyNet
-from ygo_zero.rl.curriculum import PassRate
-from ygo_zero.rl.ppo import SlotStore, gather
-from ygo_zero.rl.rollout import Collector
+from decklight.decks import load_ydk
+from decklight.engine.cpp_env import CppEnv, VecEnv
+from decklight.engine.duel import DuelConfig
+from decklight.model.policy import PolicyNet
+from decklight.rl.curriculum import PassRate
+from decklight.rl.ppo import SlotStore, gather
+from decklight.rl.rollout import Collector
 
 from pathlib import Path
 

@@ -2,7 +2,7 @@
 
 import math
 
-from ygo_zero.eval.seqtest import (
+from decklight.eval.seqtest import (
     block_keys,
     bounds,
     llr_loss,

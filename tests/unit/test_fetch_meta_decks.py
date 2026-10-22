@@ -7,7 +7,7 @@ from datetime import date
 from pathlib import Path
 from types import SimpleNamespace
 
-from ygo_zero.decks import parse_ydk
+from decklight.decks import parse_ydk
 
 ROOT = Path(__file__).resolve().parents[2]
 

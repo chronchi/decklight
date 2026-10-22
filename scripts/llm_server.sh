@@ -1,5 +1,5 @@
 #!/bin/sh
-# Long-running opencode server for fast muse calls (ygo_zero.demos.llm, YGO_OPENCODE_SERVER=http://127.0.0.1:4097).
+# Long-running opencode server for fast muse calls (decklight.demos.llm, YGO_OPENCODE_SERVER=http://127.0.0.1:4097).
 # Laptop rule: pinned to cores 0-3, nice 19. The OpenCode key stays on the laptop (opencode's own auth).
 #   scripts/llm_server.sh start | stop | status
 cd "$(dirname "$0")/.." || exit 1

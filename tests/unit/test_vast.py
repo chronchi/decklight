@@ -2,7 +2,7 @@
 
 import pytest
 
-from ygo_zero.infra import vast
+from decklight.infra import vast
 
 
 class FakeVast:

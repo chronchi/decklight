@@ -4,7 +4,7 @@
         --name0 "Our AI" --name1 "ygo-agent"
 
 Replays the record's choices in the Python reference env (PyEnv) to get the raw core responses, writes the .yrp
-(src/ygo_zero/demos/yrp.py), then rebuilds the duel from the file the way EDOPro does and checks the core gives the
+(src/decklight/demos/yrp.py), then rebuilds the duel from the file the way EDOPro does and checks the core gives the
 same message stream. Exit 2 if the replay does not reproduce the record's winner or the file does not verify.
 In EDOPro: the file goes in EDOPro's replay/ folder (--edopro does it), then Replay -> pick it -> Start (EDOPro
 re-simulates the duel with its own core and scripts; --edopro checks those reproduce the game).
@@ -20,10 +20,10 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from ygo_zero.decks import load_ydk
-from ygo_zero.demos.yrp import edopro_engine, to_yrp, verify
-from ygo_zero.engine.duel import DuelConfig, Engine
-from ygo_zero.engine.env import PyEnv
+from decklight.decks import load_ydk
+from decklight.demos.yrp import edopro_engine, to_yrp, verify
+from decklight.engine.duel import DuelConfig, Engine
+from decklight.engine.env import PyEnv
 
 
 def deck_path(name: str) -> Path:

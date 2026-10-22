@@ -1,4 +1,4 @@
-"""Mid-game window search (src/ygo_zero/search/window.py, scripts/gen_window.py) with the deterministic stand-in policy."""
+"""Mid-game window search (src/decklight/search/window.py, scripts/gen_window.py) with the deterministic stand-in policy."""
 
 import importlib.util
 import json
@@ -26,9 +26,9 @@ gen_window = _load("gen_window")
 
 def _random_games(engine, tmp_path: Path, n: int = 3, max_len: int = 400) -> Path:
     """Full random-policy games in gold record format (config, choices, actors, turns)."""
-    from ygo_zero.decks import load_ydk
-    from ygo_zero.engine.cpp_env import CppEnv
-    from ygo_zero.engine.duel import DuelConfig
+    from decklight.decks import load_ydk
+    from decklight.engine.cpp_env import CppEnv
+    from decklight.engine.duel import DuelConfig
 
     decks = sorted((FIXTURES / "decks").glob("*.ydk"))
     out = tmp_path / "src" / "games.jsonl"
@@ -56,8 +56,8 @@ def _random_games(engine, tmp_path: Path, n: int = 3, max_len: int = 400) -> Pat
 
 
 def test_position_score_is_antisymmetric(engine):
-    from ygo_zero.engine.cpp_env import CppEnv
-    from ygo_zero.search.window import position_score
+    from decklight.engine.cpp_env import CppEnv
+    from decklight.search.window import position_score
 
     cfg = gen_search.DuelConfig(*[gen_search.load_ydk(f) for f in sorted((FIXTURES / "decks").glob("*.ydk"))[:2]], seed=3)
     env = CppEnv(engine, cfg)
@@ -71,10 +71,10 @@ def test_position_score_is_antisymmetric(engine):
 
 
 def test_window_records_replay_with_legal_targets(engine, tmp_path):
-    from ygo_zero.demos.dataset import record_config
-    from ygo_zero.engine.actions import Kind
-    from ygo_zero.engine.cpp_env import CppEnv
-    from ygo_zero.search.window import is_window
+    from decklight.demos.dataset import record_config
+    from decklight.engine.actions import Kind
+    from decklight.engine.cpp_env import CppEnv
+    from decklight.search.window import is_window
 
     src = _random_games(engine, tmp_path)
     out = tmp_path / "window"
@@ -107,7 +107,7 @@ def test_window_records_replay_with_legal_targets(engine, tmp_path):
 
 
 def test_window_samples_are_targets_with_window_kinds(engine, tmp_path):
-    from ygo_zero.demos.dataset import iter_samples
+    from decklight.demos.dataset import iter_samples
 
     src = _random_games(engine, tmp_path, n=2)
     out = tmp_path / "window"
@@ -133,9 +133,9 @@ def test_window_samples_are_targets_with_window_kinds(engine, tmp_path):
 def test_value_scoring_constant_value_keeps_pass(engine, tmp_path):
     """With a learned value that is 0 everywhere, every unfinished branch ties, so a window keeps PASS (ranked
     first) unless a branch ends the duel; scores stay within [-1, 1]."""
-    from ygo_zero.demos.dataset import record_config
-    from ygo_zero.engine.duel import Engine
-    from ygo_zero.search.window import WindowSearch
+    from decklight.demos.dataset import record_config
+    from decklight.engine.duel import Engine
+    from decklight.search.window import WindowSearch
 
     src = _random_games(engine, tmp_path, n=2)
     calls = []
@@ -158,9 +158,9 @@ def test_value_scoring_constant_value_keeps_pass(engine, tmp_path):
 
 
 def _run_search(engine, recs, tmp_path, **kw):
-    from ygo_zero.demos.dataset import record_config
-    from ygo_zero.engine.duel import Engine
-    from ygo_zero.search.window import WindowSearch
+    from decklight.demos.dataset import record_config
+    from decklight.engine.duel import Engine
+    from decklight.search.window import WindowSearch
 
     kw.setdefault("own_frac", 0.2)
     ws = WindowSearch(Engine(), gen_search.greedy_logits, **kw)
@@ -273,9 +273,9 @@ def test_value_multi_horizon_keys(engine, tmp_path):
 def test_game_gen_honest_false_is_bit_identical(engine, tmp_path):
     import json as _json
 
-    from ygo_zero.demos.dataset import record_config
-    from ygo_zero.engine.duel import Engine
-    from ygo_zero.search.window import WindowSearch
+    from decklight.demos.dataset import record_config
+    from decklight.engine.duel import Engine
+    from decklight.search.window import WindowSearch
 
     src = _random_games(engine, tmp_path, n=1)
     recs = [_json.loads(x) for x in src.read_text().splitlines()]
@@ -296,9 +296,9 @@ def test_game_gen_honest_false_is_bit_identical(engine, tmp_path):
 def test_game_gen_honest_skip_never_uses_true_config(engine, tmp_path):
     import json as _json
 
-    from ygo_zero.demos.dataset import record_config
-    from ygo_zero.engine.duel import Engine
-    from ygo_zero.search.window import WindowSearch
+    from decklight.demos.dataset import record_config
+    from decklight.engine.duel import Engine
+    from decklight.search.window import WindowSearch
 
     src = _random_games(engine, tmp_path, n=2)
     recs = [_json.loads(x) for x in src.read_text().splitlines()]
@@ -336,8 +336,8 @@ def test_game_gen_honest_skip_never_uses_true_config(engine, tmp_path):
 def test_decisive_label_mode(engine, tmp_path):
     """Stage L: --ho 1 --windows all labels only decisive decisions; targets are legal, logged as status "label",
     and every labelled best candidate has the highest mean; undecided decisions carry no target."""
-    from ygo_zero.demos.dataset import record_config
-    from ygo_zero.engine.cpp_env import CppEnv
+    from decklight.demos.dataset import record_config
+    from decklight.engine.cpp_env import CppEnv
 
     src = _random_games(engine, tmp_path, n=1, max_len=120)  # one 400-decision game takes ~280 s in this mode
     for honest in ("0", "1"):

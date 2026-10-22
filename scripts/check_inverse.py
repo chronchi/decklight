@@ -27,11 +27,11 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from ygo_zero.decks import load_ydk
-from ygo_zero.demos.dataset import record_config
-from ygo_zero.engine.duel import DuelConfig, Engine
-from ygo_zero.engine.env import PyEnv
-from ygo_zero.engine.inverse import MSG_NAMES, choices_for_response, decision_groups
+from decklight.decks import load_ydk
+from decklight.demos.dataset import record_config
+from decklight.engine.duel import DuelConfig, Engine
+from decklight.engine.env import PyEnv
+from decklight.engine.inverse import MSG_NAMES, choices_for_response, decision_groups
 
 
 def deck_path(name: str) -> Path:

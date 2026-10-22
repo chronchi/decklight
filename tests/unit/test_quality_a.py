@@ -10,17 +10,17 @@ import sys
 from pathlib import Path
 from types import SimpleNamespace
 
-from ygo_zero.decks import Deck
-from ygo_zero.demos import strategy
-from ygo_zero.demos.names import CardNames
-from ygo_zero.demos.plan import (
+from decklight.decks import Deck
+from decklight.demos import strategy
+from decklight.demos.names import CardNames
+from decklight.demos.plan import (
     improve_prompt,
     plan_hands,
     plan_prompt,
     select_best,
 )
-from ygo_zero.demos.schema import ComboLine
-from ygo_zero.demos.verify import Verdict
+from decklight.demos.schema import ComboLine
+from decklight.demos.verify import Verdict
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -174,7 +174,7 @@ def test_best_of_n_same_board_excluded_from_extras():
 
 
 def test_select_best_scores_and_distinct_rule():
-    from ygo_zero.demos.schema import Step
+    from decklight.demos.schema import Step
 
     def line(end):
         ln = ComboLine(id="x", deck="d", source_file="p", hand=[], end_board=list(end), going="first")
@@ -316,7 +316,7 @@ def test_improve_lines_session_plumbing(tmp_path, monkeypatch):
         hand=[SAGE_N, PWWB_N, BEWD_N, SAGE_N, PWWB_N],
         end_board=[SAGE_N], going="first",
     )
-    from ygo_zero.demos.schema import Step
+    from decklight.demos.schema import Step
 
     old.steps = [Step(i=0, action="normal_summon", card=SAGE_N, text="x"),
                  Step(i=1, action="activate", card=PWWB_N, text="x")]

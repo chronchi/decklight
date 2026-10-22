@@ -4,14 +4,14 @@ import json
 
 import pytest
 
-from ygo_zero.demos.dataset import iter_samples
-from ygo_zero.demos.explain import explain_failure
-from ygo_zero.demos.names import CardNames
-from ygo_zero.demos.plan import plan_hands
-from ygo_zero.demos.records import make_record
-from ygo_zero.demos.verify import verify_line
+from decklight.demos.dataset import iter_samples
+from decklight.demos.explain import explain_failure
+from decklight.demos.names import CardNames
+from decklight.demos.plan import plan_hands
+from decklight.demos.records import make_record
+from decklight.demos.verify import verify_line
 
-cpp_env = pytest.importorskip("ygo_zero.engine.cpp_env", reason="extension not built")
+cpp_env = pytest.importorskip("decklight.engine.cpp_env", reason="extension not built")
 
 SAGE = 8240199
 PWWB = 63356631
@@ -67,7 +67,7 @@ def test_planned_good_line_verifies_and_replays(engine, decks, tmp_path):
 
 
 def test_explain_failure_reports_deepest_point(engine, decks):
-    from ygo_zero.demos.schema import ComboLine, Step
+    from decklight.demos.schema import ComboLine, Step
 
     deck = decks["BlueEyes"]
     names = CardNames()

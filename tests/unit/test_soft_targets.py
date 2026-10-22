@@ -117,7 +117,7 @@ def test_illegal_candidates_are_ignored():
 
 
 def test_search_soft_targets_selects_selection_score():
-    from ygo_zero.demos.dataset import search_soft_targets
+    from decklight.demos.dataset import search_soft_targets
 
     rec = {
         "source": "window search k=4 select=board@h1 tie_eps=0.0 over bc; relabelled select=board@h1",
@@ -141,9 +141,9 @@ def test_search_soft_targets_selects_selection_score():
 
 def _search_record(engine, tmp_path: Path, n_want: int = 6) -> Path:
     """One random game relabelled with `own` targets + search entries on decisions with >=3 options."""
-    from ygo_zero.decks import load_ydk
-    from ygo_zero.engine.cpp_env import CppEnv
-    from ygo_zero.engine.duel import DuelConfig
+    from decklight.decks import load_ydk
+    from decklight.engine.cpp_env import CppEnv
+    from decklight.engine.duel import DuelConfig
 
     decks = sorted((FIXTURES / "decks").glob("*.ydk"))
     d0, d1 = load_ydk(decks[0]), load_ydk(decks[1])
@@ -195,8 +195,8 @@ def _search_record(engine, tmp_path: Path, n_want: int = 6) -> Path:
 
 
 def test_soft_fields_survive_record_to_shard(engine, tmp_path):
-    from ygo_zero.demos.dataset import iter_samples
-    from ygo_zero.model.bc_data import SOFT_K, _shard_one
+    from decklight.demos.dataset import iter_samples
+    from decklight.model.bc_data import SOFT_K, _shard_one
 
     f = _search_record(engine, tmp_path)
     rec = json.loads(f.read_text().splitlines()[0])
@@ -211,7 +211,7 @@ def test_soft_fields_survive_record_to_shard(engine, tmp_path):
         assert a == rec["targets"][m["k"]] == s["chosen"]
         mask = obs["action_mask"].astype(bool)
         assert all(mask[c] for c in cands)
-    import ygo_zero.model.bc_data as bcd
+    import decklight.model.bc_data as bcd
 
     old = bcd._ENGINE
     bcd._ENGINE = engine
@@ -239,7 +239,7 @@ def test_soft_fields_survive_record_to_shard(engine, tmp_path):
 
 
 def test_old_shards_without_soft_load_with_defaults(tmp_path):
-    from ygo_zero.model.bc_data import SOFT_K, load_shards
+    from decklight.model.bc_data import SOFT_K, load_shards
 
     d = tmp_path / "shards"
     d.mkdir()
@@ -260,7 +260,7 @@ def test_old_shards_without_soft_load_with_defaults(tmp_path):
 
 
 def _tiny_net(seed=0):
-    from ygo_zero.model.policy import PolicyNet
+    from decklight.model.policy import PolicyNet
 
     rng = np.random.default_rng(42)
     codes = np.arange(1, 50)
@@ -272,7 +272,7 @@ def _tiny_net(seed=0):
 
 
 def _tiny_obs(batch=8, seed=1, n_legal=4):
-    from ygo_zero.model.bc_data import OBS_KEYS
+    from decklight.model.bc_data import OBS_KEYS
 
     torch.manual_seed(seed)
     shapes = {"cards": (batch, 160, 21), "card_mask": (batch, 160), "global": (batch, 24),
@@ -323,7 +323,7 @@ def test_gumbel_steps_are_finite_and_decrease():
 
 def _synthetic_shards(path: Path, n: int = 64, seed: int = 0):
     """Tiny BC shards with soft info on half the samples (for the train_bc end-to-end test)."""
-    from ygo_zero.model.bc_data import SOFT_K
+    from decklight.model.bc_data import SOFT_K
 
     rng = np.random.default_rng(seed)
     torch.manual_seed(seed)

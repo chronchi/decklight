@@ -19,17 +19,17 @@ import numpy as np
 import torch
 from starlette.testclient import TestClient
 
-from ygo_zero.decks import load_ydk
-from ygo_zero.edopro.bot import RandomBot
-from ygo_zero.edopro.product_bot import ProductDriver
-from ygo_zero.engine import constants as C
-from ygo_zero.engine.duel import DuelConfig
-from ygo_zero.engine.env import PyEnv
-from ygo_zero.engine.obs import Board
-from ygo_zero.model.bc_data import OBS_KEYS
-from ygo_zero.model.policy import PolicyNet
-from ygo_zero.web.server import create_app
-from ygo_zero.web.view import DB
+from decklight.decks import load_ydk
+from decklight.edopro.bot import RandomBot
+from decklight.edopro.product_bot import ProductDriver
+from decklight.engine import constants as C
+from decklight.engine.duel import DuelConfig
+from decklight.engine.env import PyEnv
+from decklight.engine.obs import Board
+from decklight.model.bc_data import OBS_KEYS
+from decklight.model.policy import PolicyNet
+from decklight.web.server import create_app
+from decklight.web.view import DB
 
 FIXTURES = Path("tests/fixtures/decks")
 TOKEN = "test-token"
@@ -412,7 +412,7 @@ def _verify_no_leak(engine, cfg, human_seat: int, choices: list[int], messages: 
     # shown to both players) makes the code public from then on, even while
     # the card is still physically hidden - the same rules the model's own
     # observation follows (`obs.history_entry.public`, `obs.chain_array`).
-    from ygo_zero.engine.query import parse_chain
+    from decklight.engine.query import parse_chain
 
     revealed: set[int] = set()
 
@@ -507,7 +507,7 @@ def _replay_record(engine, record_root: Path, last: dict, decks: tuple) -> tuple
 
 
 def test_full_game_random(tmp_path, engine):
-    from ygo_zero.decks import parse_ydk
+    from decklight.decks import parse_ydk
 
     app, last, messages, human_text, bot_text = _full_game(tmp_path, engine, "random")
     _ = app
@@ -519,7 +519,7 @@ def test_full_game_random(tmp_path, engine):
 
 
 def test_full_game_tiny_product(tmp_path, engine):
-    from ygo_zero.decks import parse_ydk
+    from decklight.decks import parse_ydk
 
     forward = _tiny_forward()
     app, last, messages, human_text, bot_text = _full_game(
@@ -537,7 +537,7 @@ def test_full_game_tiny_product(tmp_path, engine):
 
 
 def test_hidden_info_over_full_game(tmp_path, engine):
-    from ygo_zero.decks import parse_ydk
+    from decklight.decks import parse_ydk
 
     app, last, messages, human_text, bot_text = _full_game(tmp_path, engine, "random", seed=1)
     _ = app
@@ -597,7 +597,7 @@ def test_img_cache_hit(tmp_path, engine):
 
 
 def test_img_miss_then_cache(tmp_path, engine, monkeypatch):
-    import ygo_zero.web.server as S
+    import decklight.web.server as S
 
     app = _make_app(tmp_path, engine)
     calls = []
@@ -613,7 +613,7 @@ def test_img_miss_then_cache(tmp_path, engine, monkeypatch):
 
 
 def test_img_offline_fallback_and_back(tmp_path, engine, monkeypatch):
-    import ygo_zero.web.server as S
+    import decklight.web.server as S
 
     app = _make_app(tmp_path, engine)
     monkeypatch.setattr(S, "_fetch_img", lambda *a, **k: (_ for _ in ()).throw(OSError("off")))
@@ -680,7 +680,7 @@ def _records(tmp_path) -> list[dict]:
 def test_chain_auto_vs_all(tmp_path, engine):
     """Auto (default) skips quiet chain windows server-side (logged as system
     "(auto-passed)"), All shows every one; both records replay and carry meta."""
-    from ygo_zero.decks import parse_ydk
+    from decklight.decks import parse_ydk
 
     human_text = (FIXTURES / "BlueEyes.ydk").read_text()
     bot_text = (FIXTURES / "Branded.ydk").read_text()
@@ -782,7 +782,7 @@ def test_user_record_prompts(engine):
     """Replays the user's game through the builders: the position prompt shows the
     Ritual monster (not the Ritual Spell on the chain), Deck searches send the
     cards face-up with codes, and no raw %ls reaches any prompt."""
-    from ygo_zero.web.view import build_prompt
+    from decklight.web.view import build_prompt
 
     d = Path("tests/fixtures/web/mitsurugi-20261016")
     rec = json.loads((d / "game.jsonl").read_text())
@@ -863,7 +863,7 @@ def test_winchance_off_by_default(tmp_path, engine):
 
 
 def test_winchance_on_product(tmp_path, engine):
-    from ygo_zero.decks import parse_ydk
+    from decklight.decks import parse_ydk
 
     app, launcher, states = _play_product_value(tmp_path, engine, winchance=True)
     assert states, "no states received"
@@ -1020,7 +1020,7 @@ def test_review_random_mode_errors(tmp_path, engine):
 
 
 def test_review_after_tiny_product_game(tmp_path, engine):
-    from ygo_zero.engine.env import PyEnv
+    from decklight.engine.env import PyEnv
 
     forward = _tiny_forward()
     launcher = _tiny_review_launcher(forward)
@@ -1083,7 +1083,7 @@ def test_review_after_tiny_product_game(tmp_path, engine):
         ]
         assert len(recs) == 1 and "auto_passed" in recs[0]
         rec = recs[0]
-        from ygo_zero.decks import parse_ydk
+        from decklight.decks import parse_ydk
 
         human, bot = parse_ydk(human_text), parse_ydk(bot_text)
         cfg = (
@@ -1243,9 +1243,9 @@ def test_whatif_before_review_errors(tmp_path, engine):
 def test_whatif_after_review_replays_prefix(tmp_path, engine):
     """What-if replays the prefix (board at k matches), then continues to a prompt
     as a new practice game carrying the what_if record field."""
-    from ygo_zero.analysis.review import collect_human_decisions
-    from ygo_zero.engine.env import PyEnv
-    from ygo_zero.web.view import build_view
+    from decklight.analysis.review import collect_human_decisions
+    from decklight.engine.env import PyEnv
+    from decklight.web.view import build_view
 
     forward = _tiny_forward()
     launcher = _tiny_review_launcher(forward)
@@ -1301,7 +1301,7 @@ def test_whatif_after_review_replays_prefix(tmp_path, engine):
         ]
         assert len(recs) == 1
         rec = recs[0]
-        from ygo_zero.decks import parse_ydk
+        from decklight.decks import parse_ydk
 
         human, bot = parse_ydk(human_text), parse_ydk(bot_text)
         cfg = (
@@ -1501,11 +1501,11 @@ def test_undo_rewinds_practice_game(tmp_path, engine):
 
 def _puzzle_fixture(engine, tmp_path):
     """One mined puzzle as puzzles.json (monkeypatched path) + fake launcher parts."""
-    from ygo_zero.analysis.puzzles import mine_candidates
+    from decklight.analysis.puzzles import mine_candidates
 
     # Use a fresh Engine for mining (like test_puzzles does) to avoid sharing
     # the session-scoped fixture while the server also uses it.
-    from ygo_zero.engine.duel import Engine as _E
+    from decklight.engine.duel import Engine as _E
 
     fresh = _E()
     import json as _J
@@ -1524,8 +1524,8 @@ def _puzzle_fixture(engine, tmp_path):
 
 def _puzzle_fake_parts(engine, puzzle):
     """Decisions + bot choices for a puzzle (same as test_puzzles fake)."""
-    from ygo_zero.analysis.events import deck_path
-    from ygo_zero.decks import load_ydk as _ld
+    from decklight.analysis.events import deck_path
+    from decklight.decks import load_ydk as _ld
 
     decks = [_ld(deck_path(d)) for d in puzzle["decks"]]
     cfg = DuelConfig(decks[0], decks[1], seed=puzzle["seed"])
@@ -1558,14 +1558,14 @@ class _PuzzleFakeDriver:
             self._live.append(int(i))
 
     def decision(self, k, timeout=300):
-        from ygo_zero.edopro.product_bot import DriverError
+        from decklight.edopro.product_bot import DriverError
 
         if k >= len(self._decisions):
             raise DriverError("fake game ended")
         return dict(self._decisions[k])
 
     def next_bot(self, timeout=None):
-        from ygo_zero.edopro.product_bot import DriverError
+        from decklight.edopro.product_bot import DriverError
 
         if not self._bot:
             raise DriverError("no bot decision")
@@ -1612,7 +1612,7 @@ def _wait_state(ws, want_prompt=True, limit=2000):
 
 
 def test_puzzles_list_from_fixture(tmp_path, engine, monkeypatch):
-    import ygo_zero.web.server as S
+    import decklight.web.server as S
 
     p, pj = _puzzle_fixture(engine, tmp_path)
     monkeypatch.setattr(S, "PUZZLES_PATH", pj)
@@ -1630,7 +1630,7 @@ def test_puzzles_list_from_fixture(tmp_path, engine, monkeypatch):
 
 
 def test_puzzles_missing_file_empty(tmp_path, engine, monkeypatch):
-    import ygo_zero.web.server as S
+    import decklight.web.server as S
 
     monkeypatch.setattr(S, "PUZZLES_PATH", tmp_path / "no-such.json")
     app = _make_app(tmp_path, engine)
@@ -1642,8 +1642,8 @@ def test_puzzles_missing_file_empty(tmp_path, engine, monkeypatch):
 
 
 def _solver_multi(engine, puzzle):
-    from ygo_zero.analysis.events import deck_path
-    from ygo_zero.decks import load_ydk as _ld
+    from decklight.analysis.events import deck_path
+    from decklight.decks import load_ydk as _ld
 
     decks = [_ld(deck_path(d)) for d in puzzle["decks"]]
     cfg = DuelConfig(decks[0], decks[1], seed=puzzle["seed"])
@@ -1672,9 +1672,9 @@ def test_puzzle_solved_flow(tmp_path, engine, monkeypatch):
     import asyncio
     import tempfile
 
-    import ygo_zero.web.server as S
-    from ygo_zero.engine.duel import Engine as _E
-    from ygo_zero.web.view import build_view
+    import decklight.web.server as S
+    from decklight.engine.duel import Engine as _E
+    from decklight.web.view import build_view
 
     fresh = _E()
     tmpdir = Path(tempfile.mkdtemp())
@@ -1710,8 +1710,8 @@ def test_puzzle_solved_flow(tmp_path, engine, monkeypatch):
         assert srv.practice is True
         assert (srv.puzzle or {}).get("id") == p["id"]
         # Board equals the board after replaying the prefix.
-        from ygo_zero.analysis.events import deck_path
-        from ygo_zero.decks import load_ydk as _ld
+        from decklight.analysis.events import deck_path
+        from decklight.decks import load_ydk as _ld
 
         decks = [_ld(deck_path(d)) for d in p["decks"]]
         cfg = DuelConfig(decks[0], decks[1], seed=p["seed"])
@@ -1771,8 +1771,8 @@ def test_puzzle_failed_on_turn_pass(tmp_path, engine, monkeypatch):
     import asyncio
     import tempfile
 
-    import ygo_zero.web.server as S
-    from ygo_zero.engine.duel import Engine as _E
+    import decklight.web.server as S
+    from decklight.engine.duel import Engine as _E
 
     fresh = _E()
     tmpdir = Path(tempfile.mkdtemp())
@@ -1867,7 +1867,7 @@ def test_puzzle_failed_on_turn_pass(tmp_path, engine, monkeypatch):
 
 
 def test_puzzle_solution_frames(tmp_path, engine, monkeypatch):
-    import ygo_zero.web.server as S
+    import decklight.web.server as S
 
     p, pj = _puzzle_fixture(engine, tmp_path)
     monkeypatch.setattr(S, "PUZZLES_PATH", pj)
@@ -1887,9 +1887,9 @@ def test_puzzle_solution_frames(tmp_path, engine, monkeypatch):
 
 def _primer_fixture(tmp_path):
     """A one-deck primers store keyed by a real pool deck (blue-eyes)."""
-    from ygo_zero.analysis import primer as P
-    from ygo_zero.analysis.events import deck_path
-    from ygo_zero.decks import load_ydk
+    from decklight.analysis import primer as P
+    from decklight.analysis.events import deck_path
+    from decklight.decks import load_ydk
 
     bot = load_ydk(deck_path("blue-eyes"))
     h = P.hash_of(bot)
@@ -1954,7 +1954,7 @@ def _recv_type(ws, kind: str, limit: int = 400) -> dict:
 
 
 def test_primer_lobby(tmp_path, engine, monkeypatch):
-    import ygo_zero.web.server as S
+    import decklight.web.server as S
 
     _bot, _h, pj, code = _primer_fixture(tmp_path)
     monkeypatch.setattr(S, "PRIMERS_PATH", pj)
@@ -1978,7 +1978,7 @@ def test_primer_lobby(tmp_path, engine, monkeypatch):
 
 
 def test_primer_thin_and_missing(tmp_path, engine, monkeypatch):
-    import ygo_zero.web.server as S
+    import decklight.web.server as S
 
     _bot, _h, pj, _code = _primer_fixture(tmp_path)
     monkeypatch.setattr(S, "PRIMERS_PATH", pj)
@@ -1998,7 +1998,7 @@ def test_primer_thin_and_missing(tmp_path, engine, monkeypatch):
 
 
 def test_primer_trim_passes_impact_fields():
-    import ygo_zero.web.server as S
+    import decklight.web.server as S
 
     p = {
         "archetype": "X",
@@ -2072,7 +2072,7 @@ def test_primer_trim_passes_impact_fields():
 
 
 def test_primer_in_game_uses_current_decks(tmp_path, engine, monkeypatch):
-    import ygo_zero.web.server as S
+    import decklight.web.server as S
 
     _bot, _h, pj, _code = _primer_fixture(tmp_path)
     monkeypatch.setattr(S, "PRIMERS_PATH", pj)
@@ -2099,7 +2099,7 @@ def test_primer_in_game_uses_current_decks(tmp_path, engine, monkeypatch):
 
 def _swapped_paste() -> str:
     """A legal pasted deck no shipped primer knows (one card swapped)."""
-    from ygo_zero.decks import parse_ydk
+    from decklight.decks import parse_ydk
 
     human = (FIXTURES / "BlueEyes.ydk").read_text()
     other = parse_ydk((FIXTURES / "Branded.ydk").read_text())
@@ -2151,7 +2151,7 @@ STUDY_LINES = [
 def test_study_spawns_worker_and_reports_progress(tmp_path, engine, monkeypatch):
     import asyncio as _asyncio
 
-    import ygo_zero.web.server as S
+    import decklight.web.server as S
 
     app = _make_app(tmp_path, engine)
     srv = app.state.server
@@ -2205,9 +2205,9 @@ def test_study_busy_while_running(tmp_path, engine):
 
 
 def test_study_already_shipped_errors(tmp_path, engine):
-    import ygo_zero.web.server as S
-    from ygo_zero.analysis import primer as P
-    from ygo_zero.decks import load_ydk
+    import decklight.web.server as S
+    from decklight.analysis import primer as P
+    from decklight.decks import load_ydk
 
     app = _make_app(tmp_path, engine)
     srv = app.state.server
@@ -2231,7 +2231,7 @@ def test_study_already_shipped_errors(tmp_path, engine):
 
 
 def test_primer_can_study_unknown(tmp_path, engine, monkeypatch):
-    import ygo_zero.web.server as S
+    import decklight.web.server as S
 
     monkeypatch.setattr(S.Server, "get_primers", lambda self: {"decks": {}, "negated_by": {}})
     app = _make_app(tmp_path, engine)

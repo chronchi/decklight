@@ -21,7 +21,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT / "src"))
 
-from ygo_zero.decks.holdout import (
+from decklight.decks.holdout import (
     CARD_HOLDOUT_FILE,
     deck_audit_rows,
     deck_codes,
@@ -84,7 +84,7 @@ def training_roots() -> list[str]:
 
 def _card_names():
     try:
-        from ygo_zero.demos.names import CardNames
+        from decklight.demos.names import CardNames
 
         return CardNames()
     except Exception as e:  # noqa: BLE001 - names are best-effort only
@@ -198,7 +198,7 @@ def cmd_propose(n: int, min_decks: int) -> None:
 
 
 def cmd_check(globs: list[str]) -> int:
-    from ygo_zero.decks.holdout import check_records
+    from decklight.decks.holdout import check_records
 
     if not CARD_HOLDOUT_FILE.exists():
         print("no decks/pool/CARD_HOLDOUT yet — nothing to check.")
@@ -224,7 +224,7 @@ def cmd_newcards(deck_dir: Path, play: int) -> int:
     """
     from collections import Counter
 
-    from ygo_zero.decks.ydk import load_ydk
+    from decklight.decks.ydk import load_ydk
 
     sys.path.insert(0, str(REPO_ROOT / "scripts"))
     from check_decks import audit as namesake_audit
@@ -285,9 +285,9 @@ def _smoke_newcards(paths: list[Path], pool: dict, games: int, steps: int = 600)
     """Random-policy games of each newcards deck vs a pool deck (CppEnv, no errors)."""
     import random
 
-    from ygo_zero.decks.ydk import load_ydk
-    from ygo_zero.engine.cpp_env import CppEnv
-    from ygo_zero.engine.duel import DuelConfig, Engine
+    from decklight.decks.ydk import load_ydk
+    from decklight.engine.cpp_env import CppEnv
+    from decklight.engine.duel import DuelConfig, Engine
 
     foe = pool.get("salamangreat") or pool[min(pool)]
     foe_name = next(s for s, d in pool.items() if d is foe)

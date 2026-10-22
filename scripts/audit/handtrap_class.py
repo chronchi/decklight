@@ -51,7 +51,7 @@ def main() -> int:
     ap.add_argument("--out", type=Path, required=True)
     args = ap.parse_args()
 
-    from ygo_zero.cards.embed import card_texts
+    from decklight.cards.embed import card_texts
 
     texts = card_texts()
     own, opp = Counter(), Counter()

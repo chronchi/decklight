@@ -1,4 +1,4 @@
-# Python extension ygo_zero/_ygoenv, linked against the core built by scripts/build_core.sh.
+# Python extension decklight/_ygoenv, linked against the core built by scripts/build_core.sh.
 project('ygoenv', 'cpp', default_options : ['cpp_std=c++20', 'buildtype=release', 'b_ndebug=true', 'warning_level=2'])
 
 py = import('python').find_installation(pure : false)

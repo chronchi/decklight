@@ -30,11 +30,11 @@ import numpy as np
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from ygo_zero.decks import load_ydk
-from ygo_zero.engine import constants as C
-from ygo_zero.engine.actions import Kind
-from ygo_zero.engine.cpp_env import VecEnv
-from ygo_zero.engine.duel import Engine
+from decklight.decks import load_ydk
+from decklight.engine import constants as C
+from decklight.engine.actions import Kind
+from decklight.engine.cpp_env import VecEnv
+from decklight.engine.duel import Engine
 
 MAX_DECISIONS = 3000
 
@@ -42,10 +42,10 @@ MAX_DECISIONS = 3000
 def make_policies(policy: str, sample: bool, seed: int):
     """Two separate policy objects, one per seat (separate LSTM states)."""
     if policy == "random":
-        from ygo_zero.eval.policies import RandomPolicy
+        from decklight.eval.policies import RandomPolicy
 
         return RandomPolicy(seed), RandomPolicy(seed + 1)
-    from ygo_zero.eval.ygoagent import YgoAgentPolicy
+    from decklight.eval.ygoagent import YgoAgentPolicy
 
     return YgoAgentPolicy(seed=seed, sample=sample), YgoAgentPolicy(seed=seed + 1, sample=sample)
 

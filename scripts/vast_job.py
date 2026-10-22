@@ -1,4 +1,4 @@
-"""Run one capped job on vast.ai and pull runs/<name>/ back (see ygo_zero.infra.vast).
+"""Run one capped job on vast.ai and pull runs/<name>/ back (see decklight.infra.vast).
 
 uv run python scripts/vast_job.py --name smoke --hours 0.4 --cmd 'bash scripts/vast_smoke.sh smoke'
 uv run python scripts/vast_job.py --cleanup        # destroy any leftover ygo-zero instance
@@ -8,7 +8,7 @@ import argparse
 import signal
 import sys
 
-from ygo_zero.infra import vast
+from decklight.infra import vast
 
 
 def main() -> None:

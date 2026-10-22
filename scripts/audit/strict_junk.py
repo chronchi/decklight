@@ -26,11 +26,11 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "src"))
 
-from ygo_zero.cards.embed import card_texts  # noqa: E402
-from ygo_zero.demos.dataset import iter_samples  # noqa: E402
-from ygo_zero.engine import constants as C  # noqa: E402
-from ygo_zero.engine.actions import Kind  # noqa: E402
-from ygo_zero.engine.duel import Engine  # noqa: E402
+from decklight.cards.embed import card_texts  # noqa: E402
+from decklight.demos.dataset import iter_samples  # noqa: E402
+from decklight.engine import constants as C  # noqa: E402
+from decklight.engine.actions import Kind  # noqa: E402
+from decklight.engine.duel import Engine  # noqa: E402
 
 SOURCES = {
     "guides": ["data/demos/verified/*.jsonl", "data/demos/expanded/*.jsonl"],

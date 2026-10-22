@@ -35,11 +35,11 @@ import numpy as np
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from ygo_zero.decks import load_ydk
-from ygo_zero.engine import constants as C
-from ygo_zero.engine.actions import Kind
-from ygo_zero.engine.cpp_env import VecEnv
-from ygo_zero.engine.duel import Engine
+from decklight.decks import load_ydk
+from decklight.engine import constants as C
+from decklight.engine.actions import Kind
+from decklight.engine.cpp_env import VecEnv
+from decklight.engine.duel import Engine
 
 MAX_DECISIONS = 3000
 
@@ -47,13 +47,13 @@ MAX_DECISIONS = 3000
 def make_policies(policy: str, ckpt: Path | None, emb: Path, device: str, seed: int):
     """Student / labeler / opponent as three separate policy objects (separate LSTM states)."""
     if policy == "stub":
-        from ygo_zero.eval.policies import GreedyPolicy, RandomPolicy
+        from decklight.eval.policies import GreedyPolicy, RandomPolicy
 
         return RandomPolicy(seed), GreedyPolicy(seed + 7), RandomPolicy(seed + 11)
     if ckpt is None:
         raise SystemExit("--ckpt is required unless --policy stub")
-    from ygo_zero.eval.bc_policy import BCPolicy
-    from ygo_zero.eval.ygoagent import YgoAgentPolicy
+    from decklight.eval.bc_policy import BCPolicy
+    from decklight.eval.ygoagent import YgoAgentPolicy
 
     student = BCPolicy(ckpt, emb, device=device)
     return student, YgoAgentPolicy(seed=seed + 7, sample=False), YgoAgentPolicy(seed=seed + 11, sample=False)

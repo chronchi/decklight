@@ -25,10 +25,10 @@ import numpy as np
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "src"))
 
-from ygo_zero.demos.names import CardNames
-from ygo_zero.engine import constants as C
-from ygo_zero.engine.duel import Engine
-from ygo_zero.eval.turn1 import dags_config, replay_prefix
+from decklight.demos.names import CardNames
+from decklight.engine import constants as C
+from decklight.engine.duel import Engine
+from decklight.eval.turn1 import dags_config, replay_prefix
 
 LOC = {2: "hand", 3: "mzone", 4: "szone", 5: "grave", 6: "removed", 7: "extra"}
 IDLE = {C.MSG_SELECT_IDLECMD, C.MSG_SELECT_BATTLECMD}

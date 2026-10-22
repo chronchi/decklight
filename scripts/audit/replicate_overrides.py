@@ -29,13 +29,13 @@ import numpy as np
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "src"))
 
-from ygo_zero.decks import load_ydk
-from ygo_zero.engine.cpp_env import CppEnv
-from ygo_zero.engine.duel import DuelConfig, Engine
-from ygo_zero.search.determinize import Determinizer, SeenTracker, key_rank_of_choice
-from ygo_zero.search.honest import paired_gap
-from ygo_zero.search.turn1 import _batch, drive_many
-from ygo_zero.search.window import WindowSearch
+from decklight.decks import load_ydk
+from decklight.engine.cpp_env import CppEnv
+from decklight.engine.duel import DuelConfig, Engine
+from decklight.search.determinize import Determinizer, SeenTracker, key_rank_of_choice
+from decklight.search.honest import paired_gap
+from decklight.search.turn1 import _batch, drive_many
+from decklight.search.window import WindowSearch
 
 
 def fail(msg: str) -> None:
@@ -79,7 +79,7 @@ def item_gen(engine, ws: WindowSearch, rec: dict, e: dict, deck_dir: Path, sampl
                          seed=int(rec["seed"]))
         me = int(rec["s_seat"])
     else:  # gen_window record (stage L): stored config, the acting player at k
-        from ygo_zero.demos.dataset import record_config
+        from decklight.demos.dataset import record_config
 
         cfg, me = record_config(rec), int(rec["actors"][k])
     env = CppEnv(engine, cfg, rec.get("auto_single", True))
@@ -162,8 +162,8 @@ def main() -> None:
     random.Random(args.seed).shuffle(items)
     items = items[: args.n][args.proc :: args.nproc]
 
-    from ygo_zero.eval.bc_policy import BCPolicy
-    from ygo_zero.eval.value import ValueNet
+    from decklight.eval.bc_policy import BCPolicy
+    from decklight.eval.value import ValueNet
 
     engine = Engine()
     pol = BCPolicy(args.ckpt, args.emb, threads=1, device=args.device, batch=args.batch)

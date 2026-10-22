@@ -23,24 +23,24 @@ import logging
 import time
 from pathlib import Path
 
-from ygo_zero.decks import Deck, load_ydk
-from ygo_zero.demos import llm as _llm
-from ygo_zero.demos.explain import explain_failure
-from ygo_zero.demos.extract import _fill_codes, _parse_json
-from ygo_zero.demos.names import CardNames
-from ygo_zero.demos.plan import (
+from decklight.decks import Deck, load_ydk
+from decklight.demos import llm as _llm
+from decklight.demos.explain import explain_failure
+from decklight.demos.extract import _fill_codes, _parse_json
+from decklight.demos.names import CardNames
+from decklight.demos.plan import (
     SYSTEM,
     card_sheet,
     compact_line_json,
     improve_prompt,
     repair_prompt,
 )
-from ygo_zero.demos.pool import failed_verdict, map_timeout
-from ygo_zero.demos.records import make_record
-from ygo_zero.demos.schema import ComboLine
-from ygo_zero.demos.verify import Verdict, verify_line
-from ygo_zero.engine.duel import Engine
-from ygo_zero.infra.remote import remote_verify, require_session
+from decklight.demos.pool import failed_verdict, map_timeout
+from decklight.demos.records import make_record
+from decklight.demos.schema import ComboLine
+from decklight.demos.verify import Verdict, verify_line
+from decklight.engine.duel import Engine
+from decklight.infra.remote import remote_verify, require_session
 
 ROOT = Path(__file__).resolve().parents[1]
 

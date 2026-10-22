@@ -1,7 +1,7 @@
 import pytest
 
-from ygo_zero.engine.duel import Duel, DuelConfig, canonical_trace
-from ygo_zero.engine.random_agent import RandomAgent
+from decklight.engine.duel import Duel, DuelConfig, canonical_trace
+from decklight.engine.random_agent import RandomAgent
 
 
 def _play(engine, config, seed):

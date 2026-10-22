@@ -6,13 +6,13 @@ from pathlib import Path
 
 import numpy as np
 
-from ygo_zero.decks import Deck
-from ygo_zero.demos.schema import ComboLine, Step
-from ygo_zero.demos.verify import Verdict
-from ygo_zero.engine import constants as C
-from ygo_zero.engine.actions import Kind
-from ygo_zero.engine.duel import DuelConfig
-from ygo_zero.infra import remote, vast
+from decklight.decks import Deck
+from decklight.demos.schema import ComboLine, Step
+from decklight.demos.verify import Verdict
+from decklight.engine import constants as C
+from decklight.engine.actions import Kind
+from decklight.engine.duel import DuelConfig
+from decklight.infra import remote, vast
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -142,7 +142,7 @@ def _fake_obs(my_turn=0, msg=C.MSG_SELECT_CHAIN, kinds=((Kind.ACTIVATE, 89631139
 
 
 def _interrupter(answer, **kw):
-    from ygo_zero.demos.game import Interrupter
+    from decklight.demos.game import Interrupter
 
     calls = []
     it = Interrupter(lambda p: calls.append(p) or answer, {89631139: "Blue-Eyes White Dragon"}, **kw)
@@ -173,7 +173,7 @@ def test_interrupter_cap_per_turn():
 
 
 def test_interrupter_only_on_opponent_turn():
-    from ygo_zero.engine.actions import Kind as K
+    from decklight.engine.actions import Kind as K
 
     it, calls = _interrupter('{"choice": 0, "why": "go"}')
     own = _fake_obs(my_turn=1)  # acting player IS the turn player
@@ -185,7 +185,7 @@ def test_interrupter_only_on_opponent_turn():
 
 
 def test_legal_actions_lists_engine_options_and_flags_live_plays():
-    from ygo_zero.demos.game import legal_actions, turn_prompt
+    from decklight.demos.game import legal_actions, turn_prompt
 
     names = {1: "Pre-Preparation of Rites", 2: "Ragged", 3: "Trap A"}
     obs = _fake_obs(1, C.MSG_SELECT_IDLECMD, ((Kind.ACTIVATE, 1), (Kind.ACTIVATE, 1), (Kind.SUMMON, 2),
@@ -200,7 +200,7 @@ def test_legal_actions_lists_engine_options_and_flags_live_plays():
 
 
 def test_step_player_asks_only_real_choices_and_logs_the_turn():
-    from ygo_zero.demos.game import StepPlayer
+    from decklight.demos.game import StepPlayer
 
     asked = []
 

@@ -1,7 +1,7 @@
 """Auxiliary evaluator heads on the frozen value trunk (engine plan N3).
 
 Loads value_p2 (`--value`), freezes everything, and trains `AuxHeads`
-(`src/ygo_zero/eval/aux.py`) on trunk features (computed under `torch.no_grad()`
+(`src/decklight/eval/aux.py`) on trunk features (computed under `torch.no_grad()`
 per batch) with AdamW and early stopping on the holdout loss.
 
     uv run python scripts/train_aux.py --shards data/cache/aux_shards \\
@@ -29,9 +29,9 @@ from pathlib import Path
 import numpy as np
 import torch
 
-from ygo_zero.eval.aux import AUX_SPEC, AuxHeads, aux_losses
-from ygo_zero.model.bc_data import OBS_KEYS
-from ygo_zero.model.policy_v3 import make_policy
+from decklight.eval.aux import AUX_SPEC, AuxHeads, aux_losses
+from decklight.model.bc_data import OBS_KEYS
+from decklight.model.policy_v3 import make_policy
 
 TARGET_KEYS = ("d_lp", "d_cards", "ends", "turns_left")
 

@@ -16,13 +16,13 @@ import os
 from collections import Counter
 from pathlib import Path
 
-from ygo_zero.decks import Deck, load_ydk
-from ygo_zero.demos.pool import failed_verdict, map_timeout
-from ygo_zero.demos.records import make_record
-from ygo_zero.demos.schema import ComboLine
-from ygo_zero.demos.verify import Verdict, verify_line
-from ygo_zero.engine import constants as C
-from ygo_zero.engine.duel import Engine
+from decklight.decks import Deck, load_ydk
+from decklight.demos.pool import failed_verdict, map_timeout
+from decklight.demos.records import make_record
+from decklight.demos.schema import ComboLine
+from decklight.demos.verify import Verdict, verify_line
+from decklight.engine import constants as C
+from decklight.engine.duel import Engine
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -62,7 +62,7 @@ def map_ordered(fn, items: list, jobs: int, initializer=None):
     if not items:
         return []
     if REMOTE:
-        from ygo_zero.infra.remote import remote_verify
+        from decklight.infra.remote import remote_verify
 
         return remote_verify(items, LINE_TIMEOUT)  # the box sizes its pool from its cgroup quota
     if initializer is not None:

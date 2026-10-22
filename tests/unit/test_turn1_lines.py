@@ -8,9 +8,9 @@ import numpy as np
 import pytest
 import torch
 
-from ygo_zero.decks import load_ydk
-from ygo_zero.eval.turn1 import config_from_dict, replay_turn1, resolve_decks
-from ygo_zero.model.policy import PolicyNet
+from decklight.decks import load_ydk
+from decklight.eval.turn1 import config_from_dict, replay_turn1, resolve_decks
+from decklight.model.policy import PolicyNet
 
 FIXTURES = Path(__file__).resolve().parents[1] / "fixtures" / "decks"
 ARCH = {"d": 16, "layers": 1, "heads": 2, "hist": 0, "known": False}

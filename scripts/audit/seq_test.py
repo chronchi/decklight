@@ -25,7 +25,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
-from ygo_zero.eval.seqtest import (
+from decklight.eval.seqtest import (
     ordered_keys,
     paired_ci,
     resolve_params,

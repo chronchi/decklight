@@ -34,7 +34,7 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 
-from ygo_zero.model.bc_data import (
+from decklight.model.bc_data import (
     KNOWN_KEYS,
     OBS_KEYS,
     check_eval_decks,
@@ -43,7 +43,7 @@ from ygo_zero.model.bc_data import (
     load_shards,
     split_masks,
 )
-from ygo_zero.model.policy_v3 import make_policy
+from decklight.model.policy_v3 import make_policy
 
 
 def batches(data, idx, bs, device, shuffle, rng, hist=0, hist_salient=True, known=False):

@@ -1,4 +1,4 @@
-"""Play full games between pool decks with the turn planner + engine verifier (ADR 0004, src/ygo_zero/demos/game.py).
+"""Play full games between pool decks with the turn planner + engine verifier (ADR 0004, src/decklight/demos/game.py).
 
 nice -n 19 uv run python scripts/play_games.py --pairs blue-eyes:sky-striker --games 1 --max-turns 4
 Records: data/demos/games/<deck0>-vs-<deck1>.jsonl (append), one game per line.
@@ -10,14 +10,14 @@ import random
 import sys
 from pathlib import Path
 
-from ygo_zero.decks import load_ydk
-from ygo_zero.demos import llm as _llm
-from ygo_zero.demos.game import TURN_SYSTEM, build_opening, find_openings, play_game, rank_openings
-from ygo_zero.demos.names import CardNames
-from ygo_zero.demos.schema import ComboLine
-from ygo_zero.demos.verify import plan_from_state
-from ygo_zero.engine.duel import Engine
-from ygo_zero.infra import remote as _remote
+from decklight.decks import load_ydk
+from decklight.demos import llm as _llm
+from decklight.demos.game import TURN_SYSTEM, build_opening, find_openings, play_game, rank_openings
+from decklight.demos.names import CardNames
+from decklight.demos.schema import ComboLine
+from decklight.demos.verify import plan_from_state
+from decklight.engine.duel import Engine
+from decklight.infra import remote as _remote
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from plan_lines import load_examples

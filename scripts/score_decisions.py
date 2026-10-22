@@ -82,7 +82,7 @@ def load_aux_model(aux_path: Path, device: str):
     """Load an aux.pt checkpoint (train_aux.py format) onto device, eval mode."""
     import torch
 
-    from ygo_zero.eval.aux import AuxHeads
+    from decklight.eval.aux import AuxHeads
 
     ckpt = torch.load(aux_path, map_location="cpu", weights_only=False)
     state = ckpt.get("model", ckpt)
@@ -128,7 +128,7 @@ def main() -> int:
             fail(f"no such dir: {d}")
     si, sn = parse_shard(a.shard)
 
-    from ygo_zero.eval.value import ValueNet
+    from decklight.eval.value import ValueNet
 
     t0 = time.time()
     scorer = ValueNet(a.value, a.emb, device=a.device, batch=min(a.batch, 512))
@@ -145,9 +145,9 @@ def main() -> int:
 
     import render_showcase as R
 
-    from ygo_zero.decks import load_ydk
-    from ygo_zero.engine.cpp_env import CppEnv
-    from ygo_zero.engine.duel import DuelConfig, Engine
+    from decklight.decks import load_ydk
+    from decklight.engine.cpp_env import CppEnv
+    from decklight.engine.duel import DuelConfig, Engine
 
     engine = Engine()
     recs = [r for i, r in enumerate(iter_records(a.games, a.max_games)) if i % sn == si]

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# GPU box: embed card texts (MODE=strings: effect strings, ygo_zero.cards.effect_strings) with Qwen3-Embedding-0.6B. Output -> runs/$1/ (pulled back by the launcher).
+# GPU box: embed card texts (MODE=strings: effect strings, decklight.cards.effect_strings) with Qwen3-Embedding-0.6B. Output -> runs/$1/ (pulled back by the launcher).
 # Incremental (custom cards): ONLY_MISSING=1 BASE=<base npz> OUT_NPZ=<merged npz path> YGO_EXTRA_CARDS=<extra dir>
 # runs embed_cards.py --only-missing --base "$BASE" --out "$OUT_NPZ" (MODE=strings: the strings table).
 set -uo pipefail

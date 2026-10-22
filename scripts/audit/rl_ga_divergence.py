@@ -20,8 +20,8 @@ sys.path.insert(0, str(ROOT / "scripts/audit"))
 from render_games import decisions_lines
 from rl_ga_compare import divergence, fields, load
 
-from ygo_zero.demos.names import CardNames
-from ygo_zero.engine.duel import Engine
+from decklight.demos.names import CardNames
+from decklight.engine.duel import Engine
 
 
 def line_at(lines: list[str], idx: int) -> str:

@@ -22,7 +22,7 @@ deck_sheet = _load("deck_sheet")
 
 def test_audit_flags_synthetic_deck_missing_namesake(tmp_path):
     """Three deck cards quoting "Dark Magician" without the card itself -> flagged."""
-    from ygo_zero.demos.names import CardNames
+    from decklight.demos.names import CardNames
 
     p = tmp_path / "syn.ydk"
     p.write_text("#main\n12266229\n47222536\n48680970\n#extra\n37818794\n!side\n")
@@ -31,7 +31,7 @@ def test_audit_flags_synthetic_deck_missing_namesake(tmp_path):
 
 
 def test_audit_fixed_dark_magician_has_its_namesake():
-    from ygo_zero.demos.names import CardNames
+    from decklight.demos.names import CardNames
 
     rows = check_decks.audit(ROOT / "decks" / "pool" / "dark-magician.ydk", CardNames())
     assert all(name != "Dark Magician" for name, _, _ in rows), rows

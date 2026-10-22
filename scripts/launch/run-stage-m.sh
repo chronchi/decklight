@@ -20,7 +20,7 @@ OUT=${OUT:-data/demos/turns}
 STREAM=${STREAM:-0}; NSTREAMS=${NSTREAMS:-1}; FROM_CHUNK=${FROM_CHUNK:-0}; WORKERS=${WORKERS:-8}
 DECKS=$(uv run --no-sync python -c "
 from pathlib import Path
-from ygo_zero.model.bc_data import eval_only_decks
+from decklight.model.bc_data import eval_only_decks
 h, n = eval_only_decks()
 print(' '.join(sorted(p.stem for p in Path('decks/pool').glob('*.ydk') if p.stem not in h and p.stem not in n)))")
 set -- $DECKS

@@ -6,7 +6,7 @@ uv run python scripts/lua_effects_stats.py
 import time
 from collections import Counter
 
-from ygo_zero.cards.lua_effects import OFFICIAL_DIR, load_constants, parse_script
+from decklight.cards.lua_effects import OFFICIAL_DIR, load_constants, parse_script
 
 FAILURE_SAMPLE = 5
 TOP_UNRESOLVED = 15

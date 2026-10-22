@@ -13,9 +13,9 @@ import time
 import numpy as np
 import pytest
 
-from ygo_zero.engine.cpp_env import CppEnv
-from ygo_zero.engine.duel import DuelConfig
-from ygo_zero.search.determinize import (
+from decklight.engine.cpp_env import CppEnv
+from decklight.engine.duel import DuelConfig
+from decklight.search.determinize import (
     Determinizer,
     SeenTracker,
     find_by_key_rank,
@@ -161,7 +161,7 @@ def test_replay_keys_matches_python_loop(engine, decks):
 
 def test_determinizer_sample_bit_identical(engine, decks):
     """Determinizer.sample identical with the C++ fast path and the old Python loop."""
-    import ygo_zero.search.determinize as D
+    import decklight.search.determinize as D
 
     for gi, cfg in enumerate(_cfgs(decks)[:2]):
         prefix, _ = _random_prefix(engine, cfg, seed=33, length=120)

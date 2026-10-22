@@ -5,14 +5,14 @@ from pathlib import Path
 
 import pytest
 
-from ygo_zero.decks import load_ydk
-from ygo_zero.engine import messages as M
-from ygo_zero.engine.actions import Kind
-from ygo_zero.engine.duel import DuelConfig, Engine
-from ygo_zero.engine.env import PyEnv
-from ygo_zero.web.cues import build_cues
-from ygo_zero.web.stats import DuelStats
-from ygo_zero.web.view import build_view
+from decklight.decks import load_ydk
+from decklight.engine import messages as M
+from decklight.engine.actions import Kind
+from decklight.engine.duel import DuelConfig, Engine
+from decklight.engine.env import PyEnv
+from decklight.web.cues import build_cues
+from decklight.web.stats import DuelStats
+from decklight.web.view import build_view
 
 FIXTURE = Path("tests/fixtures/web/mitsurugi-20261016")
 

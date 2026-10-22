@@ -1,8 +1,8 @@
 <p align="center">
-  <img src="docs/brand/decklight/final/decklight-logo@2x.png" alt="Decklight logo: three fanned cards with a rising gold line" width="480">
+  <img src="docs/brand/decklight/final/decklight-logo@2x.png" alt="decklight logo: three fanned cards with a rising gold line" width="480">
 </p>
 
-# Decklight
+# decklight
 
 A Yu-Gi-Oh! duelist that pilots **any deck you give it**, including decks and cards it never trained on, and a
 phone-friendly web client to play and study against it.
@@ -67,7 +67,7 @@ uv run python scripts/search_match.py --ckpt "$PRODUCT_CKPT" --value "$PRODUCT_V
 ## Repository map
 | path | what |
 |---|---|
-| `src/ygo_zero/` | the Python package (internal name): engine bindings, observations, models, search, web server, EDOPro host |
+| `src/decklight/` | the Python package: engine bindings, observations, models, search, web server, EDOPro host |
 | `cpp/` | the C++ environment (pybind11) |
 | `scripts/` | training, evaluation, data and audit scripts; `scripts/product.sh` defines the product |
 | `web/` | the browser client (plain JS, no build step) |

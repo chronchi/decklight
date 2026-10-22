@@ -4,7 +4,7 @@ import math
 
 import pytest
 
-from ygo_zero.analysis import annotate as A
+from decklight.analysis import annotate as A
 
 BASE = [40, 5, 0, 0, 0, 0, 15]
 

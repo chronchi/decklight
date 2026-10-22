@@ -36,9 +36,9 @@ sys.path.insert(0, str(ROOT / "scripts"))
 from hand_play import _config
 from render_games import render_one
 
-from ygo_zero.demos.names import CardNames
-from ygo_zero.engine.cpp_env import CppEnv
-from ygo_zero.engine.duel import Engine
+from decklight.demos.names import CardNames
+from decklight.engine.cpp_env import CppEnv
+from decklight.engine.duel import Engine
 
 FIELD_LOCS = (3, 4)  # obs card column 1: 3 mzone, 4 szone (same measure as playtest.my_field)
 

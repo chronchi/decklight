@@ -1,8 +1,8 @@
-"""Embed card texts with Qwen3-Embedding-0.6B -> data/cards/emb/<tag>.npz (see ygo_zero.cards.embed).
+"""Embed card texts with Qwen3-Embedding-0.6B -> data/cards/emb/<tag>.npz (see decklight.cards.embed).
 
 uv run python scripts/embed_cards.py --dim 512            # all cards
 uv run python scripts/embed_cards.py --limit 200 --tag smoke
-uv run python scripts/embed_cards.py --strings --dim 512   # card str1..16 + system strings (ygo_zero.cards.effect_strings)
+uv run python scripts/embed_cards.py --strings --dim 512   # card str1..16 + system strings (decklight.cards.effect_strings)
 
 Incremental (custom cards: YGO_EXTRA_CARDS set, base npz shipped to the box):
 
@@ -15,8 +15,8 @@ import argparse
 import sys
 from pathlib import Path
 
-from ygo_zero.cards.effect_strings import append_string_embeddings, build_strings, missing_string_keys
-from ygo_zero.cards.embed import append_card_embeddings, build, missing_card_codes
+from decklight.cards.effect_strings import append_string_embeddings, build_strings, missing_string_keys
+from decklight.cards.embed import append_card_embeddings, build, missing_card_codes
 
 ap = argparse.ArgumentParser()
 ap.add_argument("--dim", type=int, default=512)

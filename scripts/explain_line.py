@@ -7,12 +7,12 @@ import argparse
 import json
 from pathlib import Path
 
-from ygo_zero.decks import load_ydk
-from ygo_zero.demos.explain import explain_failure
-from ygo_zero.demos.schema import ComboLine
-from ygo_zero.demos.verify import verify_line
-from ygo_zero.engine.duel import Engine
-from ygo_zero.engine.resources import CDB_DIR
+from decklight.decks import load_ydk
+from decklight.demos.explain import explain_failure
+from decklight.demos.schema import ComboLine
+from decklight.demos.verify import verify_line
+from decklight.engine.duel import Engine
+from decklight.engine.resources import CDB_DIR
 
 LOC = {1: "deck", 2: "hand", 3: "mzone", 4: "szone", 5: "grave", 6: "banished", 7: "extra", 8: "overlay"}
 

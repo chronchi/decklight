@@ -26,7 +26,7 @@ import numpy as np
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "src"))
 
-from ygo_zero.model.bc_data import OBS_KEYS  # noqa: E402
+from decklight.model.bc_data import OBS_KEYS  # noqa: E402
 
 
 def game_rows(dirs: list[Path], max_games: int, seed: int):
@@ -42,9 +42,9 @@ def deck_paths(names: list[str]) -> list[Path]:
 
 def states(rows, stride: int, seed: int):
     """Yields (obs, z, turn_start, own_turn, game index) for both players' decisions."""
-    from ygo_zero.decks import load_ydk
-    from ygo_zero.engine.cpp_env import CppEnv
-    from ygo_zero.engine.duel import DuelConfig, Engine
+    from decklight.decks import load_ydk
+    from decklight.engine.cpp_env import CppEnv
+    from decklight.engine.duel import DuelConfig, Engine
 
     engine = Engine()
     rng = random.Random(seed)
@@ -89,7 +89,7 @@ def main() -> int:
     ap.add_argument("--out", type=Path, required=True)
     a = ap.parse_args()
 
-    from ygo_zero.eval.value import ValueNet
+    from decklight.eval.value import ValueNet
 
     nets = {}
     for spec in a.value:

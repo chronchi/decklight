@@ -13,8 +13,8 @@ from pathlib import Path
 CHILD = """
 import json, sys
 from types import SimpleNamespace
-from ygo_zero.engine.cpp_env import CppEnv
-from ygo_zero.engine.duel import DuelConfig, Engine, Placement
+from decklight.engine.cpp_env import CppEnv
+from decklight.engine.duel import DuelConfig, Engine, Placement
 lines = open(sys.argv[1]).read().splitlines()
 h = json.loads(lines[0]); ch = [int(x) for x in lines[1:]][: int(sys.argv[2])]
 cfg = DuelConfig(SimpleNamespace(main=h['deck0_main'], extra=h['deck0_extra']),

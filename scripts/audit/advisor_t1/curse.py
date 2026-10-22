@@ -6,9 +6,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT / "scripts/audit")); sys.path.insert(0, str(ROOT / "scripts")); sys.path.insert(0, str(ROOT/"src"))
 import show_divergence as S
-from ygo_zero.demos.game import _opts
-from ygo_zero.engine.cpp_env import CppEnv
-from ygo_zero.engine.duel import Engine
+from decklight.demos.game import _opts
+from decklight.engine.cpp_env import CppEnv
+from decklight.engine.duel import Engine
 eng = Engine(); G = S.load(sys.argv[1]); lim = int(sys.argv[2])
 by = defaultdict(Counter); gaps = defaultdict(list); sel_se = []
 for gi, g in enumerate(G.values()):

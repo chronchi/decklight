@@ -1,14 +1,14 @@
 import numpy as np
 import pytest
 
-pytest.importorskip("ygo_zero.engine.cpp_env")
+pytest.importorskip("decklight.engine.cpp_env")
 
-from ygo_zero.eval.match import game_state, play_match, wilson
-from ygo_zero.eval.policies import GreedyPolicy, RandomPolicy
+from decklight.eval.match import game_state, play_match, wilson
+from decklight.eval.policies import GreedyPolicy, RandomPolicy
 
 
 def test_schedule_plays_each_game_once(engine, decks):
-    from ygo_zero.engine.cpp_env import VecEnv
+    from decklight.engine.cpp_env import VecEnv
 
     names = sorted(decks)
     sched = [(0, 1, 5), (1, 0, 5), (2, 3, 6), (3, 3, 7), (1, 2, 8)]
@@ -103,8 +103,8 @@ def test_saved_games_replay_and_render(engine, decks, tmp_path):
     import sys
     from pathlib import Path
 
-    from ygo_zero.engine.cpp_env import CppEnv
-    from ygo_zero.engine.duel import DuelConfig
+    from decklight.engine.cpp_env import CppEnv
+    from decklight.engine.duel import DuelConfig
 
     names = sorted(decks)[:2]
     deck_list = [decks[n] for n in names]

@@ -106,6 +106,62 @@ wheels = [
 ]
 
 [[package]]
+name = "decklight"
+version = "0.0.1"
+source = { editable = "." }
+dependencies = [
+    { name = "numpy" },
+]
+
+[package.dev-dependencies]
+dev = [
+    { name = "meson" },
+    { name = "ninja" },
+    { name = "pybind11" },
+    { name = "pytest" },
+    { name = "ruff" },
+]
+gauntlet = [
+    { name = "ai-edge-litert" },
+]
+ml = [
+    { name = "sentence-transformers" },
+    { name = "torch", version = "2.14.1", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "sys_platform == 'darwin'" },
+    { name = "torch", version = "2.14.1+cpu", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "sys_platform != 'darwin'" },
+]
+web = [
+    { name = "httpx" },
+    { name = "imageio-ffmpeg" },
+    { name = "starlette" },
+    { name = "uvicorn" },
+    { name = "websockets" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "numpy", specifier = ">=2.5.3" }]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "meson", specifier = ">=1.4" },
+    { name = "ninja", specifier = ">=1.11" },
+    { name = "pybind11", specifier = ">=3.1.0" },
+    { name = "pytest", specifier = ">=8" },
+    { name = "ruff", specifier = ">=0.6" },
+]
+gauntlet = [{ name = "ai-edge-litert", specifier = ">=2.2.0" }]
+ml = [
+    { name = "sentence-transformers", specifier = ">=5.1" },
+    { name = "torch", specifier = ">=2.9", index = "https://download.pytorch.org/whl/cpu" },
+]
+web = [
+    { name = "httpx", specifier = ">=0.27" },
+    { name = "imageio-ffmpeg", specifier = ">=0.5" },
+    { name = "starlette", specifier = ">=0.37" },
+    { name = "uvicorn", specifier = ">=0.29" },
+    { name = "websockets", specifier = ">=13" },
+]
+
+[[package]]
 name = "filelock"
 version = "4.0.9"
 source = { registry = "https://pypi.org/simple" }
@@ -1347,60 +1403,4 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/2b/bf/3d7c33b8d5e7712a60e0149c017ed50394ec5e8cf72e5cb6a1ffaf11a42d/websockets-17.2-cp315-cp315t-win_amd64.whl", hash = "sha256:315551f4ccedbbf9fd4f7e8bf037a5948c976ade0e919ba5d8f581d465f6f725", size = 218169, upload-time = "2026-10-03T14:56:37.79Z" },
     { url = "https://files.pythonhosted.org/packages/27/57/ab34cc6460c5322e6932750fa5c6c64be89e6ee4e2707d13c4e9d3312b25/websockets-17.2-cp315-cp315t-win_arm64.whl", hash = "sha256:0a6220bdf8d5f11af71251a599092d89ac1d6bfac691c7f5951c5b07953947a0", size = 218089, upload-time = "2026-10-03T14:56:39.427Z" },
     { url = "https://files.pythonhosted.org/packages/8a/58/835cd51934d6780fa586f275b5d9901eead6d81569b4343b3767cdbaae4c/websockets-17.2-py3-none-any.whl", hash = "sha256:6aa59f0ef92e796b2db6f5f26550c4713c0e4036899fadf02f55e2ed4db0b7ae", size = 211883, upload-time = "2026-10-03T14:56:51.898Z" },
-]
-
-[[package]]
-name = "ygo-zero"
-version = "0.0.1"
-source = { editable = "." }
-dependencies = [
-    { name = "numpy" },
-]
-
-[package.dev-dependencies]
-dev = [
-    { name = "meson" },
-    { name = "ninja" },
-    { name = "pybind11" },
-    { name = "pytest" },
-    { name = "ruff" },
-]
-gauntlet = [
-    { name = "ai-edge-litert" },
-]
-ml = [
-    { name = "sentence-transformers" },
-    { name = "torch", version = "2.14.1", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "sys_platform == 'darwin'" },
-    { name = "torch", version = "2.14.1+cpu", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "sys_platform != 'darwin'" },
-]
-web = [
-    { name = "httpx" },
-    { name = "imageio-ffmpeg" },
-    { name = "starlette" },
-    { name = "uvicorn" },
-    { name = "websockets" },
-]
-
-[package.metadata]
-requires-dist = [{ name = "numpy", specifier = ">=2.5.3" }]
-
-[package.metadata.requires-dev]
-dev = [
-    { name = "meson", specifier = ">=1.4" },
-    { name = "ninja", specifier = ">=1.11" },
-    { name = "pybind11", specifier = ">=3.1.0" },
-    { name = "pytest", specifier = ">=8" },
-    { name = "ruff", specifier = ">=0.6" },
-]
-gauntlet = [{ name = "ai-edge-litert", specifier = ">=2.2.0" }]
-ml = [
-    { name = "sentence-transformers", specifier = ">=5.1" },
-    { name = "torch", specifier = ">=2.9", index = "https://download.pytorch.org/whl/cpu" },
-]
-web = [
-    { name = "httpx", specifier = ">=0.27" },
-    { name = "imageio-ffmpeg", specifier = ">=0.5" },
-    { name = "starlette", specifier = ">=0.37" },
-    { name = "uvicorn", specifier = ">=0.29" },
-    { name = "websockets", specifier = ">=13" },
 ]

@@ -17,9 +17,9 @@ PROF_KEYS = ("t_det_init", "t_det", "n_prop", "n_acc", "t_setup", "t_env", "t_py
 
 def _tiny_forward():
     """A tiny d=16 PolicyNet on synthetic embeddings (as in test_search_play.py), as a batched logits fn."""
-    from ygo_zero.decks import load_ydk
-    from ygo_zero.model.bc_data import OBS_KEYS
-    from ygo_zero.model.policy import PolicyNet
+    from decklight.decks import load_ydk
+    from decklight.model.bc_data import OBS_KEYS
+    from decklight.model.policy import PolicyNet
 
     decks = [load_ydk(p) for p in sorted((FIXTURES / "decks").glob("*.ydk"))]
     codes = sorted({c for d in decks for c in list(d.main) + list(d.extra)} - {0})
@@ -39,17 +39,17 @@ def _tiny_forward():
 
 
 def _cfg():
-    from ygo_zero.decks import load_ydk
-    from ygo_zero.engine.duel import DuelConfig
+    from decklight.decks import load_ydk
+    from decklight.engine.duel import DuelConfig
 
     decks = [load_ydk(p) for p in sorted((FIXTURES / "decks").glob("*.ydk"))]
     return DuelConfig(decks[2], decks[3], seed=8)
 
 
 def _play(engine, forward, prof=False, latency=False, **kw):
-    from ygo_zero.search.play import argmax_select, search_game_gen
-    from ygo_zero.search.turn1 import drive_many
-    from ygo_zero.search.window import WindowSearch
+    from decklight.search.play import argmax_select, search_game_gen
+    from decklight.search.turn1 import drive_many
+    from decklight.search.window import WindowSearch
 
     def never(buf):
         raise AssertionError("unused")

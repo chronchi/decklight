@@ -19,7 +19,7 @@ from pathlib import Path
 
 
 def main(argv=None) -> int:
-    import ygo_zero.analysis.primer as P
+    import decklight.analysis.primer as P
 
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("caches", nargs="+", type=Path)

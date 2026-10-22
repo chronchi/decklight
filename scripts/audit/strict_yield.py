@@ -5,10 +5,10 @@ from collections import Counter
 from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "src"))
-from ygo_zero.demos.dataset import iter_samples
-from ygo_zero.demos.game import _opts
-from ygo_zero.engine.duel import Engine
-from ygo_zero.engine import constants as C
+from decklight.demos.dataset import iter_samples
+from decklight.demos.game import _opts
+from decklight.engine.duel import Engine
+from decklight.engine import constants as C
 src, nfiles, tmax = sys.argv[1], int(sys.argv[2]), float(sys.argv[3])
 files = sorted((ROOT / "data/demos" / src).rglob("*.jsonl")); random.Random(1).shuffle(files); files = files[:nfiles]
 eng = Engine(); t0 = time.time()

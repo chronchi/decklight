@@ -22,19 +22,19 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from ygo_zero.decks import load_ydk
-from ygo_zero.edopro.bot import RandomBot
-from ygo_zero.edopro.host import DuelHost
-from ygo_zero.engine.duel import Engine
+from decklight.decks import load_ydk
+from decklight.edopro.bot import RandomBot
+from decklight.edopro.host import DuelHost
+from decklight.engine.duel import Engine
 
 
 def run_selftest(port: int, deck_codes: list[int], pool: set[str | int], seed: int = 0) -> dict:
     """Drive the human seat randomly from in-process (the manual smoke): lobby, RPS/TP,
     then random legal answers until STOC_DUEL_END. Returns win/retries."""
-    from ygo_zero.edopro import protocol as P
-    from ygo_zero.engine import constants as C
-    from ygo_zero.engine import messages as M
-    from ygo_zero.engine.actions import make_decision
+    from decklight.edopro import protocol as P
+    from decklight.engine import constants as C
+    from decklight.engine import messages as M
+    from decklight.engine.actions import make_decision
 
     engine = Engine()
     rng = random.Random(seed)
@@ -113,7 +113,7 @@ def main() -> None:
     if missing:
         sys.exit(f"bot deck has {len(missing)} codes missing from the card DB, e.g. {missing[:3]}")
     if a.opponent == "product":
-        from ygo_zero.edopro.product_bot import ProductLauncher
+        from decklight.edopro.product_bot import ProductLauncher
 
         bot = ProductLauncher(ckpt=a.ckpt, value_ckpt=a.value, emb=a.emb, device=a.device,
                               fast=a.fast, replay_threads=a.replay_threads)

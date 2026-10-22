@@ -26,7 +26,7 @@ sys.path.insert(0, str(ROOT / "scripts"))
 
 import hand_play as H
 
-from ygo_zero.demos.game import _opts, describe_state, hidden_card, option_desc
+from decklight.demos.game import _opts, describe_state, hidden_card, option_desc
 
 
 def load(d: str) -> dict:
@@ -41,8 +41,8 @@ def load(d: str) -> dict:
 
 def _config(g: dict):
     """The deal as search_match --opp ygoagent builds it: gauntlet lists by seat, the game seed."""
-    from ygo_zero.decks import load_ydk
-    from ygo_zero.engine.duel import DuelConfig
+    from decklight.decks import load_ydk
+    from decklight.engine.duel import DuelConfig
 
     d0, d1 = (load_ydk(ROOT / "decks" / "gauntlet" / f"{n}.ydk") for n in g["decks"])
     return DuelConfig(d0, d1, seed=g["seed"])
@@ -63,7 +63,7 @@ def _label(obs, i: int, nn: dict) -> str:
 
 
 def state_at(g: dict, k: int, engine):
-    from ygo_zero.engine.cpp_env import CppEnv
+    from decklight.engine.cpp_env import CppEnv
 
     env = CppEnv(engine, _config(g), True)
     obs = env.reset()
@@ -86,8 +86,8 @@ def main() -> int:
     ap.add_argument("--stats", action="store_true")
     ap.add_argument("--only-flips", action="store_true")
     a = ap.parse_args()
-    from ygo_zero.demos.names import CardNames
-    from ygo_zero.engine.duel import Engine
+    from decklight.demos.names import CardNames
+    from decklight.engine.duel import Engine
 
     A, B = load(a.a), load(a.b)
     keys = sorted(set(A) & set(B))

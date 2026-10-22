@@ -3,7 +3,7 @@
 import numpy as np
 import torch
 
-from ygo_zero.model.policy import CardText
+from decklight.model.policy import CardText
 
 
 def _card_text(d=8, seed=0):

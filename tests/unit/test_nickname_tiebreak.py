@@ -2,8 +2,8 @@
 
 import json
 
-from ygo_zero.demos.extract import extract_lines
-from ygo_zero.demos.names import CardNames, resolve_global_unique
+from decklight.demos.extract import extract_lines
+from decklight.demos.names import CardNames, resolve_global_unique
 
 NAMES = CardNames()
 

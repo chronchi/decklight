@@ -2,16 +2,16 @@
 
 import pytest
 
-from ygo_zero.demos.schema import ComboLine, Step
-from ygo_zero.demos.verify import (
+from decklight.demos.schema import ComboLine, Step
+from decklight.demos.verify import (
     effective_hand_codes,
     infer_hand_codes,
     quality_guard,
     verify_line,
 )
-from ygo_zero.engine.cpp_env import CppEnv
+from decklight.engine.cpp_env import CppEnv
 
-cpp_env = pytest.importorskip("ygo_zero.engine.cpp_env", reason="extension not built")
+cpp_env = pytest.importorskip("decklight.engine.cpp_env", reason="extension not built")
 
 SAGE = 8240199  # Sage with Eyes of Blue: level 1, normal-summonable
 BLUE_EYES = 89631139
@@ -233,7 +233,7 @@ def test_summon_then_tribute_in_one_step_counts(engine):
     Prayers (no_anchor@3 on the full line; on this prefix the search only got around it via a carry)."""
     from pathlib import Path
 
-    from ygo_zero.decks import load_ydk
+    from decklight.decks import load_ydk
 
     pre_prep, habakiri, saji, prayers, aramasa = 13048472, 13332685, 18176525, 45171524, 40543231
     deck = load_ydk(Path(__file__).resolve().parents[2] / "decks" / "pool" / "mitsurugi.ydk")
@@ -255,7 +255,7 @@ def test_set_after_a_quick_play_was_offered_in_the_chain_window(engine):
     pending open-state action."""
     from pathlib import Path
 
-    from ygo_zero.decks import load_ydk
+    from decklight.decks import load_ydk
 
     droplet, cosmic, imperm, raigeki, thrust = 24299458, 8267140, 10045474, 12580477, 35269904
     deck = load_ydk(Path(__file__).resolve().parents[2] / "decks" / "pool" / "sky-striker.ydk")

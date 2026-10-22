@@ -21,7 +21,7 @@ them via `--ga-ygo-share`), so every ygo-agent training game is a report-card ma
 With F = 0 (and no fixed/greedy shares) the league draws are bit-identical to before.
 
 Curriculum (`--curric 1`, PLAN section 0a step 3): pass-rate tracking over the DAGS
-starts (src/ygo_zero/rl/curriculum.py) with weights pushed every `--curric-every`
+starts (src/decklight/rl/curriculum.py) with weights pushed every `--curric-every`
 iterations; solved/hopeless starts are dropped from the PPO batch
 (`--curric-drop-solved 0` keeps them). Hinted self-distillation (`--hint-bank` +
 `--hint-coef C`, banked by scripts/hint_bank.py): `C x CE(policy, banked action)`
@@ -48,17 +48,17 @@ import numpy as np
 import torch
 from torch.nn.parallel import DistributedDataParallel as DDP
 
-from ygo_zero.decks import load_ydk
-from ygo_zero.engine.cpp_env import VecEnv
-from ygo_zero.engine.duel import Engine
-from ygo_zero.eval.bc_policy import _run_args
-from ygo_zero.model.policy import PolicyNet
-from ygo_zero.model.policy_v3 import ARCH_KEYS, make_policy
-from ygo_zero.rl import dist as distmod
-from ygo_zero.rl.critic import critic_obs
-from ygo_zero.rl.evaluate import AsyncEvaluator, format_eval_line, run_eval
-from ygo_zero.rl.league import League
-from ygo_zero.rl.ppo import (
+from decklight.decks import load_ydk
+from decklight.engine.cpp_env import VecEnv
+from decklight.engine.duel import Engine
+from decklight.eval.bc_policy import _run_args
+from decklight.model.policy import PolicyNet
+from decklight.model.policy_v3 import ARCH_KEYS, make_policy
+from decklight.rl import dist as distmod
+from decklight.rl.critic import critic_obs
+from decklight.rl.evaluate import AsyncEvaluator, format_eval_line, run_eval
+from decklight.rl.league import League
+from decklight.rl.ppo import (
     SlotStore,
     explained_variance,
     gae,
@@ -68,9 +68,9 @@ from ygo_zero.rl.ppo import (
     ppo_loss_priv,
     to_torch,
 )
-from ygo_zero.rl.rollout import Collector
-from ygo_zero.rl.vrpo import ppo_loss_vrpo, ppo_loss_vrpo_priv
-from ygo_zero.rl.vrpo import vrpo_batch as _vrpo_batch
+from decklight.rl.rollout import Collector
+from decklight.rl.vrpo import ppo_loss_vrpo, ppo_loss_vrpo_priv
+from decklight.rl.vrpo import vrpo_batch as _vrpo_batch
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -1016,7 +1016,7 @@ def main() -> None:
     if args.dags_starts is not None or args.dags_p > 0:
         if args.dags_starts is None:
             fail(f"--dags-p {args.dags_p} without --dags-starts")
-        from ygo_zero.rl.dags import load_starts
+        from decklight.rl.dags import load_starts
 
         try:
             starts = load_starts(args.dags_starts)
@@ -1039,8 +1039,8 @@ def main() -> None:
     # only), so a banked action that is illegal at replay fails the job here, not mid-run.
     # (Flag-compatibility failures already raised before evaluate(0); only loads remain.)
     if args.hint_bank is not None:
-        from ygo_zero.rl.hints import load_bank
-        from ygo_zero.rl.ppo import model_keys
+        from decklight.rl.hints import load_bank
+        from decklight.rl.ppo import model_keys
 
         try:
             bank = load_bank(args.hint_bank, engine, hist, known, tuple(model_keys(hist, known)))
@@ -1057,7 +1057,7 @@ def main() -> None:
     if args.curric:
         if "start" not in vec.buf:
             fail("--curric 1 needs buf['start'] (rebuild the C++ env)")
-        from ygo_zero.rl.curriculum import PassRate
+        from decklight.rl.curriculum import PassRate
 
         bonus = {}
         if args.hint_start_bonus > 0:
@@ -1134,7 +1134,7 @@ def main() -> None:
     greedy_pol = None
     fixed_nets: dict[str, PolicyNet] = {}
     if args.league:
-        from ygo_zero.eval.ygoagent import MODEL_PATH as _YGO_MODEL
+        from decklight.eval.ygoagent import MODEL_PATH as _YGO_MODEL
 
         need_ygo = (args.p_ygoagent > 0 and args.p_self < 1 and args.ga_episode_share <= 0) or \
             (args.ga_episode_share > 0 and args.ga_ygo_share > 0)
@@ -1159,7 +1159,7 @@ def main() -> None:
                 p.requires_grad_(False)
             fixed_nets[name] = fnet
         if args.league_greedy_share > 0:
-            from ygo_zero.eval.policies import GreedyPolicy
+            from decklight.eval.policies import GreedyPolicy
 
             greedy_pol = GreedyPolicy(seed_rank + 0x617771)
         try:
@@ -1183,11 +1183,11 @@ def main() -> None:
             if dist_rank == 0:
                 print(f"[resume] league snapshots {[f'snap:{k}' for k in snap_its]}", flush=True)
         if args.p_ygoagent > 0 and args.p_self < 1 and args.ga_episode_share <= 0:
-            from ygo_zero.eval.ygoagent import YgoAgentPolicy
+            from decklight.eval.ygoagent import YgoAgentPolicy
 
             ygo_pol = YgoAgentPolicy(seed=seed_rank + 0x5EED, sample=True, workers=args.ga_workers)
         if args.ga_episode_share > 0 and args.ga_ygo_share > 0:
-            from ygo_zero.eval.ygoagent import YgoAgentPolicy
+            from decklight.eval.ygoagent import YgoAgentPolicy
 
             ygo_pol = YgoAgentPolicy(seed=seed_rank + 0x5EED, sample=True, workers=args.ga_workers)
         if dist_rank == 0:

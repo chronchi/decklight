@@ -62,7 +62,7 @@ train() {  # <variant> <args...>
   uv run --no-sync python scripts/train_bc.py "${COMMON[@]}" --out "$OUT/$v" "$@" > "$OUT/train-$v.txt" 2>&1
   local rc=$?
   rm -f "$OUT/$v/last.pt"
-  # fail loud: ALERT lines reach the launcher log within one poll (src/ygo_zero/infra/vast.py run_detached)
+  # fail loud: ALERT lines reach the launcher log within one poll (src/decklight/infra/vast.py run_detached)
   grep -q "^done in" "$OUT/train-$v.txt" || echo "ALERT train-$v died before 'done in' (exit $rc; OOM?)" >> "$OUT/ALERT"
   grep -h "^ALERT" "$OUT/train-$v.txt" >> "$OUT/ALERT"
   [ $rc -eq 0 ] || echo "FAILED train-$v exit $rc" >> "$OUT/timing.txt"

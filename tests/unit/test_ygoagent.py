@@ -3,9 +3,9 @@
 import numpy as np
 import pytest
 
-from ygo_zero.engine import constants as C
-from ygo_zero.engine.actions import Kind
-from ygo_zero.eval import ygoagent as Y
+from decklight.engine import constants as C
+from decklight.engine.actions import Kind
+from decklight.eval import ygoagent as Y
 
 
 def _first_codes(n=4):

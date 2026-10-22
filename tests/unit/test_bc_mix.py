@@ -6,8 +6,8 @@ from pathlib import Path
 
 import numpy as np
 
-from ygo_zero.demos.dataset import sample_kind
-from ygo_zero.model.bc_data import load_shards, split_masks
+from decklight.demos.dataset import sample_kind
+from decklight.model.bc_data import load_shards, split_masks
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -92,7 +92,7 @@ def test_load_shards_with_kind_roundtrips(tmp_path):
 
 
 def test_gold_kinds_and_weights():
-    from ygo_zero.demos.dataset import GOLD_LABEL_WEIGHT, LABEL_WEIGHT
+    from decklight.demos.dataset import GOLD_LABEL_WEIGHT, LABEL_WEIGHT
 
     assert sample_kind("data/demos/gold/a-vs-b.jsonl", "gold") == "gold"
     assert sample_kind("data/demos/gold/a-vs-b.jsonl", "pass") == "gold_pass"
@@ -152,7 +152,7 @@ def test_train_frac_is_fixed_and_nested():
 def test_check_eval_decks_flags_newcards_and_unlisted_holdout():
     import numpy as np
 
-    from ygo_zero.model.bc_data import check_eval_decks, eval_only_decks
+    from decklight.model.bc_data import check_eval_decks, eval_only_decks
 
     hold, new = eval_only_decks()
     assert "labrynth" in hold and "kewl-tune" in hold and "infernity" in new

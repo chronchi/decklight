@@ -31,21 +31,21 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from ygo_zero.decks import load_ydk  # noqa: E402
-from ygo_zero.demos import llm as _llm  # noqa: E402
-from ygo_zero.demos import verify  # noqa: E402
-from ygo_zero.demos.dataset import record_config  # noqa: E402
-from ygo_zero.demos.explain import explain_failure  # noqa: E402
-from ygo_zero.demos.extract import _fill_codes, _parse_json  # noqa: E402
-from ygo_zero.demos.game import TURN_SYSTEM, describe_state, legal_actions, turn_prompt  # noqa: E402
-from ygo_zero.demos.names import CardNames  # noqa: E402
-from ygo_zero.demos.plan import card_sheet, compact_line_json, repair_prompt  # noqa: E402
-from ygo_zero.demos.schema import ComboLine  # noqa: E402
-from ygo_zero.demos.verify import plan_from_state  # noqa: E402
-from ygo_zero.engine import constants as C  # noqa: E402
-from ygo_zero.engine.cpp_env import CppEnv  # noqa: E402
-from ygo_zero.engine.duel import Engine  # noqa: E402
-from ygo_zero.model.bc_data import eval_only_decks  # noqa: E402
+from decklight.decks import load_ydk  # noqa: E402
+from decklight.demos import llm as _llm  # noqa: E402
+from decklight.demos import verify  # noqa: E402
+from decklight.demos.dataset import record_config  # noqa: E402
+from decklight.demos.explain import explain_failure  # noqa: E402
+from decklight.demos.extract import _fill_codes, _parse_json  # noqa: E402
+from decklight.demos.game import TURN_SYSTEM, describe_state, legal_actions, turn_prompt  # noqa: E402
+from decklight.demos.names import CardNames  # noqa: E402
+from decklight.demos.plan import card_sheet, compact_line_json, repair_prompt  # noqa: E402
+from decklight.demos.schema import ComboLine  # noqa: E402
+from decklight.demos.verify import plan_from_state  # noqa: E402
+from decklight.engine import constants as C  # noqa: E402
+from decklight.engine.cpp_env import CppEnv  # noqa: E402
+from decklight.engine.duel import Engine  # noqa: E402
+from decklight.model.bc_data import eval_only_decks  # noqa: E402
 
 if not verify.STRICT:
     # Already imported without the env var (e.g. under pytest sharing one

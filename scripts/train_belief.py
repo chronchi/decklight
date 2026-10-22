@@ -1,4 +1,4 @@
-"""Train the belief head (src/ygo_zero/model/belief.py) on belief shards and report BCE against the hypergeometric
+"""Train the belief head (src/decklight/model/belief.py) on belief shards and report BCE against the hypergeometric
 baseline (PLAN §0a "Hidden-information bound" (b); gate: ratio <= 0.9 on held-out games, <= 0.95 on held-out decks).
 
     uv run python scripts/train_belief.py --shards data/cache/belief_shards --init data/cache/base_r3/best.pt \\
@@ -27,9 +27,9 @@ from pathlib import Path
 import numpy as np
 import torch
 
-from ygo_zero.model.bc_data import KNOWN_KEYS, OBS_KEYS, _npz_headers
-from ygo_zero.model.belief import BeliefNet, baseline_bce, bce, init_trunk, scored
-from ygo_zero.model.policy import PolicyNet
+from decklight.model.bc_data import KNOWN_KEYS, OBS_KEYS, _npz_headers
+from decklight.model.belief import BeliefNet, baseline_bce, bce, init_trunk, scored
+from decklight.model.policy import PolicyNet
 
 TARGET_KEYS = ("cand", "cand_n", "y", "base_p")
 META_KEYS = ("n_hidden", "turn", "game", "deck_me", "deck_opp")

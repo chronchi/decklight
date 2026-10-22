@@ -2,9 +2,9 @@
 import json,glob,collections,os,sys
 sys.path.insert(0,'scripts'); sys.path.insert(0,'scripts/audit')
 from render_games import _opts, option_desc, H
-from ygo_zero.engine.cpp_env import CppEnv
-from ygo_zero.engine.duel import Engine
-from ygo_zero.demos.names import CardNames
+from decklight.engine.cpp_env import CppEnv
+from decklight.engine.duel import Engine
+from decklight.demos.names import CardNames
 e2={}
 for f in glob.glob('runs/e2-20261007-2129/raw/games-*.jsonl'):
     for l in open(f):

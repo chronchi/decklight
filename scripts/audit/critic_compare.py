@@ -26,12 +26,12 @@ sys.path.insert(0, str(ROOT / "scripts"))
 from score_decisions import iter_records
 from train_bc import _run_args
 
-from ygo_zero.decks import load_ydk
-from ygo_zero.engine.cpp_env import CppEnv
-from ygo_zero.engine.duel import DuelConfig, Engine
-from ygo_zero.eval.value import ValueNet
-from ygo_zero.model.bc_data import OBS_KEYS
-from ygo_zero.model.policy_v3 import make_policy
+from decklight.decks import load_ydk
+from decklight.engine.cpp_env import CppEnv
+from decklight.engine.duel import DuelConfig, Engine
+from decklight.eval.value import ValueNet
+from decklight.model.bc_data import OBS_KEYS
+from decklight.model.policy_v3 import make_policy
 
 BUCKETS = (("1", 1, 1), ("2", 2, 2), ("3-4", 3, 4), ("5+", 5, 10**6))
 

@@ -15,17 +15,17 @@ import threading
 import numpy as np
 import pytest
 
-from ygo_zero.decks import load_ydk
-from ygo_zero.edopro import filter as F
-from ygo_zero.edopro import protocol as P
-from ygo_zero.edopro.bot import RandomBot
-from ygo_zero.edopro.host import DuelHost, check_deck
-from ygo_zero.engine import constants as C
-from ygo_zero.engine import messages as M
-from ygo_zero.engine.actions import make_decision
-from ygo_zero.engine.duel import DuelConfig, Engine
-from ygo_zero.engine.env import PyEnv
-from ygo_zero.engine.random_agent import RandomAgent
+from decklight.decks import load_ydk
+from decklight.edopro import filter as F
+from decklight.edopro import protocol as P
+from decklight.edopro.bot import RandomBot
+from decklight.edopro.host import DuelHost, check_deck
+from decklight.engine import constants as C
+from decklight.engine import messages as M
+from decklight.engine.actions import make_decision
+from decklight.engine.duel import DuelConfig, Engine
+from decklight.engine.env import PyEnv
+from decklight.engine.random_agent import RandomAgent
 
 DECK = "decks/pool/snake-eye.ydk"
 
@@ -312,7 +312,7 @@ def _free_port() -> int:
 
 def test_end_to_end_fake_client(tmp_path):
     try:
-        from ygo_zero.engine import inverse  # noqa: F401  (D1; server needs it live)
+        from decklight.engine import inverse  # noqa: F401  (D1; server needs it live)
     except ImportError:
         pytest.skip("D1 engine/inverse.py is missing")
 

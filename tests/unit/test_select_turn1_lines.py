@@ -7,7 +7,7 @@ from pathlib import Path
 
 from test_turn1_lines import _deck_names, _make_ckpts, _run
 
-from ygo_zero.demos.dataset import iter_samples, sample_kind
+from decklight.demos.dataset import iter_samples, sample_kind
 
 ROOT = Path(__file__).resolve().parents[2]
 

@@ -4,9 +4,9 @@ Usage: python scripts/audit/turn1_boards_vs_ya.py runs/<final-card>/raw"""
 import json, glob, sys, statistics
 sys.path.insert(0, "scripts/audit"); sys.path.insert(0, "src")
 import show_divergence as S
-from ygo_zero.engine.cpp_env import CppEnv
-from ygo_zero.engine.duel import Engine
-from ygo_zero.eval.turn1 import my_field
+from decklight.engine.cpp_env import CppEnv
+from decklight.engine.duel import Engine
+from decklight.eval.turn1 import my_field
 eng = Engine()
 G = S.load(sys.argv[1])
 def t1(g):

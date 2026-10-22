@@ -1,19 +1,19 @@
 import struct
 
-from ygo_zero.decks import parse_ydk
-from ygo_zero.engine import _gen_constants
-from ygo_zero.engine import constants as C
-from ygo_zero.engine import messages as M
-from ygo_zero.engine import responses as R
-from ygo_zero.engine.announce import is_declarable
-from ygo_zero.engine.duel import seed_words
-from ygo_zero.engine.random_agent import RandomAgent, sum_is_valid
-from ygo_zero.engine.resources import CardData
+from decklight.decks import parse_ydk
+from decklight.engine import _gen_constants
+from decklight.engine import constants as C
+from decklight.engine import messages as M
+from decklight.engine import responses as R
+from decklight.engine.announce import is_declarable
+from decklight.engine.duel import seed_words
+from decklight.engine.random_agent import RandomAgent, sum_is_valid
+from decklight.engine.resources import CardData
 
 
 def test_constants_match_pinned_header():
     expected = _gen_constants.render(_gen_constants.parse(_gen_constants.HEADER.read_text()))
-    assert _gen_constants.OUT.read_text() == expected, "run: uv run python -m ygo_zero.engine._gen_constants"
+    assert _gen_constants.OUT.read_text() == expected, "run: uv run python -m decklight.engine._gen_constants"
 
 
 def test_octal_link_markers():

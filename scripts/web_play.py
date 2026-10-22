@@ -44,7 +44,7 @@ def main() -> None:
 
     import uvicorn
 
-    from ygo_zero.web.server import create_app
+    from decklight.web.server import create_app
 
     app = create_app(token=token, opponent_default=a.opponent_default, device=a.device,
                      replay_threads=a.replay_threads)

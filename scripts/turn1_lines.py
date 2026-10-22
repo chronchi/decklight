@@ -26,11 +26,11 @@ import torch
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from ygo_zero.decks import Deck, load_ydk  # noqa: E402
-from ygo_zero.engine.cpp_env import CppEnv  # noqa: E402
-from ygo_zero.engine.duel import DuelConfig, Engine  # noqa: E402
-from ygo_zero.eval.bc_policy import BCPolicy  # noqa: E402
-from ygo_zero.eval.turn1 import (  # noqa: E402
+from decklight.decks import Deck, load_ydk  # noqa: E402
+from decklight.engine.cpp_env import CppEnv  # noqa: E402
+from decklight.engine.duel import DuelConfig, Engine  # noqa: E402
+from decklight.eval.bc_policy import BCPolicy  # noqa: E402
+from decklight.eval.turn1 import (  # noqa: E402
     CAP,
     best_of,  # noqa: F401 (re-exported for tests)
     config_from_dict,
@@ -86,7 +86,7 @@ def _deck_task(task: dict) -> list[dict]:
     """Rows of one unit of work: one random hand (greedy + K samples) or one verified record (greedy + K + expert).
 
     Units are single hands so the pool has no idle tail and results stream to disk as they finish."""
-    from ygo_zero.demos.dataset import record_config
+    from decklight.demos.dataset import record_config
 
     t0 = time.time()
     cfg, engine = _W["cfg"], _W["engine"]

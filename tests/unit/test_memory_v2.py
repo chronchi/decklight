@@ -3,7 +3,7 @@
 import numpy as np
 import torch
 
-from ygo_zero.model.bc_data import history_window, load_shards
+from decklight.model.bc_data import history_window, load_shards
 
 
 def _row(kind, code=0, actor_frame_ctrl=0, public=1, turn=1, phase=2, actor=0):
@@ -91,7 +91,7 @@ def _batch(b=4, h=128):
 
 
 def test_policy_hist0_loads_v1_strict_and_hist128_runs():
-    from ygo_zero.model.policy import PolicyNet
+    from decklight.model.policy import PolicyNet
 
     emb = _emb()
     v1 = PolicyNet(emb, d=16, layers=1, heads=2)
@@ -120,7 +120,7 @@ def test_policy_hist0_loads_v1_strict_and_hist128_runs():
 def _move(code, fc, fl, fs, fp, tc, tl, ts, tp=0xA):
     import struct
 
-    from ygo_zero.engine import constants as C
+    from decklight.engine import constants as C
 
     return bytes([C.MSG_MOVE]) + struct.pack("<I", code) + bytes([fc, fl]) + struct.pack(
         "<II", fs, fp) + bytes([tc, tl]) + struct.pack("<II", ts, tp) + struct.pack("<I", 0)
@@ -129,7 +129,7 @@ def _move(code, fc, fl, fs, fp, tc, tl, ts, tp=0xA):
 def _draw(player, codes, positions=None):
     import struct
 
-    from ygo_zero.engine import constants as C
+    from decklight.engine import constants as C
 
     positions = positions if positions is not None else [0x2] * len(codes)
     out = bytes([C.MSG_DRAW, player]) + struct.pack("<I", len(codes))
@@ -141,7 +141,7 @@ def _draw(player, codes, positions=None):
 def _confirm(viewer, entries):
     import struct
 
-    from ygo_zero.engine import constants as C
+    from decklight.engine import constants as C
 
     out = bytes([C.MSG_CONFIRM_CARDS, viewer]) + struct.pack("<I", len(entries))
     for code, con, loc, seq in entries:
@@ -152,7 +152,7 @@ def _confirm(viewer, entries):
 def _shuffle(player, codes):
     import struct
 
-    from ygo_zero.engine import constants as C
+    from decklight.engine import constants as C
 
     out = bytes([C.MSG_SHUFFLE_HAND, player]) + struct.pack("<I", len(codes))
     for c in codes:
@@ -161,8 +161,8 @@ def _shuffle(player, codes):
 
 
 def test_hand_memory_messages():
-    from ygo_zero.engine import constants as C
-    from ygo_zero.engine.knowledge import HandMemory
+    from decklight.engine import constants as C
+    from decklight.engine.knowledge import HandMemory
 
     m = HandMemory()
     assert m.note(_draw(0, [101, 102]))  # opening draw: unknown
@@ -201,7 +201,7 @@ def test_hand_memory_messages():
 
 
 def test_hand_memory_setup_hands():
-    from ygo_zero.engine.knowledge import HandMemory
+    from decklight.engine.knowledge import HandMemory
 
     m = HandMemory(([111, 112], [113]))
     assert m.known == [[False, False], [False]] and m.codes == [[111, 112], [113]]
@@ -210,7 +210,7 @@ def test_hand_memory_setup_hands():
 def test_load_shards_known_mixed_raises_and_absent_ok(tmp_path):
     import numpy as np
 
-    from ygo_zero.model.bc_data import load_shards
+    from decklight.model.bc_data import load_shards
 
     def shard(name, known):
         d = {"action": np.zeros(2, dtype=np.int64)}
@@ -233,7 +233,7 @@ def test_load_shards_known_mixed_raises_and_absent_ok(tmp_path):
 
 
 def test_policy_known_false_loads_step_a_strict_and_known_runs():
-    from ygo_zero.model.policy import PolicyNet
+    from decklight.model.policy import PolicyNet
 
     emb = _emb()
     step_a = PolicyNet(emb, d=16, layers=1, heads=2, hist=128)

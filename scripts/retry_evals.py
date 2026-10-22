@@ -27,7 +27,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from ygo_zero.rl.evaluate import format_eval_line  # noqa: E402
+from decklight.rl.evaluate import format_eval_line  # noqa: E402
 
 
 def main() -> int:

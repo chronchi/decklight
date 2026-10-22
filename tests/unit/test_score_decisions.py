@@ -51,8 +51,8 @@ class FakeValue:
 
 def _short_game(engine, decks, seed: int, max_steps: int = 60):
     names = sorted(decks)
-    from ygo_zero.engine.cpp_env import CppEnv
-    from ygo_zero.engine.duel import DuelConfig
+    from decklight.engine.cpp_env import CppEnv
+    from decklight.engine.duel import DuelConfig
 
     env = CppEnv(engine, DuelConfig(decks[names[0]], decks[names[1]], seed=seed))
     obs = env.reset()
@@ -94,7 +94,7 @@ def _write_games_dir(tmp_path: Path, engine, decks, n_games: int = 3) -> Path:
 
 
 def _run_score(monkeypatch, games_dir: Path, out: Path, extra=()):
-    import ygo_zero.eval.value as V
+    import decklight.eval.value as V
 
     monkeypatch.setattr(V, "ValueNet", FakeValue)
     import render_showcase as R
@@ -155,7 +155,7 @@ def test_shard_split_covers_all(engine, decks, tmp_path, monkeypatch):
 
 
 def test_zero_games_exits_2(tmp_path, monkeypatch):
-    import ygo_zero.eval.value as V
+    import decklight.eval.value as V
 
     monkeypatch.setattr(V, "ValueNet", FakeValue)
     empty = tmp_path / "empty"
@@ -185,8 +185,8 @@ def _tiny_value_and_aux(tmp_path: Path):
 
     import torch
 
-    from ygo_zero.eval.aux import AUX_SPEC, AuxHeads
-    from ygo_zero.model.policy import PolicyNet
+    from decklight.eval.aux import AUX_SPEC, AuxHeads
+    from decklight.model.policy import PolicyNet
 
     torch.set_num_threads(1)
     torch.manual_seed(0)
@@ -262,7 +262,7 @@ def test_aux_adds_aligned_arrays_and_leaves_v_identical(engine, decks, tmp_path,
 def test_aux_sha_mismatch_exits_2(engine, decks, tmp_path, monkeypatch):
     import torch
 
-    from ygo_zero.eval.aux import AUX_SPEC, AuxHeads
+    from decklight.eval.aux import AUX_SPEC, AuxHeads
 
     emb, vckpt, _ = _tiny_value_and_aux(tmp_path)
     bad = tmp_path / "aux-bad.pt"

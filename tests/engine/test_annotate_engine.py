@@ -2,9 +2,9 @@
 
 import random
 
-from ygo_zero.analysis import annotate as A
-from ygo_zero.engine.cpp_env import CppEnv
-from ygo_zero.engine.duel import DuelConfig
+from decklight.analysis import annotate as A
+from decklight.engine.cpp_env import CppEnv
+from decklight.engine.duel import DuelConfig
 
 MAX_STEPS = 60
 

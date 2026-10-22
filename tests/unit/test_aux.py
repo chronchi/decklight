@@ -1,4 +1,4 @@
-"""Aux evaluator heads N3 (src/ygo_zero/eval/aux.py, scripts/build_aux_shards.py,
+"""Aux evaluator heads N3 (src/decklight/eval/aux.py, scripts/build_aux_shards.py,
 scripts/train_aux.py): target extraction on hand-made sequences, features() leaving
 forward_value unchanged (random-init tiny model), AuxHeads shapes/losses, and a
 2-epoch train_aux smoke run on stub games with a tiny random model.
@@ -21,7 +21,7 @@ FIXTURES = ROOT / "tests" / "fixtures"
 
 sys.path.insert(0, str(ROOT / "src"))
 
-from ygo_zero.eval.aux import AUX_SPEC, AuxHeads, aux_losses, extract_targets
+from decklight.eval.aux import AUX_SPEC, AuxHeads, aux_losses, extract_targets
 
 
 def _load(name: str):
@@ -102,9 +102,9 @@ def _real_obs_batch(engine, decks, n: int = 4):
     """A small batch of real engine obs (random play), stacked like shard rows."""
     import random
 
-    from ygo_zero.engine.cpp_env import CppEnv
-    from ygo_zero.engine.duel import DuelConfig
-    from ygo_zero.model.bc_data import OBS_KEYS
+    from decklight.engine.cpp_env import CppEnv
+    from decklight.engine.duel import DuelConfig
+    from decklight.model.bc_data import OBS_KEYS
 
     names = sorted(decks)
     env = CppEnv(engine, DuelConfig(decks[names[0]], decks[names[1]], seed=7))
@@ -119,7 +119,7 @@ def _real_obs_batch(engine, decks, n: int = 4):
 
 
 def test_features_leaves_forward_value_unchanged(engine, decks, tmp_path):
-    from ygo_zero.model.policy import PolicyNet
+    from decklight.model.policy import PolicyNet
 
     torch.set_num_threads(1)
     torch.manual_seed(0)
@@ -172,7 +172,7 @@ def _stub_games(tmp_path: Path) -> Path:
 
 
 def _tiny_value_ckpt(tmp_path: Path) -> Path:
-    from ygo_zero.model.policy import PolicyNet
+    from decklight.model.policy import PolicyNet
 
     torch.set_num_threads(1)
     torch.manual_seed(0)
@@ -185,7 +185,7 @@ def _tiny_value_ckpt(tmp_path: Path) -> Path:
 
 
 def test_train_aux_smoke(engine, tmp_path):
-    from ygo_zero.model.bc_data import OBS_KEYS
+    from decklight.model.bc_data import OBS_KEYS
 
     _tiny_emb(tmp_path / "emb.npz")
     rec_dir = _stub_games(tmp_path)

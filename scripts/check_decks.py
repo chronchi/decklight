@@ -19,9 +19,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from ygo_zero.decks import load_ydk
-from ygo_zero.demos.game import _effect_text
-from ygo_zero.demos.names import CardNames
+from decklight.decks import load_ydk
+from decklight.demos.game import _effect_text
+from decklight.demos.names import CardNames
 
 _QUOTED = re.compile(r'"([^"]+)"')
 MIN_MENTIONS = 3

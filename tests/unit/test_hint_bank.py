@@ -24,8 +24,8 @@ def _load(name: str):
 
 def _tiny_ckpt(tmp_path: Path):
     """A real (random) d=16 BC checkpoint + emb over two train pool decks' codes."""
-    from ygo_zero.decks import load_ydk
-    from ygo_zero.model.policy import PolicyNet
+    from decklight.decks import load_ydk
+    from decklight.model.policy import PolicyNet
 
     decks = [load_ydk(ROOT / "decks/pool/abc-dragon.ydk"),
              load_ydk(ROOT / "decks/pool/adamancipator.ydk")]
@@ -45,7 +45,7 @@ def _tiny_ckpt(tmp_path: Path):
 
 def _starts_file(tmp_path: Path) -> Path:
     """2 train-split starts (empty prefix: full games from the deal)."""
-    from ygo_zero.decks import load_ydk
+    from decklight.decks import load_ydk
 
     rows = []
     for name in ("abc-dragon", "adamancipator"):
@@ -95,8 +95,8 @@ def test_hint_bank_banks_or_fails_loud(engine, tmp_path):
     rows = [json.loads(x) for x in bank.read_text().splitlines() if x.strip()]
     assert rows, "exit 0 with 0 banked rows"
     # Replay of banked rows yields legal actions (the train_rl auxiliary-loss read path).
-    from ygo_zero.engine.duel import Engine
-    from ygo_zero.rl.hints import load_bank
+    from decklight.engine.duel import Engine
+    from decklight.rl.hints import load_bank
 
     eng = Engine()
     got = load_bank(bank, eng, hist=0, known=False)
@@ -191,8 +191,8 @@ def test_slot_candidates_gates(tmp_path):
 
 def test_replay_rows_skips_prefix_decisions(engine, tmp_path):
     """Bank rows carry the DAGS prefix; its decisions are the source game's and are never distilled."""
-    from ygo_zero.eval.turn1 import config_to_dict, dags_config, replay_prefix
-    from ygo_zero.rl.hints import replay_rows
+    from decklight.eval.turn1 import config_to_dict, dags_config, replay_prefix
+    from decklight.rl.hints import replay_rows
 
     starts = [json.loads(x) for x in _starts_file(tmp_path).read_text().splitlines()]
 

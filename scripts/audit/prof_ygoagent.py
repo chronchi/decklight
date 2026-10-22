@@ -12,10 +12,10 @@ from pathlib import Path
 
 import numpy as np
 
-from ygo_zero.decks import load_ydk
-from ygo_zero.engine.cpp_env import VecEnv
-from ygo_zero.engine.duel import Engine
-from ygo_zero.eval import ygoagent as Y
+from decklight.decks import load_ydk
+from decklight.engine.cpp_env import VecEnv
+from decklight.engine.duel import Engine
+from decklight.eval import ygoagent as Y
 
 ROOT = Path(__file__).resolve().parents[2]
 

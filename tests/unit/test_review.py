@@ -4,7 +4,7 @@ from pathlib import Path
 
 import numpy as np
 
-from ygo_zero.analysis.review import (
+from decklight.analysis.review import (
     MARK_BLUND,
     MARK_GOOD,
     MARK_INACC,
@@ -115,7 +115,7 @@ def test_candidates_dedup_and_cap(engine):
 
 
 def test_single_option_skipped(engine):
-    from ygo_zero.engine.env import PyEnv
+    from decklight.engine.env import PyEnv
 
     rec, cfg, hs, _d = load_record(FIXTURE / "game.jsonl")
     env = PyEnv(engine, cfg, auto_single=False)
@@ -137,7 +137,7 @@ def test_fairness_spy_human_obs_only(engine):
     launcher = _FakeLauncher()
     review_game(engine, cfg, rec, launcher, _FakeCalib(), max_steps=8)
     assert launcher.value_seen, "value never called"
-    env0 = __import__("ygo_zero.engine.env", fromlist=["PyEnv"]).PyEnv(engine, cfg, auto_single=False)
+    env0 = __import__("decklight.engine.env", fromlist=["PyEnv"]).PyEnv(engine, cfg, auto_single=False)
     env0.reset()
     first_player = int(env0.duel.first_player)
     for batch in launcher.value_seen:

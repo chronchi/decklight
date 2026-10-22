@@ -5,8 +5,8 @@ from pathlib import Path
 
 import pytest
 
-from ygo_zero.demos.dataset import iter_samples, load_records, record_config
-from ygo_zero.engine.cpp_env import CppEnv
+from decklight.demos.dataset import iter_samples, load_records, record_config
+from decklight.engine.cpp_env import CppEnv
 
 VERIFIED = Path(__file__).resolve().parents[2] / "data" / "demos" / "verified"
 

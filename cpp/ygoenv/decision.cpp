@@ -1,4 +1,4 @@
-// Port of src/ygo_zero/engine/{messages,actions,announce}.py (plus responses.py encodings).
+// Port of src/decklight/engine/{messages,actions,announce}.py (plus responses.py encodings).
 #include <algorithm>
 #include <cstring>
 #include <stack>

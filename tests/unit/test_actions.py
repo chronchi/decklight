@@ -1,11 +1,11 @@
 import struct
 
-from ygo_zero.engine import constants as C
-from ygo_zero.engine import messages as M
-from ygo_zero.engine import responses as R
-from ygo_zero.engine.actions import Kind, make_decision
-from ygo_zero.engine.messages import CardRef
-from ygo_zero.engine.random_agent import sum_is_valid
+from decklight.engine import constants as C
+from decklight.engine import messages as M
+from decklight.engine import responses as R
+from decklight.engine.actions import Kind, make_decision
+from decklight.engine.messages import CardRef
+from decklight.engine.random_agent import sum_is_valid
 
 
 def _ref(i, loc=C.LOCATION_MZONE, con=0):

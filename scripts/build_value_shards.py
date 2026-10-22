@@ -28,7 +28,7 @@ from pathlib import Path
 
 import numpy as np
 
-from ygo_zero.model.bc_data import OBS_KEYS
+from decklight.model.bc_data import OBS_KEYS
 
 EXTRA_KEYS = ("z", "turn", "game", "deck", "deck0", "deck1", "actor", "src", "hscore")
 
@@ -37,7 +37,7 @@ _ENGINE = None
 
 def _init() -> None:
     global _ENGINE
-    from ygo_zero.engine.duel import Engine
+    from decklight.engine.duel import Engine
 
     _ENGINE = Engine()
 
@@ -50,9 +50,9 @@ def _offset(game_id: str, stride: int) -> int:
 
 def _shard_one(job: tuple) -> tuple[str, int, int, int]:
     """Replay a file's selected records; returns (out_file, games, states, z_pos)."""
-    from ygo_zero.demos.dataset import record_config
-    from ygo_zero.engine.cpp_env import CppEnv
-    from ygo_zero.search.window import position_score
+    from decklight.demos.dataset import record_config
+    from decklight.engine.cpp_env import CppEnv
+    from decklight.search.window import position_score
 
     src_file, out_file, src_tag, rec_ids, game_ids, game_strs, stride = job
     import json

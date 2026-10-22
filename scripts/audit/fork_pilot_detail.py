@@ -18,7 +18,7 @@ from pathlib import Path
 
 import numpy as np
 
-from ygo_zero.search.honest import paired_gap
+from decklight.search.honest import paired_gap
 
 
 def main() -> int:

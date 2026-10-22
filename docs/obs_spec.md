@@ -1,7 +1,7 @@
 # Observation spec (v1 + v2 memory annex)
 
 Status: v1, 2026-10-01; v2 annex (hist_long + history log), 2026-10-05, additive: every v1 key is
-bit-for-bit unchanged, so `OBS_VERSION` stays 1. Reference implementation: `src/ygo_zero/engine/obs.py`; the C++ env must produce
+bit-for-bit unchanged, so `OBS_VERSION` stays 1. Reference implementation: `src/decklight/engine/obs.py`; the C++ env must produce
 identical arrays (the contract test compares them). Bump `OBS_VERSION` on any change and log it in NOTEBOOK.
 
 Adapted from ygo-agent's `docs/feature_engineering.md`, with these differences:
