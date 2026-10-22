@@ -10,7 +10,7 @@
 // play over the board as it was; cards that land on the field stay as "ghosts"
 // and cards that leave are hidden, so the board looks progressive; the real
 // snapshot replaces all of that when the segment ends (correct by construction).
-import {esc, imgUrl, phHTML} from "./render/card.js";
+import {artImg, esc, phHTML} from "./render/card.js";
 import {ruleShort} from "./glossary.js";
 
 // Scene lengths at 1x (ms). 2x halves them; "instant" plays nothing.
@@ -589,7 +589,7 @@ export function createCuePlayer(opts) {
     d.className = "cue-card" + (hidden ? " back" : "");
     if (!hidden) {
       d.innerHTML = phHTML(ref) + (!opts.mock && ref.code
-        ? '<img alt="" src="' + imgUrl(ref.code, big ? "full" : "small") + '" onerror="this.remove()">' : "");
+        ? artImg(ref.code, big ? "full" : "small", 'alt=""') : "");
     }
     return d;
   }

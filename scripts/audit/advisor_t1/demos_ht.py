@@ -3,7 +3,7 @@ own turn / opponent turn and phase. Uses dataset.iter_samples (the training samp
 import sys, random, time
 from collections import Counter, defaultdict
 from pathlib import Path
-ROOT = Path("~/Documents/ygo-projects/ygo-zero")
+ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT / "src"))
 from ygo_zero.demos.dataset import iter_samples
 from ygo_zero.demos.game import _opts

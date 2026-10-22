@@ -23,6 +23,7 @@ import queue
 import threading
 import time
 from collections.abc import Callable, Sequence
+from pathlib import Path
 
 import numpy as np
 
@@ -42,6 +43,18 @@ from ygo_zero.search.product import (
     sha256_file,
     tag_game,
 )
+
+ROOT = Path(__file__).resolve().parents[3]
+
+
+def _rel(p) -> str:
+    """`str(p)`, repo-relative when under the repo root (records stay portable)."""
+    if p is None:
+        return str(p)
+    try:
+        return str(Path(p).resolve().relative_to(ROOT))
+    except ValueError:
+        return str(p)
 
 
 class DriverError(RuntimeError):
@@ -191,11 +204,11 @@ class ProductLauncher:
     def record_info(self, seed: int) -> dict:
         """Product settings for the duel record, so a game can be re-run."""
         return {
-            "ckpt": str(self.ckpt),
+            "ckpt": _rel(self.ckpt),
             "ckpt_sha256": self.ckpt_sha,
-            "value": str(self.value_ckpt),
+            "value": _rel(self.value_ckpt),
             "value_sha256": self.value_sha,
-            "emb": str(self.emb),
+            "emb": _rel(self.emb),
             "device": self.device,
             "game_seed": int(seed),
             "ws_seed": int(seed),

@@ -7,6 +7,19 @@ export function imgUrl(code, size) {
   return "/img/" + code + ".jpg?size=" + (size || "small") + (TOKEN ? "&t=" + encodeURIComponent(TOKEN) : "");
 }
 
+// Card art is opt-in (settings sheet, off by default): no /img requests at
+// all unless the user switches it on. The face-down card back (code 0, the
+// server's SVG) is not card art and is unaffected (hidden cards never call here).
+let artOn = false;
+export function setCardArt(on) { artOn = !!on; }
+export function cardArtOn() { return artOn; }
+// The <img> for a card face, or "" when art is off (or no code). `attrs` is
+// the call site's own attribute string, kept exactly as it renders today.
+export function artImg(code, size, attrs) {
+  if (!artOn || !code) return "";
+  return '<img ' + (attrs ? attrs + ' ' : '') + 'src="' + imgUrl(code, size || "small") + '" onerror="this.remove()">';
+}
+
 export function esc(s) {
   return String(s == null ? "" : s)
     .replace(/&/g, "&amp;")
@@ -32,9 +45,7 @@ export function phHTML(card) {
 // Face of a face-up card: image over the placeholder (the image hides itself on error).
 function faceHTML(card, mock, size) {
   if (mock || !card.code) return phHTML(card);
-  return phHTML(card) +
-    '<img class="face" loading="lazy" alt="" src="' + imgUrl(card.code, size || "small") + '"' +
-    ' onerror="this.remove()">';
+  return phHTML(card) + artImg(card.code, size || "small", 'class="face" loading="lazy" alt=""');
 }
 
 // The battle-relevant stat, shown under the card (never rotated with it).

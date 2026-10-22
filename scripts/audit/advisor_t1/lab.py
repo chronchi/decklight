@@ -1,7 +1,7 @@
 import sys, random
 from collections import Counter
 from pathlib import Path
-ROOT = Path("~/Documents/ygo-projects/ygo-zero"); sys.path.insert(0, str(ROOT / "src"))
+ROOT = Path(__file__).resolve().parents[3]; sys.path.insert(0, str(ROOT / "src"))
 from ygo_zero.demos.dataset import iter_samples
 from ygo_zero.demos.game import _opts
 from ygo_zero.engine.duel import Engine

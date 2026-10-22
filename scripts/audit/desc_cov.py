@@ -3,7 +3,7 @@ card) vs a system string, in teacher games."""
 import sys, random
 from collections import Counter
 from pathlib import Path
-ROOT = Path("~/Documents/ygo-projects/ygo-zero")
+ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "src"))
 from ygo_zero.demos.dataset import iter_samples
 from ygo_zero.engine.duel import Engine

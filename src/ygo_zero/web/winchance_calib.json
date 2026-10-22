@@ -1,5 +1,5 @@
 {
- "source_run": "~/Documents/ygo-projects/ygo-zero/runs/score-20261016-1001 + ~/Documents/ygo-projects/ygo-zero/runs/value-p2-20261015-2044",
+ "source_run": "runs/score-20261016-1001 + runs/value-p2-20261015-2044",
  "arms": [
   "hppo-p",
   "hppo-p2"

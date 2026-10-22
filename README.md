@@ -1,0 +1,70 @@
+# Decklight
+
+A Yu-Gi-Oh! duelist that pilots **any deck you give it**, including decks and cards it never trained on, and a
+phone-friendly web client to play and study against it.
+
+- **Strength:** 0.623 [0.598, 0.647] win rate against [ygo-agent](https://github.com/sbl1996/ygo-agent), an
+  open-source RL agent, on ygo-agent's own 31 decks (1,488 paired games). Details in
+  [docs/results.md](docs/results.md).
+- **How it plays:**
+  - a learned policy proposes moves;
+  - a learned value net judges positions;
+  - an honest search checks the policy's top moves in worlds sampled only from what the player has seen, and
+    overrides the policy only on a significant difference.
+- **Honest about limits:** one external benchmark, no human-strength evaluation yet, weaker going first. See
+  [docs/model-card.md](docs/model-card.md).
+
+The engine is EDOPro's (edo9300 ygopro-core). Card data and scripts come from Project Ignis. No card art is bundled.
+
+## Quickstart (Linux, Python ≥ 3.12, [uv](https://docs.astral.sh/uv/), a C++ compiler)
+```bash
+git clone --recursive https://github.com/chronchi/decklight.git
+cd decklight
+uv sync --group dev --group ml --group web
+scripts/build_ext.sh                 # builds the patched engine core and the C++ environment
+scripts/fetch_release.sh             # model bundle (~68 MB) from the GitHub release, checksum-verified
+uv run pytest tests/unit -q          # optional
+```
+
+### Play in the browser (phone or desktop)
+```bash
+uv run python scripts/web_play.py    # prints http://127.0.0.1:8765/?t=<token>
+```
+- Pick one of ~180 decks or paste a `.ydk`, then duel the bot.
+- The client has hints, a turn recap, deck primers and puzzles.
+- **Card art:** off by default; turn on "Card art" in settings to load images from YGOPRODeck.
+- To reach it from your phone, use `--bind tailscale` (or any address you trust).
+
+### Play from EDOPro
+```bash
+uv run python scripts/edopro_host.py --deck decks/pool/snake-eye.ydk --opponent product
+```
+Then join `127.0.0.1:7911` from EDOPro's LAN mode.
+
+### Reproduce the benchmark
+```bash
+uv sync --group gauntlet                    # ygo-agent's tflite runtime
+# download 0546_26550M.tflite from https://github.com/sbl1996/ygo-agent/releases/tag/v0.1 into data/models/
+. scripts/product.sh
+uv run python scripts/search_match.py --ckpt "$PRODUCT_CKPT" --value "$PRODUCT_VALUE" $PRODUCT_SEARCH \
+    --opp ygoagent --ga-seeds 6 --deal-seed0 9000 --out runs/my-card
+```
+- That is 1,488 searched games: hours on a many-core box with a GPU (`--nproc/--proc` to shard).
+- `--device cuda` needs a CUDA build of PyTorch: the project pins the CPU wheel by default.
+- `scripts/audit/paired_sm.py` compares two runs on the same deals.
+
+## Repository map
+| path | what |
+|---|---|
+| `src/ygo_zero/` | the Python package (internal name): engine bindings, observations, models, search, web server, EDOPro host |
+| `cpp/` | the C++ environment (pybind11) |
+| `scripts/` | training, evaluation, data and audit scripts; `scripts/product.sh` defines the product |
+| `web/` | the browser client (plain JS, no build step) |
+| `decks/` | deck pool, ygo-agent's gauntlet decks, holdout and new-card test decks |
+| `docs/adr/` | architecture decisions |
+| `docs/results.md`, `docs/model-card.md`, `docs/how-it-was-built.md` | results, model card, how it was built |
+| `third_party/` | submodules (ygopro-core, CardScripts, BabelCDB) and our two engine patches |
+
+## License
+AGPL-3.0 (see [LICENSE](LICENSE) and [NOTICE](NOTICE)). Yu-Gi-Oh! is a trademark of Konami; this is an unofficial,
+non-commercial project.

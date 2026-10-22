@@ -3,7 +3,7 @@ import {barHTML, sideHTML, midHTML, phaseBtnsHTML, chainHTML, winchanceHTML} fro
 import {handHTML, sheetHTML, pileSheetHTML, infoHTML, actionableMap, statsLine, pileTitle} from "./render/hand.js";
 import {logHTML} from "./render/log.js";
 import {LOG_TABS, tabStripHTML, tabPanelOpen, statsPanelHTML, cardsPanelHTML, reviewPanelHTML} from "./render/stats.js";
-import {esc, imgUrl, isHidden, phHTML} from "./render/card.js";
+import {artImg, esc, isHidden, phHTML, setCardArt} from "./render/card.js";
 import {morph} from "./render/morph.js";
 import {createCuePlayer, recapItem, chainTracker, planSteps, stepText} from "./cues.js";
 import {kwHTML, glossaryEntry} from "./glossary.js";
@@ -143,6 +143,14 @@ try {
   cuePause = localStorage.getItem("ygo-cue-pause") === "1";
   cueRecap = localStorage.getItem("ygo-cue-recap") !== "0";
 } catch (e) { /* private mode: defaults */ }
+
+// Card art (web/render/card.js): opt-in, off by default, so no /img requests
+// at all until the user switches it on in the game menu.
+let cardArt = false;
+try {
+  cardArt = localStorage.getItem("ygo-card-art") === "1";
+} catch (e) { /* private mode: stay off */ }
+setCardArt(cardArt);
 function saveSetting(k, v) {
   try { localStorage.setItem(k, v); } catch (e) { /* ignore */ }
 }
@@ -462,7 +470,7 @@ function revealHTML(ev) {
   const c = ev.card || {};
   const t = c.code ? cardText(c.code) : null;
   const face = (!MOCK && c.code)
-    ? '<div class="rface">' + phHTML(c) + '<img alt="" src="' + imgUrl(c.code, "full") + '" onerror="this.remove()"></div>'
+    ? '<div class="rface">' + phHTML(c) + artImg(c.code, "full", 'alt=""') + "</div>"
     : '<div class="rface">' + phHTML(c) + "</div>";
   const txt = (t && t.text) || (MOCK ? "Card text loads from the server in a live game." : "");
   return '<div id="reveal" data-key="reveal" data-act="closereveal" aria-hidden="true">' +
@@ -599,7 +607,7 @@ function recapHTML(hint) {
   const rows = recap.items.map((it, i) => {
     const c = it.card;
     const thumb = c && c.code ? '<span class="rth">' + phHTML(c) +
-      (!MOCK ? '<img alt="" src="' + imgUrl(c.code, "small") + '" onerror="this.remove()">' : "") + "</span>"
+      (!MOCK ? artImg(c.code, "small", 'alt=""') : "") + "</span>"
       : '<span class="rth none"></span>';
     const tag = c && c.code ? "button" : "div";
     return "<" + tag + ' class="rrow' + (c && c.owner === "opp" ? " opp" : " me") + (it.neg ? " neg" : "") + '"' +
@@ -675,6 +683,7 @@ function gameMenuHTML() {
     toggleRow("cuepause", cuePause, "Pause after each bot action", "Tap anywhere or press Enter to continue.") +
     toggleRow("cuerecap", cueRecap, "Turn recap", "What the bot did, at the start of your turn.") +
     toggleRow("rulenotes", ruleNotesOn, "Rule notes", "A one-line rule tip on the first of each kind of play.") +
+    toggleRow("cardart", cardArt, "Card art", "Card images from YGOPRODeck, fetched when shown. Not bundled.") +
     '<div class="msep"></div>' +
     '<div class="mrow disabled" aria-disabled="true">Sound<span class="sub">Off</span></div>' +
     "</div></div>";
@@ -879,7 +888,7 @@ function detailHTML() {
   const c = detail;
   const t = cardText(c.code);
   const face = !MOCK && c.code
-    ? '<div class="dface">' + phHTML(c) + '<img alt="" src="' + imgUrl(c.code, "full") + '" onerror="this.remove()"></div>'
+    ? '<div class="dface">' + phHTML(c) + artImg(c.code, "full", 'alt=""') + "</div>"
     : '<div class="dface">' + phHTML(c) + "</div>";
   const meta = [t && t.type_str, statsLine(c)].filter(Boolean).join(" · ");
   return '<div id="detail" data-key="detail" data-act="closedetail" role="dialog" aria-modal="true" tabindex="-1" aria-label="' +
@@ -1690,6 +1699,10 @@ function onAction(kind, el) {
   } else if (kind === "cuerecap") {
     cueRecap = !cueRecap;
     saveSetting("ygo-cue-recap", cueRecap ? "1" : "0");
+  } else if (kind === "cardart") {
+    cardArt = !cardArt;
+    saveSetting("ygo-card-art", cardArt ? "1" : "0");
+    setCardArt(cardArt);
   } else if (kind === "closerecap") {
     recap = null;
   } else if (kind === "chainset") {

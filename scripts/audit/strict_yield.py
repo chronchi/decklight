@@ -3,7 +3,7 @@ a strict verifier would refuse to try) and inferred labels by kind/message. Esti
 import sys, random, time, json
 from collections import Counter
 from pathlib import Path
-ROOT = Path("~/Documents/ygo-projects/ygo-zero")
+ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "src"))
 from ygo_zero.demos.dataset import iter_samples
 from ygo_zero.demos.game import _opts

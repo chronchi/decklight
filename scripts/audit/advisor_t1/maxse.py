@@ -1,6 +1,6 @@
 import json, sys, statistics as st
 from pathlib import Path
-ROOT = Path("~/Documents/ygo-projects/ygo-zero")
+ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT / "scripts/audit")); sys.path.insert(0, str(ROOT / "scripts")); sys.path.insert(0, str(ROOT/"src"))
 import show_divergence as S
 from ygo_zero.demos.game import _opts
