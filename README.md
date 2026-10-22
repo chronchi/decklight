@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/brand/decklight/final/decklight-logo@2x.png" alt="Decklight logo: three fanned cards with a rising gold line" width="480">
+</p>
+
 # Decklight
 
 A Yu-Gi-Oh! duelist that pilots **any deck you give it**, including decks and cards it never trained on, and a
