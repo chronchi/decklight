@@ -295,3 +295,14 @@ def test_build_arm_cmd_has_device():
                             0, "T:O", Path("decks/gauntlet"), 8, 9000, 4, 1, Path("out/base"), "cpu")
     assert "--device" in cmd0 and cmd0[cmd0.index("--device") + 1] == "cpu"
     assert "--raw" in cmd0
+
+
+def test_last_iter_metrics_skips_eval_records(tmp_path: Path) -> None:
+    """train_rl writes a final {"iter": N, "eval": ...} record after the last training record (smoke 2026-10-22)."""
+    ft = _load("finetune_deck")
+    recs = [{"args": {}}, {"iter": 0, "eval": {}},
+            {"iter": 1, "samples": 10, "focus_wr_vs_bc": 0.5, "focus_seat_share": 0.49},
+            {"iter": 1, "eval": {"vs_bc": {}}}]
+    (tmp_path / "metrics.jsonl").write_text("\n".join(json.dumps(r) for r in recs) + "\n")
+    last = ft.last_iter_metrics(tmp_path)
+    assert last["focus_wr_vs_bc"] == 0.5 and last["iter"] == 1

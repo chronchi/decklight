@@ -32,7 +32,7 @@ def load_recs(path: Path) -> dict[int, dict]:
             r = json.loads(raw)
         except ValueError:
             continue
-        if isinstance(r, dict) and isinstance(r.get("iter"), int):
+        if isinstance(r, dict) and isinstance(r.get("iter"), int) and "samples" in r:  # skip {"iter", "eval"} records
             recs[r["iter"]] = r
     return recs
 

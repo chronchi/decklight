@@ -83,14 +83,17 @@ def check_loads(policy_pt: Path, value_pt: Path) -> None:
 
 
 def last_iter_metrics(rl_out: Path) -> dict:
-    """The last {"iter": ...} record of the train_rl metrics.jsonl (iterations, hours, focus fields)."""
+    """The last training record of the train_rl metrics.jsonl (iterations, hours, focus fields).
+
+    Eval records also carry "iter" ({"iter": N, "eval": ...}, written after the last iteration), so a training record
+    is one with "samples"."""
     last: dict | None = None
     try:
         for raw in (rl_out / "metrics.jsonl").read_text().splitlines():
             if not raw.strip():
                 continue
             rec = json.loads(raw)
-            if "iter" in rec:
+            if "iter" in rec and "samples" in rec:
                 last = rec
     except (OSError, ValueError) as e:
         fail(f"cannot read {rl_out}/metrics.jsonl: {e}")
