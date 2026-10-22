@@ -54,6 +54,25 @@ that period are fair; absolute numbers are understated.
   - holdout 0.528 [0.507, 0.549] (n 2,176);
   - new-card 0.514 [0.492, 0.536] (n 2,058).
 
+## Fine-tuning on one deck
+`scripts/finetune_deck.py` continues the product's self-play PPO (policy and value head, KL-anchored to the base
+model) with one deck in half the seats. Pilot: 0.75 GPU-hour per deck on an RTX 4060 Ti 16 GB (~66 iterations), then
+`scripts/deck_card.py`: the deck against the other 30 benchmark decks piloted by ygo-agent, both seats, the same deals
+for base and fine-tuned (paired).
+
+| deck | mode | games per model | base | fine-tuned | difference (95% CI) |
+|---|---|---|---|---|---|
+| Blue-Eyes | raw policy | 480 | 0.277 | 0.315 | +3.8 pp (−0.3, +7.8) |
+| Blue-Eyes | product (search) | 180 | 0.367 | 0.444 | +7.8 pp (+0.6, +14.9) |
+| Branded | raw policy | 480 | 0.567 | 0.644 | +7.7 pp (+2.9, +12.5) |
+| Branded | product (search) | 180 | 0.611 | 0.772 | +16.1 pp (+8.8, +23.4) |
+
+- The gains are broad: the fine-tuned Branded model does better against 20 of 30 opponents and worse against 2.
+- The visible change is that the fine-tuned model commits to its deck's engine more often. For example, it activates
+  Branded Fusion where the base model normal-summoned.
+- Two decks are not a distribution. Untested so far: longer fine-tunes, and how a fine-tuned model plays *other* decks
+  (assume worse; use it only for its deck).
+
 ## Things that did not help
 - **A bigger architecture (v3: longer history, categorical game-phase inputs) + the same RL**, run `stage-p3-…`:
   - −1.6 pp vs P alone;

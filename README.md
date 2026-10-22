@@ -64,6 +64,24 @@ uv run python scripts/search_match.py --ckpt "$PRODUCT_CKPT" --value "$PRODUCT_V
 - `--device cuda` needs a CUDA build of PyTorch: the project pins the CPU wheel by default.
 - `scripts/audit/paired_sm.py` compares two runs on the same deals.
 
+### Fine-tune on your deck (needs a GPU)
+The bot plays every deck with one shared model. A short fine-tune on one deck makes it pilot that deck better:
+```bash
+uv pip install torch --index-url https://download.pytorch.org/whl/cu128    # CUDA build (the default wheel is CPU-only)
+uv run --no-sync python scripts/finetune_deck.py --deck my.ydk --out runs/ft-my --hours 0.75
+uv run --no-sync python scripts/web_play.py --ckpt runs/ft-my/policy/best.pt --value runs/ft-my/value/best.pt
+```
+- It continues the bot's self-play training with your deck in half the seats, and updates both the policy and
+  the value head. `edopro_host.py` takes the same `--ckpt/--value`.
+- A 16 GB card is enough (~9 GB used). 0.75 h is ~65 training iterations on an RTX 4060 Ti.
+- **What to expect** (two decks so far, product vs ygo-agent piloting the other 30 benchmark decks):
+  Branded 0.61 → 0.77 (+16 pp, 95% CI +9 to +23), Blue-Eyes 0.37 → 0.44 (+8 pp, CI +1 to +15). See
+  [docs/results.md](docs/results.md#fine-tuning-on-one-deck). The fine-tuned model is for that deck: use the
+  base model for other decks.
+- Measure your own deck with `scripts/deck_card.py` (needs the benchmark setup above): it plays the base and
+  fine-tuned models on the same deals against every other benchmark deck, in both seats, and prints the paired
+  difference.
+
 ## Repository map
 | path | what |
 |---|---|
