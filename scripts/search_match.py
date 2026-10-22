@@ -75,6 +75,24 @@ def ga_schedule(names: list[str], ga_opps: int, ga_seeds: int, seed0: int = 0) -
 from decklight.search.product import RouteWindowSearch, seat_of, tag_game
 
 
+def pairs_schedule(names: list[str], want: list[tuple[str, str]], seeds: int, seed0: int,
+                   seed_per_pair: bool) -> list[tuple[int, int, int, int, int]]:
+    """Explicit deck pairs (S plays the first deck of each pair, both seats): entry
+    (di, dj, seed, s_seat, idx), same shape as the eval schedules. --seed-per-pair gives
+    pair k its own seed range so a deck meets a new opening hand in every game."""
+    missing = [d for pr in want for d in pr if d not in names]
+    if missing or any(len(pr) != 2 for pr in want):
+        fail(f"--pairs: bad pairs or decks not in the deck set: {missing or want}")
+    sched = []
+    for k, (a, b) in enumerate(want):
+        di, dj = names.index(a), names.index(b)
+        s0 = seed0 + (k * seeds if seed_per_pair else 0)
+        for s in range(s0, s0 + seeds):
+            for s_seat in (0, 1):
+                sched.append((di, dj, s, s_seat, len(sched)))
+    return sched
+
+
 def sample_decks(n: int, seed: int) -> list[str]:
     """The report card's base-match deck sample for --decks/--seed (see playtest.py)."""
     pool = sorted(p.stem for p in (ROOT / "decks" / "pool").glob("*.ydk"))
@@ -448,6 +466,12 @@ def main() -> None:
             rng = random.Random(args.seed_base)
             sched = [(rng.randrange(n_s), n_s + rng.randrange(len(gfiles)), args.seed_base + i, i % 2, i)
                      for i in range(args.games)]
+        elif args.pairs:
+            # "target on our side in both seats" (scripts/deck_card.py): --pairs "T:O1,T:O2,..."
+            # names S's deck first; every pair plays --seeds seeds in both seats, S always on di.
+            spec = Path(args.pairs[1:]).read_text() if args.pairs.startswith("@") else args.pairs  # @file: long lists
+            want = [tuple(x.strip().split(":")) for x in spec.replace("\n", ",").split(",") if x.strip()]
+            sched = pairs_schedule(names, want, args.seeds, args.deal_seed0, bool(args.seed_per_pair))
         else:
             sched = ga_schedule(names, args.ga_opps, args.ga_seeds, args.deal_seed0)
     elif args.deal_mode == "train":

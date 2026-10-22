@@ -144,6 +144,59 @@ def policy_state(model: PolicyNet) -> dict:
             if not k.startswith("value_head.") and not k.startswith("q_head.")}  # fmt: skip
 
 
+def same_deck(a, b) -> bool:
+    """Two decks are identical for --focus-deck dedup: same main + extra (order-insensitive)."""
+    return tuple(sorted(a.main)) == tuple(sorted(b.main)) and tuple(sorted(a.extra)) == tuple(sorted(b.extra))
+
+
+def focus_copies(n_other: int, share: float) -> int:
+    """Copies k of the focus deck so a uniformly drawn seat holds it with probability ≈ share.
+
+    k = round(share * n_other / (1 - share)), at least 1. Raises ValueError outside 0 < share < 1
+    or with no other decks.
+    """
+    if not 0.0 < share < 1.0:
+        raise ValueError(f"--focus-share must be in (0, 1), got {share}")
+    if n_other <= 0:
+        raise ValueError(f"focus dedup left no other decks (n_other={n_other})")
+    return max(1, round(share * n_other / (1.0 - share)))
+
+
+def apply_focus_deck(pool_train: list, g_decks: list, focus_deck, share: float,
+                     learner_gauntlet: int) -> tuple[list, set[int], list, list]:
+    """Insert the focus deck into the training list so a uniformly drawn seat holds it with ≈ share.
+
+    Decks identical to the focus deck (same main + extra) are dropped first. With the default
+    overfitting rule (learner_gauntlet=0) ordinary episodes draw uniformly from [:pool_count]
+    only (VecEnv.set_pool_count; cpp/ygoenv/vecenv.cpp ordinary branch: deck0/deck1 uniform
+    over [0, pool_n)), so the k copies live in the pool region and n_other = len(pool);
+    with --learner-gauntlet 1 every episode draws uniformly over the whole list, so the
+    copies are appended at the end and n_other covers pool + gauntlet. Returns
+    (train_decks, focus_indices into it, new_pool_train, new_g_decks) where the new pool
+    is the set_pool_count region and new_g_decks the gauntlet slice (both keep the
+    train_decks = pool + gauntlet layout the rest of main() assumes).
+    """
+    pool = [d for d in pool_train if not same_deck(d, focus_deck)]
+    gaunt = [d for d in g_decks if not same_deck(d, focus_deck)]
+    n_other = len(pool) + len(gaunt) if learner_gauntlet else len(pool)
+    k = focus_copies(n_other, share)
+    if learner_gauntlet:
+        return pool + gaunt + [focus_deck] * k, set(range(len(pool) + len(gaunt),
+               len(pool) + len(gaunt) + k)), pool, gaunt
+    new_pool = pool + [focus_deck] * k
+    return new_pool + gaunt, set(range(len(pool), len(pool) + k)), new_pool, gaunt
+
+
+def focus_log_fields(focus_traj: float, focus_traj_n: float,
+                     focus_bc_games: float, focus_bc_wins: float) -> dict:
+    """The per-iteration --focus-deck metrics.jsonl fields (only logged with --focus-deck)."""
+    return {
+        "focus_seat_share": round(focus_traj / max(focus_traj_n, 1), 3),
+        "focus_wr_vs_bc": round(focus_bc_wins / max(focus_bc_games, 1), 3),
+        "focus_n_vs_bc": int(focus_bc_games),
+    }
+
+
 class CollectTask:
     """One `col.collect(n)` in a background thread; `join` re-raises the original error, never hangs."""
 
@@ -633,6 +686,10 @@ def main() -> None:
                     help="1: separate privileged critic (sees hidden cards); the policy stays honest")
     ap.add_argument("--value-init", type=Path, default=None,
                     help="copy value_head from this checkpoint (e.g. value_p: same trunk as --init, trained head)")
+    ap.add_argument("--focus-deck", type=Path, default=None,
+                    help="per-deck fine-tune: a .ydk file; the focus deck fills --focus-share of seats")
+    ap.add_argument("--focus-share", type=float, default=0.5,
+                    help="share of uniformly drawn seats holding the --focus-deck (0, 1 exclusive)")
     ap.add_argument("--critic-init", type=Path, default=None,
                     help="critic init checkpoint (default: --init)")
     ap.add_argument("--ga-workers", type=int, default=8,
@@ -773,10 +830,29 @@ def main() -> None:
     gfiles = sorted(args.gauntlet_decks.glob("*.ydk"))
     pool_train = [load_ydk(p) for p in pool if p.stem not in hold]
     train_decks = pool_train + [load_ydk(p) for p in gfiles]
+    focus_idx: set[int] | None = None
+    if args.focus_deck is not None:
+        try:
+            focus_deck = load_ydk(args.focus_deck)
+        except OSError as e:
+            fail2(f"--focus-deck {args.focus_deck}: cannot read: {e}")
+        if not focus_deck.main:
+            fail2(f"--focus-deck {args.focus_deck}: no main-deck cards (unparseable deck)")
+        try:
+            train_decks, focus_idx, pool_train, g_decks = apply_focus_deck(
+                pool_train, [load_ydk(p) for p in gfiles],
+                focus_deck, args.focus_share, args.learner_gauntlet)
+        except ValueError as e:
+            fail2(str(e))
+        if dist_rank == 0:
+            n_f = len(focus_idx)
+            print(f"[focus] {args.focus_deck} x{n_f} of {len(train_decks)} seats "
+                  f"(share {n_f / len(train_decks):.3f}, target {args.focus_share})", flush=True)
     r = random.Random(1234)
     ev_names = r.sample([p.stem for p in pool if p.stem not in hold], 4) + r.sample(sorted(hold & {p.stem for p in pool}), 4)
     ev_decks = [load_ydk(ROOT / "decks/pool" / f"{n}.ydk") for n in ev_names]
-    g_decks = [load_ydk(p) for p in gfiles]
+    if args.focus_deck is None:
+        g_decks = [load_ydk(p) for p in gfiles]
 
     a = _run_args(args.init)
     hist, known = int(a.get("hist", 0) or 0), bool(a.get("known", False))
@@ -1201,7 +1277,8 @@ def main() -> None:
                         critic=(critic_actor if critic_actor is not None else critic),
                         priv_critic=bool(args.priv_critic), adv=args.adv,
                         greedy=greedy_pol, ga_share=args.ga_episode_share,
-                        ga_range=(ga_start, len(g_decks)), ga_mixed=ga_mixed, fail=fail)
+                        ga_range=(ga_start, len(g_decks)), ga_mixed=ga_mixed, fail=fail,
+                        focus_idx=focus_idx)
     except ValueError as e:
         fail2(str(e))
     curric_pushed = False
@@ -1393,9 +1470,13 @@ def main() -> None:
                                  float(st["dags_wr"]) * float(st["dags_games"]),
                                  float(np.sum(st["lengths"])) if st["lengths"] else 0.0,
                                  float(len(st["lengths"])), float(ret.sum()) if len(ret) else 0.0,
-                                 float(len(ret))])
+                                 float(len(ret)), float(st.get("focus_traj", 0)),
+                                 float(st.get("focus_traj_n", 0)),
+                                 float(st.get("focus_bc_games", 0)),
+                                 float(st.get("focus_bc_wins", 0))])
                 (_g_samples, _g_games, _g_trunc, _g_dec, _g_bcg, _g_bcw, _g_dg, _g_dw,
-                 _g_sumlen, _g_nlen, _g_sumret, _g_nret) = _cs
+                 _g_sumlen, _g_nlen, _g_sumret, _g_nret,
+                 _g_ft, _g_ftn, _g_fbcg, _g_fbcw) = _cs
                 _g_adv_std, _g_ret_mean = _gstd, _g_sumret / max(_g_nret, 1)
                 _sps_min = distmod.min_scalar(_sps_local, dev)
                 _sps_max = distmod.max_scalar(_sps_local, dev)
@@ -1409,6 +1490,10 @@ def main() -> None:
                 _g_ret_mean = float(ret.mean()) if len(ret) else 0.0
                 _g_sumlen = float(np.sum(st["lengths"])) if st["lengths"] else 0.0
                 _g_nlen = float(len(st["lengths"]))
+                _g_ft = float(st.get("focus_traj", 0))
+                _g_ftn = float(st.get("focus_traj_n", 0))
+                _g_fbcg = float(st.get("focus_bc_games", 0))
+                _g_fbcw = float(st.get("focus_bc_wins", 0))
                 _sps_min = _sps_max = _sps_local
             if dist_rank == 0:
                 tot["games"] += _g_games
@@ -1421,6 +1506,8 @@ def main() -> None:
                     "train_vs_bc_sampled": round(_g_bcw / max(_g_bcg, 1), 3), "bc_games": _g_bcg,
                     "dags_games": _g_dg, "dags_wr": round(_g_dw / max(_g_dg, 1), 3),
                     "dags_bad": st["dags_bad"],
+                    **(focus_log_fields(_g_ft, _g_ftn, _g_fbcg, _g_fbcw)
+                       if focus_idx is not None else {}),
                     **({"curric": cur.stats()} if cur is not None else {}),
                     **({"hint_rows": hint["rows"]} if hint is not None else {}),
                     "adv_std": round(float(_g_adv_std), 3), "ret_mean": round(float(_g_ret_mean), 3),
@@ -1442,6 +1529,11 @@ def main() -> None:
                 assert log is not None
                 log.write(json.dumps(rec) + "\n")
                 log.flush()
+            if focus_idx is not None and it >= 2:
+                _fshare = _g_ft / max(_g_ftn, 1)
+                dfail_if_any(_fshare < args.focus_share / 2,
+                             lambda it=it, _fshare=_fshare: f"iteration {it}: "
+                                     f"focus_seat_share {_fshare:.3f} < F/2 ({args.focus_share / 2:.3f})")
             _local_done = (time.time() - t_train) / 3600 >= args.hours or (args.iters and it >= args.iters)
             out_of_time = distmod.bcast_flag(_local_done if dist_rank == 0 else False)
             if args.eval_mode == "async" and dist_rank == 0:
@@ -1562,9 +1654,13 @@ def main() -> None:
                               float(st["dags_wr"]) * float(st["dags_games"]),
                               float(np.sum(st["lengths"])) if st["lengths"] else 0.0,
                               float(len(st["lengths"])), float(ret.sum()) if len(ret) else 0.0,
-                              float(len(ret))])
+                              float(len(ret)), float(st.get("focus_traj", 0)),
+                              float(st.get("focus_traj_n", 0)),
+                              float(st.get("focus_bc_games", 0)),
+                              float(st.get("focus_bc_wins", 0))])
             (_g_samples, _g_games, _g_trunc, _g_dec, _g_bcg, _g_bcw, _g_dg, _g_dw,
-             _g_sumlen, _g_nlen, _g_sumret, _g_nret) = _cs2
+             _g_sumlen, _g_nlen, _g_sumret, _g_nret,
+             _g_ft, _g_ftn, _g_fbcg, _g_fbcw) = _cs2
             _g_adv_std, _g_ret_mean = _gstd2, _g_sumret / max(_g_nret, 1)
             _sps_min = distmod.min_scalar(_sps_local2, dev)
             _sps_max = distmod.max_scalar(_sps_local2, dev)
@@ -1578,6 +1674,10 @@ def main() -> None:
             _g_ret_mean = float(ret.mean()) if len(ret) else 0.0
             _g_sumlen = float(np.sum(st["lengths"])) if st["lengths"] else 0.0
             _g_nlen = float(len(st["lengths"]))
+            _g_ft = float(st.get("focus_traj", 0))
+            _g_ftn = float(st.get("focus_traj_n", 0))
+            _g_fbcg = float(st.get("focus_bc_games", 0))
+            _g_fbcw = float(st.get("focus_bc_wins", 0))
             _sps_min = _sps_max = _sps_local2
         if dist_rank == 0:
             tot["games"] += _g_games
@@ -1590,6 +1690,8 @@ def main() -> None:
                 "train_vs_bc_sampled": round(_g_bcw / max(_g_bcg, 1), 3), "bc_games": _g_bcg,
                 "dags_games": _g_dg, "dags_wr": round(_g_dw / max(_g_dg, 1), 3),
                 "dags_bad": st["dags_bad"],
+                **(focus_log_fields(_g_ft, _g_ftn, _g_fbcg, _g_fbcw)
+                   if focus_idx is not None else {}),
                 **({"curric": cur.stats()} if cur is not None else {}),
                 **({"hint_rows": hint["rows"]} if hint is not None else {}),
                 "adv_std": round(float(_g_adv_std), 3), "ret_mean": round(float(_g_ret_mean), 3),
@@ -1610,6 +1712,11 @@ def main() -> None:
             assert log is not None
             log.write(json.dumps(rec) + "\n")
             log.flush()
+        if focus_idx is not None and it >= 2:
+            _fshare2 = _g_ft / max(_g_ftn, 1)
+            dfail_if_any(_fshare2 < args.focus_share / 2,
+                         lambda it=it, _fshare2=_fshare2: f"iteration {it}: "
+                                 f"focus_seat_share {_fshare2:.3f} < F/2 ({args.focus_share / 2:.3f})")
         _local_done2 = (time.time() - t_train) / 3600 >= args.hours or (args.iters and it >= args.iters)
         out_of_time = distmod.bcast_flag(_local_done2 if dist_rank == 0 else False)
         if args.eval_mode == "async" and dist_rank == 0:

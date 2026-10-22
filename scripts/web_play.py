@@ -36,6 +36,9 @@ def main() -> None:
     ap.add_argument("--token", default=None, help="access token (default: random)")
     ap.add_argument("--opponent-default", default="product",
                     help="product (default) | fast | random")
+    ap.add_argument("--ckpt", type=Path, default=None, help="product P checkpoint (default data/cache/P/best.pt)")
+    ap.add_argument("--value", type=Path, default=None,
+                    help="product value checkpoint (default data/cache/value_p2/best.pt)")
     ap.add_argument("--device", default="cpu")
     ap.add_argument("--replay-threads", type=int, default=1)
     a = ap.parse_args()
@@ -47,7 +50,7 @@ def main() -> None:
     from decklight.web.server import create_app
 
     app = create_app(token=token, opponent_default=a.opponent_default, device=a.device,
-                     replay_threads=a.replay_threads)
+                     replay_threads=a.replay_threads, ckpt=a.ckpt, value=a.value)
     print(f"decklight web client: http://{host}:{a.port}/?t={token}", flush=True)
     uvicorn.run(app, host=host, port=a.port, log_level="warning")
 

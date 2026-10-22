@@ -67,7 +67,7 @@ class Collector:
                  precision: str = "fp32", league: League | None = None, ygo=None,
                  critic=None, priv_critic: bool = False, adv: str = "gae",
                  greedy=None, ga_share: float = 0.0, ga_range: tuple[int, int] | None = None,
-                 ga_mixed: bool = False, fail=None) -> None:
+                 ga_mixed: bool = False, fail=None, focus_idx: set[int] | None = None) -> None:
         self.vec = vec
         self.model = model
         self.ref = ref
@@ -87,6 +87,9 @@ class Collector:
         self.ga_range = ga_range
         self.ga_mixed = bool(ga_mixed)
         self._fail = fail
+        # Per-deck fine-tune (train_rl --focus-deck): indices into vec.decks holding the
+        # focus deck. None keeps behaviour and stats bit-identical (no focus keys).
+        self.focus_idx = set(focus_idx) if focus_idx is not None else None
         if self.ga_share < 0.0 or self.ga_share > 1.0:
             raise ValueError(f"ga_share={ga_share} not in [0, 1]")
         # Privileged critic (RL v2 part B): values come from `critic` on the privileged
@@ -114,6 +117,8 @@ class Collector:
         # the curriculum build: every episode then reports -1 (unknown, never recorded).
         self._has_start = "start" in vec.buf
         self.ep_start = np.full(n, -2, dtype=np.int64)
+        self.ep_f0 = np.zeros(n, dtype=bool)
+        self.ep_f1 = np.zeros(n, dtype=bool)
         if league is None:
             if self.ga_share > 0:
                 raise ValueError("ga_share > 0 needs a league (deck-aware draws condition on buf['ga'])")
@@ -164,9 +169,18 @@ class Collector:
         vec.async_reset()
 
     def _sync_start(self, i: int) -> None:
-        """Capture buf["start"][i] as this env's current episode start (no-op without the key)."""
+        """Capture buf["start"][i] as this env's current episode start (no-op without the key).
+
+        Also captures the focus flags when focus_idx is set: buf["deck0/1"] already show the
+        episode being drawn for (DAGS/scheduled episodes carry -1, never focus). Called at
+        every episode-begin sighting, so at finish time the flags still describe the
+        finished episode (the redraw happens after the finish is processed).
+        """
         if self._has_start:
             self.ep_start[i] = int(self.buf["start"][i])
+        if self.focus_idx is not None and "deck0" in self.buf and "deck1" in self.buf:
+            self.ep_f0[i] = int(self.buf["deck0"][i]) in self.focus_idx
+            self.ep_f1[i] = int(self.buf["deck1"][i]) in self.focus_idx
 
     def _draw_episode(self, i: int) -> None:
         """League path: record nothing here; draw the next episode type for env i."""
@@ -263,6 +277,8 @@ class Collector:
         n_fin = 0
         games = trunc = bc_games = 0
         bc_wins = 0.0
+        focus_traj = focus_traj_n = focus_bc_games = 0
+        focus_bc_wins = 0.0
         dags_games = 0
         dags_wins = 0.0
         decisions = 0
@@ -298,6 +314,8 @@ class Collector:
                 lengths.append(len(self.traj[i][0]) + len(self.traj[i][1]))
                 n_ls = len(self.traj[i][int(self.lseat[i])]) if lg else 0
                 fst = int(self.ep_start[i]) if self.ep_start[i] >= -1 else -1
+                f0, f1 = bool(self.ep_f0[i]), bool(self.ep_f1[i])
+                ls = int(self.lseat[i])
                 for seat in (0, 1):
                     sl = self.traj[i][seat]
                     if w == TRUNCATED:
@@ -311,11 +329,18 @@ class Collector:
                         # pass-rate slot = (start, seat): the two sides of a position are different problems
                         fin_starts.append(2 * fst + seat if fst >= 0 else -1)
                         n_fin += len(sl)
+                        if self.focus_idx is not None:
+                            focus_traj_n += 1
+                            if (f0 if seat == 0 else f1):
+                                focus_traj += 1
                     self.traj[i][seat] = []
                 if not lg:
                     if self.vs_bc[i]:
                         bc_games += 1
-                        bc_wins += 0.5 if w not in (0, 1) else float(w == int(self.lseat[i]))
+                        bc_wins += 0.5 if w not in (0, 1) else float(w == ls)
+                        if self.focus_idx is not None and (f0 if ls == 0 else f1):
+                            focus_bc_games += 1
+                            focus_bc_wins += 0.5 if w not in (0, 1) else float(w == ls)
                     if is_dags:
                         dags_games += 1
                         dags_wins += 0.5 if w not in (0, 1) else float(w == int(self.lseat[i]))
@@ -341,6 +366,9 @@ class Collector:
                         if name == BASE:
                             bc_games += 1
                             bc_wins += res
+                            if self.focus_idx is not None and (f0 if ls == 0 else f1):
+                                focus_bc_games += 1
+                                focus_bc_wins += res
                         elif name == YGO:
                             self.ygo.reset_keys([int(self.ep_id[i])])
                             if self.ga_share > 0:
@@ -534,6 +562,9 @@ class Collector:
                  "dags_bad": int(getattr(self.vec, "dags_bad", 0)),
                  "fin_starts": fin_starts,
                  "ga_games": ga_games, "learner_ga": learner_ga}  # fmt: skip
+        if self.focus_idx is not None:
+            stats.update(focus_traj=focus_traj, focus_traj_n=focus_traj_n,
+                         focus_bc_games=focus_bc_games, focus_bc_wins=focus_bc_wins)
         if self.priv_critic:
             stats["priv_rows"] = priv_rows
             stats["priv_nonzero"] = priv_nonzero

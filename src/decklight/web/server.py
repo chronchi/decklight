@@ -83,6 +83,8 @@ class Server:
         opponent_default: str = "product",
         device: str = "cpu",
         replay_threads: int = 1,
+        ckpt=None,
+        value=None,
     ) -> None:
         self.token = token
         self._engine = engine
@@ -92,6 +94,8 @@ class Server:
         self.opponent_default = opponent_default
         self.device = device
         self.replay_threads = replay_threads
+        self.ckpt = Path(ckpt) if ckpt is not None else None
+        self.value_ckpt = Path(value) if value is not None else None
         self._emb_codes: set[int] | None = None
         self.lock = asyncio.Lock()
         self.ws: WebSocket | None = None
@@ -162,8 +166,10 @@ class Server:
         if mode == "random":
             return RandomBot(random.Random().randrange(1 << 30))
         if mode == "fast":
-            return ProductLauncher(device=self.device, fast=True, replay_threads=self.replay_threads)
-        return ProductLauncher(device=self.device, replay_threads=self.replay_threads)
+            return ProductLauncher(ckpt=self.ckpt, value_ckpt=self.value_ckpt, device=self.device,
+                                   fast=True, replay_threads=self.replay_threads)
+        return ProductLauncher(ckpt=self.ckpt, value_ckpt=self.value_ckpt, device=self.device,
+                               replay_threads=self.replay_threads)
 
     # --- decks ---
 
@@ -1898,6 +1904,8 @@ def create_app(
     opponent_default: str = "product",
     device: str = "cpu",
     replay_threads: int = 1,
+    ckpt=None,
+    value=None,
 ) -> Starlette:
     _register_stack_dump()
     srv = Server(
@@ -1909,6 +1917,8 @@ def create_app(
         opponent_default=opponent_default,
         device=device,
         replay_threads=replay_threads,
+        ckpt=ckpt,
+        value=value,
     )
 
     def need_token(req) -> bool:
