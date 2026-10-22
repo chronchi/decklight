@@ -6,6 +6,8 @@ import sqlite3
 import sys
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -195,9 +197,12 @@ def _chain_obs(live_codes, chain_len=0, turn=3):
     g = [0] * 24
     g[2], g[21] = turn, 0x10
     return {
-        "actions": acts, "action_mask": [1] * len(acts),
-        "global": g, "chain_mask": [1] * chain_len,
-        "cards": [], "card_mask": [],
+        "actions": acts,
+        "action_mask": [1] * len(acts),
+        "global": g,
+        "chain_mask": [1] * chain_len,
+        "cards": [],
+        "card_mask": [],
     }
 
 
@@ -223,7 +228,10 @@ KIRIN, ASH = 2526224, 14558127
 
 def _hold_st(held=()):
     return {
-        "choices": [], "labels": [], "actors": [], "turns": [],
+        "choices": [],
+        "labels": [],
+        "actors": [],
+        "turns": [],
         "hold": {"0": {"turn": 3, "names": list(held)}},
     }
 
@@ -282,7 +290,8 @@ def test_same_zone_duplicates_get_zone_suffix_and_match():
             [int(Kind.SELECT), 1, code, 0, 0, 0, 0, 3, 0, 0],
         ],
         "action_mask": [1, 1],
-        "cards": cards, "card_mask": np.array([True, True]),
+        "cards": cards,
+        "card_mask": np.array([True, True]),
     }
     names = {code: "Snake-Eye Ash"}
     disp = hand_play._display_names(obs, names)
@@ -298,6 +307,10 @@ def test_number_options_show_values_and_match():
     assert hand_play._match(obs, "NUM:5", {}) == 0
 
 
+@pytest.mark.skipif(
+    not any((ROOT / "data" / "demos" / "gold").glob("*.jsonl")),
+    reason="gold games absent (data/ is gitignored)",
+)
 def test_saved_gold_games_replay_unchanged():
     """Every saved gold record replays to the end with all choices legal (hand_play logic unchanged)."""
     import json
@@ -345,14 +358,18 @@ def _main_phase_battle_obs():
     g = [8000, 3300, 3, 4, 1, 1] + [0] * 18
     g[21] = 0xB  # MSG_SELECT_IDLECMD
     return {
-        "actions": acts, "action_mask": [1, 1],
-        "cards": cards, "card_mask": np.array([True, True, True]),
+        "actions": acts,
+        "action_mask": [1, 1],
+        "cards": cards,
+        "card_mask": np.array([True, True, True]),
         "global": g,
     }
 
 
 _BATTLE_NAMES = {
-    12345: "Test Attacker", 9024367: "Galaxy Dragon", 54321: "Test Foe",
+    12345: "Test Attacker",
+    9024367: "Galaxy Dragon",
+    54321: "Test Foe",
     89631139: "Blue-Eyes White Dragon",
 }
 
@@ -584,7 +601,8 @@ def _facedown_obs():
             [int(Kind.SELECT), 1, 2222, 0, 0, 0, 0, 3, 0, 0],
         ],
         "action_mask": [1, 1],
-        "cards": cards, "card_mask": np.array([True, True]),
+        "cards": cards,
+        "card_mask": np.array([True, True]),
         "global": g,
     }
 
@@ -659,9 +677,13 @@ def _battle_obs(actions, card_rows, msg=0xA, turn=3, phase=0x40, my_turn=1):
     g = [8000, 4000, turn, phase, 0, my_turn] + [0] * 18
     g[21] = msg
     return {
-        "actions": acts, "action_mask": [1] * len(acts),
-        "cards": cards, "card_mask": np.array([True] * len(card_rows)),
-        "global": g, "chain_mask": [], "chain": [],
+        "actions": acts,
+        "action_mask": [1] * len(acts),
+        "cards": cards,
+        "card_mask": np.array([True] * len(card_rows)),
+        "global": g,
+        "chain_mask": [],
+        "chain": [],
     }
 
 
@@ -751,8 +773,11 @@ def test_material_lines_show_zone_and_link_rating(tmp_path, monkeypatch, capsys)
             [int(Kind.SELECT), 1, sp, 0, 0, 0, 0x1A, 3, 0, 0],
         ],
         "action_mask": [1, 1],
-        "cards": cards, "card_mask": np.array([True, True]),
-        "global": g, "chain_mask": [], "chain": [],
+        "cards": cards,
+        "card_mask": np.array([True, True]),
+        "global": g,
+        "chain_mask": [],
+        "chain": [],
     }
 
     class _Env:
@@ -793,7 +818,8 @@ def _zone_obs():
             [int(Kind.SELECT), 3, 0, 0, 0, 0, 0, 3, 1, 0],
         ],
         "action_mask": [1, 1, 1, 1],
-        "cards": cards, "card_mask": np.array([True] * 4),
+        "cards": cards,
+        "card_mask": np.array([True] * 4),
         "global": g,
     }
 
@@ -857,7 +883,8 @@ def _sel_card_obs():
             [int(Kind.SELECT), 1, 3333, 0, 0, 0, 0xF, 3, 0, 0],
         ],
         "action_mask": [1, 1],
-        "cards": cards, "card_mask": np.array([True, True]),
+        "cards": cards,
+        "card_mask": np.array([True, True]),
         "global": g,
     }
     return obs, {2222: "Blue-Eyes White Dragon", 3333: "Dark Magician"}
@@ -918,4 +945,3 @@ def test_do_applies_atk_as_sel_with_note(tmp_path, monkeypatch, capsys):
     assert "(ATK at a selection prompt: applied as SEL:Blue-Eyes_White_Dragon)" in out, out
     st = hand_play._load("g")
     assert st["choices"] == [0] and st["labels"] == ["gold"], st
-

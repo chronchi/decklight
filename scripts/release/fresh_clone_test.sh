@@ -13,7 +13,10 @@ OUT="$PRIV/runs/$NAME"
 WORK=/root/fresh
 mkdir -p "$OUT/logs" "$WORK"
 export PATH="$HOME/.local/bin:$PATH"
-NP=$(nproc)
+# nproc reports the host's cores on vast (256 on a 21-core slot, fresh-clone-20261021-2022); the launcher passes
+# the rented core count. One torch thread per test process.
+NP="${NP:-$(nproc)}"
+export OMP_NUM_THREADS=1 MKL_NUM_THREADS=1
 echo "cpus $NP, $(free -g | awk '/Mem/{print $2}') GiB RAM" | tee "$OUT/box.txt"
 
 step() {  # step LABEL CMD...: run in the clone, log, record PASS/FAIL; returns the command's status
@@ -53,7 +56,7 @@ step unit_tests run_units
 
 # Benchmark path: gauntlet group + ygo-agent's tflite + one searched game of the product vs ygo-agent.
 step gauntlet_sync uv sync --group dev --group ml --group web --group gauntlet
-step tflite bash -c 'curl -fL --create-dirs -o data/models/0546_26550M.tflite https://github.com/sbl1996/ygo-agent/releases/download/v0.1/0546_26550M.tflite && echo "d4ad2a78b6a2a2c1a4560f8f12da6f4b3abb24735657115969e96d71a2364b10  data/models/0546_26550M.tflite" | sha256sum -c'
+step tflite bash -c 'curl -fL --create-dirs -o data/models/0546_26550M.tflite https://github.com/sbl1996/ygo-agent/releases/download/v0.1/0546_26550M.tflite && curl -fL -o data/models/code_list.txt https://raw.githubusercontent.com/sbl1996/ygo-agent/dbf5142d49aab2e6beb4150788d4fffec39ae3e5/scripts/code_list.txt && printf "%s  %s\n" d4ad2a78b6a2a2c1a4560f8f12da6f4b3abb24735657115969e96d71a2364b10 data/models/0546_26550M.tflite 7b96f32845710b62a2f5ac1aa2a8c22e3af0ca780b5069532a06204f7dbdde78 data/models/code_list.txt | sha256sum -c'
 bench() {
   . scripts/product.sh
   timeout 2400 uv run python scripts/search_match.py --ckpt "$PRODUCT_CKPT" --value "$PRODUCT_VALUE" $PRODUCT_SEARCH \

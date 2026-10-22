@@ -6,6 +6,7 @@ import sys
 from pathlib import Path
 
 import numpy as np
+import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -151,6 +152,10 @@ def test_parse_judgement_valid_fenced_and_garbage():
     assert odd["turns"] == {} and odd["interrupts"] == []
 
 
+@pytest.mark.skipif(
+    not (ROOT / "data/demos/games/blue-eyes-vs-altergeist.jsonl").exists(),
+    reason="game record absent (data/ is gitignored)",
+)
 def test_narrative_on_tiny_real_record():
     from ygo_zero.demos.names import CardNames
     from ygo_zero.engine.duel import Engine

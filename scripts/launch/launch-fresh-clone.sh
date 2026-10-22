@@ -17,7 +17,7 @@ cp "$TAR" data/cache/release-test/
 git bundle verify data/cache/release-test/decklight.bundle > /dev/null
 N=fresh-clone-$(date +%Y%m%d-%H%M); echo $N
 taskset -c 0-3 uv run --no-sync python scripts/vast_job.py --name $N \
-  --cmd "bash scripts/release/fresh_clone_test.sh $N" --setup "true" \
+  --cmd "NP=${MIN_CPUS:-16} bash scripts/release/fresh_clone_test.sh $N" --setup "true" \
   --hours "${HOURS:-1.5}" --max-dph "${MAX_DPH:-0.15}" --min-cpus "${MIN_CPUS:-16}" --min-gpu-ram 6 \
   --data data/cache/release-test \
   > data/cache/briefs/$N.launcher.log 2>&1
