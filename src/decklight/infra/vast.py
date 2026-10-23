@@ -108,6 +108,7 @@ class JobSpec:
     setup: str = "bash scripts/vast_setup.sh"
     data_paths: tuple[str, ...] = ()  # extra repo paths to ship despite EXCLUDES (e.g. "data/demos/lines")
     min_mb_s: float = 15.0  # measured download speed a host must reach (0 = skip the check); vast's inet_down lies
+    max_inet_down_cost: float = 0.02  # $/GB cap for host download billing (ft-curve 2026-10-22: $X/GB cost ~$X/box)
 
 
 @dataclass
@@ -137,6 +138,14 @@ def mark_bad_machine(machine_id, reason: str) -> None:
 SETUP_DOWN_GB = 6.0  # measured order of magnitude: cu128 torch wheel + nvidia libs + uv deps per fresh box
 
 
+def offer_worst_cost(offer: dict, hours_cap: float) -> float:
+    """Worst-case cost of one fresh box: dph over the cap (+0.25 h startup margin) plus download billing
+    for the setup fetch, with a 1.5x margin for result pulls and retries. Missing/None inet_down_cost → 0."""
+    dph = float(offer.get("dph_total") or 0)
+    bw = float(offer.get("inet_down_cost") or 0)
+    return dph * (hours_cap + 0.25) + bw * SETUP_DOWN_GB * 1.5
+
+
 def find_offer(
     spec: JobSpec, exclude_machines: set[int] = frozenset(), exclude_offers: set[int] = frozenset()
 ) -> dict:
@@ -151,12 +160,13 @@ def find_offer(
         if o.get("machine_id") not in exclude_machines
         and str(o.get("machine_id")) not in load_bad_machines()
         and o["id"] not in exclude_offers
+        and float(o.get("inet_down_cost") or 0) <= spec.max_inet_down_cost
     ]
     if not offers:
         raise VastError(f"no offer matches: {q}")
     # Rank by expected cost, not dph alone: every box downloads ~SETUP_DOWN_GB (CUDA torch + deps), and some hosts bill
     # downloads (primer-games 2026-10-18: $X/GB made three ~5-min boxes cost $X against $X of dph).
-    hours = min(max(spec.hours_cap, 0.25), 1.0)
+    hours = max(spec.hours_cap, 0.25)
     return min(offers, key=lambda o: o["dph_total"] * hours + float(o.get("inet_down_cost") or 0) * SETUP_DOWN_GB)
 
 
@@ -344,9 +354,11 @@ def _rentable_offer(spec: JobSpec, bad_machines: set[int], tries: int = 10, rese
     stale: set[int] = set()
     for _ in range(tries):
         offer = find_offer(spec, bad_machines, stale)
-        worst = offer["dph_total"] * (spec.hours_cap + 0.25)
+        worst = offer_worst_cost(offer, spec.hours_cap)
         if worst > credit() - reserve:
-            raise VastError(f"worst-case ${worst:.2f} exceeds credit - reserve")
+            dph_part = float(offer.get("dph_total") or 0) * (spec.hours_cap + 0.25)
+            bw_part = float(offer.get("inet_down_cost") or 0) * SETUP_DOWN_GB * 1.5
+            raise VastError(f"worst-case ${worst:.2f} (dph ${dph_part:.2f} + bandwidth ${bw_part:.2f}) exceeds credit - reserve")
         out = cli("create", "instance", str(offer["id"]), "--image", spec.image, "--disk", str(spec.disk_gb),
                   "--ssh", "--direct", "--label", LABEL_PREFIX + spec.name)  # fmt: skip
         if isinstance(out, dict) and out.get("new_contract"):
@@ -503,7 +515,7 @@ def end_session(name: str = "lines") -> dict:
     _destroy_retrying(instance_id)
     now = time.time()
     seconds = now - float(s.get("started", now))
-    est_cost = float(s.get("dph", 0.0)) * seconds / 3600
+    est_cost = float(s.get("dph", 0.0)) * seconds / 3600 + float((s.get("offer") or {}).get("inet_down_cost") or 0) * SETUP_DOWN_GB
     summary = {"instance_id": instance_id, "seconds": seconds, "est_cost": est_cost}
     try:
         summary["credit_after"] = credit()
@@ -593,7 +605,7 @@ def run_job(spec: JobSpec, reserve: float = 0.25, max_hosts: int = 3) -> JobResu
     if strays:
         print(f"destroyed stray instances {strays}")
     res.credit_before = credit()
-    created: list[tuple[int, float, float]] = []  # (instance id, $/h, start time)
+    created: list[tuple[int, float, float, float]] = []  # (instance id, $/h, start time, bandwidth $)
     bad_machines: set[int] = set()
     t0 = time.time()
     try:
@@ -605,7 +617,8 @@ def run_job(spec: JobSpec, reserve: float = 0.25, max_hosts: int = 3) -> JobResu
             }
             out = offer.pop("_created")  # worst-case cost was checked before creating
             res.instance_id = int(out["new_contract"])
-            created.append((res.instance_id, offer["dph_total"], time.time()))
+            created.append((res.instance_id, offer["dph_total"], time.time(),
+                            float(offer.get("inet_down_cost") or 0) * SETUP_DOWN_GB))
             print(f"instance {res.instance_id}: {res.offer}", flush=True)
             try:
                 host, port = wait_ready(res.instance_id)
@@ -644,9 +657,9 @@ def run_job(spec: JobSpec, reserve: float = 0.25, max_hosts: int = 3) -> JobResu
         raise
     finally:
         now = time.time()
-        for iid, dph, start in created:
+        for iid, dph, start, bw in created:
             _destroy_retrying(iid)
-            res.est_cost += dph * (now - start) / 3600
+            res.est_cost += dph * (now - start) / 3600 + bw
         res.seconds = now - t0
         try:
             time.sleep(5)

@@ -133,3 +133,45 @@ def test_relay_progress_prefixed_and_missing_is_normal(tmp_path, monkeypatch):
         "PROGRESS [eval it 10] wr 0.6",
         "PROGRESS [eval it 20] wr 0.7",
     ]
+
+
+def test_offer_worst_cost_numbers():
+    o = {"dph_total": 0.10, "inet_down_cost": 0.039}
+    assert vast.offer_worst_cost(o, 0.5) == pytest.approx(0.10 * 0.75 + 0.039 * vast.SETUP_DOWN_GB * 1.5)
+    assert vast.offer_worst_cost({"dph_total": 0.10}, 0.5) == pytest.approx(0.10 * 0.75)
+    assert vast.offer_worst_cost({"dph_total": 0.10, "inet_down_cost": None}, 0.5) == pytest.approx(0.10 * 0.75)
+
+
+def test_rentable_offer_refuses_on_bandwidth(fake, monkeypatch):
+    offer = {"id": 9, "machine_id": 99, "dph_total": 0.10, "inet_down_cost": 0.039}
+    monkeypatch.setattr(vast, "credit", lambda: 0.40)
+    monkeypatch.setattr(vast, "find_offer", lambda *a, **k: offer)
+    monkeypatch.setattr(vast, "cli", fake)  # create must never be reached
+    spec = vast.JobSpec("t", "true", hours_cap=0.5)
+    # dph-only worst ($X) would pass credit - reserve ($X), full worst (~$X) must refuse
+    with pytest.raises(vast.VastError, match=r"dph \$.*\+ bandwidth \$"):
+        vast._rentable_offer(spec, set())
+    assert not [c for c in fake.calls if c[:2] == ("create", "instance")]
+
+
+def test_find_offer_prefers_cheap_bandwidth_over_cheap_dph(fake, monkeypatch):
+    offers = [
+        {"id": 1, "machine_id": 11, "dph_total": 0.10, "inet_down_cost": 0.039},
+        {"id": 2, "machine_id": 22, "dph_total": 0.12, "inet_down_cost": 0.0},
+    ]
+    monkeypatch.setattr(vast, "cli", lambda *a, **k: offers)
+    spec = vast.JobSpec("t", "true", hours_cap=2.75, max_inet_down_cost=0.05)
+    assert vast.find_offer(spec)["id"] == 2
+
+
+def test_find_offer_filters_above_max_inet_cost(fake, monkeypatch):
+    offers = [
+        {"id": 1, "machine_id": 11, "dph_total": 0.05, "inet_down_cost": 0.039},
+        {"id": 2, "machine_id": 22, "dph_total": 0.06, "inet_down_cost": 0.01},
+    ]
+    monkeypatch.setattr(vast, "cli", lambda *a, **k: offers)
+    spec = vast.JobSpec("t", "true")  # default max_inet_down_cost=0.02
+    assert vast.find_offer(spec)["id"] == 2
+    monkeypatch.setattr(vast, "cli", lambda *a, **k: [offers[0]])
+    with pytest.raises(vast.VastError, match="no offer matches"):
+        vast.find_offer(spec)
