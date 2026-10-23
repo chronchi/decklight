@@ -82,6 +82,29 @@ def check_loads(policy_pt: Path, value_pt: Path) -> None:
         fail(f"{policy_pt} / {value_pt} do not load as the product's policy/value: {e!r}")
 
 
+def export(full_state: dict, dest_dir: Path, init: Path, value_init: Path) -> tuple[Path, Path]:
+    """Export one fp16 full state into the product layout under dest_dir.
+
+    Writes dest_dir/policy/best.pt (policy, no value/q heads) and dest_dir/value/best.pt
+    (trunk + trained value head), each with its base's metrics.jsonl, then runs
+    check_invariants + check_loads. Returns (policy_pt, value_pt).
+    """
+    full = {k: v.half() if torch.is_tensor(v) and v.is_floating_point() else v
+            for k, v in full_state.items()}
+    policy_pt, value_pt = dest_dir / "policy" / "best.pt", dest_dir / "value" / "best.pt"
+    for pt, base in ((policy_pt, init), (value_pt, value_init)):
+        m = base.parent / "metrics.jsonl"
+        if not m.is_file():
+            fail(f"{m} missing: {pt} would load with the wrong architecture")
+        pt.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(m, pt.parent / "metrics.jsonl")
+    torch.save({k: v for k, v in full.items() if not k.startswith(("value_head.", "q_head."))}, policy_pt)
+    torch.save(full, value_pt)
+    check_invariants(value_pt, init, value_init)
+    check_loads(policy_pt, value_pt)
+    return policy_pt, value_pt
+
+
 def last_iter_metrics(rl_out: Path) -> dict:
     """The last training record of the train_rl metrics.jsonl (iterations, hours, focus fields).
 
@@ -120,6 +143,8 @@ def main() -> None:
     ap.add_argument("--ygoagent", action="store_true",
                     help="keep the slow ygo-agent eval (default: --no-ygoagent)")
     ap.add_argument("--rl-out", type=Path, default=None, help="train_rl output dir (default <out>/rl)")
+    ap.add_argument("--snap-every", type=int, default=0,
+                    help="export a product-layout snapshot every N iterations (0 = off)")
     args, extra = ap.parse_known_args()
     if extra and extra[0] == "--":
         extra = extra[1:]
@@ -148,6 +173,8 @@ def main() -> None:
            "--out", str(rl_out)]  # fmt: skip
     if not args.ygoagent:
         cmd.append("--no-ygoagent")
+    if args.snap_every > 0:
+        cmd += ["--save-every", str(args.snap_every)]
     cmd += extra
     print(f"[finetune] {' '.join(cmd)}", flush=True)
     r = subprocess.run(cmd, check=False)
@@ -160,26 +187,29 @@ def main() -> None:
     # Two files like the product (P + value_p2): BCPolicy loads strictly without the value head, ValueNet with it.
     # Each dir gets its base's metrics.jsonl: the loaders take the architecture from <ckpt dir>/metrics.jsonl
     # (bc_policy._run_args; a missing file silently means default args, value_p2's adds `value: true`).
-    full = {k: v.half() if v.is_floating_point() else v for k, v in load_state(last_pt).items()}
-    policy_pt, value_pt = out / "policy" / "best.pt", out / "value" / "best.pt"
-    for pt, base in ((policy_pt, args.init), (value_pt, args.value_init)):
-        m = base.parent / "metrics.jsonl"
-        if not m.is_file():
-            fail(f"{m} missing: {pt} would load with the wrong architecture")
-        pt.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copyfile(m, pt.parent / "metrics.jsonl")
-    torch.save({k: v for k, v in full.items() if not k.startswith(("value_head.", "q_head."))}, policy_pt)
-    torch.save(full, value_pt)
-    check_invariants(value_pt, args.init, args.value_init)
-    check_loads(policy_pt, value_pt)
+    policy_pt, value_pt = export(load_state(last_pt), out, args.init, args.value_init)
+
+    snapshots: list[dict] = []
+    for snap_pt in sorted(rl_out.glob("snap-*.pt")):
+        try:
+            it = int(snap_pt.stem.split("-")[1])
+        except (IndexError, ValueError):
+            fail(f"unparseable snapshot name {snap_pt}")
+        dest = out / "snaps" / f"it-{it:04d}"
+        p_pt, v_pt = export(load_state(snap_pt), dest, args.init, args.value_init)
+        snapshots.append({"iter": it, "policy": str(p_pt), "value": str(v_pt)})
+        snap_pt.unlink()
 
     last = last_iter_metrics(rl_out)
+    if args.snap_every > 0 and not snapshots and last["iter"] >= args.snap_every:
+        fail(f"--snap-every {args.snap_every}: no snapshot written although training ran {last['iter']} iterations")
     info = {
         "deck": str(args.deck), "deck_sha256": sha256_file(args.deck),
         "base_ckpt": str(args.init), "base_sha256": sha256_file(args.init),
         "base_value": str(args.value_init), "base_value_sha256": sha256_file(args.value_init),
         "iterations": last["iter"], "hours": last.get("hours"),
         "focus_wr_vs_bc": last.get("focus_wr_vs_bc"), "focus_seat_share": last.get("focus_seat_share"),
+        "snapshots": snapshots,
         "train_rl_cmd": cmd,
     }
     if info["focus_wr_vs_bc"] is None or info["focus_seat_share"] is None:

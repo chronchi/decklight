@@ -5,6 +5,8 @@ Fast: no GPU, no training runs, no real games.
 
 import importlib.util
 import json
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -306,3 +308,102 @@ def test_last_iter_metrics_skips_eval_records(tmp_path: Path) -> None:
     (tmp_path / "metrics.jsonl").write_text("\n".join(json.dumps(r) for r in recs) + "\n")
     last = ft.last_iter_metrics(tmp_path)
     assert last["focus_wr_vs_bc"] == 0.5 and last["iter"] == 1
+
+
+# --- Part B: snapshot export ---
+
+
+def _bases(tmp_path: Path):
+    """Fake --init/--value-init checkpoint dirs (weights + metrics.jsonl for the arch)."""
+    init_d, value_d = tmp_path / "P", tmp_path / "value_p2"
+    for d in (init_d, value_d):
+        d.mkdir(parents=True)
+        (d / "metrics.jsonl").write_text(json.dumps({"args": {}}) + "\n")
+    _ckpt(init_d / "best.pt", 1.0, 0.0)
+    _ckpt(value_d / "best.pt", 9.0, 2.0)
+    return init_d / "best.pt", value_d / "best.pt"
+
+
+def test_export_snapshot_layout(tmp_path, monkeypatch):
+    ft = _load("finetune_deck")
+    monkeypatch.setattr(ft, "check_loads", lambda *a: None)  # fake tiny tensors, no real net
+    init, value_init = _bases(tmp_path)
+    full = {"trunk.weight": torch.full((2,), 1.5), "value_head.weight": torch.full((2,), 2.5)}
+    dest = tmp_path / "snaps" / "it-0040"
+    p_pt, v_pt = ft.export(full, dest, init, value_init)
+    assert p_pt == dest / "policy" / "best.pt" and v_pt == dest / "value" / "best.pt"
+    assert p_pt.is_file() and v_pt.is_file()
+    assert (dest / "policy" / "metrics.jsonl").is_file()
+    assert (dest / "value" / "metrics.jsonl").is_file()
+    pol = torch.load(p_pt, map_location="cpu", weights_only=False)
+    val = torch.load(v_pt, map_location="cpu", weights_only=False)
+    assert all(not k.startswith(("value_head.", "q_head.")) for k in pol)
+    assert any(k.startswith("value_head.") for k in val)
+    assert pol["trunk.weight"].dtype == torch.float16
+
+
+# --- Part C: ft_select ---
+
+FT_SELECT = SCRIPTS / "audit" / "ft_select.py"
+
+
+def _card(path: Path, diffs: dict[str, float], first: str = "base") -> Path:
+    arms = {first: {"win_rate": 0.5, "n": 10, "ci": [0.2, 0.8]}}
+    d_all: dict = {"first": first}
+    for name, d in diffs.items():
+        arms[name] = {"win_rate": 0.5, "n": 10, "ci": [0.2, 0.8]}
+        d_all[name] = {"diff_pp": d, "se_pp": 1.0, "ci_pp": [d - 2.0, d + 2.0], "n": 10}
+    card = {"arms": arms, "diff_vs_first": d_all, "seats": {}}
+    p = path / "card.json"
+    p.write_text(json.dumps(card))
+    return p
+
+
+def _select(card: Path, out: Path, extra: list[str] | None = None) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        [sys.executable, str(FT_SELECT), "--card", str(card),
+         "--base", "base", "--out", str(out)] + (extra or []),
+        capture_output=True, text=True, check=False)
+
+
+def test_ft_select_best_pick(tmp_path):
+    card = _card(tmp_path, {"it0040": 1.0, "it0080": 3.0, "final": 2.0})
+    out = tmp_path / "select.json"
+    r = _select(card, out)
+    assert r.returncode == 0, r.stderr + r.stdout
+    sel = json.loads(out.read_text())
+    assert sel["best"] == "it0080"
+    assert set(sel["diffs"]) == {"it0040", "it0080", "final"}
+    assert "PROGRESS select best=it0080" in r.stdout
+
+
+def test_ft_select_tie_earliest_and_final_last(tmp_path):
+    card = _card(tmp_path, {"it0080": 2.0, "it0040": 2.0, "final": 1.0})
+    out = tmp_path / "select.json"
+    r = _select(card, out)
+    assert r.returncode == 0, r.stderr + r.stdout
+    assert json.loads(out.read_text())["best"] == "it0040"  # top tie -> earliest
+    (tmp_path / "c2").mkdir(exist_ok=True)
+    card2 = _card(tmp_path / "c2", {"it0040": 1.0, "it0080": 5.0, "final": 5.0})
+    out2 = tmp_path / "select2.json"
+    r2 = _select(card2, out2)
+    assert r2.returncode == 0, r2.stderr + r2.stdout
+    assert json.loads(out2.read_text())["best"] == "it0080"  # final loses ties
+
+
+def test_ft_select_nan_fails(tmp_path):
+    card = _card(tmp_path, {"it0040": 1.0})
+    raw = json.loads((card).read_text())
+    raw["diff_vs_first"]["it0040"]["diff_pp"] = float("nan")
+    card.write_text(json.dumps(raw))
+    # json round-trips NaN as NaN literal, which json.loads reads back as nan
+    r = _select(card, tmp_path / "select.json")
+    assert r.returncode != 0
+
+
+def test_ft_select_identical_and_no_arms_fail(tmp_path):
+    card = _card(tmp_path, {"it0040": 1.0, "it0080": 1.0})
+    assert _select(card, tmp_path / "s1.json").returncode != 0  # all diffs identical
+    (tmp_path / "empty").mkdir(exist_ok=True)
+    card0 = _card(tmp_path / "empty", {})
+    assert _select(card0, tmp_path / "s0.json").returncode != 0  # no non-base arms

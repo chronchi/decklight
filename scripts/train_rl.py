@@ -695,6 +695,8 @@ def main() -> None:
     ap.add_argument("--ga-workers", type=int, default=8,
                     help="league ygo-agent: TFLite interpreter pool size (same moves as 1, ~3x faster)")
     ap.add_argument("--eval-every", type=int, default=10)
+    ap.add_argument("--save-every", type=int, default=0,
+                    help="save a full-state snapshot <out>/snap-NNNN.pt every N iterations (0 = off)")
     ap.add_argument("--eval-seeds", type=int, default=6, help="vs BC: seeds per ordered deck pair")
     ap.add_argument("--ga-seeds", type=int, default=1, help="vs ygo-agent: seeds per deck pair")
     ap.add_argument("--gauntlet-decks", type=Path, default=ROOT / "decks/gauntlet",
@@ -968,6 +970,12 @@ def main() -> None:
             ckpt["critic"] = critic.state_dict()
             ckpt["copt"] = copt.state_dict()
         torch.save(ckpt, args.out / "last.pt")
+
+    def save_snap(it: int) -> None:
+        """Full-state snapshot for learning-curve exports: fp16 weights, loadable via load_state."""
+        if args.save_every > 0 and it % args.save_every == 0:
+            snap = {k: v.half() if v.is_floating_point() else v for k, v in model.state_dict().items()}
+            torch.save(snap, args.out / f"snap-{it:04d}.pt")
 
     def save_curriculum() -> None:
         """Write the tracker next to the checkpoints (resumable, auditable)."""
@@ -1529,6 +1537,7 @@ def main() -> None:
                 assert log is not None
                 log.write(json.dumps(rec) + "\n")
                 log.flush()
+                save_snap(it)
             if focus_idx is not None and it >= 2:
                 _fshare = _g_ft / max(_g_ftn, 1)
                 dfail_if_any(_fshare < args.focus_share / 2,
@@ -1712,6 +1721,7 @@ def main() -> None:
             assert log is not None
             log.write(json.dumps(rec) + "\n")
             log.flush()
+            save_snap(it)
         if focus_idx is not None and it >= 2:
             _fshare2 = _g_ft / max(_g_ftn, 1)
             dfail_if_any(_fshare2 < args.focus_share / 2,
