@@ -578,8 +578,22 @@ html.short #app { height: var(--app-h); }
 .decklist { display: flex; flex-direction: column; max-height: 264px; overflow-y: auto; margin-top: 6px; }
 .deckrow { display: flex; align-items: center; gap: 8px; min-height: 44px; padding: 0 10px; border-radius: 8px; text-align: left; font-size: 15px; color: var(--muted); }
 .deckrow .nm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.deckrow .col { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.deckrow .sub { font-size: 12px; color: var(--muted); }
 .deckrow:hover { color: var(--text); }
 .deckrow.sel { color: var(--accent); background: var(--accent-tint); }
+/* decklight's model picker: group headings reuse the small-caps label voice,
+   the dim line reuses the muted token (>=4.5:1, WCAG 1.4.3). */
+.pickpanel .grp { font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted);
+  margin: 12px 0 4px; padding: 12px 10px 0; border-top: 1px solid var(--line-2); }
+.pickpanel .grp:first-child { margin-top: 2px; padding-top: 4px; border-top: 0; }
+.pickpanel .deckrow { width: 100%; }
+.deckrow:has(.col) { padding: 9px 10px; }
+.pickbtn.dim { opacity: 0.55; }
+.modelsub { font-size: 12px; color: var(--muted); margin: 8px 10px 2px; line-height: 1.5; }
+.mnote { font-size: 13px; color: var(--muted); margin: 8px 2px 0; line-height: 1.5; }
+.mnote.warn { color: var(--text); }
+.mnote svg { display: inline-block; width: 14px; height: 14px; vertical-align: -2px; margin-right: 6px; }
 .seg { display: flex; gap: 0; border-bottom: 1px solid var(--line-2); }
 .seg button {
   flex: 1; min-height: 46px; padding: 0 6px; font-size: 14px; color: var(--muted); white-space: nowrap;

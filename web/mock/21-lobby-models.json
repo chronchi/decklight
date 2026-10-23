@@ -1,0 +1,27 @@
+{
+  "t": "lobby",
+  "decks": [
+    {"id": "branded", "name": "Branded", "group": "pool"},
+    {"id": "blue-eyes", "name": "Blue-Eyes", "group": "pool"},
+    {"id": "snake-eye", "name": "Snake-Eye", "group": "pool"}
+  ],
+  "models": [
+    {"id": "base", "label": "Base model", "kind": "base", "deck_name": null, "deck_id": null},
+    {
+      "id": "3f9a12c7e1", "short": "3f9a", "label": "Tuned for Branded",
+      "kind": "finetune", "deck_name": "Branded", "deck_id": "branded",
+      "date": "22 Oct", "hours": 0.8
+    },
+    {
+      "id": "7b2e44aa09", "short": "7b2e", "label": "Tuned for Branded",
+      "kind": "finetune", "deck_name": "Branded", "deck_id": "branded",
+      "date": "14 Oct", "hours": 0.5
+    },
+    {
+      "id": "a1c904d2f6", "short": "a1c9", "label": "Tuned for Blue-Eyes",
+      "kind": "finetune", "deck_name": "Blue-Eyes", "deck_id": "blue-eyes",
+      "date": "20 Oct", "hours": 1.2
+    }
+  ],
+  "model_default": "3f9a12c7e1"
+}

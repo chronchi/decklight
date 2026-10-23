@@ -85,6 +85,7 @@ class Server:
         replay_threads: int = 1,
         ckpt=None,
         value=None,
+        models_dirs=None,
     ) -> None:
         self.token = token
         self._engine = engine
@@ -96,6 +97,12 @@ class Server:
         self.replay_threads = replay_threads
         self.ckpt = Path(ckpt) if ckpt is not None else None
         self.value_ckpt = Path(value) if value is not None else None
+        if models_dirs is None:
+            self.models_dirs = [ROOT / "runs"]
+        else:
+            self.models_dirs = [Path(d) for d in models_dirs]
+        self.model_id = "base"
+        self.model_label = "Base model"
         self._emb_codes: set[int] | None = None
         self.lock = asyncio.Lock()
         self.ws: WebSocket | None = None
@@ -113,6 +120,7 @@ class Server:
         self.end_reason = ""
         self._last_sig: tuple = ()
         self.user_decks: dict[str, str] = {}  # id -> ydk text (pasted this session)
+        self.tuned_decks: dict[str, tuple[str, Path]] = {}  # id -> (deck name, .ydk path) of fine-tunes' own decks
         self.chain_mode = "auto"  # "auto": skip quiet chain windows (session.auto_pass_index); "all"
         self.winchance_on = False  # client setting, off by default, reset per connection
         self.winchance = None  # {"p","turn","history"} while on (sent as null when off)
@@ -159,17 +167,117 @@ class Server:
             self._emb_codes = {int(c) for c in np.load(EMB_PATH)["codes"]}
         return self._emb_codes
 
-    def _default_opponent(self, mode: str):
+    def _default_opponent(self, mode: str, model=None):
         from decklight.edopro.bot import RandomBot
         from decklight.edopro.product_bot import ProductLauncher
 
         if mode == "random":
             return RandomBot(random.Random().randrange(1 << 30))
+        ckpt = model.get("ckpt") if isinstance(model, dict) and model.get("ckpt") is not None else self.ckpt
+        value = model.get("value") if isinstance(model, dict) and model.get("value") is not None else self.value_ckpt
         if mode == "fast":
-            return ProductLauncher(ckpt=self.ckpt, value_ckpt=self.value_ckpt, device=self.device,
+            return ProductLauncher(ckpt=ckpt, value_ckpt=value, device=self.device,
                                    fast=True, replay_threads=self.replay_threads)
-        return ProductLauncher(ckpt=self.ckpt, value_ckpt=self.value_ckpt, device=self.device,
+        return ProductLauncher(ckpt=ckpt, value_ckpt=value, device=self.device,
                                replay_threads=self.replay_threads)
+
+    # --- models (base + per-deck fine-tunes) ---
+
+    def get_models(self) -> tuple[list[dict], str]:
+        """All known models (with ckpt/value Paths) + the default model id."""
+        from decklight.web.models import discover_models
+
+        models = discover_models(self.models_dirs, self.list_decks(), self.ckpt, self.value_ckpt)
+        self._register_tuned_decks(models)
+        return models, self._default_model_id(models)
+
+    def _register_tuned_decks(self, models: list[dict]) -> None:
+        """A fine-tune's own deck, when no lobby deck has the same list, joins the lobby (group "tuned"), so the
+        bot can play exactly the deck the model was tuned on (gauntlet lists and users' own .ydk files are not in
+        decks/pool). Same content -> one lobby entry; ids are stable across calls."""
+        from decklight.decks import load_ydk
+
+        by_key: dict[tuple, str] = {}
+        for e in models:
+            p = e.get("deck_path")
+            if e.get("kind") != "finetune" or e.get("deck_id") is not None or p is None:
+                continue
+            try:
+                d = load_ydk(p)
+            except (OSError, ValueError):
+                continue
+            key = (tuple(sorted(d.main)), tuple(sorted(d.extra)))
+            did = by_key.setdefault(key, f"tuned-{e['short']}")
+            self.tuned_decks[did] = (e["deck_name"], Path(p))
+            e["deck_id"] = did
+
+    def _default_model_id(self, models: list[dict]) -> str:
+        if self.ckpt is not None or self.value_ckpt is not None:
+            for e in models:
+                if e.get("kind") == "cli":
+                    return e["id"]
+            for e in models:
+                if e.get("id") == "base":
+                    continue
+                if self._entry_matches_cli(e):
+                    return e["id"]
+        return "base"
+
+    def _entry_matches_cli(self, e: dict) -> bool:
+        try:
+            e_ckpt = Path(e["ckpt"]).resolve() if e.get("ckpt") is not None else None
+            e_val = Path(e["value"]).resolve() if e.get("value") is not None else None
+        except OSError:
+            return False
+        ck = self.ckpt.resolve() if self.ckpt is not None else None
+        vv = self.value_ckpt.resolve() if self.value_ckpt is not None else None
+        try:
+            if ck is not None:
+                ck = ck.resolve()
+            if vv is not None:
+                vv = vv.resolve()
+        except OSError:
+            pass
+        return (ck is None or (e_ckpt is not None and e_ckpt == ck)) and (
+            vv is None or (e_val is not None and e_val == vv)
+        )
+
+    def _model_entry(self, model_id: str | None) -> dict | None:
+        models, default = self.get_models()
+        want = model_id or default
+        for e in models:
+            if e["id"] == want:
+                return e
+        return None
+
+    @staticmethod
+    def _public_model(e: dict) -> dict:
+        out = {k: v for k, v in e.items() if k not in ("ckpt", "value") and not k.startswith("_")}
+        for k in ("ckpt", "value", "deck_path"):
+            out.pop(k, None)
+        return out
+
+    def lobby_message(self) -> dict:
+        models, default = self.get_models()
+        return {
+            "t": "lobby",
+            "decks": self.list_decks(),
+            "models": [self._public_model(e) for e in models],
+            "model_default": default,
+        }
+
+    async def _build_opponent(self, mode: str, model_entry: dict | None):
+        """Call the opponent factory with (mode, model) when it accepts two args
+        (the product default and new stubs); old single-arg stubs keep working."""
+        import inspect
+
+        try:
+            n = len(inspect.signature(self._make_opponent).parameters)
+        except (TypeError, ValueError):
+            n = 2
+        if n >= 2:
+            return await asyncio.to_thread(self._make_opponent, mode, model_entry)
+        return await asyncio.to_thread(self._make_opponent, mode)
 
     # --- decks ---
 
@@ -183,6 +291,8 @@ class Server:
                     continue
                 seen.add(p.stem)
                 out.append({"id": p.stem, "name": _pretty_deck_name(p.stem), "group": group})
+        for deck_id, (name, _p) in sorted(self.tuned_decks.items(), key=lambda kv: kv[1][0]):
+            out.append({"id": deck_id, "name": name, "group": "tuned"})  # same name as "Tuned for <name>"
         for i, (deck_id, _text) in enumerate(sorted(self.user_decks.items())):
             out.append({"id": deck_id, "name": f"Pasted deck {i + 1}", "group": "user"})
         return out
@@ -200,6 +310,9 @@ class Server:
                 if p.is_file():
                     deck = load_ydk(p)
                     return deck, self.check_text(deck)
+            if spec in self.tuned_decks:
+                deck = load_ydk(self.tuned_decks[spec][1])
+                return deck, self.check_text(deck)
             if spec in self.user_decks:
                 deck = parse_ydk(self.user_decks[spec], spec)
                 return deck, self.check_text(deck)
@@ -239,7 +352,7 @@ class Server:
 
         s = self.session
         if s is None:
-            return {"t": "lobby", "decks": self.list_decks()}
+            return self.lobby_message()
         human = s.human_seat
         if self.stats is None or getattr(self.stats, "viewer", human) != human:
             self.stats = DuelStats(human)
@@ -279,6 +392,7 @@ class Server:
             "can_undo": bool(self.practice and not self.advancing and s.need_human and self.human_decisions),
             "what_if": self.what_if,
             "puzzle": self.puzzle,
+            "model_label": self.model_label,
         }
 
     def get_puzzles(self) -> list[dict]:
@@ -728,10 +842,21 @@ class Server:
         if not isinstance(practice, bool):
             await self._error("practice must be true|false")
             return
+        models, model_default = self.get_models()
+        model_id = msg.get("model", model_default)
+        if mode == "random":
+            model_entry = next((e for e in models if e["id"] == "base"), models[0])
+            self.model_id, self.model_label = model_entry["id"], model_entry["label"]
+        else:
+            model_entry = next((e for e in models if e["id"] == model_id), None)
+            if model_entry is None:
+                await self._error(f"unknown model {model_id!r}")
+                return
+            self.model_id, self.model_label = model_entry["id"], model_entry["label"]
         seed = random.Random().getrandbits(63)
         cfg = DuelConfig(_DeckLike(first_deck), _DeckLike(second_deck), seed=seed)
         try:
-            opp = await asyncio.to_thread(self._make_opponent, mode)
+            opp = await self._build_opponent(mode, model_entry)
         except Exception as e:  # noqa: BLE001 -- report, keep the old game (if any)
             await self._error(f"could not start the {mode} opponent: {e}")
             return
@@ -748,6 +873,11 @@ class Server:
             "chain": self.chain_mode,
             "practice": practice,
             "hints_used": 0,
+            "model": {
+                "id": self.model_id,
+                "label": self.model_label,
+                "short": model_entry.get("short", self.model_id),
+            },
         }
         session = DuelSession(
             self.engine,
@@ -1159,12 +1289,15 @@ class Server:
             await self._error(f"replay failed: {e}")
             return
         try:
-            opp = await asyncio.to_thread(self._make_opponent, "fast")
+            models, _ = self.get_models()
+            base_entry = next((e for e in models if e["id"] == "base"), models[0])
+            opp = await self._build_opponent("fast", base_entry)
         except Exception as e:  # noqa: BLE001
             await self._error(f"could not start the fast opponent: {e}")
             return
         launcher = opp if hasattr(opp, "start_duel") else None
         bot = None if launcher is not None else opp
+        self.model_id, self.model_label = base_entry["id"], base_entry["label"]
         meta = {
             "human_deck": str(found["decks"][seat]) if seat < len(found["decks"]) else "puzzle",
             "bot_deck": str(found["decks"][1 - seat]) if len(found["decks"]) > 1 else "puzzle",
@@ -1172,6 +1305,11 @@ class Server:
             "practice": True,
             "puzzle": {"id": str(found["id"])},
             "hints_used": 0,
+            "model": {
+                "id": self.model_id,
+                "label": self.model_label,
+                "short": base_entry.get("short", self.model_id),
+            },
         }
         session = DuelSession(
             self.engine,
@@ -1564,6 +1702,7 @@ class Server:
         what_if: dict | None = None,
         undos: int | None = None,
         hints_used: int = 0,
+        model_id: str | None = None,
     ) -> bool:
         """Rebuild the live session from a host prefix (shared by what-if and undo).
 
@@ -1611,15 +1750,33 @@ class Server:
                 f"{len(product_prefix)} product decisions"
             )
             return False
+        want_id = model_id if model_id is not None else self.model_id
+        model_entry = self._model_entry(want_id)
+        if model_entry is None:
+            await self._error("the model this game used is no longer available")
+            return False
         try:
-            opp = await asyncio.to_thread(self._make_opponent, mode)
+            opp = await self._build_opponent(mode, model_entry)
         except Exception as e:  # noqa: BLE001
             await self._error(f"could not start the {mode} opponent: {e}")
             return False
         launcher = opp if hasattr(opp, "start_duel") else None
         bot = None if launcher is not None else opp
+        self.model_id, self.model_label = model_entry["id"], model_entry["label"]
         meta = dict(s.record_meta or {})
-        meta.update({"mode": mode, "practice": True, "what_if": what_if, "hints_used": hints_used})
+        meta.update(
+            {
+                "mode": mode,
+                "practice": True,
+                "what_if": what_if,
+                "hints_used": hints_used,
+                "model": {
+                    "id": self.model_id,
+                    "label": self.model_label,
+                    "short": model_entry.get("short", self.model_id),
+                },
+            }
+        )
         if undos is None:
             meta.pop("undos", None)
         else:
@@ -1746,6 +1903,10 @@ class Server:
         if mode not in ("product", "fast"):
             await self._error("What-if needs the full bot")
             return
+        rec_model = rec.get("model")
+        rec_model_id = rec_model.get("id") if isinstance(rec_model, dict) else None
+        if rec_model_id is None:
+            rec_model_id = self.model_id
         prefix_host = [int(c) for c in dlist[k]["prefix"]]
         source = self.record_path.parent.name if self.record_path is not None else ""
         ok = await self._restart_from(
@@ -1755,6 +1916,7 @@ class Server:
             what_if={"source": source, "k": int(k), "option": int(option)},
             undos=None,
             hints_used=0,
+            model_id=rec_model_id,
         )
         if ok:
             self.human_decisions = []
@@ -1906,6 +2068,7 @@ def create_app(
     replay_threads: int = 1,
     ckpt=None,
     value=None,
+    models_dirs=None,
 ) -> Starlette:
     _register_stack_dump()
     srv = Server(
@@ -1919,6 +2082,7 @@ def create_app(
         replay_threads=replay_threads,
         ckpt=ckpt,
         value=value,
+        models_dirs=models_dirs,
     )
 
     def need_token(req) -> bool:
@@ -1986,7 +2150,7 @@ def create_app(
             except (WebSocketDisconnect, RuntimeError):
                 pass
         try:
-            await ws.send_json({"t": "lobby", "decks": srv.list_decks()})
+            await ws.send_json(srv.lobby_message())
             if srv.session is not None and not (srv.session.done and srv.finished):
                 await srv.send_state(full_log=True)
             while True:
@@ -2042,7 +2206,7 @@ def create_app(
                         await srv.on_choose(msg)
                     elif t == "resync":
                         if srv.session is None:
-                            await ws.send_json({"t": "lobby", "decks": srv.list_decks()})
+                            await ws.send_json(srv.lobby_message())
                         else:
                             await srv.send_state(full_log=True)
                     else:

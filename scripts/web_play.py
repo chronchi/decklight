@@ -41,6 +41,8 @@ def main() -> None:
                     help="product value checkpoint (default data/cache/value_p2/best.pt)")
     ap.add_argument("--device", default="cpu")
     ap.add_argument("--replay-threads", type=int, default=1)
+    ap.add_argument("--models-dir", action="append", default=None, dest="models_dir",
+                    help="fine-tune search dir (repeatable, default runs)")
     a = ap.parse_args()
     host = resolve_bind(a.bind)
     token = a.token or secrets.token_urlsafe(16)
@@ -50,7 +52,8 @@ def main() -> None:
     from decklight.web.server import create_app
 
     app = create_app(token=token, opponent_default=a.opponent_default, device=a.device,
-                     replay_threads=a.replay_threads, ckpt=a.ckpt, value=a.value)
+                     replay_threads=a.replay_threads, ckpt=a.ckpt, value=a.value,
+                     models_dirs=a.models_dir)
     print(f"decklight web client: http://{host}:{a.port}/?t={token}", flush=True)
     uvicorn.run(app, host=host, port=a.port, log_level="warning")
 

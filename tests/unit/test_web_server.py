@@ -2241,3 +2241,132 @@ def test_primer_can_study_unknown(tmp_path, engine, monkeypatch):
         m = _recv_type(ws, "primer")
         assert m["primer"] is None
         assert m.get("can_study") is True
+
+
+# --- 12. decklight's model (base / fine-tune) ---
+
+
+def _write_lobby_tune(root: Path, name: str, deck_text: str, hours: float) -> Path:
+    d = root / name
+    (d / "policy").mkdir(parents=True)
+    (d / "value").mkdir(parents=True)
+    (d / "policy" / "best.pt").write_bytes(b"")
+    (d / "value" / "best.pt").write_bytes(b"")
+    lst = root / "lists" / f"{name}.ydk"
+    lst.parent.mkdir(parents=True, exist_ok=True)
+    lst.write_text(deck_text)
+    (d / "FINETUNE.json").write_text(json.dumps({"deck": str(lst), "hours": hours}))
+    return d
+
+
+def _model_app(tmp_path, engine, tunes):
+    """App with an isolated models dir; stub opponent records (mode, model entry)."""
+    from decklight.web.server import create_app
+
+    md = tmp_path / "models"
+    for name, text, hours in tunes:
+        _write_lobby_tune(md, name, text, hours)
+    calls = []
+
+    def make_opponent(mode, model=None):
+        calls.append((mode, model))
+        return RandomBot(1234)
+
+    app = create_app(
+        token=TOKEN,
+        engine=engine,
+        make_opponent=make_opponent,
+        record_root=tmp_path / "runs",
+        pics_dir=tmp_path / "pics",
+        models_dirs=[md],
+    )
+    return app, calls, md
+
+
+def test_new_game_unknown_model_errors(tmp_path, engine):
+    branded = (Path("decks/pool/branded.ydk")).read_text()
+    app, _calls, _md = _model_app(tmp_path, engine, [("ft-a", branded, 0.8)])
+    human_text = (FIXTURES / "BlueEyes.ydk").read_text()
+    bot_text = (FIXTURES / "Branded.ydk").read_text()
+    with _client(app).websocket_connect(f"/ws?t={TOKEN}") as ws:
+        lobby = json.loads(ws.receive_text())
+        assert lobby["t"] == "lobby" and lobby["models"][0]["id"] == "base"
+        assert all("ckpt" not in m and "value" not in m for m in lobby["models"])
+        assert lobby["model_default"] == "base"
+        ws.send_json(
+            {
+                "t": "new_game",
+                "deck": {"ydk": human_text},
+                "bot_deck": {"ydk": bot_text},
+                "first": "me",
+                "mode": "product",
+                "model": "nope",
+            }
+        )
+        err = json.loads(ws.receive_text())
+        assert err["t"] == "error" and "unknown model" in err["text"]
+        ws.send_json({"t": "resync"})
+        assert json.loads(ws.receive_text())["t"] == "lobby"  # the old game is kept (none)
+
+
+def test_new_game_valid_model_uses_entry_paths(tmp_path, engine):
+    branded = (Path("decks/pool/branded.ydk")).read_text()
+    app, calls, md = _model_app(tmp_path, engine, [("ft-a", branded, 0.8)])
+    human_text = (FIXTURES / "BlueEyes.ydk").read_text()
+    bot_text = (FIXTURES / "Branded.ydk").read_text()
+    with _client(app).websocket_connect(f"/ws?t={TOKEN}") as ws:
+        lobby = json.loads(ws.receive_text())
+        tune = next(m for m in lobby["models"] if m["kind"] == "finetune")
+        assert tune["deck_id"] == "branded"
+        ws.send_json(
+            {
+                "t": "new_game",
+                "deck": {"ydk": human_text},
+                "bot_deck": {"ydk": bot_text},
+                "first": "me",
+                "mode": "product",
+                "model": tune["id"],
+            }
+        )
+        first = _wait_prompt(ws)
+        assert first["model_label"] == tune["label"]
+        assert len(calls) == 1 and calls[0][0] == "product"
+        entry = calls[0][1]
+        assert Path(entry["ckpt"]) == md / "ft-a" / "policy" / "best.pt"
+        assert Path(entry["value"]) == md / "ft-a" / "value" / "best.pt"
+        ws.send_json({"t": "surrender"})
+        for _ in range(50):
+            m = json.loads(ws.receive_text())
+            if m.get("result") is not None:
+                break
+        assert m["result"] == {"winner": "bot", "reason": "surrender"}
+    recs = [
+        json.loads((p / "game.jsonl").read_text())
+        for p in sorted((tmp_path / "runs").iterdir())
+        if p.is_dir()
+    ]
+    assert len(recs) == 1
+    assert recs[0]["model"]["id"] == tune["id"]
+    assert recs[0]["model"]["label"] == tune["label"]
+
+
+def test_new_game_random_ignores_model(tmp_path, engine):
+    branded = (Path("decks/pool/branded.ydk")).read_text()
+    app, _calls, _md = _model_app(tmp_path, engine, [("ft-a", branded, 0.8)])
+    human_text = (FIXTURES / "BlueEyes.ydk").read_text()
+    bot_text = (FIXTURES / "Branded.ydk").read_text()
+    with _client(app).websocket_connect(f"/ws?t={TOKEN}") as ws:
+        lobby = json.loads(ws.receive_text())
+        tune = next(m for m in lobby["models"] if m["kind"] == "finetune")
+        ws.send_json(
+            {
+                "t": "new_game",
+                "deck": {"ydk": human_text},
+                "bot_deck": {"ydk": bot_text},
+                "first": "me",
+                "mode": "random",
+                "model": tune["id"],
+            }
+        )
+        first = _wait_prompt(ws)
+        assert first["model_label"] == "Base model"

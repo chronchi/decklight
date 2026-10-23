@@ -29,6 +29,7 @@ const MOCKS = [
   "mock/18-duel-early.json",
   "mock/19-winchance-board.json",
   "mock/20-winchance-stats.json",
+  "mock/21-lobby-models.json",
 ];
 
 const qs = new URLSearchParams(location.search);
@@ -102,8 +103,14 @@ function setLogTab(t) {
 }
 let detail = null;       // card for the full-screen detail view
 let lobby = null;
-let lobbyPick = {you: null, bot: null, first: "rps", mode: "product", play: "duel"};
-let pickerOpen = null;   // "you" | "bot" | null
+let lobbyPick = {you: null, bot: null, first: "rps", mode: "product", play: "duel", model: null};
+let pickerOpen = null;   // "you" | "bot" | "model" | null
+let modelNotice = null;  // status line under the model field (auto-switch), cleared on the next lobby change
+let gameModel = null;    // running game's model label (starting screen + menu fallback)
+let savedModel = null;
+try {
+  savedModel = localStorage.getItem("ygo-model");
+} catch (e) { /* private mode: no remembered model */ }
 let pileOpen = null;     // "gy:you" | "banished:bot" | "extra:you" ...
 let ws = null;
 let lpShown = {you: null, bot: null};
@@ -665,6 +672,9 @@ function gameMenuHTML() {
     '<div class="mhead">Game menu<button class="iconbtn" data-act="closegamemenu" aria-label="Close game menu">' +
     '<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5 5l10 10M15 5 5 15"/></svg></button></div>' +
     '<div class="mbody">' +
+    '<div class="mrow disabled" aria-disabled="true"><span class="muted">Bot: ' +
+    esc((msg && msg.model_label) || gameModel || "Base model") + " · " +
+    esc({product: "Full", fast: "Fast", random: "Random"}[gameMode] || "Full") + "</span></div>" +
     '<button class="mrow danger' + (surrenderArm ? " confirm" : "") + '" data-act="surrender">' +
     (surrenderArm ? "Tap again to surrender" : "Surrender") + "</button>" +
     '<button class="mrow" data-act="backlobby">Back to lobby</button>' +
@@ -966,10 +976,11 @@ function renderOverlays(logh) {
     }
   } else if (msg && msg.view && msg.result && !overDismissed) {
     const missed = review ? (review.missed || 0) : 0;
+    const overTuned = isTunedLabel(msg.model_label) ? " · " + tunedSuffix(msg.model_label) : "";
     const reviewLabel = reviewLoading
       ? ("Reviewing… " + (reviewProgress ? reviewProgress.done + "/" + reviewProgress.total : ""))
-      : (review ? ("Review game" + (missed ? " · " + missed + " missed response" + (missed === 1 ? "" : "s") : ""))
-        : "Review game");
+      : (review ? ("Review game" + overTuned + (missed ? " · " + missed + " missed response" + (missed === 1 ? "" : "s") : ""))
+        : "Review game" + overTuned);
     const reviewBtn = '<button class="bigbtn" data-act="review" aria-label="' + esc(reviewLabel) + '"' +
       (reviewLoading ? " disabled" : "") + ">" + esc(reviewLabel) + "</button>";
     if (msg.names) {
@@ -1040,7 +1051,7 @@ function deckName(decks, id) {
   return d ? d.name : "Choose a deck";
 }
 
-const GROUPS = {pool: "Pool", newcards: "New cards", user: "Yours"};
+const GROUPS = {pool: "Pool", newcards: "New cards", tuned: "Fine-tuned", user: "Yours"};
 
 function pickerHTML(decks, side, label) {
   const cur = lobbyPick[side];
@@ -1070,6 +1081,106 @@ function segHTML(label, key, items) {
     items.map(([k, t]) => '<button role="radio" aria-checked="' + (lobbyPick[key] === k) + '" class="' +
       (lobbyPick[key] === k ? "sel" : "") + (t.length > 10 ? " wide" : "") + '" data-' + key + '="' + k + '">' + t + "</button>").join("") +
     "</div></section>";
+}
+
+// decklight's model (lobby): base + per-deck fine-tunes from the server.
+// Hidden entirely when the lobby lists no non-base model.
+function lobbyModels() {
+  return (lobby && Array.isArray(lobby.models) && lobby.models.length) ? lobby.models : [{id: "base", label: "Base model", kind: "base"}];
+}
+function modelById(id) {
+  return lobbyModels().find((m) => m.id === id) || null;
+}
+function ensureModelPick() {
+  const models = lobbyModels();
+  const ids = new Set(models.map((m) => m.id));
+  const def = (lobby && lobby.model_default && ids.has(lobby.model_default)) ? lobby.model_default : "base";
+  if (!lobbyPick.model || !ids.has(lobbyPick.model)) {
+    lobbyPick.model = (savedModel && ids.has(savedModel)) ? savedModel : def;
+  }
+}
+function modelTag(m) {
+  if (!m || m.kind === "base") return "all decks";
+  if (m.date && m.hours != null) return m.date + " · " + m.hours + " h";
+  return "custom";
+}
+function tunedSuffix(label) {
+  // "Tuned for Branded" -> "tuned for Branded" for inline suffixes.
+  return label ? label.charAt(0).toLowerCase() + label.slice(1) : "tuned model";
+}
+function isTunedLabel(label) {
+  return !!label && label !== "Base model" && label !== "Custom model";
+}
+function modelRowHTML(m, botName) {
+  const sel = lobbyPick.model === m.id;
+  const sub = m.kind === "base"
+    ? "Plays every deck · the released model"
+    : (m.date && m.hours != null ? m.date + " · " + m.hours + " h of training · #" + (m.short || "?") : "Custom model");
+  void botName;
+  return '<button role="option" aria-selected="' + sel + '" class="deckrow' + (sel ? " sel" : "") + '" data-model="' + esc(m.id) + '">' +
+    '<span class="col"><span class="nm">' + esc(m.label) + '</span><span class="sub">' + esc(sub) + "</span></span></button>";
+}
+function modelPickerHTML() {
+  const models = lobbyModels();
+  if (!models.some((m) => m.kind && m.kind !== "base")) return "";
+  ensureModelPick();
+  const decks = (lobby && lobby.decks) || [];
+  const botName = deckName(decks, lobbyPick.bot);
+  const cur = modelById(lobbyPick.model) || models[0];
+  const open = pickerOpen === "model";
+  const randomMode = lobbyPick.mode === "random";
+  let h = '<section class="field-group"><div class="flabel">decklight\'s model</div>';
+  h += '<button class="pickbtn' + (open ? " open" : "") + (randomMode ? " dim" : "") + '" data-pickopen="model" aria-expanded="' + open + '"' +
+    (randomMode ? ' aria-disabled="true"' : "") + ">" +
+    '<span class="nm">' + esc(cur.label) + "</span>" +
+    '<span class="g">' + esc(randomMode ? "not used by Random" : modelTag(cur)) + "</span>" +
+    '<svg class="chev" viewBox="0 0 20 20" aria-hidden="true"><path d="M5 8l5 5 5-5"/></svg></button>';
+  if (open && !randomMode) {
+    const mine = models.filter((m) => m.kind !== "base" && m.deck_id && m.deck_id === lobbyPick.bot);
+    const rest = models.filter((m) => m.kind !== "base" && !(m.deck_id && m.deck_id === lobbyPick.bot));
+    h += '<div class="pickpanel"><div class="decklist" role="listbox" aria-label="decklight\'s model">';
+    if (mine.length) {
+      h += '<div role="group" aria-label="For ' + esc(botName) + '"><div class="grp">For ' + esc(botName) + "</div>" +
+        mine.map((m) => modelRowHTML(m, botName)).join("") + "</div>";
+    }
+    h += '<div role="group" aria-label="General"><div class="grp">General</div>' +
+      modelRowHTML(models.find((m) => m.kind === "base") || models[0], botName) + "</div>";
+    if (rest.length) {
+      h += '<div role="group" aria-label="Tuned for other decks"><div class="grp">Tuned for other decks</div>' +
+        rest.map((m) => modelRowHTML(m, botName)).join("") + "</div>";
+    }
+    h += '</div><div class="modelsub">The bot, hints, win chance and review all use this model.</div></div>';
+  }
+  h += modelNoteHTML();
+  return h + "</section>";
+}
+// Status / warning / availability line under the model field.
+function modelNoteHTML() {
+  if (modelNotice) return '<div class="mnote" role="status">' + esc(modelNotice) + "</div>";
+  const models = lobbyModels();
+  if (!models.some((m) => m.kind && m.kind !== "base")) return "";
+  ensureModelPick();
+  const decks = (lobby && lobby.decks) || [];
+  const cur = modelById(lobbyPick.model);
+  if (!cur) return "";
+  if (cur.kind !== "base" && cur.deck_id !== lobbyPick.bot) {
+    const onName = deckName(decks, lobbyPick.bot);
+    return '<div class="mnote warn" role="status"><svg viewBox="0 0 20 20" aria-hidden="true">' +
+      '<path d="M10 3 L18 17 H2 Z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>' +
+      '<path d="M10 8v4M10 14.5v.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>' +
+      esc(cur.label + ". On " + onName + " it is untested and may play worse than the base model.") +
+      ' <button class="linkbtn" data-act="usebase">Use base model</button></div>';
+  }
+  if (cur.kind === "base") {
+    const tune = models.filter((m) => m.kind !== "base" && m.deck_id && m.deck_id === lobbyPick.bot)
+      .sort((a, b) => String(b.date || "").localeCompare(String(a.date || "")))[0]
+      || models.find((m) => m.kind !== "base" && m.deck_id === lobbyPick.bot);
+    if (tune) {
+      return '<div class="mnote">A model tuned for ' + esc(tune.deck_name || "this deck") + " is available. " +
+        '<button class="linkbtn" data-act="usetuned">Use it</button></div>';
+    }
+  }
+  return "";
 }
 
 // Puzzles list sheet (lobby): grouped by difficulty, quiet Solved text marks.
@@ -1236,13 +1347,15 @@ function startingHTML() {
   const youN = deckName(decks, lobbyPick.you);
   const botN = deckName(decks, lobbyPick.bot);
   const modeN = {product: "Full", fast: "Fast", random: "Random"}[lobbyPick.mode] || "Full";
+  const sm = modelById(lobbyPick.model);
+  const modeTuned = (sm && sm.kind !== "base" && lobbyPick.mode !== "random") ? " · " + tunedSuffix(sm.label) : "";
   const think = msg && msg.t === "state" && msg.thinking && typeof msg.thinking.seconds === "number"
     ? '<div class="sthink">The bot is thinking… ' + Math.round(msg.thinking.seconds) + " s</div>"
     : '<div class="sthink dim">Waiting for the bot…</div>';
   return '<div id="starting" role="status" aria-live="polite">' +
     '<div class="sline" aria-hidden="true"></div>' +
     '<div class="kicker">Setting up the duel</div>' +
-    '<div class="sdesc">decklight (' + esc(modeN) + ") · " + esc(botN) + " vs your " + esc(youN) + "</div>" +
+    '<div class="sdesc">decklight (' + esc(modeN + modeTuned) + ") · " + esc(botN) + " vs your " + esc(youN) + "</div>" +
     think + "</div>";
 }
 
@@ -1286,6 +1399,7 @@ function renderLobby() {
   h += '<h2 class="sr-only">New duel</h2>';
   h += pickerHTML(decks, "you", "Your deck");
   h += pickerHTML(decks, "bot", "decklight plays");
+  h += modelPickerHTML();
   h += '<div class="aboutrow"><button class="linkbtn" data-act="primer">About this deck</button></div>';
   h += segHTML("Mode", "play", [["duel", "Duel"], ["practice", "Practice"]]);
   h += segHTML("Going first", "first", [["rps", "Rock-paper-scissors"], ["me", "Me"], ["bot", "Bot"]]);
@@ -1408,6 +1522,7 @@ app.addEventListener("click", (ev) => {
   const pick = t.closest("[data-pickopen]");
   if (pick) {
     const side = pick.getAttribute("data-pickopen");
+    if (side === "model" && lobbyPick.mode === "random") return;  // not used by Random
     pickerOpen = pickerOpen === side ? null : side;
     renderLobby();
     const inp = app.querySelector(".decksearch");
@@ -1438,6 +1553,27 @@ app.addEventListener("click", (ev) => {
     if (el) {
       lobbyPick[key === "youdeck" ? "you" : "bot"] = el.getAttribute("data-" + key);
       pickerOpen = null;
+      modelNotice = null;
+      renderLobby();
+      return;
+    }
+  }
+  {
+    const el = t.closest("[data-model]");
+    if (el) {
+      const m = modelById(el.getAttribute("data-model"));
+      if (m && lobbyPick.mode !== "random") {
+        lobbyPick.model = m.id;
+        saveSetting("ygo-model", m.id);
+        modelNotice = null;
+        if (m.kind !== "base" && m.deck_id && m.deck_id !== lobbyPick.bot) {
+          lobbyPick.bot = m.deck_id;
+          const decks = (lobby && lobby.decks) || [];
+          modelNotice = "decklight now plays " + deckName(decks, m.deck_id) +
+            ", the deck this model was tuned for.";
+        }
+      }
+      pickerOpen = null;
       renderLobby();
       return;
     }
@@ -1446,6 +1582,7 @@ app.addEventListener("click", (ev) => {
     const el = t.closest("[data-" + key + "]");
     if (el) {
       lobbyPick[key] = el.getAttribute("data-" + key);
+      modelNotice = null;
       renderLobby();
       return;
     }
@@ -1612,6 +1749,8 @@ function goLobby() {
   pileOpen = null;
   gameMenu = false;
   gameMode = null;
+  gameModel = null;
+  modelNotice = null;
   surrenderArm = false;
   revealCur = null;
   revealQueue = [];
@@ -1734,6 +1873,8 @@ function onAction(kind, el) {
     hintPrompt = null;
     whatIf = null;
     gameMode = lobbyPick.mode;
+    ensureModelPick();
+    gameModel = (modelById(lobbyPick.model) || {}).label || "Base model";
     practiceMode = lobbyPick.play === "practice";
     puzzlesOpen = false;
     primerOpen = false;
@@ -1747,7 +1888,23 @@ function onAction(kind, el) {
     render();
     sendGame({t: "new_game", deck: ydk ? {ydk} : lobbyPick.you, bot_deck: lobbyPick.bot,
       first: lobbyPick.first, mode: lobbyPick.mode, chain: chainMode,
-      practice: lobbyPick.play === "practice"});
+      practice: lobbyPick.play === "practice", model: lobbyPick.model});
+    return;
+  } else if (kind === "usebase") {
+    lobbyPick.model = "base";
+    saveSetting("ygo-model", "base");
+    modelNotice = null;
+    render();
+    return;
+  } else if (kind === "usetuned") {
+    const models = lobbyModels();
+    const tune = models.filter((m) => m.kind !== "base" && m.deck_id && m.deck_id === lobbyPick.bot)[0];
+    if (tune) {
+      lobbyPick.model = tune.id;
+      saveSetting("ygo-model", tune.id);
+    }
+    modelNotice = null;
+    render();
     return;
   } else if (kind === "newgame") {
     goLobby();
@@ -2355,6 +2512,7 @@ function applyState(m) {
   }
   practiceMode = !!m.practice;
   canUndo = !!m.can_undo;
+  if (m.model_label) gameModel = m.model_label;
   whatIf = m.what_if || null;
   puzzle = m.puzzle || null;
   if (puzzle && puzzle.status === "solved") markSolved(puzzle.id);
@@ -2383,7 +2541,24 @@ async function loadMock(i) {
   } catch (e) {
     msg = {t: "error", text: "mock load failed: " + MOCKS[mockIdx]};
   }
-  if (msg.t === "lobby") lobby = msg;
+  if (msg.t === "lobby") {
+    lobby = msg;
+    lobbyPick.model = null;
+    modelNotice = null;
+    ensureModelPick();
+    if (qs.get("model")) {
+      const m = modelById(qs.get("model"));
+      if (m) { lobbyPick.model = m.id; saveSetting("ygo-model", m.id); }
+    }
+    if (qs.get("bot")) {
+      const decks = (lobby && lobby.decks) || [];
+      if (decks.some((d) => d.id === qs.get("bot"))) lobbyPick.bot = qs.get("bot");
+    }
+  }
+  if (msg.t === "state" && qs.get("modellabel")) {
+    msg = Object.assign({}, msg, {model_label: qs.get("modellabel")});
+    gameModel = msg.model_label;
+  }
   // Screenshot hook for the setting-up status: ?starting=1 shows the loading
   // screen right after Start (start button disabled, no second new_game).
   starting = qs.get("starting") === "1";
@@ -2712,6 +2887,7 @@ async function boot() {
     onMessage(m) {
       if (m.t === "lobby") {
         lobby = m;
+        ensureModelPick();
         if (!msg || msg.t === "lobby") msg = m;
         if (puzzles === null && !MOCK && ws) ws.send({t: "puzzles"});
       } else if (m.t === "review_progress") {
