@@ -68,15 +68,16 @@ uv run python scripts/search_match.py --ckpt "$PRODUCT_CKPT" --value "$PRODUCT_V
 The bot plays every deck with one shared model. A short fine-tune on one deck makes it pilot that deck better:
 ```bash
 uv pip install torch --index-url https://download.pytorch.org/whl/cu128    # CUDA build (the default wheel is CPU-only)
-uv run --no-sync python scripts/finetune_deck.py --deck my.ydk --out runs/ft-my --hours 0.75
+uv run --no-sync python scripts/finetune_deck.py --deck my.ydk --out runs/ft-my --hours 2
 uv run --no-sync python scripts/web_play.py --ckpt runs/ft-my/policy/best.pt --value runs/ft-my/value/best.pt
 ```
 - It continues the bot's self-play training with your deck in half the seats, and updates both the policy and
   the value head. `edopro_host.py` takes the same `--ckpt/--value`.
 - Or just start `web_play.py`: fine-tunes under `runs/` (or `--models-dir`) appear in the lobby as
   "decklight's model", next to the deck they were tuned for. Hints, win chance and the review use the chosen model.
-- A 16 GB card is enough (~9 GB used). 0.75 h is ~65 training iterations on an RTX 4060 Ti.
-- **What to expect** (two decks so far, product vs ygo-agent piloting the other 30 benchmark decks):
+- A 16 GB card is enough (~9 GB used). 2 h is ~180 training iterations on an RTX 4060 Ti; on Blue-Eyes, 2 h gained
+  about twice as much as 0.75 h (raw policy +7.9 pp vs +3.8 pp).
+- **What to expect** (two decks, 0.75 h fine-tunes, product vs ygo-agent piloting the other 30 benchmark decks):
   Branded 0.61 → 0.77 (+16 pp, 95% CI +9 to +23), Blue-Eyes 0.37 → 0.44 (+8 pp, CI +1 to +15). See
   [docs/results.md](docs/results.md#fine-tuning-on-one-deck). The fine-tuned model is for that deck: use the
   base model for other decks.

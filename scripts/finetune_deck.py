@@ -1,6 +1,6 @@
 """Per-deck fine-tune (user-facing): continue P's PPO with the target deck in `--share` of seats.
 
-    uv run python scripts/finetune_deck.py --deck my.ydk --out runs/ft-my [--hours 0.75] [--iters 0] [--share 0.5]
+    uv run python scripts/finetune_deck.py --deck my.ydk --out runs/ft-my [--hours 2] [--iters 0] [--share 0.5]
         [--device cuda] [--lr 4e-5] [--kl-coef 0.1] [extra train_rl args after --]
 
 Runs scripts/train_rl.py with --init data/cache/P/best.pt, --value-init data/cache/value_p2/best.pt,
@@ -130,7 +130,8 @@ def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--deck", type=Path, required=True, help="target .ydk file, anywhere")
     ap.add_argument("--out", type=Path, required=True)
-    ap.add_argument("--hours", type=float, default=0.75)
+    ap.add_argument("--hours", type=float, default=2.0,
+                    help="training budget; 2 h beat 0.75 h on Blue-Eyes (docs/results.md)")
     ap.add_argument("--iters", type=int, default=0, help="stop after this many iterations (0 = by --hours)")
     ap.add_argument("--share", type=float, default=0.5, help="share of seats holding the deck")
     ap.add_argument("--device", default=None, help="cuda (default when available) | cpu (works, very slow)")

@@ -70,8 +70,21 @@ for base and fine-tuned (paired).
 - The gains are broad: the fine-tuned Branded model does better against 20 of 30 opponents and worse against 2.
 - The visible change is that the fine-tuned model commits to its deck's engine more often. For example, it activates
   Branded Fusion where the base model normal-summoned.
-- Two decks are not a distribution. Untested so far: longer fine-tunes, and how a fine-tuned model plays *other* decks
-  (assume worse; use it only for its deck).
+- Two decks are not a distribution. Untested so far: how a fine-tuned model plays *other* decks (assume worse; use it
+  only for its deck).
+
+### Longer fine-tune: 2 hours on Blue-Eyes
+Snapshots every 40 iterations, each played on separate validation deals (360 games per model, raw policy); the best
+was then confirmed on the 480 deals above.
+
+| iterations | 40 | 80 | 120 | 160 | 182 (2 h) |
+|---|---|---|---|---|---|
+| validation, difference vs base | +5.0 | +4.2 | +4.6 | +8.1 | +8.1 |
+
+- Test (the 480 deals above): base 0.277 → 0.356, **+7.9 pp (+3.9, +11.9)**, against +3.8 pp after 0.75 h. The base
+  model scored 0.277 again, on a different machine.
+- The curve is flat for most of the run and then steps up, so 2 h is now the default (`--hours 2`); it may not be the
+  top either. One deck, one run.
 
 ## Things that did not help
 - **A bigger architecture (v3: longer history, categorical game-phase inputs) + the same RL**, run `stage-p3-…`:
