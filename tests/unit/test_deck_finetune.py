@@ -106,6 +106,90 @@ def test_focus_log_fields():
     assert rec0 == {"focus_seat_share": 0.0, "focus_wr_vs_bc": 0.0, "focus_n_vs_bc": 0}
 
 
+def test_focus_log_fields_seat_split_and_brier():
+    tr = _load("train_rl")
+    rec = tr.focus_log_fields(50, 100, 20, 12, 8, 5, 12, 7, 3.0, 20, 1.0, 5)
+    assert rec["focus_seat_share"] == 0.5
+    assert rec["focus_wr_vs_bc"] == 0.6
+    assert rec["focus_n_vs_bc"] == 20
+    assert rec["focus_wr_vs_bc_first"] == 0.625
+    assert rec["focus_n_vs_bc_first"] == 8
+    assert rec["focus_wr_vs_bc_second"] == 0.583
+    assert rec["focus_n_vs_bc_second"] == 12
+    assert rec["focus_n_vs_bc_first"] + rec["focus_n_vs_bc_second"] == rec["focus_n_vs_bc"]
+    assert rec["focus_value_brier"] == 0.15
+    assert rec["focus_value_n"] == 20
+    assert rec["focus_value_brier_open"] == 0.2
+    # Brier rounds to 4 decimals
+    rec2 = tr.focus_log_fields(0, 1, 0, 0, 1, 1, 0, 0, 1.0, 3, 0.0, 1)
+    assert rec2["focus_value_brier"] == 0.3333
+
+
+def test_focus_log_fields_null_on_zero_counts():
+    tr = _load("train_rl")
+    rec = tr.focus_log_fields(0, 0, 0, 0, 0, 0, 0, 0, 0.0, 0, 0.0, 0)
+    assert rec["focus_wr_vs_bc_first"] is None
+    assert rec["focus_n_vs_bc_first"] == 0
+    assert rec["focus_wr_vs_bc_second"] is None
+    assert rec["focus_n_vs_bc_second"] == 0
+    assert rec["focus_value_brier"] is None
+    assert rec["focus_value_n"] == 0
+    assert rec["focus_value_brier_open"] is None
+
+
+def test_value_to_prob_mapping():
+    from decklight.rl.rollout import value_to_prob
+    assert float(value_to_prob(1.0)) == pytest.approx(1.0)
+    assert float(value_to_prob(-1.0)) == pytest.approx(0.0)
+    assert float(value_to_prob(0.0)) == pytest.approx(0.5)
+    assert float(value_to_prob(2.0)) == pytest.approx(1.0)  # clipped
+    assert float(value_to_prob(-2.0)) == pytest.approx(0.0)  # clipped
+
+
+def test_episode_brier_fake_episodes():
+    """Two focus episodes (won going first, lost going second) with known values."""
+    from decklight.rl.rollout import episode_brier
+    sse1, open1 = episode_brier([1.0, -1.0], 1.0)  # p=[1, 0], y=1 -> se=[0, 1]
+    assert sse1 == pytest.approx(1.0)
+    assert open1 == pytest.approx(0.0)
+    sse2, open2 = episode_brier([0.0], 0.0)  # p=0.5, y=0 -> se=0.25
+    assert sse2 == pytest.approx(0.25)
+    assert open2 == pytest.approx(0.25)
+    # totals as the logger sums them: Brier 1.25/3, open 0.25/2 (ref: always-0.5 -> 0.25)
+    assert (sse1 + sse2) / 3 == pytest.approx(1.25 / 3)
+    assert (open1 + open2) / 2 == pytest.approx(0.125)
+
+
+def _load_audit(name: str):
+    p = SCRIPTS / "audit" / f"{name}.py"
+    spec = importlib.util.spec_from_file_location(f"{name}_mod", p)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def test_ft_progress_new_signals():
+    fp = _load_audit("ft_progress")
+    recs = {i: {"iter": i, "samples": 10, "focus_wr_vs_bc": 0.5,
+                "focus_wr_vs_bc_first": 0.6, "focus_wr_vs_bc_second": 0.4,
+                "focus_value_brier": 0.2, "focus_value_brier_open": 0.22,
+                "focus_seat_share": 0.5, "focus_n_vs_bc": 4} for i in range(1, 6)}
+    lines = fp.progress_lines(recs, "ft", 0)
+    assert len(lines) == 1
+    assert "first=0.600" in lines[0] and "second=0.400" in lines[0]
+    assert "brier=0.2000" in lines[0] and "brier_open=0.2200" in lines[0]
+
+
+def test_ft_progress_skips_absent_keys():
+    fp = _load_audit("ft_progress")
+    recs = {i: {"iter": i, "samples": 10, "focus_wr_vs_bc": 0.5,
+                "focus_seat_share": 0.5, "focus_n_vs_bc": 4} for i in range(1, 6)}
+    lines = fp.progress_lines(recs, "ft", 0)
+    assert len(lines) == 1
+    assert "first=" not in lines[0] and "second=" not in lines[0]
+    assert "brier" not in lines[0]
+
+
 # --- Part B: finetune_deck invariant checks ---
 
 

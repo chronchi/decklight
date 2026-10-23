@@ -55,6 +55,29 @@ def _sample_from_lp(lp: torch.Tensor, legal: torch.Tensor) -> tuple[np.ndarray, 
             lp.gather(1, a[:, None]).squeeze(1).cpu().numpy())
 
 
+def value_to_prob(v) -> np.ndarray:
+    """Value-head output ([-1, 1] expected return) -> win probability in [0, 1].
+
+    The head ends in Tanh (policy.py) and the PPO value loss is MSE against returns
+    in [-1, 1] (+1 learner win / -1 loss), so E[return] = 2p - 1 and p = (v + 1) / 2.
+    Clipped to [0, 1] for safety (fp16 store, non-finite guards elsewhere).
+    """
+    return np.clip((np.asarray(v, dtype=np.float64) + 1.0) / 2.0, 0.0, 1.0)
+
+
+def episode_brier(values, won: float) -> tuple[float, float]:
+    """Brier sums for one finished focus trajectory: (sse, open_sse).
+
+    `values` are the stored per-step value-head outputs ([-1, 1]) in decision order,
+    `won` is 1.0 (learner won) or 0.0 (lost); draws/truncated episodes never reach
+    here (the caller skips w not in (0, 1)). `open_sse` is the single squared error
+    of the episode's first learner decision (calibration before the game develops).
+    """
+    p = value_to_prob(values)
+    se = (p - float(won)) ** 2
+    return float(se.sum()), float(se[0]) if len(se) else 0.0
+
+
 class Collector:
     """VecEnv in async mode + per-env trajectory bookkeeping.
 
@@ -279,6 +302,14 @@ class Collector:
         bc_wins = 0.0
         focus_traj = focus_traj_n = focus_bc_games = 0
         focus_bc_wins = 0.0
+        # Per-deck fine-tune extras (only counted with focus_idx set): seat split of the
+        # vs-BC focus games (seat 0 always moves first in the C++ VecEnv, so the learner
+        # seat went first iff lseat == 0) and value-calibration sums over finished focus
+        # trajectories (all opponents; draws/truncated excluded).
+        focus_bc_first_games = focus_bc_second_games = 0
+        focus_bc_first_wins = focus_bc_second_wins = 0.0
+        focus_value_sse = focus_value_open_sse = 0.0
+        focus_value_n = focus_value_open_n = 0
         dags_games = 0
         dags_wins = 0.0
         decisions = 0
@@ -333,6 +364,14 @@ class Collector:
                             focus_traj_n += 1
                             if (f0 if seat == 0 else f1):
                                 focus_traj += 1
+                                if w in (0, 1):  # draws/truncated excluded from calibration
+                                    sse, open_sse = episode_brier(
+                                        self.store.value[np.asarray(sl, dtype=np.int64)],
+                                        1.0 if w == seat else 0.0)
+                                    focus_value_sse += sse
+                                    focus_value_n += len(sl)
+                                    focus_value_open_sse += open_sse
+                                    focus_value_open_n += 1
                     self.traj[i][seat] = []
                 if not lg:
                     if self.vs_bc[i]:
@@ -340,7 +379,14 @@ class Collector:
                         bc_wins += 0.5 if w not in (0, 1) else float(w == ls)
                         if self.focus_idx is not None and (f0 if ls == 0 else f1):
                             focus_bc_games += 1
-                            focus_bc_wins += 0.5 if w not in (0, 1) else float(w == ls)
+                            res_fbc = 0.5 if w not in (0, 1) else float(w == ls)
+                            focus_bc_wins += res_fbc
+                            if ls == 0:  # seat 0 always moves first: learner went first
+                                focus_bc_first_games += 1
+                                focus_bc_first_wins += res_fbc
+                            else:
+                                focus_bc_second_games += 1
+                                focus_bc_second_wins += res_fbc
                     if is_dags:
                         dags_games += 1
                         dags_wins += 0.5 if w not in (0, 1) else float(w == int(self.lseat[i]))
@@ -369,6 +415,12 @@ class Collector:
                             if self.focus_idx is not None and (f0 if ls == 0 else f1):
                                 focus_bc_games += 1
                                 focus_bc_wins += res
+                                if ls == 0:  # seat 0 always moves first: learner went first
+                                    focus_bc_first_games += 1
+                                    focus_bc_first_wins += res
+                                else:
+                                    focus_bc_second_games += 1
+                                    focus_bc_second_wins += res
                         elif name == YGO:
                             self.ygo.reset_keys([int(self.ep_id[i])])
                             if self.ga_share > 0:
@@ -564,7 +616,14 @@ class Collector:
                  "ga_games": ga_games, "learner_ga": learner_ga}  # fmt: skip
         if self.focus_idx is not None:
             stats.update(focus_traj=focus_traj, focus_traj_n=focus_traj_n,
-                         focus_bc_games=focus_bc_games, focus_bc_wins=focus_bc_wins)
+                         focus_bc_games=focus_bc_games, focus_bc_wins=focus_bc_wins,
+                         focus_bc_first_games=focus_bc_first_games,
+                         focus_bc_first_wins=focus_bc_first_wins,
+                         focus_bc_second_games=focus_bc_second_games,
+                         focus_bc_second_wins=focus_bc_second_wins,
+                         focus_value_sse=focus_value_sse, focus_value_n=focus_value_n,
+                         focus_value_open_sse=focus_value_open_sse,
+                         focus_value_open_n=focus_value_open_n)
         if self.priv_critic:
             stats["priv_rows"] = priv_rows
             stats["priv_nonzero"] = priv_nonzero

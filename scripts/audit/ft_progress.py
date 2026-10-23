@@ -4,7 +4,10 @@
         [--ms-it 20 --ms-min 0.45]
 
 For every new iteration (iter > --seen) divisible by 5, prints one line:
-    PROGRESS <tag> it=<i> focus_wr_vs_bc=<last-5 mean> focus_share=<x> n=<sum last 5>[ kl=<v>]
+    PROGRESS <tag> it=<i> focus_wr_vs_bc=<last-5 mean> focus_share=<x> n=<sum last 5>[ first=<x> second=<x> brier=<x> brier_open=<x>][ kl=<v>]
+first/second/brier/brier_open are the same last-5 means of focus_wr_vs_bc_first,
+focus_wr_vs_bc_second, focus_value_brier and focus_value_brier_open; each is skipped
+when no record in the window carries it (older metrics.jsonl without the new signals).
 kl is the kl_bc (or kl) value of iteration <i> when present. Missing file or no new
 iterations: prints nothing, exits 0. With --ms-it, once iterations ms_it-4..ms_it are
 all present, prints MILESTONE <tag> it=<ms> mean=<m> (or MILESTONE_FAIL ...) and exits
@@ -15,6 +18,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 from pathlib import Path
 
 
@@ -45,6 +49,18 @@ def kl_of(rec: dict) -> float | None:
     return None
 
 
+def _window_mean(window: list, key: str) -> float | None:
+    """Mean of `key` over the window, skipping records that lack it (older metrics.jsonl).
+
+    Only finite numbers count (nulls and NaN never average in); None when no record
+    carries a usable value, and the caller then skips that suffix.
+    """
+    vs = [w.get(key) for w in window if isinstance(w, dict)]
+    vs = [float(v) for v in vs if isinstance(v, (int, float)) and not isinstance(v, bool)
+          and math.isfinite(float(v))]
+    return sum(vs) / len(vs) if vs else None
+
+
 def progress_lines(recs: dict[int, dict], tag: str, seen: int) -> list[str]:
     lines = []
     for i in sorted(recs):
@@ -61,6 +77,18 @@ def progress_lines(recs: dict[int, dict], tag: str, seen: int) -> list[str]:
         kl = kl_of(window[-1])  # type: ignore[union-attr]
         line = (f"PROGRESS {tag} it={i} focus_wr_vs_bc={mean:.3f} "
                 f"focus_share={share} n={n}")
+        first = _window_mean(window, "focus_wr_vs_bc_first")
+        if first is not None:
+            line += f" first={first:.3f}"
+        second = _window_mean(window, "focus_wr_vs_bc_second")
+        if second is not None:
+            line += f" second={second:.3f}"
+        brier = _window_mean(window, "focus_value_brier")
+        if brier is not None:
+            line += f" brier={brier:.4f}"
+        brier_open = _window_mean(window, "focus_value_brier_open")
+        if brier_open is not None:
+            line += f" brier_open={brier_open:.4f}"
         if kl is not None:
             line += f" kl={kl:.4f}"
         lines.append(line)

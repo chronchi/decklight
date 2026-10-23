@@ -188,13 +188,47 @@ def apply_focus_deck(pool_train: list, g_decks: list, focus_deck, share: float,
 
 
 def focus_log_fields(focus_traj: float, focus_traj_n: float,
-                     focus_bc_games: float, focus_bc_wins: float) -> dict:
-    """The per-iteration --focus-deck metrics.jsonl fields (only logged with --focus-deck)."""
-    return {
+                     focus_bc_games: float, focus_bc_wins: float,
+                     focus_bc_first_games: float | None = None,
+                     focus_bc_first_wins: float | None = None,
+                     focus_bc_second_games: float | None = None,
+                     focus_bc_second_wins: float | None = None,
+                     focus_value_sse: float | None = None,
+                     focus_value_n: float | None = None,
+                     focus_value_open_sse: float | None = None,
+                     focus_value_open_n: float | None = None) -> dict:
+    """The per-iteration --focus-deck metrics.jsonl fields (only logged with --focus-deck).
+
+    The seat split (went-first iff the learner seat is 0: seat 0 always moves first in
+    the C++ VecEnv) covers the same episodes as focus_wr_vs_bc; the Brier scores average
+    (p - y)^2 with p = (value + 1) / 2 (value head is Tanh in [-1, 1], PPO target returns
+    in [-1, 1]) over finished focus trajectories, draws/truncated excluded. Without the
+    extra counters (all None) the record is byte-for-byte the old three fields.
+    """
+    rec = {
         "focus_seat_share": round(focus_traj / max(focus_traj_n, 1), 3),
         "focus_wr_vs_bc": round(focus_bc_wins / max(focus_bc_games, 1), 3),
         "focus_n_vs_bc": int(focus_bc_games),
     }
+    if focus_bc_first_games is None:
+        return rec
+    assert focus_bc_second_games is not None and focus_bc_second_wins is not None
+    assert focus_bc_first_wins is not None
+    assert focus_value_sse is not None and focus_value_n is not None
+    assert focus_value_open_sse is not None and focus_value_open_n is not None
+    rec.update({
+        "focus_wr_vs_bc_first": (round(focus_bc_first_wins / focus_bc_first_games, 3)
+                                 if focus_bc_first_games else None),
+        "focus_n_vs_bc_first": int(focus_bc_first_games),
+        "focus_wr_vs_bc_second": (round(focus_bc_second_wins / focus_bc_second_games, 3)
+                                  if focus_bc_second_games else None),
+        "focus_n_vs_bc_second": int(focus_bc_second_games),
+        "focus_value_brier": round(focus_value_sse / focus_value_n, 4) if focus_value_n else None,
+        "focus_value_n": int(focus_value_n),
+        "focus_value_brier_open": (round(focus_value_open_sse / focus_value_open_n, 4)
+                                   if focus_value_open_n else None),
+    })
+    return rec
 
 
 class CollectTask:
@@ -1481,10 +1515,20 @@ def main() -> None:
                                  float(len(ret)), float(st.get("focus_traj", 0)),
                                  float(st.get("focus_traj_n", 0)),
                                  float(st.get("focus_bc_games", 0)),
-                                 float(st.get("focus_bc_wins", 0))])
+                                 float(st.get("focus_bc_wins", 0)),
+                                 float(st.get("focus_bc_first_games", 0)),
+                                 float(st.get("focus_bc_first_wins", 0)),
+                                 float(st.get("focus_bc_second_games", 0)),
+                                 float(st.get("focus_bc_second_wins", 0)),
+                                 float(st.get("focus_value_sse", 0)),
+                                 float(st.get("focus_value_n", 0)),
+                                 float(st.get("focus_value_open_sse", 0)),
+                                 float(st.get("focus_value_open_n", 0))])
                 (_g_samples, _g_games, _g_trunc, _g_dec, _g_bcg, _g_bcw, _g_dg, _g_dw,
                  _g_sumlen, _g_nlen, _g_sumret, _g_nret,
-                 _g_ft, _g_ftn, _g_fbcg, _g_fbcw) = _cs
+                 _g_ft, _g_ftn, _g_fbcg, _g_fbcw,
+                 _g_fbc1g, _g_fbc1w, _g_fbc2g, _g_fbc2w,
+                 _g_vbrier, _g_vn, _g_vobrier, _g_von) = _cs
                 _g_adv_std, _g_ret_mean = _gstd, _g_sumret / max(_g_nret, 1)
                 _sps_min = distmod.min_scalar(_sps_local, dev)
                 _sps_max = distmod.max_scalar(_sps_local, dev)
@@ -1502,7 +1546,19 @@ def main() -> None:
                 _g_ftn = float(st.get("focus_traj_n", 0))
                 _g_fbcg = float(st.get("focus_bc_games", 0))
                 _g_fbcw = float(st.get("focus_bc_wins", 0))
+                _g_fbc1g = float(st.get("focus_bc_first_games", 0))
+                _g_fbc1w = float(st.get("focus_bc_first_wins", 0))
+                _g_fbc2g = float(st.get("focus_bc_second_games", 0))
+                _g_fbc2w = float(st.get("focus_bc_second_wins", 0))
+                _g_vbrier = float(st.get("focus_value_sse", 0))
+                _g_vn = float(st.get("focus_value_n", 0))
+                _g_vobrier = float(st.get("focus_value_open_sse", 0))
+                _g_von = float(st.get("focus_value_open_n", 0))
                 _sps_min = _sps_max = _sps_local
+            if focus_idx is not None:
+                dfail_if_any(round(_g_fbc1g) + round(_g_fbc2g) != round(_g_fbcg),
+                             lambda it=it, a=_g_fbc1g, b=_g_fbc2g, c=_g_fbcg:
+                             f"iteration {it}: focus seat split {a:.0f}+{b:.0f} != focus_n_vs_bc {c:.0f}")
             if dist_rank == 0:
                 tot["games"] += _g_games
                 tot["trunc"] += _g_trunc
@@ -1514,7 +1570,9 @@ def main() -> None:
                     "train_vs_bc_sampled": round(_g_bcw / max(_g_bcg, 1), 3), "bc_games": _g_bcg,
                     "dags_games": _g_dg, "dags_wr": round(_g_dw / max(_g_dg, 1), 3),
                     "dags_bad": st["dags_bad"],
-                    **(focus_log_fields(_g_ft, _g_ftn, _g_fbcg, _g_fbcw)
+                    **(focus_log_fields(_g_ft, _g_ftn, _g_fbcg, _g_fbcw,
+                                        _g_fbc1g, _g_fbc1w, _g_fbc2g, _g_fbc2w,
+                                        _g_vbrier, _g_vn, _g_vobrier, _g_von)
                        if focus_idx is not None else {}),
                     **({"curric": cur.stats()} if cur is not None else {}),
                     **({"hint_rows": hint["rows"]} if hint is not None else {}),
@@ -1666,10 +1724,20 @@ def main() -> None:
                               float(len(ret)), float(st.get("focus_traj", 0)),
                               float(st.get("focus_traj_n", 0)),
                               float(st.get("focus_bc_games", 0)),
-                              float(st.get("focus_bc_wins", 0))])
+                              float(st.get("focus_bc_wins", 0)),
+                              float(st.get("focus_bc_first_games", 0)),
+                              float(st.get("focus_bc_first_wins", 0)),
+                              float(st.get("focus_bc_second_games", 0)),
+                              float(st.get("focus_bc_second_wins", 0)),
+                              float(st.get("focus_value_sse", 0)),
+                              float(st.get("focus_value_n", 0)),
+                              float(st.get("focus_value_open_sse", 0)),
+                              float(st.get("focus_value_open_n", 0))])
             (_g_samples, _g_games, _g_trunc, _g_dec, _g_bcg, _g_bcw, _g_dg, _g_dw,
              _g_sumlen, _g_nlen, _g_sumret, _g_nret,
-             _g_ft, _g_ftn, _g_fbcg, _g_fbcw) = _cs2
+             _g_ft, _g_ftn, _g_fbcg, _g_fbcw,
+             _g_fbc1g, _g_fbc1w, _g_fbc2g, _g_fbc2w,
+             _g_vbrier, _g_vn, _g_vobrier, _g_von) = _cs2
             _g_adv_std, _g_ret_mean = _gstd2, _g_sumret / max(_g_nret, 1)
             _sps_min = distmod.min_scalar(_sps_local2, dev)
             _sps_max = distmod.max_scalar(_sps_local2, dev)
@@ -1687,7 +1755,19 @@ def main() -> None:
             _g_ftn = float(st.get("focus_traj_n", 0))
             _g_fbcg = float(st.get("focus_bc_games", 0))
             _g_fbcw = float(st.get("focus_bc_wins", 0))
+            _g_fbc1g = float(st.get("focus_bc_first_games", 0))
+            _g_fbc1w = float(st.get("focus_bc_first_wins", 0))
+            _g_fbc2g = float(st.get("focus_bc_second_games", 0))
+            _g_fbc2w = float(st.get("focus_bc_second_wins", 0))
+            _g_vbrier = float(st.get("focus_value_sse", 0))
+            _g_vn = float(st.get("focus_value_n", 0))
+            _g_vobrier = float(st.get("focus_value_open_sse", 0))
+            _g_von = float(st.get("focus_value_open_n", 0))
             _sps_min = _sps_max = _sps_local2
+        if focus_idx is not None:
+            dfail_if_any(round(_g_fbc1g) + round(_g_fbc2g) != round(_g_fbcg),
+                         lambda it=it, a=_g_fbc1g, b=_g_fbc2g, c=_g_fbcg:
+                         f"iteration {it}: focus seat split {a:.0f}+{b:.0f} != focus_n_vs_bc {c:.0f}")
         if dist_rank == 0:
             tot["games"] += _g_games
             tot["trunc"] += _g_trunc
@@ -1699,7 +1779,9 @@ def main() -> None:
                 "train_vs_bc_sampled": round(_g_bcw / max(_g_bcg, 1), 3), "bc_games": _g_bcg,
                 "dags_games": _g_dg, "dags_wr": round(_g_dw / max(_g_dg, 1), 3),
                 "dags_bad": st["dags_bad"],
-                **(focus_log_fields(_g_ft, _g_ftn, _g_fbcg, _g_fbcw)
+                **(focus_log_fields(_g_ft, _g_ftn, _g_fbcg, _g_fbcw,
+                                   _g_fbc1g, _g_fbc1w, _g_fbc2g, _g_fbc2w,
+                                   _g_vbrier, _g_vn, _g_vobrier, _g_von)
                    if focus_idx is not None else {}),
                 **({"curric": cur.stats()} if cur is not None else {}),
                 **({"hint_rows": hint["rows"]} if hint is not None else {}),
