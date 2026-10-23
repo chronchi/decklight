@@ -18,6 +18,7 @@ def main() -> None:
     ap.add_argument("--name")
     ap.add_argument("--cmd")
     ap.add_argument("--hours", type=float, default=0.5)
+    ap.add_argument("--reserve", type=float, default=0.25, help="credit kept untouched by the worst case (USD)")
     ap.add_argument("--max-dph", type=float, default=0.15)
     ap.add_argument("--min-cpus", type=int, default=8)
     ap.add_argument("--no-gpu", action="store_true")
@@ -45,7 +46,7 @@ def main() -> None:
     )
     if args.setup is not None:
         spec.setup = args.setup
-    res = vast.run_job(spec, max_hosts=5)
+    res = vast.run_job(spec, reserve=args.reserve, max_hosts=5)
     print(res)
 
 

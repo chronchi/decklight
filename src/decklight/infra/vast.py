@@ -338,14 +338,14 @@ def pull_results(host: str, port: int, name: str) -> Path:
     return dest
 
 
-def _rentable_offer(spec: JobSpec, bad_machines: set[int], tries: int = 10) -> dict:
+def _rentable_offer(spec: JobSpec, bad_machines: set[int], tries: int = 10, reserve: float = 0.25) -> dict:
     """Cheapest offer that can actually be rented: listings can be stale (CLI answers `no_such_ask` with exit 0
     and an error object, seen 2026-10-02 on CPU-only offers). Creates the instance; the result is in `_created`."""
     stale: set[int] = set()
     for _ in range(tries):
         offer = find_offer(spec, bad_machines, stale)
         worst = offer["dph_total"] * (spec.hours_cap + 0.25)
-        if worst > credit() - 0.25:
+        if worst > credit() - reserve:
             raise VastError(f"worst-case ${worst:.2f} exceeds credit - reserve")
         out = cli("create", "instance", str(offer["id"]), "--image", spec.image, "--disk", str(spec.disk_gb),
                   "--ssh", "--direct", "--label", LABEL_PREFIX + spec.name)  # fmt: skip
@@ -598,7 +598,7 @@ def run_job(spec: JobSpec, reserve: float = 0.25, max_hosts: int = 3) -> JobResu
     t0 = time.time()
     try:
         for _ in range(max_hosts):
-            offer = _rentable_offer(spec, bad_machines)
+            offer = _rentable_offer(spec, bad_machines, reserve=reserve)
             res.offer = {
                 k: offer.get(k)
                 for k in ("id", "machine_id", "gpu_name", "dph_total", "inet_down_cost", "cpu_cores_effective", "geolocation")
