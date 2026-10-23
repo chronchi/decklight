@@ -445,6 +445,7 @@ class VecEnv {
   std::vector<uint8_t> ga;         // ga[i]: the episode now in env i is gauntlet-vs-gauntlet
   std::vector<int32_t> deck0;      // deck indices of the episode now in env i (-1: DAGS prefix or idle)
   std::vector<int32_t> deck1;
+  std::vector<uint64_t> deal_seed;  // duel seed of the episode now in env i (0: idle; DAGS: the start's seed)
   std::vector<int32_t> start;      // start[i]: index into the starts list of the DAGS episode
                                    // now in env i (-1: not a DAGS episode)
 

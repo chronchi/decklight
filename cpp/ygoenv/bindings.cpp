@@ -295,6 +295,7 @@ PYBIND11_MODULE(_ygoenv, m) {
         d["ga"] = py::array(py::dtype("uint8"), {v.num_envs}, {1}, v.ga.data(), self);
         d["deck0"] = py::array(py::dtype("int32"), {v.num_envs}, {4}, v.deck0.data(), self);
         d["deck1"] = py::array(py::dtype("int32"), {v.num_envs}, {4}, v.deck1.data(), self);
+        d["seed"] = py::array(py::dtype("uint64"), {v.num_envs}, {8}, v.deal_seed.data(), self);
         d["dags"] = py::array(py::dtype("bool"), {v.num_envs}, {1}, v.dags.data(), self);
         d["dags_last"] = py::array(py::dtype("bool"), {v.num_envs}, {1}, v.dags_last.data(), self);
         d["start"] = py::array(py::dtype("int32"), {v.num_envs}, {4}, v.start.data(), self);

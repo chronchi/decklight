@@ -4,14 +4,16 @@
         [--ms-it 20 --ms-min 0.45]
 
 For every new iteration (iter > --seen) divisible by 5, prints one line:
-    PROGRESS <tag> it=<i> focus_wr_vs_bc=<last-5 mean> focus_share=<x> n=<sum last 5>[ first=<x> second=<x> brier=<x> brier_open=<x>][ kl=<v>]
+    PROGRESS <tag> it=<i> focus_wr_vs_bc=<last-5 mean> focus_share=<x> n=<sum last 5>[ first=<x> second=<x> brier=<x> brier_open=<x>][ div=<x> lines=<n> top=<x>][ kl=<v>]
 first/second/brier/brier_open are the same last-5 means of focus_wr_vs_bc_first,
 focus_wr_vs_bc_second, focus_value_brier and focus_value_brier_open; each is skipped
 when no record in the window carries it (older metrics.jsonl without the new signals).
-kl is the kl_bc (or kl) value of iteration <i> when present. Missing file or no new
-iterations: prints nothing, exits 0. With --ms-it, once iterations ms_it-4..ms_it are
-all present, prints MILESTONE <tag> it=<ms> mean=<m> (or MILESTONE_FAIL ...) and exits
-2 when the mean is below --ms-min (the caller alerts; it never kills the run).
+div/top are the last-5 means of focus_dtype_entropy / focus_line_top_share and lines the
+last-5 sum of focus_line_distinct (skipped the same way). kl is the kl_bc (or kl) value
+of iteration <i> when present. Missing file or no new iterations: prints nothing, exits 0.
+With --ms-it, once iterations ms_it-4..ms_it are all present, prints MILESTONE <tag> it=<ms>
+mean=<m> (or MILESTONE_FAIL ...) and exits 2 when the mean is below --ms-min (the caller
+alerts; it never kills the run).
 """
 
 from __future__ import annotations
@@ -89,6 +91,16 @@ def progress_lines(recs: dict[int, dict], tag: str, seen: int) -> list[str]:
         brier_open = _window_mean(window, "focus_value_brier_open")
         if brier_open is not None:
             line += f" brier_open={brier_open:.4f}"
+        div = _window_mean(window, "focus_dtype_entropy")
+        if div is not None:
+            line += f" div={div:.3f}"
+        if any(isinstance(w.get("focus_line_distinct"), (int, float)) and not isinstance(w.get("focus_line_distinct"), bool)  # type: ignore[union-attr]
+               for w in window):
+            lines_n = sum(int(w.get("focus_line_distinct", 0)) for w in window)  # type: ignore[union-attr]
+            line += f" lines={lines_n}"
+        top = _window_mean(window, "focus_line_top_share")
+        if top is not None:
+            line += f" top={top:.3f}"
         if kl is not None:
             line += f" kl={kl:.4f}"
         lines.append(line)

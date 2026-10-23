@@ -28,6 +28,7 @@ static std::vector<uint32_t> shuffled_main(std::vector<uint32_t> main, uint64_t 
 VecEnv::VecEnv(Engine& engine, std::vector<Deck> decks, int num_envs, int num_threads, uint64_t seed, bool auto_single)
     : num_envs(num_envs), obs(num_envs), player(num_envs, 0), winner(num_envs, -1), done(num_envs, 0), game(num_envs, -1),
       dags(num_envs, 0), dags_last(num_envs, 0), ga(num_envs, 0), deck0(num_envs, -1), deck1(num_envs, -1),
+      deal_seed(num_envs, 0),
       start(num_envs, -1),
       engine_(engine), decks_(std::move(decks)), auto_single_(auto_single), envs_(num_envs), rng_(num_envs),
       dags_rng_(num_envs),
@@ -170,6 +171,7 @@ bool VecEnv::try_dags(int i, Episode& ep) {
   dags[i] = 1;
   ga[i] = 0;
   deck0[i] = deck1[i] = -1;
+  deal_seed[i] = s.seed;
   start[i] = static_cast<int32_t>(idx);
   ++dags_used_;
   return true;
@@ -185,6 +187,7 @@ void VecEnv::start_episode(int i) {
         game[i] = -1;
         ga[i] = 0;
         deck0[i] = deck1[i] = -1;
+        deal_seed[i] = 0;
         start[i] = -1;
         envs_[i].reset();
         obs[i].clear();
@@ -196,6 +199,7 @@ void VecEnv::start_episode(int i) {
     ga[i] = 0;
     deck0[i] = static_cast<int32_t>(ep.deck0);
     deck1[i] = static_cast<int32_t>(ep.deck1);
+    deal_seed[i] = ep.seed;
     start[i] = -1;
   } else if (try_dags(i, ep)) {
     return;
@@ -211,6 +215,7 @@ void VecEnv::start_episode(int i) {
       ga[i] = 1;
       deck0[i] = static_cast<int32_t>(ep.deck0);
       deck1[i] = static_cast<int32_t>(ep.deck1);
+      deal_seed[i] = ep.seed;
       start[i] = -1;
     } else {
       // Mixed episode (overfitting rule): one seat train-pool, one seat gauntlet.
@@ -224,6 +229,7 @@ void VecEnv::start_episode(int i) {
       ga[i] = ga_on_0 ? 1 : 2;
       deck0[i] = static_cast<int32_t>(ep.deck0);
       deck1[i] = static_cast<int32_t>(ep.deck1);
+      deal_seed[i] = ep.seed;
       start[i] = -1;
     }
   } else {
@@ -236,6 +242,7 @@ void VecEnv::start_episode(int i) {
     ga[i] = 0;
     deck0[i] = static_cast<int32_t>(ep.deck0);
     deck1[i] = static_cast<int32_t>(ep.deck1);
+    deal_seed[i] = ep.seed;
     start[i] = -1;
   }
   dags[i] = 0;

@@ -196,7 +196,10 @@ def focus_log_fields(focus_traj: float, focus_traj_n: float,
                      focus_value_sse: float | None = None,
                      focus_value_n: float | None = None,
                      focus_value_open_sse: float | None = None,
-                     focus_value_open_n: float | None = None) -> dict:
+                     focus_value_open_n: float | None = None,
+                     focus_dtype_entropy: float | None = None,
+                     focus_line_distinct: float | None = None,
+                     focus_line_top_share: float | None = None) -> dict:
     """The per-iteration --focus-deck metrics.jsonl fields (only logged with --focus-deck).
 
     The seat split (went-first iff the learner seat is 0: seat 0 always moves first in
@@ -204,6 +207,9 @@ def focus_log_fields(focus_traj: float, focus_traj_n: float,
     (p - y)^2 with p = (value + 1) / 2 (value head is Tanh in [-1, 1], PPO target returns
     in [-1, 1]) over finished focus trajectories, draws/truncated excluded. Without the
     extra counters (all None) the record is byte-for-byte the old three fields.
+    The diversity triple (entropy in nats of the learner's decision-type histogram over
+    finished focus trajectories; distinct first-turn line signatures; top signature share)
+    is appended the same way: all None keeps the record byte-for-byte the old fields.
     """
     rec = {
         "focus_seat_share": round(focus_traj / max(focus_traj_n, 1), 3),
@@ -228,7 +234,36 @@ def focus_log_fields(focus_traj: float, focus_traj_n: float,
         "focus_value_brier_open": (round(focus_value_open_sse / focus_value_open_n, 4)
                                    if focus_value_open_n else None),
     })
+    if focus_dtype_entropy is None:
+        return rec
+    assert focus_line_distinct is not None and focus_line_top_share is not None
+    rec.update({
+        "focus_dtype_entropy": round(float(focus_dtype_entropy), 3),
+        "focus_line_distinct": int(focus_line_distinct),
+        "focus_line_top_share": round(float(focus_line_top_share), 3),
+    })
     return rec
+
+
+def log_game_records(games: list[dict], out_dir: Path, it: int, k: int,
+                     rng: np.random.Generator) -> int:
+    """Sample up to K finished episodes uniformly (seeded) into train_games/it-NNNN.jsonl.
+
+    Only replayable records are sampled (non-DAGS, deck indices >= 0, non-empty choices);
+    each gains the iteration number. Returns the games written (0 = nothing to log).
+    ~1-2 KB/game, so K=32 over 200 iterations is ~10 MB.
+    """
+    pool = [g for g in games if not g.get("dags") and int(g.get("deck0", -1)) >= 0
+            and int(g.get("deck1", -1)) >= 0 and g.get("choices")]
+    if not pool or k <= 0:
+        return 0
+    n = min(k, len(pool))
+    idx = rng.choice(len(pool), n, replace=False) if len(pool) > n else list(range(len(pool)))
+    out_dir.mkdir(parents=True, exist_ok=True)
+    with (out_dir / f"it-{it:04d}.jsonl").open("w") as f:
+        for j in idx:
+            f.write(json.dumps({**pool[int(j)], "it": it}) + "\n")
+    return n
 
 
 class CollectTask:
@@ -724,6 +759,9 @@ def main() -> None:
                     help="per-deck fine-tune: a .ydk file; the focus deck fills --focus-share of seats")
     ap.add_argument("--focus-share", type=float, default=0.5,
                     help="share of uniformly drawn seats holding the --focus-deck (0, 1 exclusive)")
+    ap.add_argument("--log-games", type=int, default=0,
+                    help="per iteration, append up to K finished episodes (uniform seeded sample) as "
+                    "replayable records to <out>/train_games/it-NNNN.jsonl (0 = off, bit-identical)")
     ap.add_argument("--critic-init", type=Path, default=None,
                     help="critic init checkpoint (default: --init)")
     ap.add_argument("--ga-workers", type=int, default=8,
@@ -1320,7 +1358,7 @@ def main() -> None:
                         priv_critic=bool(args.priv_critic), adv=args.adv,
                         greedy=greedy_pol, ga_share=args.ga_episode_share,
                         ga_range=(ga_start, len(g_decks)), ga_mixed=ga_mixed, fail=fail,
-                        focus_idx=focus_idx)
+                        focus_idx=focus_idx, log_games=args.log_games > 0)
     except ValueError as e:
         fail2(str(e))
     curric_pushed = False
@@ -1523,13 +1561,23 @@ def main() -> None:
                                  float(st.get("focus_value_sse", 0)),
                                  float(st.get("focus_value_n", 0)),
                                  float(st.get("focus_value_open_sse", 0)),
-                                 float(st.get("focus_value_open_n", 0))])
+                                 float(st.get("focus_value_open_n", 0)),
+                                 float(st.get("focus_dtype_entropy", 0)) * float(st.get("focus_dtype_n", 0)),
+                                 float(st.get("focus_dtype_n", 0)),
+                                 float(st.get("focus_line_distinct", 0)),
+                                 float(st.get("focus_line_top_share", 0)) * float(st.get("focus_line_n", 0)),
+                                 float(st.get("focus_line_n", 0))])
                 (_g_samples, _g_games, _g_trunc, _g_dec, _g_bcg, _g_bcw, _g_dg, _g_dw,
                  _g_sumlen, _g_nlen, _g_sumret, _g_nret,
                  _g_ft, _g_ftn, _g_fbcg, _g_fbcw,
                  _g_fbc1g, _g_fbc1w, _g_fbc2g, _g_fbc2w,
-                 _g_vbrier, _g_vn, _g_vobrier, _g_von) = _cs
+                 _g_vbrier, _g_vn, _g_vobrier, _g_von,
+                 _g_div_num, _g_div_n, _g_lines, _g_top_num, _g_line_n) = _cs
                 _g_adv_std, _g_ret_mean = _gstd, _g_sumret / max(_g_nret, 1)
+                # Diversity across ranks is approximate (entropy/top_share are rank-weighted means,
+                # distinct is summed); single-process is exact.
+                _g_div = _g_div_num / max(_g_div_n, 1)
+                _g_top = _g_top_num / max(_g_line_n, 1)
                 _sps_min = distmod.min_scalar(_sps_local, dev)
                 _sps_max = distmod.max_scalar(_sps_local, dev)
             else:
@@ -1554,6 +1602,11 @@ def main() -> None:
                 _g_vn = float(st.get("focus_value_n", 0))
                 _g_vobrier = float(st.get("focus_value_open_sse", 0))
                 _g_von = float(st.get("focus_value_open_n", 0))
+                _g_div = float(st.get("focus_dtype_entropy", 0))
+                _g_div_n = float(st.get("focus_dtype_n", 0))
+                _g_lines = float(st.get("focus_line_distinct", 0))
+                _g_top = float(st.get("focus_line_top_share", 0))
+                _g_line_n = float(st.get("focus_line_n", 0))
                 _sps_min = _sps_max = _sps_local
             if focus_idx is not None:
                 dfail_if_any(round(_g_fbc1g) + round(_g_fbc2g) != round(_g_fbcg),
@@ -1572,7 +1625,8 @@ def main() -> None:
                     "dags_bad": st["dags_bad"],
                     **(focus_log_fields(_g_ft, _g_ftn, _g_fbcg, _g_fbcw,
                                         _g_fbc1g, _g_fbc1w, _g_fbc2g, _g_fbc2w,
-                                        _g_vbrier, _g_vn, _g_vobrier, _g_von)
+                                        _g_vbrier, _g_vn, _g_vobrier, _g_von,
+                                        _g_div, _g_lines, _g_top)
                        if focus_idx is not None else {}),
                     **({"curric": cur.stats()} if cur is not None else {}),
                     **({"hint_rows": hint["rows"]} if hint is not None else {}),
@@ -1595,6 +1649,10 @@ def main() -> None:
                 assert log is not None
                 log.write(json.dumps(rec) + "\n")
                 log.flush()
+                if args.log_games > 0:
+                    _n_log = log_game_records(st.get("games_log", []), args.out / "train_games",
+                                              it, args.log_games, rng)
+                    print(f"[games it {it}] logged {_n_log} replayable episodes", flush=True)
                 save_snap(it)
             if focus_idx is not None and it >= 2:
                 _fshare = _g_ft / max(_g_ftn, 1)
@@ -1732,13 +1790,21 @@ def main() -> None:
                               float(st.get("focus_value_sse", 0)),
                               float(st.get("focus_value_n", 0)),
                               float(st.get("focus_value_open_sse", 0)),
-                              float(st.get("focus_value_open_n", 0))])
+                              float(st.get("focus_value_open_n", 0)),
+                              float(st.get("focus_dtype_entropy", 0)) * float(st.get("focus_dtype_n", 0)),
+                              float(st.get("focus_dtype_n", 0)),
+                              float(st.get("focus_line_distinct", 0)),
+                              float(st.get("focus_line_top_share", 0)) * float(st.get("focus_line_n", 0)),
+                              float(st.get("focus_line_n", 0))])
             (_g_samples, _g_games, _g_trunc, _g_dec, _g_bcg, _g_bcw, _g_dg, _g_dw,
              _g_sumlen, _g_nlen, _g_sumret, _g_nret,
              _g_ft, _g_ftn, _g_fbcg, _g_fbcw,
              _g_fbc1g, _g_fbc1w, _g_fbc2g, _g_fbc2w,
-             _g_vbrier, _g_vn, _g_vobrier, _g_von) = _cs2
+             _g_vbrier, _g_vn, _g_vobrier, _g_von,
+             _g_div_num2, _g_div_n2, _g_lines2, _g_top_num2, _g_line_n2) = _cs2
             _g_adv_std, _g_ret_mean = _gstd2, _g_sumret / max(_g_nret, 1)
+            _g_div2 = _g_div_num2 / max(_g_div_n2, 1)
+            _g_top2 = _g_top_num2 / max(_g_line_n2, 1)
             _sps_min = distmod.min_scalar(_sps_local2, dev)
             _sps_max = distmod.max_scalar(_sps_local2, dev)
         else:
@@ -1763,6 +1829,9 @@ def main() -> None:
             _g_vn = float(st.get("focus_value_n", 0))
             _g_vobrier = float(st.get("focus_value_open_sse", 0))
             _g_von = float(st.get("focus_value_open_n", 0))
+            _g_div2 = float(st.get("focus_dtype_entropy", 0))
+            _g_lines2 = float(st.get("focus_line_distinct", 0))
+            _g_top2 = float(st.get("focus_line_top_share", 0))
             _sps_min = _sps_max = _sps_local2
         if focus_idx is not None:
             dfail_if_any(round(_g_fbc1g) + round(_g_fbc2g) != round(_g_fbcg),
@@ -1781,7 +1850,8 @@ def main() -> None:
                 "dags_bad": st["dags_bad"],
                 **(focus_log_fields(_g_ft, _g_ftn, _g_fbcg, _g_fbcw,
                                    _g_fbc1g, _g_fbc1w, _g_fbc2g, _g_fbc2w,
-                                   _g_vbrier, _g_vn, _g_vobrier, _g_von)
+                                   _g_vbrier, _g_vn, _g_vobrier, _g_von,
+                                   _g_div2, _g_lines2, _g_top2)
                    if focus_idx is not None else {}),
                 **({"curric": cur.stats()} if cur is not None else {}),
                 **({"hint_rows": hint["rows"]} if hint is not None else {}),
@@ -1803,6 +1873,10 @@ def main() -> None:
             assert log is not None
             log.write(json.dumps(rec) + "\n")
             log.flush()
+            if args.log_games > 0:
+                _n_log2 = log_game_records(st.get("games_log", []), args.out / "train_games",
+                                           it, args.log_games, rng)
+                print(f"[games it {it}] logged {_n_log2} replayable episodes", flush=True)
             save_snap(it)
         if focus_idx is not None and it >= 2:
             _fshare2 = _g_ft / max(_g_ftn, 1)

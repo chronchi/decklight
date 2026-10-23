@@ -35,6 +35,7 @@ today's behaviour bit-identical.
 
 from __future__ import annotations
 
+import math
 import time
 
 import numpy as np
@@ -78,6 +79,25 @@ def episode_brier(values, won: float) -> tuple[float, float]:
     return float(se.sum()), float(se[0]) if len(se) else 0.0
 
 
+def dtype_entropy(counts: dict) -> float:
+    """Entropy (nats) of a decision-type histogram {kind: count} (0.0 when empty).
+
+    Kinds are the chosen option's `Kind` int (buf["actions"] row col 0, engine/actions.py).
+    """
+    tot = sum(counts.values())
+    if not tot:
+        return 0.0
+    return float(-sum((c / tot) * math.log(c / tot) for c in counts.values() if c))
+
+
+def summarize_lines(line_counts: dict) -> tuple[int, float]:
+    """(distinct signatures, top share) from {signature: episodes} (0, 0.0 when empty)."""
+    n = sum(line_counts.values())
+    if not n:
+        return 0, 0.0
+    return len(line_counts), float(max(line_counts.values()) / n)
+
+
 class Collector:
     """VecEnv in async mode + per-env trajectory bookkeeping.
 
@@ -90,7 +110,8 @@ class Collector:
                  precision: str = "fp32", league: League | None = None, ygo=None,
                  critic=None, priv_critic: bool = False, adv: str = "gae",
                  greedy=None, ga_share: float = 0.0, ga_range: tuple[int, int] | None = None,
-                 ga_mixed: bool = False, fail=None, focus_idx: set[int] | None = None) -> None:
+                 ga_mixed: bool = False, fail=None, focus_idx: set[int] | None = None,
+                 log_games: bool = False) -> None:
         self.vec = vec
         self.model = model
         self.ref = ref
@@ -113,6 +134,10 @@ class Collector:
         # Per-deck fine-tune (train_rl --focus-deck): indices into vec.decks holding the
         # focus deck. None keeps behaviour and stats bit-identical (no focus keys).
         self.focus_idx = set(focus_idx) if focus_idx is not None else None
+        # Replay logging (train_rl --log-games): per-env choice/actor/turn/deal capture so
+        # finished episodes are logged as replayable records (decks, seed, choices, ...).
+        # False keeps behaviour bit-identical (no per-decision recording).
+        self.log_games = bool(log_games)
         if self.ga_share < 0.0 or self.ga_share > 1.0:
             raise ValueError(f"ga_share={ga_share} not in [0, 1]")
         # Privileged critic (RL v2 part B): values come from `critic` on the privileged
@@ -133,6 +158,20 @@ class Collector:
         n = vec.num_envs
         self.buf = vec.buf
         self.traj: list[list[list[int]]] = [[[], []] for _ in range(n)]
+        # Replay-log capture of the episode now on each env (deck indices + deal seed,
+        # taken at episode-begin sightings in _sync_start; -2 = not yet sighted).
+        self._has_seed = "seed" in vec.buf
+        self._has_decks = "deck0" in vec.buf and "deck1" in vec.buf
+        self.ep_deck0 = np.full(n, -2, dtype=np.int64)
+        self.ep_deck1 = np.full(n, -2, dtype=np.int64)
+        self.ep_deal_seed = np.zeros(n, dtype=np.uint64)
+        self.ep_choices: list[list[int]] = [[] for _ in range(n)]
+        self.ep_actors: list[list[int]] = [[] for _ in range(n)]
+        self.ep_turn = np.zeros(n, dtype=np.int64)
+        # Diversity detail (only recorded with focus_idx set): per-env per-seat learner
+        # decisions as (kind, code, turn) triples (kind/code = the taken option row's
+        # cols 0/2 in buf["actions"], i.e. engine Kind + card code).
+        self.ep_kinds: list[list[list[tuple[int, int, int]]]] = [[[], []] for _ in range(n)]
         # DAGS start index of the episode now on each env (-2 = not yet sighted; the C++
         # VecEnv starts the next episode before Python processes the previous finish, so the
         # index is captured at episode begin: on first sighting in play, and right after every
@@ -198,12 +237,43 @@ class Collector:
         episode being drawn for (DAGS/scheduled episodes carry -1, never focus). Called at
         every episode-begin sighting, so at finish time the flags still describe the
         finished episode (the redraw happens after the finish is processed).
+        The replay-log deck indices + deal seed (buf["deck0/1"], buf["seed"]) are captured
+        the same way whenever the keys exist, so a finished non-DAGS episode is reproduced
+        by DuelConfig(decks[d0], decks[d1], seed) + the logged choices.
         """
         if self._has_start:
             self.ep_start[i] = int(self.buf["start"][i])
         if self.focus_idx is not None and "deck0" in self.buf and "deck1" in self.buf:
             self.ep_f0[i] = int(self.buf["deck0"][i]) in self.focus_idx
             self.ep_f1[i] = int(self.buf["deck1"][i]) in self.focus_idx
+        if self._has_decks:
+            self.ep_deck0[i] = int(self.buf["deck0"][i])
+            self.ep_deck1[i] = int(self.buf["deck1"][i])
+        if self._has_seed:
+            self.ep_deal_seed[i] = int(self.buf["seed"][i])
+
+    def _opp_name(self, i: int) -> str:
+        """train_rl --log-games `opponent` field for the episode now on env i."""
+        if self.league is None:
+            return "bc" if bool(self.vs_bc[i]) else "self"
+        name = str(self.opp[i])
+        if name == SELF:
+            return "self"
+        if name == BASE:
+            return "bc"
+        if name == YGO:
+            return "ygoagent"
+        if name == GREEDY:
+            return "greedy"
+        return f"pool:{name}"
+
+    def _deck_name(self, d: int) -> str:
+        """Deck list name for a logged record (falls back to the index)."""
+        try:
+            name = getattr(self.vec.decks[int(d)], "name", "")
+        except (IndexError, AttributeError, TypeError):
+            name = ""
+        return name or f"deck{int(d)}"
 
     def _draw_episode(self, i: int) -> None:
         """League path: record nothing here; draw the next episode type for env i."""
@@ -310,6 +380,16 @@ class Collector:
         focus_bc_first_wins = focus_bc_second_wins = 0.0
         focus_value_sse = focus_value_open_sse = 0.0
         focus_value_n = focus_value_open_n = 0
+        # Play-diversity accumulators (only filled with focus_idx set): decision-type
+        # histogram over learner decisions in finished focus trajectories, and first-turn
+        # line signatures ({signature: episodes}; signature = tuple of the learner's
+        # turn-1 (kind, code) pairs, only when the learner moves first, i.e. seat 0).
+        focus_dtype_counts: dict[int, int] = {}
+        focus_line_counts: dict[tuple, int] = {}
+        focus_line_n = 0
+        # Replay log (only filled with log_games=True): one replayable record per finished
+        # non-DAGS episode (DAGS prefixes are mid-game starts, not reproducible from a deal).
+        games_log: list[dict] = []
         dags_games = 0
         dags_wins = 0.0
         decisions = 0
@@ -372,7 +452,34 @@ class Collector:
                                     focus_value_n += len(sl)
                                     focus_value_open_sse += open_sse
                                     focus_value_open_n += 1
+                                # Play diversity: ep_kinds holds this seat's learner decisions
+                                # (non-empty exactly for stored learner seats); the seat went
+                                # first iff seat == 0 (seat 0 always moves first).
+                                kinds = self.ep_kinds[i][seat]
+                                if kinds:
+                                    for k, _, _ in kinds:
+                                        focus_dtype_counts[k] = focus_dtype_counts.get(k, 0) + 1
+                                    if seat == 0:
+                                        sig = tuple((k, c) for k, c, t in kinds if t == 1)
+                                        if sig:
+                                            focus_line_counts[sig] = focus_line_counts.get(sig, 0) + 1
+                                            focus_line_n += 1
                     self.traj[i][seat] = []
+                if self.log_games and not is_dags:
+                    d0, d1 = int(self.ep_deck0[i]), int(self.ep_deck1[i])
+                    if d0 >= 0 and d1 >= 0 and self.ep_choices[i]:
+                        games_log.append({
+                            "decks": [self._deck_name(d0), self._deck_name(d1)],
+                            "deck0": d0, "deck1": d1, "seed": int(self.ep_deal_seed[i]),
+                            "choices": list(self.ep_choices[i]), "actors": list(self.ep_actors[i]),
+                            "winner": w, "truncated": w == TRUNCATED,
+                            "turns": int(self.ep_turn[i]),
+                            "learner_seat": ls, "opponent": self._opp_name(i),
+                            "focus": bool(f0 if ls == 0 else f1),
+                        })
+                self.ep_choices[i] = []
+                self.ep_actors[i] = []
+                self.ep_kinds[i] = [[], []]
                 if not lg:
                     if self.vs_bc[i]:
                         bc_games += 1
@@ -596,6 +703,25 @@ class Collector:
                     for i, a in zip(np.asarray(_self_b).tolist(), act_self.tolist()):
                         actions[pos[int(i)]] = int(a)
             t_fwd += time.perf_counter() - t1
+            if self.log_games or self.focus_idx is not None:
+                # Per-decision replay/diversity capture (buf rows are valid until sent again).
+                # kinds/codes come from the taken option's row (cols 0/2) in buf["actions"].
+                _acts = buf["actions"] if self.focus_idx is not None else None
+                _glob = buf["global"]
+                for k, i in enumerate(ids):
+                    ii = int(i)
+                    a = int(actions[pos[ii]])
+                    if self.log_games:
+                        self.ep_choices[ii].append(a)
+                        self.ep_actors[ii].append(int(player[ii]))
+                        self.ep_turn[ii] = int(_glob[ii][2])
+                if self.focus_idx is not None and len(l_ids):
+                    for i, a in zip(l_ids, act_l):
+                        ii, aa = int(i), int(a)
+                        seat = int(player[ii])
+                        assert _acts is not None
+                        self.ep_kinds[ii][seat].append(
+                            (int(_acts[ii, aa, 0]), int(_acts[ii, aa, 2]), int(_glob[ii][2])))
             self.vec.send(np.asarray(ids, dtype=np.int32), np.asarray(actions, dtype=np.int32))
             decisions += len(ids)
         if lg and self.ga_share > 0 and self.ygo_bad:
@@ -615,6 +741,7 @@ class Collector:
                  "fin_starts": fin_starts,
                  "ga_games": ga_games, "learner_ga": learner_ga}  # fmt: skip
         if self.focus_idx is not None:
+            _line_distinct, _line_top_share = summarize_lines(focus_line_counts)
             stats.update(focus_traj=focus_traj, focus_traj_n=focus_traj_n,
                          focus_bc_games=focus_bc_games, focus_bc_wins=focus_bc_wins,
                          focus_bc_first_games=focus_bc_first_games,
@@ -623,7 +750,15 @@ class Collector:
                          focus_bc_second_wins=focus_bc_second_wins,
                          focus_value_sse=focus_value_sse, focus_value_n=focus_value_n,
                          focus_value_open_sse=focus_value_open_sse,
-                         focus_value_open_n=focus_value_open_n)
+                         focus_value_open_n=focus_value_open_n,
+                         focus_dtype_entropy=dtype_entropy(focus_dtype_counts),
+                         focus_dtype_n=sum(focus_dtype_counts.values()),
+                         focus_line_distinct=_line_distinct,
+                         focus_line_top=(max(focus_line_counts.values())
+                                         if focus_line_counts else 0),
+                         focus_line_n=focus_line_n,
+                         focus_line_top_share=_line_top_share)
+        stats["games_log"] = games_log
         if self.priv_critic:
             stats["priv_rows"] = priv_rows
             stats["priv_nonzero"] = priv_nonzero

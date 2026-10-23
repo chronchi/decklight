@@ -139,6 +139,29 @@ def test_vecenv_async_matches_sync(engine, decks):
     assert async_map == sync_map
 
 
+def test_vecenv_seed_buffer_matches_schedule(engine, decks):
+    """buf["seed"] exposes the current episode's deal seed (read-only): scheduled games
+    show their schedule seeds, and pop_finished episodes carry the same seed."""
+    deck_list = [decks[k] for k in sorted(decks)]
+    games = [(0, 1, 111), (1, 0, 222), (0, 0, 333), (1, 1, 444)]
+    vec = cpp_env.VecEnv(engine, deck_list, num_envs=2, num_threads=1, seed=5)
+    vec.set_schedule(games)
+    vec.set_max_decisions(300)
+    buf = vec.reset()
+    assert "seed" in buf and buf["seed"].dtype == np.uint64
+    assert sorted(int(s) for s in buf["seed"]) == [111, 222]  # first two scheduled games
+    seen = {}
+    while vec.remaining > 0:
+        actions = np.zeros(2, dtype=np.int32)
+        for i in range(2):
+            if int(buf["player"][i]) != -1:
+                actions[i] = _policy_action(buf, i)
+        vec.step(actions)
+        for ep in vec.pop_finished():
+            seen[ep.index] = (ep.deck0, ep.deck1, ep.seed)
+    assert seen == {k: (d0, d1, s) for k, (d0, d1, s) in enumerate(games)}
+
+
 def test_vecenv_async_misuse(engine, decks):
     deck_list = [decks[k] for k in sorted(decks)]
     vec = cpp_env.VecEnv(engine, deck_list, num_envs=2, num_threads=1, seed=5)

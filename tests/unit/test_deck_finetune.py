@@ -137,6 +137,42 @@ def test_focus_log_fields_null_on_zero_counts():
     assert rec["focus_value_brier_open"] is None
 
 
+def test_focus_log_fields_diversity():
+    tr = _load("train_rl")
+    rec = tr.focus_log_fields(50, 100, 20, 12, 8, 5, 12, 7, 3.0, 20, 1.0, 5,
+                              1.2344, 7, 0.42857)
+    assert rec["focus_dtype_entropy"] == 1.234
+    assert rec["focus_line_distinct"] == 7
+    assert rec["focus_line_top_share"] == 0.429
+    # without the triple the record is byte-for-byte the old fields
+    old = tr.focus_log_fields(50, 100, 20, 12, 8, 5, 12, 7, 3.0, 20, 1.0, 5)
+    assert "focus_dtype_entropy" not in old and "focus_line_distinct" not in old
+    assert "focus_line_top_share" not in old
+
+
+def _game(i: int, dags: bool = False, empty: bool = False) -> dict:
+    return {"decks": ["a", "b"], "deck0": 0, "deck1": 1, "seed": 100 + i,
+            "choices": [] if empty else [i % 4, 0], "actors": [] if empty else [0, 1],
+            "winner": 0, "truncated": False, "turns": 2, "learner_seat": 0,
+            "opponent": "self", "focus": True, **({"dags": True} if dags else {})}
+
+
+def test_log_game_records_samples_and_skips(tmp_path):
+    import numpy as np
+
+    tr = _load("train_rl")
+    games = [_game(i) for i in range(10)] + [_game(10, dags=True), _game(11, empty=True)]
+    n = tr.log_game_records(games, tmp_path, 3, 4, np.random.default_rng(0))
+    assert n == 4  # capped at K, DAGS/empty records never sampled
+    recs = [json.loads(x) for x in (tmp_path / "it-0003.jsonl").read_text().splitlines()]
+    assert len(recs) == 4 and all(r["it"] == 3 for r in recs)
+    assert len({r["seed"] for r in recs}) == 4  # uniform sample without replacement
+    assert tr.log_game_records([], tmp_path, 4, 4, np.random.default_rng(0)) == 0
+    assert tr.log_game_records(games, tmp_path, 4, 0, np.random.default_rng(0)) == 0
+    n_all = tr.log_game_records(games, tmp_path, 5, 100, np.random.default_rng(0))
+    assert n_all == 10  # K above the pool: everything replayable is logged
+
+
 def test_value_to_prob_mapping():
     from decklight.rl.rollout import value_to_prob
     assert float(value_to_prob(1.0)) == pytest.approx(1.0)
@@ -188,6 +224,23 @@ def test_ft_progress_skips_absent_keys():
     assert len(lines) == 1
     assert "first=" not in lines[0] and "second=" not in lines[0]
     assert "brier" not in lines[0]
+
+
+def test_ft_progress_diversity():
+    fp = _load_audit("ft_progress")
+    recs = {i: {"iter": i, "samples": 10, "focus_wr_vs_bc": 0.5,
+                "focus_seat_share": 0.5, "focus_n_vs_bc": 4,
+                "focus_dtype_entropy": 1.5, "focus_line_distinct": 3,
+                "focus_line_top_share": 0.4} for i in range(1, 6)}
+    lines = fp.progress_lines(recs, "ft", 0)
+    assert len(lines) == 1
+    assert "div=1.500" in lines[0] and "lines=15" in lines[0] and "top=0.400" in lines[0]
+    # absent diversity keys: line unchanged
+    recs2 = {i: {"iter": i, "samples": 10, "focus_wr_vs_bc": 0.5,
+                 "focus_seat_share": 0.5, "focus_n_vs_bc": 4} for i in range(1, 6)}
+    assert "div=" not in fp.progress_lines(recs2, "ft", 0)[0]
+    assert "lines=" not in fp.progress_lines(recs2, "ft", 0)[0]
+    assert "top=" not in fp.progress_lines(recs2, "ft", 0)[0]
 
 
 # --- Part B: finetune_deck invariant checks ---

@@ -6,6 +6,7 @@ import time
 from pathlib import Path
 
 import numpy as np
+import pytest
 import torch
 
 from decklight.decks import load_ydk
@@ -185,6 +186,68 @@ def test_hint_step_stats_are_not_minibatch_averaged(engine):
                           adv_n, ret, np.random.default_rng(5), dev, hint=hint, **kw)
     assert {k: v for k, v in a1.items() if not k.startswith("hint_")} == a0
     assert 0.0 <= a1["hint_acc"] <= 1.0 and a1["hint_ce"] > 0.05  # an untrained tiny net is not near-zero CE
+
+
+def _collector_log(engine, decks, seed=0, focus_idx=None, log_games=True):
+    dev = torch.device("cpu")
+    model, ref = _tiny(decks, True), _tiny(decks, False)
+    vec = VecEnv(engine, decks, 8, 2, seed=seed)
+    vec.set_max_decisions(60)
+    store = SlotStore(8000, gather(vec.buf, np.arange(1), 0, False))
+    col = Collector(vec, model, ref, store, 0, False, dev, 0.3, -0.5, 2,
+                    np.random.default_rng(seed), "fp32",
+                    focus_idx=focus_idx, log_games=log_games)
+    return col, vec, decks
+
+
+def test_dtype_entropy_and_summarize_lines_handmade():
+    from decklight.rl.rollout import dtype_entropy, summarize_lines
+    import math
+    assert dtype_entropy({}) == 0.0
+    assert dtype_entropy({3: 5}) == 0.0
+    assert dtype_entropy({1: 2, 2: 2}) == pytest.approx(math.log(2))
+    assert summarize_lines({}) == (0, 0.0)
+    assert summarize_lines({((1, 7),): 3, ((1, 8),): 1}) == (2, 0.75)
+
+
+def test_log_games_records_replay_in_reference_env(engine):
+    """Logged records reproduce: DuelConfig(decks, seed) + choices replays the same
+    choices, and the winner for non-truncated games (truncated ones continue)."""
+    from decklight.engine.duel import DuelConfig
+    from decklight.engine.env import PyEnv
+    decks = [load_ydk(p) for p in sorted(FIXTURES.glob("*.ydk"))]
+    col, _, _ = _collector_log(engine, decks)
+    _, st = col.collect(300)
+    assert st["games"] > 0 and len(st["games_log"]) == st["games"]
+    for g in st["games_log"][:3]:
+        assert g["deck0"] >= 0 and g["deck1"] >= 0 and g["choices"] and len(g["choices"]) == len(g["actors"])
+        assert g["opponent"] in ("self", "bc") and g["learner_seat"] in (0, 1)
+        cfg = DuelConfig(decks[g["deck0"]], decks[g["deck1"]], seed=g["seed"])
+        py = PyEnv.replay(engine, cfg, g["choices"])
+        assert list(py.choices) == g["choices"]  # the deal + choices reproduce the game
+        assert len(py.choices) == len(g["choices"])
+        if not g["truncated"]:
+            assert py.done and py.winner == g["winner"]
+
+
+def test_log_games_off_keeps_stats_lean(engine):
+    decks = [load_ydk(p) for p in sorted(FIXTURES.glob("*.ydk"))]
+    col, _, _ = _collector_log(engine, decks, log_games=False)
+    _, st = col.collect(200)
+    assert st["games_log"] == [] and st["games"] > 0
+
+
+def test_focus_diversity_stats_on_tiny_run(engine):
+    decks = [load_ydk(p) for p in sorted(FIXTURES.glob("*.ydk"))]
+    col, _, _ = _collector_log(engine, decks, focus_idx={0, 1})
+    _, st = col.collect(300)
+    assert st["focus_dtype_n"] > 0 and st["focus_dtype_entropy"] >= 0.0
+    assert st["focus_line_distinct"] <= st["focus_line_n"] or st["focus_line_n"] == 0
+    if st["focus_line_n"]:
+        assert 0.0 <= st["focus_line_top_share"] <= 1.0
+        assert st["focus_line_top"] <= st["focus_line_n"]
+    else:
+        assert st["focus_line_top_share"] == 0.0
 
 
 def test_non_finite_minibatch_step_is_skipped(engine, capsys):
