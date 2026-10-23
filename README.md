@@ -73,6 +73,8 @@ uv run --no-sync python scripts/web_play.py --ckpt runs/ft-my/policy/best.pt --v
 ```
 - It continues the bot's self-play training with your deck in half the seats, and updates both the policy and
   the value head. `edopro_host.py` takes the same `--ckpt/--value`.
+- Or just start `web_play.py`: fine-tunes under `runs/` (or `--models-dir`) appear in the lobby as
+  "decklight's model", next to the deck they were tuned for. Hints, win chance and the review use the chosen model.
 - A 16 GB card is enough (~9 GB used). 0.75 h is ~65 training iterations on an RTX 4060 Ti.
 - **What to expect** (two decks so far, product vs ygo-agent piloting the other 30 benchmark decks):
   Branded 0.61 → 0.77 (+16 pp, 95% CI +9 to +23), Blue-Eyes 0.37 → 0.44 (+8 pp, CI +1 to +15). See
