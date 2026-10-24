@@ -230,9 +230,9 @@ def _post_server(model: str, system: str | None, prompt: str, variant: str | Non
         # OPENCODE_CONFIG=config/opencode-llm.json with bash/edit/webfetch/... = "ask"; nobody answers, so a tool call stalls to the timeout).
         body = {"model": {"providerID": provider, "modelID": model_id},
                 "parts": [{"type": "text", "text": prompt}]}  # fmt: skip
-        if model_id.endswith("-free"):
-            system = f"{system}\n{_NO_TOOLS_NOTE}" if system else _NO_TOOLS_NOTE
-        else:
+        # deepseek-v4.1-flash writes tool calls as plain text even with tools off (2026-10-23), so always say it
+        system = f"{system}\n{_NO_TOOLS_NOTE}" if system else _NO_TOOLS_NOTE
+        if not model_id.endswith("-free"):
             body["tools"] = _NO_TOOLS
         if system:
             body["system"] = system
@@ -272,7 +272,14 @@ def _post_server(model: str, system: str | None, prompt: str, variant: str | Non
     text = "".join(p.get("text", "") for p in r.get("parts", []) if p.get("type") == "text")
     if not text.strip():
         raise RuntimeError("server: empty reply")
+    if looks_like_tool_call(text):
+        raise RuntimeError(f"server: tool call written as text: {text[:120]!r}")
     return text
+
+
+def looks_like_tool_call(text: str) -> bool:
+    """A reply that is a tool call in text form (deepseek DSML markup) instead of an answer; never cache it."""
+    return "DSML" in text[:200] and "invoke" in text[:400]
 
 
 CLI_SLOTS = int(os.environ.get("YGO_LLM_CLI_SLOTS", "2"))  # machine-wide cap on `opencode run` (~450 MB each)
