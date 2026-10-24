@@ -43,8 +43,14 @@ class CardData:
     link_marker: int
 
 
-def extra_card_dirs() -> list[Path]:
-    """Existing dirs from `YGO_EXTRA_CARDS` (`os.pathsep`-separated); [] when unset."""
+def extra_card_dirs(explicit: list[Path] | tuple[Path, ...] | None = None) -> list[Path]:
+    """Existing extra card dirs.
+
+    `explicit` given (even []) wins: no env read. `None` keeps today's `YGO_EXTRA_CARDS`
+    fallback (existing dirs only, [] when unset).
+    """
+    if explicit is not None:
+        return [d for d in (Path(p) for p in explicit) if d.is_dir()]
     raw = os.environ.get(EXTRA_CARDS_ENV, "")
     out: list[Path] = []
     for part in raw.split(os.pathsep):
@@ -54,19 +60,25 @@ def extra_card_dirs() -> list[Path]:
     return out
 
 
-def extra_script_dirs() -> list[Path]:
+def extra_script_dirs(explicit: list[Path] | tuple[Path, ...] | None = None) -> list[Path]:
     """`<dir>/script` of every existing extra card dir (only those that exist)."""
+    if explicit is not None:
+        return [d / "script" for d in extra_card_dirs(explicit) if (d / "script").is_dir()]
     return [d / "script" for d in extra_card_dirs() if (d / "script").is_dir()]
 
 
-def default_cdbs(cdb_dir: Path = CDB_DIR) -> list[Path]:
-    """TCG/OCG cards plus (pre)release sets; later files override earlier ones. No rush/skills/goat."""
+def default_cdbs(cdb_dir: Path = CDB_DIR,
+                 extra_dirs: list[Path] | tuple[Path, ...] | None = None) -> list[Path]:
+    """TCG/OCG cards plus (pre)release sets; later files override earlier ones. No rush/skills/goat.
+
+    `extra_dirs=None` keeps the `YGO_EXTRA_CARDS` fallback; `[]` means no extras.
+    """
     extra = sorted(cdb_dir.glob("release-*.cdb")) + sorted(
         p for p in cdb_dir.glob("prerelease-*.cdb") if "rush" not in p.name
     )
     paths = [cdb_dir / "cards.cdb", *extra]
     if Path(cdb_dir) == CDB_DIR:
-        for d in extra_card_dirs():
+        for d in extra_card_dirs(explicit=extra_dirs):
             paths += sorted(d.glob("*.cdb"))
     return paths
 
@@ -104,15 +116,66 @@ def load_cards(paths: list[Path] | None = None) -> dict[int, CardData]:
     return cards
 
 
-def index_scripts(scripts_dir: Path = SCRIPTS_DIR) -> dict[str, Path]:
+def index_scripts(scripts_dir: Path = SCRIPTS_DIR,
+                  extra_dirs: list[Path] | tuple[Path, ...] | None = None) -> dict[str, Path]:
     """Map script file name -> path. Root (system/proc scripts) first, then official, then pre-release,
-    then every `YGO_EXTRA_CARDS` dir (extras never override official names)."""
+    then every extra card dir (extras never override official names).
+
+    `extra_dirs=None` keeps the `YGO_EXTRA_CARDS` fallback; `[]` means no extras.
+    """
     index: dict[str, Path] = {}
     for sub in ("", "official", "pre-release"):
         for p in sorted((scripts_dir / sub).glob("*.lua")):
             index.setdefault(p.name, p)
     if Path(scripts_dir) == SCRIPTS_DIR:
-        for d in extra_script_dirs():
+        for d in extra_script_dirs(explicit=extra_dirs):
             for p in sorted(d.glob("*.lua")):
                 index.setdefault(p.name, p)
     return index
+
+
+class CardSet:
+    """An explicit card set: the official cards plus extra custom-card dirs.
+
+    `extra_dirs=()` (the default) is the official set. `None` means "today's env
+    fallback" and is resolved once, at construction. The key is the sorted extra
+    cdb/script paths, so two bundles with clashing codes get different engines.
+    """
+
+    def __init__(self, extra_dirs: tuple[Path, ...] | list[Path] | None = None) -> None:
+        if extra_dirs is None:
+            resolved = extra_card_dirs()
+        else:
+            resolved = [p for p in (Path(q) for q in extra_dirs) if p.is_dir()]
+        self.extra_dirs = tuple(resolved)
+
+    def key(self) -> tuple[str, ...]:
+        """Cache key: the sorted extra cdb/script paths (official cards always included)."""
+        names: list[str] = []
+        for d in self.extra_dirs:
+            names += [str(p) for p in sorted(d.glob("*.cdb"))]
+            script_dir = d / "script"
+            if script_dir.is_dir():
+                names += [str(p) for p in sorted(script_dir.glob("*.lua"))]
+        return tuple(sorted(names))
+
+    def engine(self):
+        """An `Engine` over this card set (loads the core library)."""
+        from decklight.engine.duel import Engine
+
+        return Engine(cards=load_cards(default_cdbs(extra_dirs=list(self.extra_dirs))),
+                      scripts=index_scripts(extra_dirs=list(self.extra_dirs)))
+
+
+_ENGINES: dict[tuple[str, ...], object] = {}
+
+
+def engine_for(cardset: "CardSet"):
+    """One `Engine` per card-set key, created on first use and cached (web server: many
+    bundles share one process, each duel uses its bundle's engine)."""
+    key = cardset.key()
+    engine = _ENGINES.get(key)
+    if engine is None:
+        engine = cardset.engine()
+        _ENGINES[key] = engine
+    return engine

@@ -40,16 +40,25 @@ def _blue_eyes_text() -> str:
 
 
 def test_base_is_always_first(tmp_path):
-    models = discover_models([tmp_path], DECKS, None, None)
+    models = discover_models([tmp_path], DECKS, None, None, bundle_dirs=[])
     assert models[0]["id"] == "base"
     assert models[0]["label"] == "Base model" and models[0]["kind"] == "base"
+
+
+def test_shipped_bundles_listed_by_default():
+    models = discover_models([ROOT / "runs"], DECKS, None, None)
+    bundles = [m for m in models if m["kind"] == "bundle"]
+    assert {m["id"] for m in bundles} >= {"bundle-random-snake-eye", "bundle-raw-blueeyes"}
+    raw = next(m for m in bundles if m["id"] == "bundle-raw-blueeyes")
+    assert raw["agent"] == "raw" and raw["deck_name"] == "blue-eyes"
+    assert raw["deck_id"] == "blue-eyes"  # matched to the lobby list by content
 
 
 def test_missing_value_skipped_with_alert(tmp_path, capsys):
     _write_tune(tmp_path, "ft-novalue", _branded_text(), 1.0)
     noval = tmp_path / "ft-novalue" / "value" / "best.pt"
     noval.unlink()
-    models = discover_models([tmp_path], DECKS, None, None)
+    models = discover_models([tmp_path], DECKS, None, None, bundle_dirs=[])
     assert [m["id"] for m in models] == ["base"]
     out = capsys.readouterr().out
     assert "ALERT web: model" in out and "value/best.pt missing" in out
@@ -58,7 +67,7 @@ def test_missing_value_skipped_with_alert(tmp_path, capsys):
 def test_deck_id_matched_by_content_not_name(tmp_path):
     # Same cards as the lobby's "branded" list, but a different file name.
     _write_tune(tmp_path, "ft-a", _branded_text(), 0.8)
-    models = discover_models([tmp_path], DECKS, None, None)
+    models = discover_models([tmp_path], DECKS, None, None, bundle_dirs=[])
     assert len(models) == 2
     tune = models[1]
     assert tune["deck_id"] == "branded"
@@ -75,7 +84,7 @@ def test_newest_first(tmp_path):
     now = time.time()
     _write_tune(tmp_path, "ft-old", _branded_text(), 0.5, mtime=now - 100000)
     _write_tune(tmp_path, "ft-new", _blue_eyes_text(), 1.2, mtime=now)
-    models = discover_models([tmp_path], DECKS, None, None)
+    models = discover_models([tmp_path], DECKS, None, None, bundle_dirs=[])
     assert [m["hours"] for m in models[1:]] == [1.2, 0.5]
     assert models[1]["deck_id"] == "blue-eyes" and models[2]["deck_id"] == "branded"
 
@@ -83,7 +92,7 @@ def test_newest_first(tmp_path):
 def test_cli_custom_entry(tmp_path):
     ckpt = tmp_path / "custom" / "policy" / "best.pt"
     value = tmp_path / "custom" / "value" / "best.pt"
-    models = discover_models([tmp_path], DECKS, ckpt, value)
+    models = discover_models([tmp_path], DECKS, ckpt, value, bundle_dirs=[])
     cli = next(m for m in models if m["kind"] == "cli")
     assert cli["label"] == "Custom model"
     assert Path(cli["ckpt"]) == ckpt and Path(cli["value"]) == value
@@ -93,7 +102,7 @@ def test_cli_matching_discovered_entry_adds_nothing(tmp_path):
     ft = _write_tune(tmp_path, "ft-a", _branded_text(), 0.8)
     policy = ft.parent / "policy" / "best.pt"
     value = ft.parent / "value" / "best.pt"
-    models = discover_models([tmp_path], DECKS, policy, value)
+    models = discover_models([tmp_path], DECKS, policy, value, bundle_dirs=[])
     assert [m["kind"] for m in models] == ["base", "finetune"]
 
 
@@ -103,7 +112,7 @@ def test_lobby_payload_strips_paths_and_default(tmp_path):
     now = time.time()
     _write_tune(tmp_path, "ft-old", _branded_text(), 0.5, mtime=now - 100000)
     new_ft = _write_tune(tmp_path, "ft-new", _blue_eyes_text(), 1.2, mtime=now)
-    srv = Server(token="t", models_dirs=[tmp_path])
+    srv = Server(token="t", models_dirs=[tmp_path], bundle_dirs=[])
     lobby = srv.lobby_message()
     assert lobby["t"] == "lobby" and lobby["decks"]
     for m in lobby["models"]:

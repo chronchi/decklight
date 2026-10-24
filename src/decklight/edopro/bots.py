@@ -1,12 +1,7 @@
-"""Bot catalog: `config/bots/*.toml` entries plus WindBot argument parsing.
+"""Bot catalog: thin re-export of `decklight.play.bundle` plus WindBot argument parsing.
 
-Adding a bot = adding a file:
-
-    name = "random-snake-eye"
-    deck = "decks/pool/snake-eye.ydk"   # repo-relative or absolute
-    agent = "random"                    # make_agent name ("raw" needs StreamView)
-    description = "..."
-    # optional: seed, ckpt, emb, device
+Adding a bot = adding a file: `bots/<name>/bot.toml` (user bundles) or
+`config/bots/<name>.toml` (shipped examples); see `docs/bots.md` for the schema.
 
 The WindBot `Key=Value` launch arguments (`Program.cs`) and the `--serve`
 query parameters (`/?name=&deck=&...`) are parsed here so both the launcher
@@ -15,66 +10,32 @@ and the unit tests share one implementation.
 
 from __future__ import annotations
 
-import tomllib
 import urllib.parse
-from dataclasses import dataclass
 from pathlib import Path
+
+from decklight.play.bundle import Bundle, BundleError, bundles_text, discover_bundles, resolve_bundle
+
+list_bots_text = bundles_text
+resolve_deck = resolve_bundle
+
+__all__ = [
+    "Bundle",
+    "BundleError",
+    "discover_bundles",
+    "list_bots_text",
+    "load_catalog",
+    "parse_kv_args",
+    "parse_serve_query",
+    "resolve_deck",
+]
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_CATALOG_DIR = REPO_ROOT / "config" / "bots"
 
 
-@dataclass
-class BotSpec:
-    name: str
-    deck: str  # .ydk path (repo-relative or absolute)
-    agent: str = "random"
-    seed: int = 0
-    ckpt: str | None = None
-    emb: str | None = None
-    device: str = "cpu"
-    description: str = ""
-
-    def deck_path(self, root: Path = REPO_ROOT) -> Path:
-        p = Path(self.deck)
-        return p if p.is_absolute() else root / p
-
-
-def load_catalog(directory: str | Path = DEFAULT_CATALOG_DIR) -> dict[str, BotSpec]:
-    """All `<name>.toml` entries keyed by their `name` (falls back to the stem)."""
-    out: dict[str, BotSpec] = {}
-    directory = Path(directory)
-    if not directory.is_dir():
-        return out
-    for path in sorted(directory.glob("*.toml")):
-        with open(path, "rb") as f:
-            data = tomllib.load(f)
-        name = str(data.get("name", path.stem))
-        data.pop("name", None)
-        try:
-            out[name] = BotSpec(name=name, **data)
-        except TypeError as e:
-            raise ValueError(f"bad bot entry {path}: {e}") from None
-    return out
-
-
-def resolve_deck(ref: str, catalog: dict[str, BotSpec],
-                 root: Path = REPO_ROOT) -> tuple[Path | None, BotSpec | None]:
-    """`Deck=` value -> (ydk path, catalog entry or None).
-
-    A catalog name wins; otherwise `ref` is a `.ydk` path (repo-relative or
-    absolute, `.ydk` suffix optional). Returns (None, None) when neither matches.
-    """
-    if ref in catalog:
-        spec = catalog[ref]
-        return spec.deck_path(root), spec
-    p = Path(ref)
-    if p.suffix != ".ydk":
-        p = p.with_suffix(".ydk")
-    full = p if p.is_absolute() else root / p
-    if full.is_file():
-        return full, None
-    return None, None
+def load_catalog(directory: str | Path = DEFAULT_CATALOG_DIR) -> dict[str, Bundle]:
+    """All bundles under `directory`, keyed by name (`discover_bundles`)."""
+    return discover_bundles(directory)
 
 
 # --- WindBot launch arguments (Program.cs RunFromArgs / RunAsServer) ---
@@ -149,14 +110,3 @@ def parse_serve_query(query_string: str) -> dict:
         if v is not None:
             out[key] = _coerce(key, v)
     return out
-
-
-def list_bots_text(catalog: dict[str, BotSpec]) -> str:
-    lines = []
-    for name in sorted(catalog):
-        spec = catalog[name]
-        extra = f" [{spec.agent}] {spec.deck}"
-        if spec.description:
-            extra += f" — {spec.description.splitlines()[0][:100]}"
-        lines.append(f"{name}{extra}")
-    return "\n".join(lines) + ("\n" if lines else "")

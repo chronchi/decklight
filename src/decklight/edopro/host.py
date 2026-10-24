@@ -35,8 +35,11 @@ from decklight.play.session import (
     write_record as _write_record,
 )
 
-EMB_PATH = Path(os.environ.get("YGO_EMB") or
-               Path(__file__).resolve().parents[3] / "data" / "cards" / "emb" / "qwen3-0.6b-d512.npz")
+
+def emb_path() -> Path:
+    """Card-embedding npz actually used (read lazily so importing this module reads no env)."""
+    return Path(os.environ.get("YGO_EMB") or
+                Path(__file__).resolve().parents[3] / "data" / "cards" / "emb" / "qwen3-0.6b-d512.npz")
 
 EXTRA_TYPES = C.TYPE_FUSION | C.TYPE_SYNCHRO | C.TYPE_XYZ
 
@@ -371,7 +374,8 @@ class DuelHost:
 
     def __init__(self, engine: Engine, bot_deck, bot: Bot, *, seed: int | None = None,
                  bot_second: bool = False, name: str = "ygo-zero",
-                 record_root: Path = Path("runs/edopro")) -> None:
+                 record_root: Path = Path("runs/edopro"),
+                 emb_codes: set[int] | None = None) -> None:
         self.engine = engine
         self.bot_deck = bot_deck
         self.bot = bot
@@ -380,7 +384,9 @@ class DuelHost:
         self.name = name
         self.record_root = record_root
         self._rng = random.Random()
-        self.emb_codes = {int(c) for c in np.load(EMB_PATH)["codes"]}
+        if emb_codes is None:
+            emb_codes = {int(c) for c in np.load(emb_path())["codes"]}
+        self.emb_codes = emb_codes
         self._duels = 0
 
     def host_info(self, version2: bytes) -> P.HostInfo:

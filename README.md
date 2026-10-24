@@ -45,6 +45,24 @@ uv run python scripts/edopro_host.py --deck decks/pool/snake-eye.ydk --opponent 
 ```
 Then join `127.0.0.1:7911` from EDOPro's LAN mode.
 
+### Play as a bot in a Multirole room
+```bash
+uv run python scripts/edopro_join.py Name=bot Deck=raw-blueeyes Host=127.0.0.1 Port=7911
+uv run python scripts/edopro_join.py --list-bots   # bundles in bots/ + config/bots/
+```
+This joins a room as a bot and plays it with the raw policy over the network
+(no local search: a client never sees the opponent's hidden choices, and the
+product search needs the true engine state, so only `random` and `raw` agents
+run here). The client also sees less than the policy saw in training (the
+opponent's passes and declined chains, which hand card is which after a
+shuffle), so it picks the same move as with full information on 94.5% of
+decisions (`scripts/audit/client_parity.py`). Search stays on the host
+(`edopro_host.py`) and web sides, which hold the engine.
+
+A bot is a bundle: one folder with `bot.toml` (agent, deck, checkpoints,
+custom cards, embeddings) — see `docs/bots.md`. `finetune_deck.py` writes one
+next to every fine-tune; copy it into `bots/` to play it anywhere.
+
 ### Reproduce the benchmark
 ```bash
 uv sync --group dev --group ml --group web --group gauntlet   # + ygo-agent's tflite runtime (uv sync is exact)

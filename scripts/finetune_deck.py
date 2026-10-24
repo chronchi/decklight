@@ -105,6 +105,49 @@ def export(full_state: dict, dest_dir: Path, init: Path, value_init: Path) -> tu
     return policy_pt, value_pt
 
 
+def write_bundle(out: Path, *, deck: Path, policy_pt: Path, value_pt: Path,
+                 emb: str | Path | None = None, cards: list[str] | None = None,
+                 name: str | None = None) -> Path:
+    """Write `<out>/bundle/bot.toml` (+ a copy of the .ydk) for the fine-tune.
+
+    `emb` defaults to the npz the product loaders actually use; `cards` defaults
+    to today's `YGO_EXTRA_CARDS` fallback. Returns the bundle dir.
+    """
+    import shutil as _shutil
+
+    from decklight.engine.resources import extra_card_dirs
+    from decklight.search.product import resolve_product_paths
+
+    def _rel(p: Path, base: Path) -> str:
+        try:
+            return str(Path(p).resolve().relative_to(base.resolve()))
+        except ValueError:
+            return str(p)
+
+    bundle_dir = out / "bundle"
+    bundle_dir.mkdir(parents=True, exist_ok=True)
+    _shutil.copyfile(deck, bundle_dir / "deck.ydk")
+    if emb is None:
+        _, _, emb = resolve_product_paths(None, None, None)
+    if cards is None:
+        cards = [str(d) for d in extra_card_dirs()]
+    lines = [
+        f"name = {json.dumps(name or deck.stem)}",
+        f"description = {json.dumps(f'Fine-tuned on {deck.stem}')}",
+        'agent = "product"',
+        'deck = "deck.ydk"',
+        f"ckpt = {json.dumps(_rel(policy_pt, bundle_dir))}",
+        f"value = {json.dumps(_rel(value_pt, bundle_dir))}",
+        f"emb = {json.dumps(str(emb))}",
+    ]
+    if cards:
+        lines.append("cards = [")
+        lines += [f"  {json.dumps(c)}," for c in cards]
+        lines.append("]")
+    (bundle_dir / "bot.toml").write_text("\n".join(lines) + "\n")
+    return bundle_dir
+
+
 def last_iter_metrics(rl_out: Path) -> dict:
     """The last training record of the train_rl metrics.jsonl (iterations, hours, focus fields).
 
@@ -146,6 +189,9 @@ def main() -> None:
     ap.add_argument("--rl-out", type=Path, default=None, help="train_rl output dir (default <out>/rl)")
     ap.add_argument("--snap-every", type=int, default=0,
                     help="export a product-layout snapshot every N iterations (0 = off)")
+    ap.add_argument("--extra-cards", default=None,
+                    help="custom card dirs (os.pathsep-separated) for the bundle; "
+                         "default: today's YGO_EXTRA_CARDS fallback")
     args, extra = ap.parse_known_args()
     if extra and extra[0] == "--":
         extra = extra[1:]
@@ -216,6 +262,18 @@ def main() -> None:
     if info["focus_wr_vs_bc"] is None or info["focus_seat_share"] is None:
         fail(f"{rl_out}/metrics.jsonl iteration {last['iter']} has no focus fields")
     (out / "FINETUNE.json").write_text(json.dumps(info, indent=1))
+    import os as _os
+
+    from decklight.play.bundle import Bundle as _Bundle
+
+    extra = args.extra_cards.split(_os.pathsep) if args.extra_cards else None
+    bundle_dir = write_bundle(out, deck=args.deck, policy_pt=policy_pt, value_pt=value_pt,
+                              cards=extra)
+    try:
+        _Bundle.load(bundle_dir)
+    except Exception as e:  # noqa: BLE001 - the self-check must fail loud
+        fail(f"fresh bundle {bundle_dir} does not validate: {e}")
+    print(f"bot bundle: {bundle_dir} (copy it into bots/ to play it anywhere)", flush=True)
     print(f"[finetune] wrote {policy_pt}, {value_pt} + {out}/FINETUNE.json "
           f"(it {info['iterations']}, focus_wr_vs_bc {info['focus_wr_vs_bc']}, "
           f"focus_seat_share {info['focus_seat_share']})", flush=True)

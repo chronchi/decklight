@@ -5,19 +5,25 @@ Single duel (WindBot `Key=Value` args and `--flags` both work)::
     uv run python scripts/edopro_join.py Name=test Deck=random-snake-eye Host=127.0.0.1 Port=7922
     uv run python scripts/edopro_join.py --deck decks/pool/snake-eye.ydk --host 127.0.0.1 --port 7922
 
-`Deck=` is a `config/bots/*.toml` entry (adding a bot = adding a file) or a
-`.ydk` path. `Version=` is WindBot's packed int (EDOPro major | minor<<8 |
+`Deck=` is a bot bundle name (`bots/<name>/bot.toml`, `config/bots/<name>.toml`),
+a bundle path, or a `.ydk` path (a default random bundle is built on the fly).
+`Version=` is WindBot's packed int (EDOPro major | minor<<8 |
 core major<<16 | core minor<<24); `--pro-version` / `--client-version`
-("41.0.11.0") override it.
+("41.0.11.0") override it. `--agent/--ckpt/--emb/--device/--seed` override the
+bundle's files.
 
 Server mode (WindBot `ServerMode`)::
 
     uv run python scripts/edopro_join.py --serve 7923 --max-duels 1
     curl 'http://127.0.0.1:7923/?name=t&deck=random-snake-eye&host=127.0.0.1&port=7924'
 
-Each request spawns one `edopro_join.py` subprocess (inheriting the
+Each request re-discovers the bundles (a bundle dropped in `bots/` works
+without restart) and spawns one `edopro_join.py` subprocess (inheriting the
 agent/ckpt/emb/device/record-dir/timeout flags) and returns HTTP 200 at once
 (503 beyond `--max-duels`).
+
+Every agent plays through `StreamView` (the raw policy over the network); the
+product search needs a local engine, so `Deck=<product bundle>` exits 2 here.
 
 Exit codes: 0 duel finished; 2 bad args/catalog or server-side rejection;
 3 our view disagreed with the server (MSG_RETRY); 4 timeout/disconnect.
@@ -32,6 +38,7 @@ import sys
 import threading
 import time
 import urllib.parse
+from dataclasses import replace
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -40,7 +47,9 @@ sys.path.insert(0, str(ROOT / "src"))
 
 from decklight.edopro import bots as B
 from decklight.edopro import protocol as P
-from decklight.edopro.client import ClientSession, DecisionOnlyView
+from decklight.edopro.client import ClientSession
+from decklight.play.bundle import BundleError, discover_bundles
+from decklight.play.stream import StreamView
 
 EXIT_OK, EXIT_ARGS, EXIT_RETRY, EXIT_TIMEOUT = 0, 2, 3, 4
 
@@ -49,7 +58,10 @@ def build_parser(kv: dict) -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--name", default=kv.get("name", "ygo-zero"))
     ap.add_argument("--deck", default=kv.get("deck"))
+    ap.add_argument("--bot", default=None, help="bundle name or path (like Deck=)")
     ap.add_argument("--deckfile", default=kv.get("deckfile"))
+    ap.add_argument("--bots-dir", action="append", default=[],
+                    help="extra bundle dir (repeatable; default: bots/ + config/bots/)")
     ap.add_argument("--host", default=kv.get("host", "127.0.0.1"))
     ap.add_argument("--port", type=int, default=kv.get("port", 7911))
     ap.add_argument("--password", default=kv.get("password", ""))
@@ -60,12 +72,12 @@ def build_parser(kv: dict) -> argparse.ArgumentParser:
                     help="WindBot packed Version int (maps to ProtocolConfig)")
     ap.add_argument("--pro-version", default=None, help="u16 proto version, e.g. 0x1354")
     ap.add_argument("--client-version", default=None, help="dotted client version, e.g. 41.0.11.0")
-    ap.add_argument("--agent", default=None)
+    ap.add_argument("--agent", default=None, help="override the bundle's agent (random|raw)")
     ap.add_argument("--seed", type=int, default=None,
-                    help="agent RNG seed (default: random; equal seeds on both sides tie RPS forever)")
+                    help="agent RNG seed (default: the bundle's, else random; equal seeds on both sides tie RPS forever)")
     ap.add_argument("--ckpt", default=None)
     ap.add_argument("--emb", default=None)
-    ap.add_argument("--device", default="cpu")
+    ap.add_argument("--device", default=None)
     ap.add_argument("--record-dir", default="data/cache/edopro_client")
     ap.add_argument("--timeout", type=float, default=30.0)
     ap.add_argument("--debug", action="store_true", default=bool(kv.get("debug", False)))
@@ -98,43 +110,64 @@ def make_proto(args) -> P.ProtocolConfig:
     return proto
 
 
-def run_duel(args) -> int:
-    from decklight.decks import load_ydk
-    from decklight.engine.duel import Engine
-    from decklight.play.agents import MissingCapability, make_agent
+def bundle_dirs(args) -> list[Path]:
+    dirs = [Path(d) for d in (args.bots_dir or [])]
+    for d in (ROOT / "bots", ROOT / "config" / "bots"):
+        if d.is_dir():
+            dirs.append(d)
+    return dirs
 
-    catalog = B.load_catalog()
-    ref = args.deck or args.deckfile
+
+def run_duel(args, catalog: dict | None = None) -> int:
+    from decklight.play.agents import MissingCapability
+
+    try:
+        catalog = catalog if catalog is not None else discover_bundles(bundle_dirs(args))
+    except BundleError as e:
+        print(f"{e}", file=sys.stderr)
+        return EXIT_ARGS
+    ref = args.bot or args.deck or args.deckfile
     if not ref:
-        print("need a deck: Deck=<catalog name> or a .ydk path (--list-bots lists the catalog)",
+        print("need a bot: Deck=<bundle name> or a .ydk path (--list-bots lists the bundles)",
               file=sys.stderr)
         return EXIT_ARGS
-    deck_path, spec = B.resolve_deck(str(ref), catalog)
-    if deck_path is None:
-        print(f"unknown deck {ref!r} (not in catalog, no such .ydk file)", file=sys.stderr)
+    try:
+        _deck_path, bundle = B.resolve_deck(str(ref), catalog)
+    except BundleError as e:
+        print(f"{e}", file=sys.stderr)
         return EXIT_ARGS
-    agent_name = args.agent or (spec.agent if spec else None) or "random"
+    if bundle is None:
+        print(f"unknown deck {ref!r} (not a bundle, no such .ydk file)", file=sys.stderr)
+        return EXIT_ARGS
+    agent_name = args.agent or bundle.agent
+    if agent_name == "product":
+        print("agent 'product' needs a local engine (search); "
+              "the network client plays raw or random", file=sys.stderr)
+        return EXIT_ARGS
     seed = args.seed
     if seed is None:
-        seed = spec.seed if spec is not None and spec.seed else random.randrange(2**31)
-    cfg: dict = {"seed": seed, "device": args.device}
+        seed = bundle.seed or random.randrange(2**31)
+    cfg: dict = {"seed": seed}
     if args.ckpt:
         cfg["ckpt"] = args.ckpt
     if args.emb:
         cfg["emb"] = args.emb
+    if args.device:
+        cfg["device"] = args.device
     try:
-        agent = make_agent(agent_name, **cfg)
+        agent = replace(bundle, agent=agent_name).make_agent(**cfg)
+    except BundleError as e:
+        print(f"{e}", file=sys.stderr)
+        return EXIT_ARGS
     except ValueError as e:
         print(f"cannot make agent {agent_name!r}: {e}", file=sys.stderr)
-        if agent_name == "raw":
-            print("(the raw policy needs StreamView, which is not implemented yet)", file=sys.stderr)
         return EXIT_ARGS
     try:
-        deck = load_ydk(deck_path)
+        deck = bundle.load_deck()
     except (OSError, ValueError) as e:
-        print(f"cannot load deck {deck_path}: {e}", file=sys.stderr)
+        print(f"cannot load deck {bundle.deck_path()}: {e}", file=sys.stderr)
         return EXIT_ARGS
-    engine = Engine()
+    engine = bundle.engine()
     missing = [c for c in (*deck.main, *deck.extra) if c not in engine.cards]
     if missing:
         print(f"deck has {len(missing)} codes missing from the card DB, e.g. {missing[:3]}",
@@ -142,11 +175,12 @@ def run_duel(args) -> int:
         return EXIT_ARGS
     proto = make_proto(args)
     if args.debug:
-        print(f"join {args.host}:{args.port} as {args.name} deck={deck_path} "
+        print(f"join {args.host}:{args.port} as {args.name} bot={bundle.name} "
               f"agent={agent_name} proto={proto}", flush=True)
     session = ClientSession(
         args.host, args.port, args.name, deck, agent,
-        view_factory=lambda seat, codes: DecisionOnlyView(seat, codes, cards=engine.cards),
+        view_factory=lambda seat, codes: StreamView(
+            {"main": list(deck.main), "extra": list(deck.extra)}, engine.cards, seat=seat),
         proto=proto, password=args.password or "", gameid=args.roomid,
         hand=args.hand or 0, timeout_s=args.timeout, record_dir=args.record_dir,
     )
@@ -156,8 +190,7 @@ def run_duel(args) -> int:
         print(f"agent cannot run as a network client: {e}", file=sys.stderr)
         return EXIT_ARGS
     except NotImplementedError as e:
-        # DecisionOnlyView.obs() until StreamView lands (e.g. --agent raw).
-        print(f"agent needs more view than the client has yet: {e}", file=sys.stderr)
+        print(f"agent needs more view than the client has: {e}", file=sys.stderr)
         return EXIT_ARGS
 
 
@@ -185,6 +218,8 @@ class ServeState:
         with self.lock:
             if len(self.procs) >= self.args.max_duels:
                 return False
+            # Re-discover on each request: a bundle dropped in bots/ works without restart
+            # (a broken bundle errors in the child, not here).
             argv = [sys.executable, str(self.script)]
             for key, flag in (("name", "Name"), ("deck", "Deck"), ("host", "Host"),
                               ("port", "Port"), ("password", "Password"),
@@ -196,6 +231,8 @@ class ServeState:
                 val = getattr(self.args, flag.replace("-", "_"))
                 if val not in (None, ""):
                     argv += [f"--{flag}", str(val)]
+            for d in self.args.bots_dir:
+                argv += ["--bots-dir", str(d)]
             if self.args.debug:
                 argv.append("--debug")
             p = subprocess.Popen(argv)
@@ -261,7 +298,11 @@ def main(argv=None) -> int:
         return EXIT_ARGS
     args = build_parser(kv).parse_args(rest)
     if args.list_bots:
-        sys.stdout.write(B.list_bots_text(B.load_catalog()))
+        try:
+            sys.stdout.write(B.list_bots_text(discover_bundles(bundle_dirs(args))))
+        except BundleError as e:
+            print(f"{e}", file=sys.stderr)
+            return EXIT_ARGS
         return EXIT_OK
     if args.serve is not None:
         return serve_forever(args)

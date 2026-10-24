@@ -670,6 +670,7 @@ class StreamView:
         self._winner: int | None = None
         self._history: list[HistoryEntry] = []
         self._clear_deck_after = False
+        self._auto: bytes | None = None  # a singleton response completed with no agent (take_auto pops it)
         self.retries = 0
 
     # --- SeatView surface ---
@@ -713,6 +714,7 @@ class StreamView:
         opt = self._opts[index]
         self._record(opt)
         self._side_effects(opt)
+        self._auto = None  # an agent answered: the response rides this take, not take_auto
         resp = self._dec.choose(index)
         while resp is None:
             # Multi-step decisions: single-option steps take themselves, unrecorded.
@@ -725,13 +727,22 @@ class StreamView:
         self._resp = resp
         if self._clear_deck_after:
             # A deck SORT's response reorders the top: drop positions, keep statuses.
-            self.state._demote_deck()
+            self._demote_deck()
             self._clear_deck_after = False
         return resp
 
+    def take_auto(self) -> bytes | None:
+        """Next completed singleton response, if any (the `ClientSession` duel loop
+        sends these before asking the agent; agent-completed responses ride `take`).
+        `_resp` keeps the last response as a record (the parity audit reads it)."""
+        if self._auto is not None:
+            resp, self._auto = self._auto, None
+            return resp
+        return None
+
     @property
     def needs_answer(self) -> bool:
-        return self._dec is not None and self._resp is None
+        return self._dec is not None and self._resp is None and self._auto is None
 
     @property
     def done(self) -> bool:
@@ -754,6 +765,7 @@ class StreamView:
             self._learn_select(msg)
             self._dec = make_decision(msg, self._cards, lambda: self._known_pool(self.state.seat))
             self._resp = None
+            self._auto = None
             self._settle_singletons()
             return
         if payload[0] == C.MSG_WIN:
@@ -780,6 +792,7 @@ class StreamView:
             if resp is not None:
                 self._opts = []
                 self._resp = resp
+                self._auto = resp  # no agent involved: the session flushes it via take_auto
                 if self._clear_deck_after:
                     self.state._demote_deck()
                     self._clear_deck_after = False

@@ -282,7 +282,7 @@ class ClientSession:
             safe = "".join(c if c.isalnum() or c in "-_" else "_" for c in self.name)[:32]
             path = self.record_dir / f"{stamp}-{safe}-{self.port}.json"
             rec = dict(self.record.__dict__)
-            if rec["winner"] is not None:
+            if isinstance(rec["winner"], tuple):
                 rec["winner"] = list(rec["winner"])
             path.write_text(json.dumps(rec, indent=1, default=str) + "\n")
         except OSError as e:

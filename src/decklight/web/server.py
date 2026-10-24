@@ -86,6 +86,7 @@ class Server:
         ckpt=None,
         value=None,
         models_dirs=None,
+        bundle_dirs=None,
     ) -> None:
         self.token = token
         self._engine = engine
@@ -101,6 +102,7 @@ class Server:
             self.models_dirs = [ROOT / "runs"]
         else:
             self.models_dirs = [Path(d) for d in models_dirs]
+        self.bundle_dirs = None if bundle_dirs is None else [Path(d) for d in bundle_dirs]
         self.model_id = "base"
         self.model_label = "Base model"
         self._emb_codes: set[int] | None = None
@@ -162,15 +164,28 @@ class Server:
         if self._emb_codes is None:
             import numpy as np
 
-            from decklight.edopro.host import EMB_PATH
+            from decklight.edopro.host import emb_path
 
-            self._emb_codes = {int(c) for c in np.load(EMB_PATH)["codes"]}
+            self._emb_codes = {int(c) for c in np.load(emb_path())["codes"]}
         return self._emb_codes
 
     def _default_opponent(self, mode: str, model=None):
         from decklight.edopro.bot import RandomBot
         from decklight.edopro.product_bot import ProductLauncher
 
+        if isinstance(model, dict) and model.get("bundle") is not None:
+            from decklight.play.bundle import Bundle as _Bundle
+
+            bundle = _Bundle.load(model["bundle"])
+            if bundle.agent == "random":
+                return RandomBot(random.Random().randrange(1 << 30))
+            if bundle.agent == "raw":
+                return ProductLauncher(ckpt=model.get("ckpt"), value_ckpt=None,
+                                       emb=bundle._abs(bundle.emb), device=self.device,
+                                       fast=True, replay_threads=self.replay_threads)
+            return ProductLauncher(ckpt=model.get("ckpt"), value_ckpt=model.get("value"),
+                                   emb=bundle._abs(bundle.emb), device=self.device,
+                                   replay_threads=self.replay_threads)
         if mode == "random":
             return RandomBot(random.Random().randrange(1 << 30))
         ckpt = model.get("ckpt") if isinstance(model, dict) and model.get("ckpt") is not None else self.ckpt
@@ -187,7 +202,8 @@ class Server:
         """All known models (with ckpt/value Paths) + the default model id."""
         from decklight.web.models import discover_models
 
-        models = discover_models(self.models_dirs, self.list_decks(), self.ckpt, self.value_ckpt)
+        models = discover_models(self.models_dirs, self.list_decks(), self.ckpt, self.value_ckpt,
+                                  bundle_dirs=self.bundle_dirs)
         self._register_tuned_decks(models)
         return models, self._default_model_id(models)
 
@@ -253,7 +269,7 @@ class Server:
     @staticmethod
     def _public_model(e: dict) -> dict:
         out = {k: v for k, v in e.items() if k not in ("ckpt", "value") and not k.startswith("_")}
-        for k in ("ckpt", "value", "deck_path"):
+        for k in ("ckpt", "value", "deck_path", "bundle"):
             out.pop(k, None)
         return out
 
@@ -297,35 +313,41 @@ class Server:
             out.append({"id": deck_id, "name": f"Pasted deck {i + 1}", "group": "user"})
         return out
 
-    def resolve_deck(self, spec):
-        """A deck id or {"ydk": text} -> (Deck, error text|None)."""
+    def resolve_deck(self, spec, engine=None, emb_codes=None):
+        """A deck id or {"ydk": text} -> (Deck, error text|None).
+
+        `engine`/`emb_codes` override the server's (a bundle duel legality-checks
+        against the bundle's engine and embeddings, so custom cards work).
+        """
         from decklight.decks import load_ydk, parse_ydk
 
         if isinstance(spec, dict) and "ydk" in spec:
             deck = parse_ydk(spec["ydk"], "pasted")
-            return deck, self.check_text(deck)
+            return deck, self.check_text(deck, engine, emb_codes)
         if isinstance(spec, str):
             for _group, d in DECK_DIRS:
                 p = d / f"{spec}.ydk"
                 if p.is_file():
                     deck = load_ydk(p)
-                    return deck, self.check_text(deck)
+                    return deck, self.check_text(deck, engine, emb_codes)
             if spec in self.tuned_decks:
                 deck = load_ydk(self.tuned_decks[spec][1])
-                return deck, self.check_text(deck)
+                return deck, self.check_text(deck, engine, emb_codes)
             if spec in self.user_decks:
                 deck = parse_ydk(self.user_decks[spec], spec)
-                return deck, self.check_text(deck)
+                return deck, self.check_text(deck, engine, emb_codes)
             return None, f"unknown deck {spec!r}"
         return None, 'deck must be a deck id or {"ydk": "..."}'
 
-    def check_text(self, deck) -> str | None:
+    def check_text(self, deck, engine=None, emb_codes=None) -> str | None:
         """The EDOPro host's deck rules; names cards without embeddings."""
         from decklight.demos.names import CardNames
         from decklight.edopro.host import check_deck, split_deck
 
-        main, extra = split_deck([*deck.main, *deck.extra], self.engine.cards)
-        err = check_deck(main, extra, self.engine.cards, self.emb_codes())
+        engine = engine if engine is not None else self.engine
+        codes = emb_codes if emb_codes is not None else self.emb_codes()
+        main, extra = split_deck([*deck.main, *deck.extra], engine.cards)
+        err = check_deck(main, extra, engine.cards, codes)
         if err is None:
             return None
         type_, cur, minimum, maximum, code = err
@@ -817,26 +839,8 @@ class Server:
         if isinstance(deck_spec, dict) and "ydk" in deck_spec:
             deck_id = f"pasted-{time.strftime('%Y%m%d-%H%M%S')}"
             self.user_decks[deck_id] = deck_spec["ydk"]
-        deck, err = self.resolve_deck(deck_spec)
-        if err is not None:
-            await self._error(err)
-            return
-        bot_deck, berr = self.resolve_deck(bot_spec)
-        if berr is not None:
-            await self._error(berr)
-            return
         if mode not in ("product", "fast", "random"):
             await self._error(f"unknown mode {mode!r} (product|fast|random)")
-            return
-        if first == "me":
-            human_seat, first_deck, second_deck = 0, deck, bot_deck
-        elif first == "bot":
-            human_seat, first_deck, second_deck = 1, bot_deck, deck
-        elif first == "rps":
-            human_seat = random.Random().randint(0, 1)
-            first_deck, second_deck = (deck, bot_deck) if human_seat == 0 else (bot_deck, deck)
-        else:
-            await self._error(f"unknown first {first!r} (rps|me|bot)")
             return
         practice = msg.get("practice", False)
         if not isinstance(practice, bool):
@@ -853,6 +857,42 @@ class Server:
                 await self._error(f"unknown model {model_id!r}")
                 return
             self.model_id, self.model_label = model_entry["id"], model_entry["label"]
+        # A bundle duel runs on the bundle's engine (custom cards) and checks
+        # both decks against the bundle's embeddings; otherwise the server default.
+        engine, emb_codes = self.engine, None
+        if model_entry.get("bundle") is not None:
+            from decklight.play.bundle import Bundle as _Bundle
+
+            try:
+                _bundle = _Bundle.load(model_entry["bundle"])
+            except Exception as e:  # noqa: BLE001 -- listed at lobby time, broken since
+                await self._error(f"bot bundle is invalid: {e}")
+                return
+            engine = _bundle.engine()
+            import numpy as np
+
+            from decklight.search.product import resolve_product_paths
+
+            _, _, _emb = resolve_product_paths(None, None, _bundle._abs(_bundle.emb))
+            emb_codes = {int(c) for c in np.load(_emb)["codes"]}
+        deck, err = self.resolve_deck(deck_spec, engine, emb_codes)
+        if err is not None:
+            await self._error(err)
+            return
+        bot_deck, berr = self.resolve_deck(bot_spec, engine, emb_codes)
+        if berr is not None:
+            await self._error(berr)
+            return
+        if first == "me":
+            human_seat, first_deck, second_deck = 0, deck, bot_deck
+        elif first == "bot":
+            human_seat, first_deck, second_deck = 1, bot_deck, deck
+        elif first == "rps":
+            human_seat = random.Random().randint(0, 1)
+            first_deck, second_deck = (deck, bot_deck) if human_seat == 0 else (bot_deck, deck)
+        else:
+            await self._error(f"unknown first {first!r} (rps|me|bot)")
+            return
         seed = random.Random().getrandbits(63)
         cfg = DuelConfig(_DeckLike(first_deck), _DeckLike(second_deck), seed=seed)
         try:
@@ -880,7 +920,7 @@ class Server:
             },
         }
         session = DuelSession(
-            self.engine,
+            engine,
             cfg,
             human_seat,
             bot=bot,

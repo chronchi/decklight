@@ -9,6 +9,9 @@ dist/
 # Large or derived artifacts live outside git (master copy on this laptop, see AGENTS.md)
 data/
 runs/
+# User bot bundles (shipped examples live in config/bots/)
+bots/*
+!bots/README.md
 src/decklight/_ygoenv*.so
 
 # release: infra state and local-only files stay out of git

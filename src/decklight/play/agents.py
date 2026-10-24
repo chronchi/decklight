@@ -88,6 +88,44 @@ class RandomAgent:
 
 
 @register
+class ProductAgent:
+    """The full product (policy + search) for engine transports (host, web).
+
+    Search runs lockstep with the authoritative engine through the host/web
+    driver (`Bundle.make_launcher`), not through one `act` call per decision, so
+    `act` fails fast with that pointer. The client (no local engine) is refused
+    at startup by `check_needs` (`needs == {"engine"}`).
+    """
+
+    name = "product"
+    needs: frozenset[str] = frozenset({ENGINE})
+
+    def __init__(self, ckpt=None, value=None, emb=None, device: str = "cpu",
+                 fast: bool = False, **_) -> None:
+        self.ckpt = ckpt
+        self.value = value
+        self.emb = emb
+        self.device = device
+        self.fast = fast
+
+    def rps(self) -> int:
+        return random.randint(1, 3)
+
+    def go_first(self) -> bool:
+        return True
+
+    def launcher(self):
+        from decklight.edopro.product_bot import ProductLauncher
+
+        return ProductLauncher(ckpt=self.ckpt, value_ckpt=self.value, emb=self.emb,
+                               device=self.device, fast=self.fast)
+
+    def act(self, view: SeatView) -> int:
+        raise RuntimeError("product search runs through the host/web driver "
+                           "(Bundle.make_launcher), not act()")
+
+
+@register
 class RawPolicyAgent:
     """The trained policy, argmax over legal options (client mode: needs no engine)."""
 

@@ -126,10 +126,12 @@ def test_catalog_loading_and_resolution(tmp_path):
 
     path, spec = B.resolve_deck("random-snake-eye", catalog)
     assert spec is not None and path is not None and path.is_file()
+    assert spec.agent == "random"
     path, spec = B.resolve_deck("decks/pool/snake-eye.ydk", catalog)
-    assert spec is None and path is not None and path.is_file()
+    assert path is not None and path.is_file()  # bare .ydk -> on-the-fly default bundle
+    assert spec is not None and spec.agent == "random" and spec.deck_path() == path
     path, spec = B.resolve_deck("decks/pool/snake-eye", catalog)  # suffix optional
-    assert spec is None and path is not None and path.is_file()
+    assert path is not None and path.is_file() and spec is not None
     assert B.resolve_deck("no-such-bot", catalog) == (None, None)
 
     (tmp_path / "mine.toml").write_text(
@@ -168,6 +170,48 @@ def _run_loopback(deal_seed: int, client_seed: int, tmp_path) -> tuple[ClientSes
     assert len(subs) == 1
     rec = json.loads((subs[0] / "game.jsonl").read_text())
     return session, {"code": code, "record": rec}
+
+
+def _run_stream_loopback(deal_seed: int, client_seed: int, tmp_path) -> tuple[ClientSession, dict]:
+    """Same as `_run_loopback` but the client plays through `StreamView` (the real client path)."""
+    from decklight.play.stream import StreamView
+
+    engine = Engine()
+    deck = load_ydk(DECK)
+    host = DuelHost(engine, deck, RandomBot(deal_seed), seed=deal_seed, record_root=tmp_path)
+    port = _free_port()
+    thread = threading.Thread(target=host.serve, args=("127.0.0.1", port, True), daemon=True)
+    thread.start()
+    main, extra = list(deck.main), list(deck.extra)
+    session = ClientSession(
+        "127.0.0.1", port, "loopback", deck, RandomAgent(client_seed),
+        view_factory=lambda seat, codes: StreamView({"main": main, "extra": extra},
+                                                    engine.cards, seat=seat),
+        timeout_s=120.0,
+    )
+    code = session.run()
+    thread.join(timeout=300)
+    assert not thread.is_alive(), "server did not exit after the --once duel"
+    subs = [p for p in tmp_path.iterdir() if p.is_dir()]
+    assert len(subs) == 1
+    rec = json.loads((subs[0] / "game.jsonl").read_text())
+    return session, {"code": code, "record": rec}
+
+
+@pytest.mark.slow  # ~35 s per full random-vs-random duel over the real client view
+def test_loopback_full_duel_stream_view(tmp_path):
+    try:
+        from decklight.engine import inverse  # noqa: F401 (D1; server needs it live)
+    except ImportError:
+        pytest.skip("D1 engine/inverse.py is missing")
+    session, out = _run_stream_loopback(14, 4, tmp_path)
+    assert out["code"] == OK, f"client exited with {out['code']}"
+    assert session.record.duel_end, "client never saw STOC_DUEL_END"
+    assert session.record.winner is not None, "client never saw MSG_WIN"
+    assert session.record.retries == 0, "server sent MSG_RETRY to a legal client"
+    assert session.record.seat in (0, 1)
+    rec = out["record"]
+    assert rec["winner"] == session.record.winner and rec["winner"] in (0, 1)
 
 
 @pytest.mark.slow  # ~35 s per full random-vs-random duel; 3 seeds ≈ 2 min

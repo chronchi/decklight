@@ -61,10 +61,53 @@ def _load_deck_key(deck_ref: str | None):
         return None
 
 
+def discover_bundles(bundle_dirs: list[Path] | None = None) -> list[dict]:
+    """All bot bundles as lobby models (pure filesystem read, no model loading).
+
+    Each entry carries `ckpt`/`value` Paths, the bundle source, and the bundle's
+    agent; the server strips the local paths before sending the lobby to the
+    client. Broken bundles print one ALERT line and are skipped.
+    """
+    from decklight.play.bundle import DEFAULT_BUNDLE_DIRS, BundleError
+    from decklight.play.bundle import discover_bundles as _discover
+
+    entries: list[dict] = []
+    for name, bundle in _discover(bundle_dirs if bundle_dirs is not None
+                                  else [d for d in DEFAULT_BUNDLE_DIRS if d.is_dir()]).items():
+        try:
+            ckpt = bundle._abs(bundle.ckpt) if bundle.ckpt else None
+            value = bundle._abs(bundle.value) if bundle.value else None
+            if ckpt is None:
+                from decklight.search.product import PRODUCT_CKPT, PRODUCT_VALUE
+
+                ckpt, value = PRODUCT_CKPT, PRODUCT_VALUE
+            entries.append(
+                {
+                    "id": f"bundle-{bundle.name}",
+                    "short": bundle.name[:12],
+                    "label": bundle.description.splitlines()[0][:80] if bundle.description
+                    else f"Bot {bundle.name}",
+                    "kind": "bundle",
+                    "deck_name": Path(bundle.deck).stem,
+                    "deck_id": None,
+                    "ckpt": ckpt,
+                    "value": value,
+                    "agent": bundle.agent,
+                    "bundle": str(bundle.source),
+                    "deck_path": bundle.deck_path(),
+                }
+            )
+        except (BundleError, OSError, ValueError) as e:
+            print(f"ALERT web: bundle {name} skipped: {e}", flush=True)
+    entries.sort(key=lambda e: e["id"])
+    return entries
+
+
 def discover_models(
-    dirs: list[Path], decks: list[dict], cli_ckpt, cli_value
+    dirs: list[Path], decks: list[dict], cli_ckpt, cli_value,
+    bundle_dirs: list[Path] | None = None,
 ) -> list[dict]:
-    """All selectable models: base first, then fine-tunes newest first.
+    """All selectable models: base first, then fine-tunes newest first, then bundles.
 
     Each entry carries `ckpt`/`value` Paths (the server strips them before
     sending the lobby to the client). Prints one ALERT line per skipped model.
@@ -144,6 +187,19 @@ def discover_models(
             )
     found.sort(key=lambda e: e.pop("_mtime"), reverse=True)
     models.extend(found)
+    bundles = discover_bundles(bundle_dirs)
+    for e in bundles:  # a bundle's own deck, when no lobby deck has the same list, stays deck-less
+        if e.get("deck_id") is None and e.get("deck_path") is not None:
+            try:
+                key = _load_deck_key(str(e["deck_path"]))
+            except (OSError, ValueError):
+                key = None
+            if key is not None:
+                for did, lk in lobby_keys.items():
+                    if lk == key:
+                        e["deck_id"] = did
+                        break
+    models.extend(bundles)
 
     ckpt_p = Path(cli_ckpt) if cli_ckpt is not None else None
     value_p = Path(cli_value) if cli_value is not None else None

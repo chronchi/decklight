@@ -25,21 +25,22 @@ from decklight.edopro.host import DuelHost
 from decklight.engine.duel import Engine
 
 
-def run_selftest(port: int, deck_codes: list[int], pool: set[str | int], seed: int = 0) -> dict:
-    """Drive the human seat with ClientSession + RandomAgent (manual smoke).
+def run_selftest(port: int, deck, engine, seed: int = 0) -> dict:
+    """Drive the human seat with ClientSession + RandomAgent over StreamView (manual smoke).
 
     Same output dict as before: win, retries, start_seen.
     """
-    from decklight.edopro.client import ClientSession, DecisionOnlyView
+    from decklight.edopro.client import ClientSession
     from decklight.play.agents import RandomAgent
+    from decklight.play.stream import StreamView
 
     # +1: the host bot defaults to seed 0, and identical RPS sequences would
     # tie forever (both sides re-throw in lockstep).
     agent = RandomAgent(seed + 1)
     session = ClientSession(
-        "127.0.0.1", port, "selftest", (list(deck_codes), [], []), agent,
-        view_factory=lambda seat, codes: DecisionOnlyView(
-            seat, codes, pool=set(pool) | set(codes)),
+        "127.0.0.1", port, "selftest", deck, agent,
+        view_factory=lambda seat, codes: StreamView(
+            {"main": list(deck.main), "extra": list(deck.extra)}, engine.cards, seat=seat),
         timeout_s=600.0,
     )
     code = session.run()
@@ -51,7 +52,10 @@ def run_selftest(port: int, deck_codes: list[int], pool: set[str | int], seed: i
 
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--deck", type=Path, required=True, help="bot's .ydk deck")
+    ap.add_argument("--deck", type=Path, default=None, help="bot's .ydk deck (or use --bot)")
+    ap.add_argument("--bot", default=None, help="bot bundle name or path (deck, agent, checkpoints, engine)")
+    ap.add_argument("--bots-dir", action="append", default=[],
+                    help="extra bundle dir (repeatable; default: bots/ + config/bots/)")
     ap.add_argument("--port", type=int, default=7911)
     ap.add_argument("--bind", default="127.0.0.1", help="bind address (default 127.0.0.1)")
     ap.add_argument("--opponent", default="random", choices=["random", "product"])
@@ -70,27 +74,67 @@ def main() -> None:
     ap.add_argument("--name", default="ygo-zero", help="room name shown in EDOPro's LAN list")
     a = ap.parse_args()
 
-    bot_deck = load_ydk(a.deck)
-    engine = Engine()
-    missing = [c for c in (*bot_deck.main, *bot_deck.extra) if c not in engine.cards]
-    if missing:
-        sys.exit(f"bot deck has {len(missing)} codes missing from the card DB, e.g. {missing[:3]}")
-    if a.opponent == "product":
-        from decklight.edopro.product_bot import ProductLauncher
+    launcher = None
+    emb_codes = None
+    if a.bot:
+        from decklight.play.bundle import BundleError, discover_bundles
 
-        bot = ProductLauncher(ckpt=a.ckpt, value_ckpt=a.value, emb=a.emb, device=a.device,
-                              fast=a.fast, replay_threads=a.replay_threads)
-        print(f"product: ckpt {bot.ckpt} (sha256 {bot.ckpt_sha[:12]}), "
-              f"value {bot.value_ckpt} (sha256 {(bot.value_sha or '')[:12]}), "
-              f"fast={a.fast} device={a.device}", flush=True)
+        dirs = [Path(d) for d in a.bots_dir] + \
+            [d for d in (ROOT / "bots", ROOT / "config" / "bots") if d.is_dir()]
+        try:
+            catalog = discover_bundles(dirs)
+        except BundleError as e:
+            sys.exit(str(e))
+        from decklight.edopro import bots as B
+
+        _path, bundle = B.resolve_deck(a.bot, catalog)
+        if bundle is None:
+            sys.exit(f"unknown bot {a.bot!r} (--list-bots in edopro_join.py lists the bundles)")
+        bot_deck = bundle.load_deck()
+        engine = bundle.engine()
+        missing = [c for c in (*bot_deck.main, *bot_deck.extra) if c not in engine.cards]
+        if missing:
+            sys.exit(f"bot deck has {len(missing)} codes missing from the card DB, e.g. {missing[:3]}")
+        import numpy as np
+
+        from decklight.search.product import resolve_product_paths
+
+        _, _, emb_p = resolve_product_paths(None, None, bundle._abs(bundle.emb))
+        emb_codes = {int(c) for c in np.load(emb_p)["codes"]}
+        if bundle.agent == "product":
+            launcher = bundle.make_launcher()
+            bot = None
+            print(f"bundle {bundle.name}: product search (ckpt {launcher.ckpt})", flush=True)
+        else:
+            bot = bundle.make_bot()
+            print(f"bundle {bundle.name}: agent {bundle.agent} on {bundle.deck_path()}", flush=True)
     else:
-        bot = RandomBot()
-    host = DuelHost(engine, bot_deck, bot, seed=a.seed, bot_second=a.bot_second, name=a.name)
+        if a.deck is None:
+            sys.exit("need --deck or --bot")
+        bot_deck = load_ydk(a.deck)
+        engine = Engine()
+        missing = [c for c in (*bot_deck.main, *bot_deck.extra) if c not in engine.cards]
+        if missing:
+            sys.exit(f"bot deck has {len(missing)} codes missing from the card DB, e.g. {missing[:3]}")
+        if a.opponent == "product":
+            from decklight.edopro.product_bot import ProductLauncher
+
+            launcher = ProductLauncher(ckpt=a.ckpt, value_ckpt=a.value, emb=a.emb, device=a.device,
+                                       fast=a.fast, replay_threads=a.replay_threads)
+            bot = None
+            print(f"product: ckpt {launcher.ckpt} (sha256 {launcher.ckpt_sha[:12]}), "
+                  f"value {launcher.value_ckpt} (sha256 {(launcher.value_sha or '')[:12]}), "
+                  f"fast={a.fast} device={a.device}", flush=True)
+        else:
+            bot = RandomBot()
+    # A product launcher rides DuelHost.bot (Session branches on start_duel).
+    host = DuelHost(engine, bot_deck, launcher if launcher is not None else bot, seed=a.seed,
+                    bot_second=a.bot_second, name=a.name,
+                    **({"emb_codes": emb_codes} if emb_codes is not None else {}))
     if a.selftest:
         if not a.once:
             print("--selftest implies --once", flush=True)
-        mixed = list(bot_deck.main) + list(bot_deck.extra)
-        client = threading.Thread(target=lambda: run_selftest(a.port, mixed, set(mixed)),
+        client = threading.Thread(target=lambda: run_selftest(a.port, bot_deck, engine),
                                   daemon=True)
         # serve(once=True) exits after the first completed duel; the client drives it.
         srv = threading.Thread(target=host.serve, args=(a.bind, a.port, True), daemon=True)
