@@ -56,7 +56,7 @@ EXIT_OK, EXIT_ARGS, EXIT_RETRY, EXIT_TIMEOUT = 0, 2, 3, 4
 
 def build_parser(kv: dict) -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--name", default=kv.get("name", "ygo-zero"))
+    ap.add_argument("--name", default=kv.get("name", "decklight"))
     ap.add_argument("--deck", default=kv.get("deck"))
     ap.add_argument("--bot", default=None, help="bundle name or path (like Deck=)")
     ap.add_argument("--deckfile", default=kv.get("deckfile"))
@@ -64,7 +64,8 @@ def build_parser(kv: dict) -> argparse.ArgumentParser:
                     help="extra bundle dir (repeatable; default: bots/ + config/bots/)")
     ap.add_argument("--host", default=kv.get("host", "127.0.0.1"))
     ap.add_argument("--port", type=int, default=kv.get("port", 7911))
-    ap.add_argument("--password", default=kv.get("password", ""))
+    ap.add_argument("--password", default=kv.get("password", kv.get("hostinfo", "")),
+                    help="room password (WindBot HostInfo=, sent in JOIN_GAME like WindBot's GameClient)")
     ap.add_argument("--roomid", type=int, default=kv.get("roomid", 0))
     ap.add_argument("--hand", type=int, default=kv.get("hand", 0),
                     help="forced RPS throw 1/2/3 (WindBot Hand=); 0 = agent decides")
