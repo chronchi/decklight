@@ -133,21 +133,4 @@ class PyEnv:
         return None
 
     def _observe(self) -> Obs:
-        b, dec, me = self.board, self.dec, self.player
-        cards, card_mask = b.cards(dec.selected)
-        card_known, known_code = b.knowledge(self.duel.memory)
-        chain, chain_mask = b.chain_array()
-        actions, action_mask = O.actions_array(b, dec, self.opts)
-        history, history_mask = O.history_array(self.history, me, self.duel.turn)
-        hist_long, hist_long_mask = O.history_array(
-            self.history, me, self.duel.turn, n=O.HISTORY_MAX, salient=True
-        )
-        return {
-            "cards": cards, "card_mask": card_mask,
-            "card_known": card_known, "known_code": known_code,
-            "global": b.global_array(self.duel, dec.msg.type),
-            "chain": chain, "chain_mask": chain_mask,
-            "actions": actions, "action_mask": action_mask,
-            "history": history, "history_mask": history_mask,
-            "hist_long": hist_long, "hist_long_mask": hist_long_mask,
-        }  # fmt: skip
+        return O.build_obs(self.board, self.dec, self.opts, self.history, O.DuelSource(self.duel))

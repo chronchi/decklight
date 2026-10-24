@@ -230,6 +230,23 @@ def after_refreshes(raw: bytes) -> list[tuple]:
     return []
 
 
+def refresh_packet(duel, ref: tuple, viewer: int) -> bytes | None:
+    """One board-refresh packet for `viewer`, queried now (None when it names an empty slot).
+
+    Pure query+encode half of the host's `send_refresh`; the client-parity audit replays
+    the exact host packet stream through this. `ref` is a `before/after_refreshes` tuple.
+    """
+    if ref[0] == "loc":
+        _, player, location = ref
+        cards = duel.query_location(player, location)
+        return encode_update_data(player, location, cards, viewer != player)
+    _, player, location, seq = ref
+    cards = duel.query_location(player, location)
+    if seq >= len(cards) or cards[seq] is None:
+        return None
+    return encode_update_card(player, location, seq, cards[seq], viewer != player)
+
+
 # --- MSG_UPDATE_DATA / MSG_UPDATE_CARD encoders (CoreUtils::Query::GenerateBuffer) ---
 
 # (flag, kind): kinds mirror core_utils.cpp GetFlagSize; ascending flag order.

@@ -71,16 +71,59 @@ class Row:
     visible: bool  # identity known to the viewer
 
 
+class DuelSource:
+    """A `BoardSource` over a live engine duel (absolute engine seats).
+
+    `Board` reads its source only through this surface; a plain duel is wrapped
+    automatically, so existing `Board(duel, me)` callers keep working.
+    """
+
+    def __init__(self, duel) -> None:
+        self._duel = duel
+
+    def query_location(self, player: int, location: int, flags: int = Q.CARD_FLAGS):
+        return self._duel.query_location(player, location, flags)
+
+    def field_state(self) -> tuple[tuple[int, int], list[Q.ChainLink]]:
+        """(lps, chain links), parsed from the query-field buffer."""
+        field = self._duel.query_field()
+        return Q.lps(field), Q.parse_chain(field)
+
+    @property
+    def turn(self) -> int:
+        return self._duel.turn
+
+    @property
+    def phase(self) -> int:
+        return self._duel.phase
+
+    @property
+    def first_player(self):
+        return self._duel.first_player
+
+    @property
+    def turn_player(self) -> int:
+        return self._duel.turn_player
+
+    @property
+    def memory(self):
+        return self._duel.memory
+
+
+def _source_of(source) -> DuelSource:
+    """Wrap a raw duel; anything with `field_state` already is a board source."""
+    return source if hasattr(source, "field_state") else DuelSource(source)
+
+
 class Board:
     """All cards as seen by `me`, in obs row order, with a lookup from message card refs to rows."""
 
-    def __init__(self, duel, me: int) -> None:
+    def __init__(self, source, me: int) -> None:
         self.me = me
-        q = {(p, loc): duel.query_location(p, loc) for p in (0, 1) for loc in Q.QUERY_LOCATIONS}
+        src = _source_of(source)
+        q = {(p, loc): src.query_location(p, loc) for p in (0, 1) for loc in Q.QUERY_LOCATIONS}
         self.counts = {k: sum(c is not None for c in v) for k, v in q.items()}
-        field = duel.query_field()
-        self.lp = Q.lps(field)
-        self.chain = Q.parse_chain(field)
+        self.lp, self.chain = src.field_state()
         rows: list[Row] = []
         for p in (me, 1 - me):
             mine = p == me
@@ -125,7 +168,13 @@ class Board:
             return opt.code
         r = self.row_of(opt.card)
         if r >= 0:
-            return opt.code if self.rows[r].visible else 0
+            if not self.rows[r].visible:
+                return 0
+            if opt.code:
+                return opt.code
+            # A filtered stream names visible cards with code 0 (e.g. an offered card
+            # whose ref misses the client's row mapping); the row holds the knowledge.
+            return self.rows[r].card.code
         # a card offered from a hidden pile (Deck, face-down Extra Deck) is revealed to the chooser by the effect
         # (e.g. looking at the opponent's Extra Deck); face-down field cards are rows above and stay hidden
         if opt.card.controller == self.me or opt.card.location in (C.LOCATION_DECK, C.LOCATION_EXTRA):
@@ -201,10 +250,10 @@ class Board:
             mask[i] = True
         return out, mask
 
-    def global_array(self, duel, msg_type: int) -> np.ndarray:
+    def global_array(self, source, msg_type: int) -> np.ndarray:
         me, opp = self.me, 1 - self.me
-        g = [i32(self.lp[me]), i32(self.lp[opp]), duel.turn, duel.phase, int(duel.first_player == me),
-             int(duel.turn_player == me)]  # fmt: skip
+        g = [i32(self.lp[me]), i32(self.lp[opp]), source.turn, source.phase, int(source.first_player == me),
+             int(source.turn_player == me)]  # fmt: skip
         for p in (me, opp):
             g += [self.counts[(p, loc)] for loc in Q.QUERY_LOCATIONS]
         g += [len(self.chain), msg_type, self.truncated, OBS_VERSION]
@@ -276,6 +325,31 @@ def history_array(
         out[i] = _history_row(e, me, turn)
         mask[i] = True
     return out, mask
+
+
+def build_obs(board: Board, dec: Decision, opts: Sequence[Option],
+                history: Sequence[HistoryEntry], source) -> dict[str, np.ndarray]:
+    """The policy input for one pending decision: every view builds it through this
+    function, so a network client sees the same arrays as the engine seat (up to what
+    the filtered stream cannot reconstruct). `source` is a board source (turn, phase,
+    first_player, turn_player, memory)."""
+    cards, card_mask = board.cards(dec.selected)
+    card_known, known_code = board.knowledge(source.memory)
+    chain, chain_mask = board.chain_array()
+    actions, action_mask = actions_array(board, dec, opts)
+    history_arr, history_mask = history_array(history, board.me, source.turn)
+    hist_long, hist_long_mask = history_array(
+        history, board.me, source.turn, n=HISTORY_MAX, salient=True
+    )
+    return {
+        "cards": cards, "card_mask": card_mask,
+        "card_known": card_known, "known_code": known_code,
+        "global": board.global_array(source, dec.msg.type),
+        "chain": chain, "chain_mask": chain_mask,
+        "actions": actions, "action_mask": action_mask,
+        "history": history_arr, "history_mask": history_mask,
+        "hist_long": hist_long, "hist_long_mask": hist_long_mask,
+    }  # fmt: skip
 
 
 def history_log(entries: Sequence[HistoryEntry]) -> np.ndarray:

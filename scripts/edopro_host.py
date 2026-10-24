@@ -12,9 +12,6 @@ product search as scripts/search_match.py plays it: --fast = raw P, no search).
 from __future__ import annotations
 
 import argparse
-import random
-import socket
-import struct
 import sys
 import threading
 from pathlib import Path
@@ -29,61 +26,27 @@ from decklight.engine.duel import Engine
 
 
 def run_selftest(port: int, deck_codes: list[int], pool: set[str | int], seed: int = 0) -> dict:
-    """Drive the human seat randomly from in-process (the manual smoke): lobby, RPS/TP,
-    then random legal answers until STOC_DUEL_END. Returns win/retries."""
-    from decklight.edopro import protocol as P
-    from decklight.engine import constants as C
-    from decklight.engine import messages as M
-    from decklight.engine.actions import make_decision
+    """Drive the human seat with ClientSession + RandomAgent (manual smoke).
 
-    engine = Engine()
-    rng = random.Random(seed)
-    sock = socket.create_connection(("127.0.0.1", port))
-    reader = P.FrameReader()
-    win, retries, start_seen, duel_end = None, 0, False, False
+    Same output dict as before: win, retries, start_seen.
+    """
+    from decklight.edopro.client import ClientSession, DecisionOnlyView
+    from decklight.play.agents import RandomAgent
 
-    def send(proto: int, payload: bytes = b"") -> None:
-        sock.sendall(P.pack_frame(proto, payload))
-
-    def recv():
-        data = sock.recv(65536)
-        if not data:
-            raise ConnectionError("server closed")
-        return reader.feed(data)
-
-    def decide(raw: bytes) -> bytes:
-        dec = make_decision(M.parse_one(raw), engine.cards, lambda: pool)
-        while True:
-            opts = dec.options()
-            resp = dec.choose(rng.randrange(len(opts)))
-            if resp is not None:
-                return resp
-
-    send(P.CTOS_PLAYER_INFO, P.encode_name("selftest"))
-    send(P.CTOS_JOIN_GAME, P.pack_join_game(P.PRO_VERSION, 0, P.client_version_bytes(*P.CLIENT_VERSION)))
-    send(P.CTOS_UPDATE_DECK,
-         struct.pack("<II", len(deck_codes), 0) + struct.pack(f"<{len(deck_codes)}I", *deck_codes))
-    send(P.CTOS_HS_READY)
-    while not duel_end:
-        for proto, payload in recv():
-            if proto == P.STOC_SELECT_HAND:
-                send(P.CTOS_HAND_RESULT, bytes([rng.randint(1, 3)]))
-            elif proto == P.STOC_SELECT_TP:
-                send(P.CTOS_TP_RESULT, bytes([1]))
-            elif proto == P.STOC_GAME_MSG:
-                t = payload[0]
-                if t == C.MSG_START:
-                    start_seen = True
-                elif t == C.MSG_WIN:
-                    win = (payload[1], payload[2])
-                elif t == C.MSG_RETRY:
-                    retries += 1
-                elif t in M.SELECT_TYPES:
-                    send(P.CTOS_RESPONSE, decide(payload))
-            elif proto == P.STOC_DUEL_END:
-                duel_end = True
-    sock.close()
-    return {"win": win, "retries": retries, "start_seen": start_seen}
+    # +1: the host bot defaults to seed 0, and identical RPS sequences would
+    # tie forever (both sides re-throw in lockstep).
+    agent = RandomAgent(seed + 1)
+    session = ClientSession(
+        "127.0.0.1", port, "selftest", (list(deck_codes), [], []), agent,
+        view_factory=lambda seat, codes: DecisionOnlyView(
+            seat, codes, pool=set(pool) | set(codes)),
+        timeout_s=600.0,
+    )
+    code = session.run()
+    if code != 0:
+        print(f"selftest client exited with code {code}", flush=True)
+    return {"win": session.record.winner, "retries": session.record.retries,
+            "start_seen": session.record.seat is not None}
 
 
 def main() -> None:

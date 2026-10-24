@@ -55,4 +55,5 @@ markers = [
     "unit: fast, no built artifacts",
     "engine: needs build/core/libocgcore.so",
     "gpu: vast only",
+    "slow: longer than 60 s even on a fast laptop (e.g. full-duel loopback)",
 ]

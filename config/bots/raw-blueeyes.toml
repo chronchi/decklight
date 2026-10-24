@@ -1,0 +1,4 @@
+name = "raw-blueeyes"
+deck = "decks/pool/blue-eyes.ydk"
+agent = "raw"
+description = "Product default policy (no search) on Blue-Eyes. NEEDS StreamView: the raw agent reads obs(), which DecisionOnlyView cannot provide, so edopro_join exits 2 for this bot until StreamView lands."

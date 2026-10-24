@@ -274,20 +274,9 @@ class Session:
 
     def send_refresh(self, ref: tuple) -> None:
         assert self.env is not None
-        duel = self.env.duel
-        if ref[0] == "loc":
-            _, player, location = ref
-            cards = duel.query_location(player, location)
-            public = self.human_seat != player
-            self.send(P.STOC_GAME_MSG, F.encode_update_data(player, location, cards, public))
-        else:
-            _, player, location, seq = ref
-            cards = duel.query_location(player, location)
-            if seq >= len(cards) or cards[seq] is None:
-                return
-            public = self.human_seat != player
-            self.send(P.STOC_GAME_MSG,
-                      F.encode_update_card(player, location, seq, cards[seq], public))
+        payload = F.refresh_packet(self.env.duel, ref, self.human_seat)
+        if payload is not None:
+            self.send(P.STOC_GAME_MSG, payload)
 
     def pump(self) -> None:
         """Send every new core message (filtered) with its before/after refreshes."""

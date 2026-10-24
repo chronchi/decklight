@@ -1,0 +1,4 @@
+name = "random-snake-eye"
+deck = "decks/pool/snake-eye.ydk"
+agent = "random"
+description = "Uniform random legal player on Snake-Eye (protocol smoke tests, loopback)."

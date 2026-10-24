@@ -85,3 +85,38 @@ class RandomAgent:
 
     def act(self, view: SeatView) -> int:
         return self.rng.randrange(len(view.opts))
+
+
+@register
+class RawPolicyAgent:
+    """The trained policy, argmax over legal options (client mode: needs no engine)."""
+
+    name = "raw"
+    needs: frozenset[str] = frozenset()
+
+    def __init__(self, ckpt=None, emb=None, device: str = "cpu", **_) -> None:
+        from decklight.search.product import load_policy, resolve_product_paths
+
+        ckpt_p, _value_p, emb_p = resolve_product_paths(ckpt, None, emb)
+        self.policy = load_policy(ckpt_p, emb_p, device=device)
+
+    def rps(self) -> int:
+        return random.randint(1, 3)
+
+    def go_first(self) -> bool:
+        return True
+
+    def act(self, view: SeatView) -> int:
+        import numpy as np
+
+        obs = view.obs()
+        batch = {k: np.ascontiguousarray(v)[None] for k, v in obs.items()}
+        z = np.asarray(self.policy.logits(batch)[0], dtype=np.float64)
+        legal = np.asarray(obs["action_mask"])[: len(view.opts)].astype(bool)
+        if not legal.any():
+            raise RuntimeError("raw agent: no legal option")
+        z = z[: len(view.opts)]
+        if not np.isfinite(z[legal]).all():
+            raise RuntimeError("raw agent: NaN logits over legal options")
+        z[~legal] = -np.inf
+        return int(np.argmax(z))
