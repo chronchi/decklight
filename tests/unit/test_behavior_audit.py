@@ -80,6 +80,9 @@ def test_judge_aggregate_and_verdict_parsing():
     assert mod.parse_verdicts(fenced, ["b1", "b2"]) == {"b1": True, "b2": False}
     assert mod.parse_verdicts("no json here", ["b1"]) is None
     assert mod.parse_verdicts('{"b1": true}', ["b1", "b2"]) is None  # missing id
+    ids = ["b01-fire_pass", "b02-chip_attack"]
+    assert mod.parse_verdicts('{"b01": true, "b02": false}', ids) == {ids[0]: True, ids[1]: False}  # short ids
+    assert mod.parse_verdicts('{"b01": true, "b02": false}', ["b01-x", "b01-y"]) is None  # ambiguous prefix
 
 
 def test_proposer_parsing_tolerant_of_fences():

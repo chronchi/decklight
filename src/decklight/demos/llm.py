@@ -400,6 +400,8 @@ def complete(
     _throttle()
     try:
         text = _run_cli(model, system, prompt, timeout, variant)
+        if not text.strip() or looks_like_tool_call(text):
+            raise RuntimeError(f"cli: empty reply or tool call as text: {text[:120]!r}")
         _write_cache(path, {"model": model, "variant": variant, "response": text})
         last_backend = "cli"
         return text

@@ -59,6 +59,13 @@ def parse_verdicts(text: str, ids: list[str]) -> dict[str, bool] | None:
             obj = None
     if not isinstance(obj, dict):
         return None
+    # judges often answer with the short id ("b01") instead of "b01-fire_disruption_..."; map unique prefixes back
+    short = {}
+    for i in ids:
+        short.setdefault(i.split("-", 1)[0], []).append(i)
+    for k in list(obj):
+        if k not in ids and len(short.get(k, [])) == 1:
+            obj.setdefault(short[k][0], obj[k])
     out = {}
     for i in ids:
         v = obj.get(i)
