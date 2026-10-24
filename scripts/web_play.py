@@ -41,6 +41,8 @@ def main() -> None:
                     help="product value checkpoint (default data/cache/value_p2/best.pt)")
     ap.add_argument("--device", default="cpu")
     ap.add_argument("--replay-threads", type=int, default=1)
+    ap.add_argument("--card-art", choices=("on", "off"), default="off",
+                    help="default card-art switch for clients that never chose (default off)")
     ap.add_argument("--models-dir", action="append", default=None, dest="models_dir",
                     help="fine-tune search dir (repeatable, default runs)")
     a = ap.parse_args()
@@ -53,7 +55,7 @@ def main() -> None:
 
     app = create_app(token=token, opponent_default=a.opponent_default, device=a.device,
                      replay_threads=a.replay_threads, ckpt=a.ckpt, value=a.value,
-                     models_dirs=a.models_dir)
+                     models_dirs=a.models_dir, card_art_default=(a.card_art == "on"))
     print(f"decklight web client: http://{host}:{a.port}/?t={token}", flush=True)
     uvicorn.run(app, host=host, port=a.port, log_level="warning")
 

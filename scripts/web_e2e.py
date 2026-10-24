@@ -166,13 +166,21 @@ def check_c_sheet_info(page, errors: list[str], ran: dict) -> None:
 
 
 def check_d_closers(page, errors: list[str], ran: dict) -> None:
-    """(d) Pile sheet Close, pile scrim, log scrim and game-menu X all close (touch taps)."""
+    """(d) Pile sheet Close, pile scrim, log scrim and game-menu X all close (touch taps).
+
+    At >=900px the log is a side panel (#logdrawer/#scrim are display:none),
+    so the drawer and back-gesture checks are skipped and the side panel's
+    visibility is asserted instead.
+    """
     if ran["d"] or modal_visible(page) or page.locator("#sheet:not(.pile)").count():
         return
     piles = [p for p in page.locator("[data-pile]").all() if p.is_visible()]
     if not piles:
         return
     ran["d"] = True
+    wide = (page.viewport_size or {}).get("width", 0) >= 900
+    if wide and not page.locator("#logside").is_visible():
+        errors.append("(d) desktop side log panel (#logside) is not visible")
 
     def closes(label, open_loc, sel, close_loc):
         if not tap(page, open_loc, timeout=3000):
@@ -202,17 +210,18 @@ def check_d_closers(page, errors: list[str], ran: dict) -> None:
         closes("pile Close", piles[0], "#sheet.pilesheet", lambda: page.locator("[data-act=closepile].bigbtn"))
         closes("pile scrim", piles[0], "#sheet.pilesheet",
                lambda: (page.locator("#pscrim"),))
-        logb = page.locator("[data-act=log]").first
-        closes("log scrim", logb, "#logdrawer", lambda: (page.locator("#scrim"),))
-        # Android back gesture: closes the drawer, and only the drawer
-        if tap(page, page.locator("[data-act=log]").first, timeout=3000):
-            page.wait_for_timeout(300)
-            page.evaluate("history.back()")
-            page.wait_for_timeout(500)
-            if page.locator("#logdrawer").count():
-                errors.append("(d) back gesture did not close the log drawer")
-            elif page.locator("#app").count() == 0:
-                errors.append("(d) back gesture left the page")
+        if not wide:
+            logb = page.locator("[data-act=log]").first
+            closes("log scrim", logb, "#logdrawer", lambda: (page.locator("#scrim"),))
+            # Android back gesture: closes the drawer, and only the drawer
+            if tap(page, page.locator("[data-act=log]").first, timeout=3000):
+                page.wait_for_timeout(300)
+                page.evaluate("history.back()")
+                page.wait_for_timeout(500)
+                if page.locator("#logdrawer").count():
+                    errors.append("(d) back gesture did not close the log drawer")
+                elif page.locator("#app").count() == 0:
+                    errors.append("(d) back gesture left the page")
         closes("game menu X", page.locator("[data-act=gamemenu]").first, "#gamemenu",
                lambda: page.locator("#gamemenu [data-act=closegamemenu]").first)
     except Exception as e:  # noqa: BLE001
@@ -288,7 +297,15 @@ def main() -> int:
                     help="client pacing-cue speed (web/cues.js); 1x makes a random duel run long")
     ap.add_argument("--surrender-thinking", action="store_true",
                     help="second game uses mode fast and surrenders while the bot thinks")
+    ap.add_argument("--art", action="store_true", help="turn card art on (localStorage ygo-card-art=1)")
+    ap.add_argument("--settle-ms", type=int, default=0,
+                    help="wait this long after a tap before its screenshot (0 = shoot at once)")
+    ap.add_argument("--viewport", default="412x915", help="WxH (phone default; e.g. 1280x800 desktop)")
+    ap.add_argument("--out", type=Path, default=None, help="screenshot dir (default data/cache/web-e2e)")
     args = ap.parse_args()
+    global OUT
+    if args.out is not None:
+        OUT = args.out
     OUT.mkdir(parents=True, exist_ok=True)
     for old in OUT.glob("*.png"):
         old.unlink()
@@ -313,15 +330,18 @@ def main() -> int:
         from playwright.sync_api import sync_playwright
         with sync_playwright() as pw:
             browser = pw.chromium.launch(**launch_kwargs())
-            page = browser.new_page(viewport={"width": 412, "height": 915}, device_scale_factor=2,
-                                    is_mobile=True, has_touch=True)  # Chrome Android: taps
+            vw, vh = (int(x) for x in args.viewport.split("x"))
+            phone = vw < 700
+            page = browser.new_page(viewport={"width": vw, "height": vh}, device_scale_factor=2 if phone else 1,
+                                    is_mobile=phone, has_touch=True)  # Chrome Android: taps
             page.on("pageerror", lambda e: errors.append(f"pageerror: {e} | {getattr(e, 'stack', '')}"))
             page.on("console", lambda m: errors.append(f"console.{m.type}: {m.text}")
                     if m.type == "error" and "404" not in m.text else None)
             frames: list[str] = []
             page.on("websocket", lambda ws: ws.on("framereceived", lambda f: frames.append(f)))
             page.add_init_script(
-                f"try {{ localStorage.setItem('ygo-cue-speed', '{args.cue_speed}'); }} catch (e) {{}}")
+                f"try {{ localStorage.setItem('ygo-cue-speed', '{args.cue_speed}');"
+                + (" localStorage.setItem('ygo-card-art', '1');" if args.art else "") + " } catch (e) {}")
             page.goto(url)
             page.wait_for_selector("#startbtn", timeout=10000)
             page.screenshot(path=str(OUT / "00-lobby.png"))
@@ -379,6 +399,8 @@ def main() -> int:
                 clicks += 1
                 if clicks % args.shot_every == 0:
                     shots += 1
+                    if args.settle_ms:
+                        page.wait_for_timeout(args.settle_ms)
                     page.screenshot(path=str(OUT / f"{shots:02d}-play.png"))
                 page.wait_for_timeout(120)
             page.screenshot(path=str(OUT / "99-end.png"))

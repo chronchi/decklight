@@ -266,7 +266,7 @@ html.short #app { height: var(--app-h); }
 }
 .ph .nm {
   font-size: max(6px, 14.5cqw); font-weight: 500; line-height: 1.18; color: #c8c1b2;
-  display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere;
+  display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: break-word; hyphens: auto;
 }
 .ph .art { flex: 1; margin-top: 7cqw; border-radius: 2px; min-height: 0; box-shadow: inset 0 0 0 1px rgba(214, 207, 192, 0.06); background: rgba(214, 207, 192, 0.02); }
 
@@ -318,7 +318,7 @@ html.short #app { height: var(--app-h); }
 .thumb.none { background: var(--raise); }
 
 /* ---------- info panel ---------- */
-#info { flex: 1 1 auto; min-height: 0; overflow: hidden; padding: 10px 16px 0; position: relative; }
+#info { flex: 1 1 auto; min-height: 0; overflow: hidden; padding: 10px 16px 14px; position: relative; }
 .feed { height: 100%; display: flex; flex-direction: column; gap: 8px; cursor: pointer; }
 .feed .hint { font-size: 13px; color: var(--accent); flex: 0 0 auto; letter-spacing: 0.02em; }
 .evs {
@@ -339,6 +339,11 @@ html.short #app { height: var(--app-h); }
 .focuscard .fname { font-size: 15px; font-weight: 500; line-height: 1.3; }
 .focuscard .fmeta { font-size: 12px; color: var(--muted); letter-spacing: 0.02em; }
 .focuscard .ftext { margin-top: 6px; font-size: 13px; line-height: 1.55; color: #bdb6a8; overflow-y: auto; flex: 1; min-height: 0; white-space: pre-line; }
+/* Bottom fade only while the text overflows (JS adds .over): it reads as scrollable. */
+.focuscard .ftext.over {
+  -webkit-mask-image: linear-gradient(to bottom, #000 72%, transparent);
+  mask-image: linear-gradient(to bottom, #000 72%, transparent);
+}
 
 /* ---------- hand ---------- */
 #hand {
@@ -353,8 +358,15 @@ html.short #app { height: var(--app-h); }
 #hand .hcard .card { border-radius: 6px; box-shadow: -3px 0 8px rgba(10, 9, 7, 0.45), 0 0 0 1px rgba(214, 207, 192, 0.07); }
 #hand .hcard .card.actionable { box-shadow: -3px 0 8px rgba(10, 9, 7, 0.45), 0 0 0 1.5px var(--accent); }
 #hand .hcard .card.focus { box-shadow: -3px 0 8px rgba(10, 9, 7, 0.45), 0 0 0 1.5px var(--text); }
-#hand .hcard.lift { transform: translateY(-10px); }
+#hand .hcard.lift { transform: translateY(-10px); z-index: 2; }
 #hand .hcard:has(.focus) { z-index: 3; transform: translateY(-12px); }
+#hand .hcard:hover, #hand .hcard:focus-within { z-index: 3; }
+/* Overlapping fan (negative --hand-gap, set by fit()): every card but the
+   last wraps its name inside the visible strip (art covers the placeholder,
+   so this only matters for imageless cards). */
+#hand .hcard:not(:last-child) .ph .nm {
+  max-width: max(0px, calc(var(--hand-w) + var(--hand-gap) - 16cqw));
+}
 #hand .ph .nm { font-size: max(8px, 12.5cqw); }
 #app.busy #hand, #app.busy .phasebtns { opacity: 0.55; pointer-events: none; }
 
@@ -368,8 +380,11 @@ html.short #app { height: var(--app-h); }
   box-shadow: 0 -1px 0 var(--line-2), 0 -18px 40px rgba(10, 9, 7, 0.55);
   animation: up 240ms var(--ease);
 }
-#sheet.locked { opacity: 0.6; pointer-events: none; }
-@keyframes up { from { transform: translateY(16px); opacity: 0; } }
+/* waiting for the server after a tap: dim the contents, never the sheet itself
+   (a translucent sheet let the board and log show through the options) */
+#sheet.locked { pointer-events: none; }
+#sheet.locked > * { opacity: 0.55; }
+@keyframes up { from { transform: translateY(16px); } }
 @keyframes fade { from { opacity: 0; } }
 #sheet .grab { width: 32px; height: 3px; border-radius: 2px; background: var(--line-2); margin: 8px auto 8px; flex: 0 0 auto; }
 #sheet .stitle { display: flex; gap: 14px; align-items: center; padding: 4px 18px 14px; flex: 0 0 auto; }
@@ -451,7 +466,7 @@ html.short #app { height: var(--app-h); }
   display: flex; flex-direction: column;
   animation: slide 240ms var(--ease);
 }
-@keyframes slide { from { transform: translateX(32px); opacity: 0; } }
+@keyframes slide { from { transform: translateX(32px); } }
 .loghead { display: flex; align-items: center; min-height: 52px; padding: 4px 6px 4px 18px; flex: 0 0 auto; font-size: 14px; color: var(--muted); border-bottom: 1px solid var(--line); }
 .loghead button { margin-left: auto; }
 .loglist { overflow-y: auto; padding: 8px 12px; display: flex; flex-direction: column; flex: 1; }
@@ -473,7 +488,7 @@ html.short #app { height: var(--app-h); }
   background: rgba(16, 15, 12, 0.97);
   display: flex; flex-direction: column; align-items: center;
   padding: calc(24px + env(safe-area-inset-top)) 22px 24px;
-  overflow-y: auto; animation: fade var(--t) var(--ease);
+  overflow-y: auto; animation: up var(--t) var(--ease);
 }
 #detail .dface {
   position: relative; flex: 0 0 auto; overflow: hidden; border-radius: 8px; container-type: size;
@@ -844,7 +859,8 @@ details.ydk textarea {
 /* ---------- pacing cues (web/cues.js) ----------
    Quiet scenes over the held board: one dim scrim, slow slides, hairline accents.
    No flashes, no white, no glow. Every value is driven per frame from JS. */
-#ov-cues { position: fixed; inset: 0; z-index: 55; pointer-events: none; }
+/* under the prompt sheet (50): a cue still playing never covers the options the player must read */
+#ov-cues { position: fixed; inset: 0; z-index: 48; pointer-events: none; }
 #ov-cues .cue-ghosts, #ov-cues .cue-stage { position: absolute; inset: 0; }
 #ov-cues .cue-dim { position: absolute; inset: 0; background: rgba(13, 12, 10, 0.8); opacity: 0; }
 .cue-band { position: absolute; background: rgba(19, 18, 15, 0.94); box-shadow: 0 -1px 0 var(--line), 0 1px 0 var(--line); opacity: 0; }

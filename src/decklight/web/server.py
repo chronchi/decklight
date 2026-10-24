@@ -87,6 +87,7 @@ class Server:
         value=None,
         models_dirs=None,
         bundle_dirs=None,
+        card_art_default: bool = False,
     ) -> None:
         self.token = token
         self._engine = engine
@@ -113,6 +114,7 @@ class Server:
         # live duel while step_bot applies a move races on the core's query buffer (struct.error, fresh-clone-20261021-2108).
         self._peek_msg: dict | None = None
         self.mode = opponent_default
+        self.card_art_default = bool(card_art_default)
         self.human_name = "human"
         self.prompt_id = 0
         self.log_sent = 0
@@ -280,6 +282,7 @@ class Server:
             "decks": self.list_decks(),
             "models": [self._public_model(e) for e in models],
             "model_default": default,
+            "card_art": self.card_art_default,
         }
 
     async def _build_opponent(self, mode: str, model_entry: dict | None):
@@ -2109,6 +2112,7 @@ def create_app(
     ckpt=None,
     value=None,
     models_dirs=None,
+    card_art_default: bool = False,
 ) -> Starlette:
     _register_stack_dump()
     srv = Server(
@@ -2123,6 +2127,7 @@ def create_app(
         ckpt=ckpt,
         value=value,
         models_dirs=models_dirs,
+        card_art_default=card_art_default,
     )
 
     def need_token(req) -> bool:

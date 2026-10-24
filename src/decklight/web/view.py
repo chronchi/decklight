@@ -13,11 +13,12 @@ from __future__ import annotations
 
 import re
 import sqlite3
+import struct
 from pathlib import Path
 
 from decklight.engine import constants as C
 from decklight.engine import messages as M
-from decklight.engine.actions import Kind
+from decklight.engine.actions import Kind, zone_bit
 from decklight.engine.obs import Board
 from decklight.engine.resources import default_cdbs
 
@@ -86,6 +87,15 @@ _SAY = {
     Kind.RACE: "declares the type", Kind.DECLARE: "declares the card",
     Kind.SORT: "orders", Kind.COUNTER: "removes counters from",
     Kind.RPS: "plays rock-paper-scissors", Kind.PASS: "passes",
+}
+
+# Verbs whose _SAY wording needs a card name to read as a sentence (a bare
+# "Chooses" / "Selects" is the bug). Announce verbs (NUMBER/ATTRIBUTE/RACE)
+# read fine without one ("declares the number"), so they stay out.
+_NEEDS_OBJECT = {
+    Kind.SUMMON, Kind.SPSUMMON, Kind.REPOS, Kind.MSET, Kind.SSET, Kind.ACTIVATE,
+    Kind.ATTACK, Kind.YES, Kind.NO, Kind.OPTION, Kind.SELECT, Kind.UNSELECT,
+    Kind.POSITION, Kind.SORT, Kind.COUNTER,
 }
 
 # Generic wording for the bot's hidden actions (the client learns nothing).
@@ -388,8 +398,6 @@ def _select_hint(env, human_seat: int) -> str:
         if raw[0] != C.MSG_HINT or len(raw) < 11:
             continue
         if raw[1] == C.HINT_SELECTMSG and raw[2] == human_seat:
-            import struct
-
             (data,) = struct.unpack_from("<Q", raw, 3)
             return _fill(DB.desc_text(data >> 20, data & 0xFFFFF))
     return ""
@@ -399,6 +407,48 @@ def _phase_label(phase: str) -> str:
     return {"draw": "Draw Phase", "standby": "Standby Phase", "main1": "Main Phase 1",
             "battle": "Battle Phase", "main2": "Main Phase 2",
             "end": "End Phase"}.get(phase, phase)
+
+
+def zone_label(arg: int, human_seat: int, selecting_player: int) -> str:
+    """Words for a SelectPlace option arg, from the human's point of view.
+
+    Columns count from the human's left (the opponent's board is mirrored on
+    screen: their seq 0 is the human's rightmost column). The two Extra
+    Monster Zone halves and the two Pendulum Zones are left/right from the
+    human's view. `selecting_player` is the seat that was asked (rel in
+    `zone_bit` is relative to it).
+    """
+    rel, loc, seq = zone_bit(arg)
+    mine = (selecting_player ^ rel) == human_seat
+    who = "Your" if mine else "Opponent's"
+    if loc == C.LOCATION_MZONE:
+        if seq >= 5:  # the shared Extra Monster Zone: left cell holds your seq 5 / their seq 6
+            side = "left" if (seq == 5) == mine else "right"
+            return f"Extra Monster Zone ({side})"
+        col = seq + 1 if mine else 5 - seq
+        return f"{who} Monster Zone {col}"
+    if seq <= 4:
+        col = seq + 1 if mine else 5 - seq
+        return f"{who} Spell & Trap Zone {col}"
+    if seq == 5:
+        return f"{who} Field Zone"
+    side = "left" if (seq == 6) == mine else "right"
+    return f"{who} Pendulum Zone ({side})"
+
+
+def _place_card_name(env, human_seat: int) -> str:
+    """The card a pending SelectPlace is moving, from its HINT_SELECTMSG.
+
+    Every engine path that asks for a zone first announces the moving card's
+    code that way (operations.cpp); without it the placement is anonymous.
+    """
+    for raw in reversed(env.duel.trace):
+        if raw[0] != C.MSG_HINT or len(raw) < 11:
+            continue
+        if raw[1] == C.HINT_SELECTMSG and raw[2] == human_seat:
+            (data,) = struct.unpack_from("<Q", raw, 3)
+            return DB.names().get(int(data), "")
+    return ""
 
 
 def _prompt_text(env, human_seat: int, kind: str, view: dict, msg) -> str:
@@ -434,7 +484,8 @@ def _prompt_text(env, human_seat: int, kind: str, view: dict, msg) -> str:
                 base += " (pick 1)"
         return base
     if kind == "place":
-        return "Choose a zone"
+        nm = _place_card_name(env, human_seat)
+        return f"Choose a zone for {nm}" if nm else "Choose a zone"
     if kind == "position":
         return "Choose a battle position"
     if kind == "announce":
@@ -510,7 +561,8 @@ def _effect(opt) -> str | None:
     return None
 
 
-def _label(opt, card: dict | None, where: dict | None, effect: str | None) -> str:
+def _label(opt, card: dict | None, where: dict | None, effect: str | None,
+           human_seat: int | None = None, selecting_player: int | None = None) -> str:
     nm = (card or {}).get("name") if card else None
     if not nm:
         nm = "a face-down card" if card is not None else ""
@@ -565,6 +617,8 @@ def _label(opt, card: dict | None, where: dict | None, effect: str | None) -> st
     if k == Kind.UNSELECT:
         return f"Unselect {nm}" if nm else "Unselect"
     if k == Kind.PLACE:
+        if human_seat is not None and selecting_player is not None:
+            return zone_label(opt.arg, human_seat, selecting_player)
         return f"Place in zone {opt.arg}"
     if k == Kind.COUNTER:
         return f"Remove from {nm}" if nm else "Remove a counter"
@@ -590,7 +644,7 @@ def build_prompt(env, human_seat: int, prompt_id: int) -> dict | None:
         where = _where(opt.card, human_seat)
         effect = _effect(opt)
         options.append({"index": i, "verb": _verb(opt),
-                        "label": _label(opt, card, where, effect),
+                        "label": _label(opt, card, where, effect, human_seat, dec.msg.player),
                         "card": card, "where": where, "effect": effect})
     min_n = int(getattr(dec.msg, "min", 0) or 0)
     max_n = int(getattr(dec.msg, "max", 0) or 0)
@@ -624,6 +678,8 @@ def build_events(env, human_seat: int, since: int = 0) -> list[dict]:
             nm = names.get(code, f"#{code}") if code else ""
             if kind == Kind.PLACE:  # the zone itself is not in the history row
                 text = f"places {nm}" if nm else "chooses a zone"
+            elif not nm and kind in _NEEDS_OBJECT:
+                text = _HIDDEN_SAY.get(kind, "makes a hidden move")
             else:
                 text = f"{say} {nm}".strip()
             card = _named_card(code, f"e{n}") if code else None

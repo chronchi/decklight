@@ -152,10 +152,16 @@ try {
 } catch (e) { /* private mode: defaults */ }
 
 // Card art (web/render/card.js): opt-in, off by default, so no /img requests
-// at all until the user switches it on in the game menu.
+// at all until the user switches it on in the game menu (or the lobby).
+// The server may send a default in the lobby message (--card-art on); it
+// applies only when the user never chose (no ygo-card-art key): an explicit
+// choice always wins.
 let cardArt = false;
+let cardArtChosen = false;
 try {
-  cardArt = localStorage.getItem("ygo-card-art") === "1";
+  const saved = localStorage.getItem("ygo-card-art");
+  cardArtChosen = saved !== null;
+  cardArt = saved === "1";
 } catch (e) { /* private mode: stay off */ }
 setCardArt(cardArt);
 function saveSetting(k, v) {
@@ -333,7 +339,26 @@ function fit() {
     hand.style.setProperty("--hand-gap", g.toFixed(1) + "px");
   }
 }
-window.addEventListener("resize", () => { fit(); });
+window.addEventListener("resize", () => { fit(); markInfoOverflow(); });
+
+// Card-text fade + scroll (item 5): the bottom fade (.over) and the tab stop
+// exist only while the text actually overflows, so it reads as scrollable.
+// Touch scrolls natively (overflow-y); the keyboard reaches it via tabindex.
+function markInfoOverflow() {
+  const el = app.querySelector("#info .ftext");
+  if (!el) return;
+  const over = el.scrollHeight > el.clientHeight + 1;
+  el.classList.toggle("over", over);
+  if (over) {
+    el.setAttribute("tabindex", "0");
+    el.setAttribute("role", "region");
+    el.setAttribute("aria-label", "Card text");
+  } else {
+    el.removeAttribute("tabindex");
+    el.removeAttribute("role");
+    el.removeAttribute("aria-label");
+  }
+}
 
 const reducedMotion = () =>
   window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -829,6 +854,7 @@ function renderGame() {
   restore();
   app.classList.toggle("busy", locked);
   fit();
+  markInfoOverflow();
 
   for (const who of ["you", "bot"]) {
     const el = app.querySelector(".pbar." + who + " .lp");
@@ -1400,6 +1426,12 @@ function renderLobby() {
   h += pickerHTML(decks, "you", "Your deck");
   h += pickerHTML(decks, "bot", "decklight plays");
   h += modelPickerHTML();
+  h += '<section class="field-group"><div class="flabel">Card art</div>' +
+    '<button class="pickbtn" role="switch" aria-checked="' + cardArt + '" data-act="cardart" aria-label="Card art">' +
+    '<span class="nm">Card art</span>' +
+    '<span class="g">' + (cardArt ? "On" : "Off") + "</span>" +
+    '<span class="sw' + (cardArt ? " on" : "") + '" aria-hidden="true"><i></i></span></button>' +
+    '<div class="modelsub">Card images from YGOPRODeck, fetched when shown. Not bundled.</div></section>';
   h += '<div class="aboutrow"><button class="linkbtn" data-act="primer">About this deck</button></div>';
   h += segHTML("Mode", "play", [["duel", "Duel"], ["practice", "Practice"]]);
   h += segHTML("Going first", "first", [["rps", "Rock-paper-scissors"], ["me", "Me"], ["bot", "Bot"]]);
@@ -1840,6 +1872,7 @@ function onAction(kind, el) {
     saveSetting("ygo-cue-recap", cueRecap ? "1" : "0");
   } else if (kind === "cardart") {
     cardArt = !cardArt;
+    cardArtChosen = true;
     saveSetting("ygo-card-art", cardArt ? "1" : "0");
     setCardArt(cardArt);
   } else if (kind === "closerecap") {
@@ -2499,6 +2532,15 @@ function markNegations(m) {
 
 function applyState(m) {
   if (!m) return;
+  // A new prompt that opens a sheet replaces the card detail and the
+  // info-panel focus: no half-covered panel stays behind the sheet.
+  // Idle/battle prompts open no sheet, so they keep the focus.
+  const prevPrompt = msg && msg.t === "state" ? msg.prompt : null;
+  if (m.prompt && (!prevPrompt || m.prompt.id !== prevPrompt.id) &&
+      m.prompt.kind !== "idle" && m.prompt.kind !== "battle") {
+    detail = null;
+    focusUid = null;
+  }
   if (msg && msg.t === "state" && msg.prompt && (!m.prompt || m.prompt.id !== msg.prompt.id)) {
     sel = [];
     expanded = null;
@@ -2887,6 +2929,10 @@ async function boot() {
     onMessage(m) {
       if (m.t === "lobby") {
         lobby = m;
+        if (m.card_art != null && !cardArtChosen) {
+          cardArt = !!m.card_art;
+          setCardArt(cardArt);
+        }
         ensureModelPick();
         if (!msg || msg.t === "lobby") msg = m;
         if (puzzles === null && !MOCK && ws) ws.send({t: "puzzles"});
