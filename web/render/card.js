@@ -37,8 +37,18 @@ export function isMonster(card) {
 }
 
 // Placeholder face: name band + art window. Used for every imageless card.
+// Long words get soft hyphens (every 4 letters, never fewer than 3 after the last one), so a name such as
+// "Adamancipator" breaks with a hyphen in a narrow card instead of mid-word without one; invisible otherwise.
+export function softHyphens(s) {
+  return s.replace(/[A-Za-z]{9,}/g, (w) => {
+    let out = "", k = 0;
+    for (; k + 4 <= w.length - 3; k += 4) out += w.slice(k, k + 4) + "\u00ad";
+    return out + w.slice(k);
+  });
+}
+
 export function phHTML(card) {
-  return '<div class="ph"><span class="nm">' + esc((card && card.name) || "#" + (card && card.code)) +
+  return '<div class="ph"><span class="nm">' + softHyphens(esc((card && card.name) || "#" + (card && card.code))) +
     '</span><span class="art"></span></div>';
 }
 

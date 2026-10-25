@@ -665,6 +665,15 @@ details.ydk textarea {
   #logdrawer, #scrim { display: none; }
   .sidecard { flex: 0 0 210px; padding: 18px; border-bottom: 1px solid var(--line); }
   .sidecard .emptytx { margin-top: 80px; }
+  /* The prompt sheet docks in the side column, under the card detail, so it never covers the board or your hand
+     (#layout centres #app 520px + #logside 360px: the side column starts 80px right of the centre). */
+  #app:not(.replay) #sheet {
+    position: fixed; top: 210px; bottom: 0; left: calc(50% + 80px); right: auto; width: 360px;
+    max-height: none; border-radius: 0; box-shadow: none;
+    border-top: 1px solid var(--line-2); border-left: 1px solid var(--line); border-right: 1px solid var(--line);
+  }
+  #app:not(.replay) #sheet .grab { display: none; }
+  #app:not(.replay) #sheet .stitle { padding-top: 16px; }
 }
 
 /* ---------- prompt info buttons ----------

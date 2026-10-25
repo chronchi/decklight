@@ -997,6 +997,19 @@ def main() -> int:
             print("shot 43-desktop-stats.png", flush=True)
             if not d.evaluate("!!document.querySelector('#logside .dtiles')"):
                 errors.append("43-desktop-stats: no stat tiles in the side panel")
+            # Desktop prompt sheets dock in the side column: they never cover the board or the hand.
+            for i, name in ((2, "46-desktop-chain"), (3, "47-desktop-select")):
+                d.goto(f"{base}?mock=1&i={i}", wait_until="networkidle")
+                d.wait_for_timeout(400)
+                d.screenshot(path=str(OUT / f"{name}.png"))
+                print(f"shot {name}.png", flush=True)
+                hit = d.evaluate(
+                    "() => { const s = document.querySelector('#sheet'); if (!s) return 'no sheet';"
+                    " const r = s.getBoundingClientRect(), b = document.querySelector('#app').getBoundingClientRect();"
+                    " return r.left >= b.right - 1 ? '' : 'sheet overlaps #app: left ' + r.left + ' < ' + b.right; }"
+                )
+                if hit:
+                    errors.append(f"{name}: {hit}")
             ctx2.close()
             browser.close()
     finally:
@@ -1012,7 +1025,7 @@ def main() -> int:
             print(f"  {e}", flush=True)
         return 1
     print(
-        f"ok: {len(MOCKS) + len(CUE_SHOTS) + len(LOG_SHOTS) + len(CUE_SHOTS_360) + 8} PNGs in {OUT}",
+        f"ok: {len(MOCKS) + len(CUE_SHOTS) + len(LOG_SHOTS) + len(CUE_SHOTS_360) + 10} PNGs in {OUT}",
         flush=True,
     )
     return 0
