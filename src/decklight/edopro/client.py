@@ -161,7 +161,13 @@ class DuelRecord:
 
 
 class ClientSession:
-    """One duel as a joining bot: connect, lobby, RPS/TP, duel loop, record."""
+    """One duel as a bot: connect, lobby, RPS/TP, duel loop, record.
+
+    By default the bot joins an existing room (`gameid`, `password`). With
+    `create=HostInfo(...)` it creates the room instead (CTOS_CREATE_GAME, as an
+    EDOPro player hosting on Multirole does) and starts the duel (CTOS_HS_START)
+    once every other duelist is ready.
+    """
 
     def __init__(
         self,
@@ -177,6 +183,8 @@ class ClientSession:
         hand: int = 0,  # forced RPS throw (WindBot Hand=); 0 = agent decides
         timeout_s: float = 30.0,
         record_dir: str | Path = DEFAULT_RECORD_DIR,
+        create: P.HostInfo | None = None,
+        room_notes: str = "",
     ) -> None:
         self.host = host
         self.port = port
@@ -198,6 +206,9 @@ class ClientSession:
         self.reader = P.FrameReader()
         self.record = DuelRecord(server=f"{host}:{port}")
         self._ties = 0  # consecutive RPS ties (lockstep guard)
+        self.create = create
+        self.room_notes = room_notes
+        self.room_id: int | None = None  # set from STOC_CREATE_GAME in create mode
 
     # -- socket helpers --
 
@@ -257,15 +268,19 @@ class ClientSession:
             _alert(rec.__dict__, f"connect to {self.host}:{self.port} failed: {e}")
             return self._finish(TIMEOUT)
         self.send(P.CTOS_PLAYER_INFO, P.pack_player_info(self.name))
-        self.send(
-            P.CTOS_JOIN_GAME,
-            P.pack_join_game(
-                self.proto.pro_version,
-                self.gameid,
-                P.client_version_bytes(*self.proto.client_version),
-                self.password,
-            ),
-        )
+        if self.create is not None:
+            self.send(P.CTOS_CREATE_GAME,
+                      P.pack_create_game(self.create, self.name, self.password, self.room_notes))
+        else:
+            self.send(
+                P.CTOS_JOIN_GAME,
+                P.pack_join_game(
+                    self.proto.pro_version,
+                    self.gameid,
+                    P.client_version_bytes(*self.proto.client_version),
+                    self.password,
+                ),
+            )
         try:
             code, pending = self._lobby()
             if code is not None:
@@ -301,6 +316,16 @@ class ClientSession:
         deck_sent = False
         pending_ready = False
         seat: int | None = None
+        is_host = False
+        ready_sent = False
+        others_ready: set[int] = set()  # create mode: seats of other duelists that are ready
+        start_sent = False
+
+        def maybe_start() -> None:
+            nonlocal start_sent
+            if self.create is not None and is_host and ready_sent and others_ready and not start_sent:
+                self.send(P.CTOS_HS_START)
+                start_sent = True
         while True:
             frames = self._wait()
             if frames is None:
@@ -326,24 +351,45 @@ class ClientSession:
                     if pending_ready:
                         self.send(P.CTOS_HS_READY)
                         pending_ready = False
+                        ready_sent = True
+                        maybe_start()
                 elif proto == P.STOC_TYPE_CHANGE:
                     try:
-                        seat, _is_host = P.parse_type_change(payload)
+                        seat, is_host = P.parse_type_change(payload)
                     except ValueError as e:
                         _alert(rec, f"bad STOC_TYPE_CHANGE: {e}")
                         return BAD_ARGS, []
                     rec["seat"] = seat
                     if deck_sent:
                         self.send(P.CTOS_HS_READY)
+                        ready_sent = True
+                        maybe_start()
                     else:
                         pending_ready = True
+                elif proto == P.STOC_CREATE_GAME:
+                    try:
+                        self.room_id = P.parse_create_game(payload)
+                    except ValueError as e:
+                        _alert(rec, f"bad STOC_CREATE_GAME: {e}")
+                        return BAD_ARGS, []
+                    rec["room_id"] = self.room_id
                 elif proto == P.STOC_HS_PLAYER_ENTER:
                     try:
                         _n, _p = P.parse_hs_player_enter(payload)
                     except ValueError:
                         pass
                 elif proto == P.STOC_HS_PLAYER_CHANGE:
-                    pass  # seat bookkeeping only; the host starts the duel
+                    # a joiner ignores this (the room host starts the duel); in create mode we are the host
+                    try:
+                        pos, state = P.parse_hs_player_change(payload)
+                    except ValueError:
+                        continue
+                    if pos != seat:
+                        if state == "ready":
+                            others_ready.add(pos)
+                        else:
+                            others_ready.discard(pos)
+                        maybe_start()
                 elif proto == P.STOC_SELECT_HAND:
                     rps = self.hand or self.agent.rps()
                     if rps not in (1, 2, 3):
@@ -445,6 +491,9 @@ class ClientSession:
                             self.record.n_responses += 1
                     if view.winner is not None:
                         self.record.winner = view.winner
+                elif proto == P.STOC_REMATCH:
+                    # one duel per session: decline, the server then ends the room (STOC_DUEL_END)
+                    self.send(P.CTOS_REMATCH_RESPONSE, bytes([0]))
                 elif proto == P.STOC_SELECT_HAND:
                     rps = self.hand or self.agent.rps()
                     if rps not in (1, 2, 3):
@@ -480,5 +529,6 @@ class ClientSession:
                     P.STOC_HS_PLAYER_ENTER, P.STOC_HS_PLAYER_CHANGE, P.STOC_HS_WATCH_CHANGE,
                     P.STOC_CREATE_GAME, P.STOC_JOIN_GAME, P.STOC_TYPE_CHANGE,
                     P.STOC_LEAVE_GAME, P.STOC_DUEL_START, P.STOC_WAITING_SIDE,
+                    P.STOC_WAITING_REMATCH, P.STOC_NEW_REPLAY,
                 ):
                     pass  # counted, safely ignored

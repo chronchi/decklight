@@ -80,6 +80,7 @@ CTOS_LEAVE_GAME = 0x13
 CTOS_SURRENDER = 0x14
 CTOS_TIME_CONFIRM = 0x15
 CTOS_CHAT = 0x16
+CTOS_REMATCH_RESPONSE = 0xF0  # u8: 1 rematch, 0 decline
 CTOS_HS_TODUELIST = 0x20
 CTOS_HS_TOOBSERVER = 0x21
 CTOS_HS_READY = 0x22
@@ -101,6 +102,9 @@ STOC_TYPE_CHANGE = 0x13
 STOC_LEAVE_GAME = 0x14
 STOC_DUEL_START = 0x15
 STOC_DUEL_END = 0x16
+STOC_NEW_REPLAY = 0x30
+STOC_REMATCH = 0xF1  # Multirole/EDOPro after a duel: answer CTOS_REMATCH_RESPONSE
+STOC_WAITING_REMATCH = 0xF2
 STOC_REPLAY = 0x17
 STOC_TIME_LIMIT = 0x18
 STOC_CHAT = 0x19
@@ -168,8 +172,13 @@ def client_version_bytes(major: int, minor: int, core_major: int, core_minor: in
     return bytes([major, minor, core_major, core_minor])
 
 
-_HOSTINFO_FMT = struct.Struct("<IBBBBBIBBHII4siiiIIH6H")
-assert _HOSTINFO_FMT.size == 63
+# Lobby structs travel as raw memcpy of EDOPro's (and Multirole's) C++ structs with natural
+# alignment, not packed: sizes and padding below are measured from gframe/network.h with g++
+# (HostInfo 68, CTOS_JoinGame 52, CTOS_CreateGame 348, DeckError 24, JoinError 8,
+# STOC_HS_PlayerEnter 42, STOC_TimeLimit 4). Multirole rejects a packet whose length is not
+# exactly sizeof(struct) (CTOSMsg.hpp), so every pad byte matters.
+_HOSTINFO_FMT = struct.Struct("<IBBBBB3xIBBHII4siiiIIH6H2x")
+assert _HOSTINFO_FMT.size == 68
 
 
 @dataclass
@@ -223,20 +232,38 @@ class HostInfo:
 
 
 def pack_join_game(version: int, gameid: int, version2: bytes, password: str = "") -> bytes:
-    """CTOS_JOIN_GAME: u16 version, u32 gameid, u16 pass[20], ClientVersion (52 bytes).
+    """CTOS_JOIN_GAME: u16 version, 2 pad, u32 gameid, u16 pass[20], ClientVersion (52 bytes).
 
     `password` is the room password as UTF-16 (WindBot `HostInfo=`); empty by
     default, which keeps the old 3-arg call working (pass = 20 NUL units).
     """
     assert len(version2) == 4
-    return struct.pack("<HI", version, gameid) + encode_name(password, 20) + version2
+    return struct.pack("<H2xI", version, gameid) + encode_name(password, 20) + version2
 
 
 def unpack_join_game(payload: bytes) -> tuple[int, int, bytes]:
     """CTOS_JOIN_GAME payload -> (version, gameid, version2)."""
-    version, gameid = struct.unpack_from("<HI", payload)
-    version2 = bytes(payload[46:50])
+    version, gameid = struct.unpack_from("<H2xI", payload)
+    version2 = bytes(payload[48:52])
     return version, gameid, version2
+
+
+def pack_create_game(info: "HostInfo", name: str = "", password: str = "", notes: str = "") -> bytes:
+    """CTOS_CREATE_GAME: HostInfo, u16 name[20], u16 pass[20], char notes[200] (348 bytes)."""
+    raw = notes.encode("utf-8")[:199]
+    return info.pack() + encode_name(name, 20) + encode_name(password, 20) + raw + bytes(200 - len(raw))
+
+
+def parse_create_game(payload: bytes) -> int:
+    """STOC_CREATE_GAME payload -> the new room id."""
+    if len(payload) < 4:
+        raise ValueError(f"create-game packet too short: {len(payload)}")
+    return struct.unpack_from("<I", payload)[0]
+
+
+def pack_hs_player_enter(name: str, pos: int) -> bytes:
+    """STOC_HS_PLAYER_ENTER: u16 name[20], u8 pos, 1 pad (42 bytes)."""
+    return encode_name(name, 20) + bytes([pos, 0])
 
 
 def pack_player_info(name: str) -> bytes:
@@ -328,9 +355,9 @@ def parse_hs_player_change(payload: bytes) -> tuple[int, str]:
 
 def parse_time_limit(payload: bytes) -> tuple[int, int]:
     """STOC_TIME_LIMIT payload -> (player, seconds left)."""
-    if len(payload) < 3:
+    if len(payload) < 4:
         raise ValueError(f"time-limit packet too short: {len(payload)}")
-    return payload[0], struct.unpack_from("<H", payload, 1)[0]
+    return payload[0], struct.unpack_from("<H", payload, 2)[0]
 
 
 def parse_error_msg(payload: bytes) -> str:
@@ -339,20 +366,20 @@ def parse_error_msg(payload: bytes) -> str:
         return "empty error message"
     etype = payload[0]
     if etype == ERR_JOINERROR:
-        (code,) = struct.unpack_from("<I", payload, 1) if len(payload) >= 5 else (0,)
+        (code,) = struct.unpack_from("<I", payload, 4) if len(payload) >= 8 else (0,)
         name = _JERR_NAMES[code] if code < len(_JERR_NAMES) else f"code {code}"
         return f"join error: {name}"
     if etype == ERR_DECKERROR:
-        if len(payload) < 21:
+        if len(payload) < 24:
             return "deck error: (truncated)"
-        (_t, current, minimum, maximum, code) = struct.unpack_from("<5I", payload, 1)
+        (_t, current, minimum, maximum, code) = struct.unpack_from("<5I", payload, 4)
         name = _DERR_NAMES[_t] if _t < len(_DERR_NAMES) else f"type {_t}"
         msg = f"deck error: {name} (current {current}, allowed {minimum}-{maximum})"
         if _t == DERR_UNKNOWNCARD:
             msg += f" card {code}"
         return msg
     if etype == ERR_SIDEERROR:
-        (code,) = struct.unpack_from("<I", payload, 1) if len(payload) >= 5 else (0,)
+        (code,) = struct.unpack_from("<I", payload, 4) if len(payload) >= 8 else (0,)
         return f"side-deck error: code {code}"
     if etype in (ERR_VERERROR, ERR_VERERROR2):
         ver = bytes(payload[4:8]) if len(payload) >= 8 else b""
@@ -364,11 +391,11 @@ def parse_error_msg(payload: bytes) -> str:
 def pack_deck_error(derr_type: int, current: int = 0, minimum: int = 0,
                     maximum: int = 0, code: int = 0) -> bytes:
     """STOC_ERROR_MSG payload for a DECKERROR (network.h DeckError layout)."""
-    return struct.pack("<BI3II", ERR_DECKERROR, derr_type, current, minimum, maximum, code)
+    return struct.pack("<B3xI3II", ERR_DECKERROR, derr_type, current, minimum, maximum, code)
 
 
 def pack_join_error(code: int) -> bytes:
-    return struct.pack("<BI", ERR_JOINERROR, code)
+    return struct.pack("<B3xI", ERR_JOINERROR, code)
 
 
 def parse_update_deck(payload: bytes) -> tuple[list[int], list[int]]:

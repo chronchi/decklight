@@ -47,9 +47,14 @@ Then join `127.0.0.1:7911` from EDOPro's LAN mode.
 
 ### Play as a bot in a Multirole room
 ```bash
-uv run python scripts/edopro_join.py Name=bot Deck=raw-blueeyes Host=127.0.0.1 Port=7911
+uv run python scripts/edopro_join.py Name=bot Deck=raw-blueeyes Host=127.0.0.1 Port=7911 RoomId=12 HostInfo=<room password>
 uv run python scripts/edopro_join.py --list-bots   # bundles in bots/ + config/bots/
 ```
+On Multirole a room is joined by its id (`RoomId=`), which the server's room
+listing shows (`http://<host>:7922/`, JSON: `roomid`, `roomnotes`, `users`);
+`HostInfo=` is the room password, empty for an open room.
+`scripts/audit/multirole_check.py` plays full duels against a running Multirole
+(a room host and a joining bot) and fails on any retry or winner mismatch.
 This joins a room as a bot and plays it with the raw policy over the network
 (no local search: a client never sees the opponent's hidden choices, and the
 product search needs the true engine state, so only `random` and `raw` agents

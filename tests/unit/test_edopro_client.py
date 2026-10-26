@@ -32,11 +32,11 @@ DECK = "decks/pool/snake-eye.ydk"
 
 
 def test_client_packers_round_trip():
-    # join with password: version2 stays at [46:50], password is UTF-16 at [6:46]
+    # join with password: 2 pad bytes after version, password UTF-16 at [8:48], version2 at [48:52]
     payload = P.pack_join_game(P.PRO_VERSION, 7, P.client_version_bytes(*P.CLIENT_VERSION), "secret")
-    assert len(payload) == 50
+    assert len(payload) == 52
     assert P.unpack_join_game(payload) == (P.PRO_VERSION, 7, P.client_version_bytes(*P.CLIENT_VERSION))
-    assert P.decode_name(payload[6:46]) == "secret"
+    assert P.decode_name(payload[8:48]) == "secret"
     # old 3-arg call still works (empty password)
     assert P.unpack_join_game(P.pack_join_game(P.PRO_VERSION, 0, bytes([41, 0, 11, 0]))) == (
         P.PRO_VERSION, 0, bytes([41, 0, 11, 0]))
@@ -58,7 +58,7 @@ def test_client_packers_round_trip():
     assert P.parse_type_change(bytes([0x10])) == (0, True)
     assert P.parse_hs_player_enter(P.encode_name("ab") + bytes([2])) == ("ab", 2)
     assert P.parse_hs_player_change(bytes([(1 << 4) | P.PLAYERCHANGE_READY])) == (1, "ready")
-    assert P.parse_time_limit(bytes([1, 30, 0])) == (1, 30)
+    assert P.parse_time_limit(bytes([1, 0, 30, 0])) == (1, 30)  # u8 team, pad, u16 left
     assert P.parse_hand_result(bytes([3, 1])) == (3, 1)
     assert P.parse_tp_result(bytes([1])) is True
 
@@ -294,3 +294,21 @@ def test_decision_only_view_singletons():
     assert not view.needs_answer
     view.feed(bytes([C.MSG_WIN, 1, 0]))
     assert view.winner == (1, 0)
+
+
+def test_struct_sizes_match_edopro_cpp():
+    """Lobby packets are memcpy'd C++ structs with natural alignment (gframe/network.h; sizes measured with
+    g++). Multirole drops any packet whose length differs from sizeof(struct)."""
+    info = P.HostInfo()
+    assert len(info.pack()) == 68
+    assert len(P.pack_join_game(P.PRO_VERSION, 7, info.version, "pw")) == 52
+    assert len(P.pack_create_game(info, "room", "pw", "notes")) == 348
+    assert len(P.pack_deck_error(P.DERR_MAINCOUNT, 39, 40, 60, 0)) == 24
+    assert len(P.pack_join_error(P.JERR_PASSWORD)) == 8
+    assert len(P.pack_hs_player_enter("bot", 1)) == 42
+    # padding sits where the compiler puts it: start_lp after 3 pad bytes, gameid after 2
+    raw = P.HostInfo(start_lp=1234).pack()
+    assert struct.unpack_from("<I", raw, 12)[0] == 1234
+    assert struct.unpack_from("<I", P.pack_join_game(P.PRO_VERSION, 99, info.version), 4)[0] == 99
+    assert P.parse_time_limit(bytes([1, 0]) + struct.pack("<H", 180)) == (1, 180)
+    assert P.parse_create_game(struct.pack("<I", 42)) == 42

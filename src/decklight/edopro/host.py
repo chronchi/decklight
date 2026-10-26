@@ -135,7 +135,7 @@ class Session:
                 return
             _ver, _gameid, version2 = P.unpack_join_game(payload)
             info = self.host.host_info(version2)
-            self.send(P.STOC_HS_PLAYER_ENTER, P.encode_name(self.name) + bytes([0]))
+            self.send(P.STOC_HS_PLAYER_ENTER, P.pack_hs_player_enter(self.name, 0))
             self.send(P.STOC_JOIN_GAME, info.pack())
             self.send(P.STOC_TYPE_CHANGE, bytes([0x10]))  # pos 0 + host bit
         elif proto == P.CTOS_UPDATE_DECK:
@@ -454,7 +454,7 @@ class DuelHost:
                 except OSError:
                     return
                 if len(data) >= 2 and struct.unpack_from("<H", data)[0] == P.NETWORK_CLIENT_ID:
-                    pkt = (struct.pack("<HHHI", P.NETWORK_SERVER_ID, P.PRO_VERSION, tcp_port, 0)
+                    pkt = (struct.pack("<HHH2xI", P.NETWORK_SERVER_ID, P.PRO_VERSION, tcp_port, 0)  # HostPacket, 120 bytes
                            + P.encode_name(self.name)
                            + self.host_info(P.client_version_bytes(*P.CLIENT_VERSION)).pack())
                     try:

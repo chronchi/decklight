@@ -49,8 +49,8 @@ def test_protocol_round_trip():
         P.parse_update_deck(struct.pack("<II", 60, 0) + b"\0" * 8)
 
     err = P.pack_deck_error(P.DERR_MAINCOUNT, 39, 40, 60, 0)
-    assert len(err) == 21 and err[0] == P.ERR_DECKERROR
-    assert struct.unpack_from("<BI3II", err) == (P.ERR_DECKERROR, P.DERR_MAINCOUNT, 39, 40, 60, 0)
+    assert len(err) == 24 and err[0] == P.ERR_DECKERROR
+    assert struct.unpack_from("<B3xI3II", err) == (P.ERR_DECKERROR, P.DERR_MAINCOUNT, 39, 40, 60, 0)
     assert len(P.build_start(8000, 40, 15, 40, 15, 0)) == 18
 
     assert P.rps_beats(1, 2) and P.rps_beats(2, 3) and P.rps_beats(3, 1)
@@ -369,8 +369,8 @@ def test_udp_discovery():
         data, _ = listener.recvfrom(512)
         assert struct.unpack_from("<H", data)[0] == P.NETWORK_SERVER_ID
         assert struct.unpack_from("<H", data, 4)[0] == port
-        assert P.decode_name(data[10:50]) == "ygo-zero"
-        assert len(data) == 10 + 40 + 63
+        assert P.decode_name(data[12:52]) == "ygo-zero"  # 2 pad bytes before ipaddr
+        assert len(data) == 120  # sizeof(HostPacket) in gframe/network.h
     finally:
         stop.set()
         thread.join(timeout=5)
