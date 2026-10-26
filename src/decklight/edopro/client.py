@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import json
 import socket
+import struct
 import sys
 import time
 from collections.abc import Callable
@@ -145,6 +146,11 @@ class DecisionOnlyView:
         raise NotImplementedError("needs StreamView")
 
 
+# Game messages counted in DuelRecord.events, by card code.
+_EVENT_KIND = {C.MSG_CHAINING: "chain", C.MSG_SUMMONING: "summon", C.MSG_SPSUMMONING: "summon",
+               C.MSG_FLIPSUMMONING: "summon"}
+
+
 @dataclass
 class DuelRecord:
     server: str = ""
@@ -156,6 +162,7 @@ class DuelRecord:
     winner: tuple[int, int] | None = None
     duel_end: bool = False
     packets: dict = field(default_factory=dict)
+    events: dict = field(default_factory=dict)  # "chain:<code>" / "summon:<code>" counts, both players
     alerts: list = field(default_factory=list)
     exit_code: int = TIMEOUT
 
@@ -231,6 +238,15 @@ class ClientSession:
         assert self.sock is not None
         self.sock.sendall(P.pack_frame(proto, payload))
         self._count(f"C{proto:#x}")
+
+    def _note_event(self, t: int, payload: bytes) -> None:
+        """Count which cards were activated / summoned (what a duel record can be audited on)."""
+        kind = _EVENT_KIND.get(t)
+        if kind is None or len(payload) < 5:
+            return
+        (code,) = struct.unpack_from("<I", payload, 1)
+        key = f"{kind}:{code}"
+        self.record.events[key] = self.record.events.get(key, 0) + 1
 
     def _count(self, key) -> None:
         self.record.packets[key] = self.record.packets.get(key, 0) + 1
@@ -476,6 +492,7 @@ class ClientSession:
                         return RETRY
                     if view is None:
                         continue  # refresh before START: nothing to answer
+                    self._note_event(t, payload)
                     view.feed(payload)
                     while True:
                         auto = view.take_auto()

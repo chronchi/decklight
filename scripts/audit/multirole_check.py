@@ -12,6 +12,9 @@ Multirole is the server EDOPro's public lobbies run. On it a room is created by 
 
     uv run python scripts/audit/multirole_check.py --games 3 --bot random-snake-eye
     uv run python scripts/audit/multirole_check.py --games 2 --bot raw-blueeyes
+    # custom cards: start the server with the card repo (scripts/multirole_local.sh WORKDIR CARD_DIR),
+    # both bundles list the same dir in `cards`
+    uv run python scripts/audit/multirole_check.py --rule 4 --bot wiccanthrope-raw --host-bot wiccanthrope-random
 
 Exits 1 when any duel fails one of the checks (fail loud: a retry means our view of the duel
 disagrees with the server's).
@@ -21,6 +24,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import sqlite3
 import subprocess
 import sys
 import threading
@@ -53,6 +57,16 @@ def find_room(host: str, lobby_port: int, note: str, timeout_s: float) -> int:
     raise TimeoutError(f"room with notes {note!r} never appeared in the listing")
 
 
+def custom_codes(bundle) -> set[int]:
+    """Codes defined in the bundle's custom card dirs (empty for a bundle without `cards`)."""
+    out: set[int] = set()
+    for d in bundle.cards:
+        for cdb in sorted(Path(d).glob("*.cdb")):
+            with sqlite3.connect(f"file:{cdb}?mode=ro", uri=True) as con:
+                out.update(r[0] for r in con.execute("SELECT id FROM datas"))
+    return out
+
+
 def last_record(d: Path) -> dict:
     files = sorted(d.glob("*.json"))
     if not files:
@@ -60,7 +74,7 @@ def last_record(d: Path) -> dict:
     return json.loads(files[-1].read_text())
 
 
-def one_duel(args, n: int, host_bundle, out: Path) -> dict:
+def one_duel(args, n: int, host_bundle, out: Path, custom: set[int]) -> dict:
     note = f"decklight-check-{uuid.uuid4().hex[:8]}"
     rec_host, rec_join = out / f"g{n}-host", out / f"g{n}-join"
     deck = host_bundle.load_deck()
@@ -70,7 +84,7 @@ def one_duel(args, n: int, host_bundle, out: Path) -> dict:
         view_factory=lambda seat, codes: StreamView(
             {"main": list(deck.main), "extra": list(deck.extra)}, cards, seat=seat),
         password=args.password, timeout_s=args.timeout, record_dir=rec_host,
-        create=P.HostInfo(rule=3, start_lp=8000), room_notes=note,
+        create=P.HostInfo(rule=args.rule, start_lp=8000), room_notes=note,
     )
     result: dict = {}
     t = threading.Thread(target=lambda: result.__setitem__("host_exit", session.run()), daemon=True)
@@ -89,6 +103,8 @@ def one_duel(args, n: int, host_bundle, out: Path) -> dict:
         "host_retries": hr.get("retries"), "join_retries": jr.get("retries"),
         "join_seat": jr.get("seat"), "join_responses": jr.get("n_responses", 0),
         "alerts": (hr.get("alerts") or []) + (jr.get("alerts") or []),
+        # custom-card activations / summons seen by the joiner (both players): proof the server ran their scripts
+        "custom_events": sum(v for k, v in (jr.get("events") or {}).items() if int(k.split(":")[1]) in custom),
         "join_tail": p.stdout[-400:] + p.stderr[-400:],
     })
     problems = []
@@ -104,6 +120,13 @@ def one_duel(args, n: int, host_bundle, out: Path) -> dict:
     return result
 
 
+def custom_check(results: list[dict], custom: set[int]) -> str | None:
+    """A custom-card run must show custom cards in play at least once over all duels."""
+    if custom and not sum(r["custom_events"] for r in results):
+        return "no custom card was activated or summoned in any duel"
+    return None
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--host", default="127.0.0.1")
@@ -113,6 +136,8 @@ def main() -> int:
     ap.add_argument("--host-bot", default="random-snake-eye", help="bundle the room host plays")
     ap.add_argument("--games", type=int, default=3)
     ap.add_argument("--password", default="")
+    ap.add_argument("--rule", type=int, default=3,
+                    help="allowed cards: 3 official + prerelease, 4 any (custom-card servers)")
     ap.add_argument("--timeout", type=float, default=60.0)
     ap.add_argument("--max-s", type=float, default=900.0, help="cap per duel")
     ap.add_argument("--out", type=Path, default=ROOT / "data/cache/multirole_check")
@@ -124,13 +149,19 @@ def main() -> int:
         return 2
     out = args.out / time.strftime("%Y%m%d-%H%M%S")
     out.mkdir(parents=True, exist_ok=True)
-    failed = 0
+    join_bundle = bundles.get(args.bot)
+    custom = custom_codes(join_bundle) if join_bundle else set()
+    failed, results = 0, []
     for n in range(args.games):
-        r = one_duel(args, n, bundles[args.host_bot], out)
+        r = one_duel(args, n, bundles[args.host_bot], out, custom)
+        results.append(r)
         failed += bool(r["problems"])
         print(json.dumps({k: v for k, v in r.items() if k != "join_tail" or r["problems"]}), flush=True)
     print(f"multirole check: {args.games - failed}/{args.games} duels ok (records in {out})", flush=True)
-    return 1 if failed else 0
+    bad = custom_check(results, custom)
+    if bad:
+        print(f"multirole check: {bad} ({len(custom)} custom codes in {args.bot})", file=sys.stderr)
+    return 1 if failed or bad else 0
 
 
 if __name__ == "__main__":

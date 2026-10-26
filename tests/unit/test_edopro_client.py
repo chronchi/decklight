@@ -212,6 +212,12 @@ def test_loopback_full_duel_stream_view(tmp_path):
     assert session.record.seat in (0, 1)
     rec = out["record"]
     assert rec["winner"] == session.record.winner and rec["winner"] in (0, 1)
+    # activations / summons by card code: a whole duel always summons something, and every code is a deck card
+    events = session.record.events
+    assert any(k.startswith("summon:") for k in events), events
+    deck = load_ydk(DECK)
+    codes = {*deck.main, *deck.extra}
+    assert all(k.split(":")[0] in ("chain", "summon") and int(k.split(":")[1]) in codes for k in events), events
 
 
 @pytest.mark.slow  # ~35 s per full random-vs-random duel; 3 seeds ≈ 2 min

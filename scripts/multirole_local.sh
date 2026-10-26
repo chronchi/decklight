@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
 # Build and run a local Multirole (the server behind EDOPro's public lobbies) for client tests.
 #
-#   scripts/multirole_local.sh [WORKDIR]      # default WORKDIR: data/cache/multirole
+#   scripts/multirole_local.sh [WORKDIR] [CARD_DIR...]   # default WORKDIR: data/cache/multirole
+#
+# Each CARD_DIR is a custom-card git repo laid out like a bundle's `cards` dir (`*.cdb` + `script/*.lua`),
+# e.g. ZedjaCustomCards: it becomes one more Multirole repo, observed by the script and card-data providers.
 #   uv run python scripts/audit/multirole_check.py --games 3 --bot raw-blueeyes
 #
 # Build tools (meson, ninja) come from uv. Multirole's C++ libraries (Boost >= 1.78, libgit2,
@@ -14,6 +17,9 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 W="$(mkdir -p "${1:-$ROOT/data/cache/multirole}" && cd "${1:-$ROOT/data/cache/multirole}" && pwd)"
+shift || true
+CARD_DIRS=()
+for d in "$@"; do CARD_DIRS+=("$(cd "$d" && pwd)"); done
 CONDA="${CONDA:-conda}"
 cd "$W"
 
@@ -42,9 +48,9 @@ for n in banlists bin; do
   git -C "repos/$n" add -A && git -C "repos/$n" -c user.name=local -c user.email=local@localhost commit -qm init
 done
 
-python3 - "$ROOT" "$W" <<'PY'
+python3 - "$ROOT" "$W" "${CARD_DIRS[@]}" <<'PY'
 import json, sys
-root, w = sys.argv[1:]
+root, w, *card_dirs = sys.argv[1:]
 c = json.load(open(f"{w}/Multirole/etc/config.json"))
 src = {"scripts": f"{root}/third_party/CardScripts", "databases": f"{root}/third_party/BabelCDB",
        "banlists": f"{w}/repos/banlists", "bin": f"{w}/repos/bin"}
@@ -52,6 +58,12 @@ for r in c["repos"]:
     r["remote"] = "file://" + src[r["name"]]
     r["webhookToken"] = "local-test"
 c["lobbyMaxConnections"] = 16
+for i, d in enumerate(card_dirs):  # custom cards: scripts + cdbs from the same repo
+    name = f"custom{i}"
+    c["repos"].append({"name": name, "remote": "file://" + d, "path": f"./sync/{name}/",
+                       "webhookPort": 51000 + i, "webhookToken": "local-test"})
+    c["scriptProvider"]["observedRepos"].append(name)
+    c["dataProvider"]["observedRepos"].append(name)
 json.dump(c, open(f"{w}/run/config.json", "w"), indent=1)
 PY
 
