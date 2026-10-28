@@ -223,7 +223,11 @@ class Determinizer:
 
     def __init__(self, engine, config, auto_single: bool, me: int, prefix: list[int],
                  seen: set[int], root_obs: dict, rng, tries: int = 8,
-                 prefix_keys: list[tuple[tuple[int, ...], int]] | None = None) -> None:
+                 prefix_keys: list[tuple[tuple[int, ...], int]] | None = None,
+                 keep_env: bool = False) -> None:
+        # keep_env (R1, Rust core): results are (world, resolved, env), env = the accepted
+        # replay at the root decision, which WindowSearch clones per branch instead of replaying.
+        self.keep_env = keep_env
         self.engine = engine
         self.config = config
         self.auto_single = auto_single
@@ -411,7 +415,7 @@ class Determinizer:
                 ok = root_obs_equal(obs, self.root_obs) if semantic else obs_equal(obs, self.root_obs)
                 if ok:
                     self.accepted += 1
-                    return world, resolved
+                    return (world, resolved, env) if self.keep_env else (world, resolved)
                 self.reasons["obs_mismatch"] += 1
             self.fallbacks += 1
             return None
@@ -420,7 +424,7 @@ class Determinizer:
 
     def _check_proposal(self, mains: dict[int, list[int]]):
         """Replay + root-obs check for one proposed main-deck order (thread-safe: a fresh
-        `CppEnv` per call, read-only shared state). Returns (ok, reason, world, resolved)
+        `CppEnv` per call, read-only shared state). Returns (ok, reason, world, resolved, env)
         with the same semantics as one `sample()` try (`reason` is None when accepted)."""
         world = self._build_config(mains)
         try:
@@ -431,7 +435,7 @@ class Determinizer:
                 else:
                     obs, resolved, failed = _replay_semantic(env, self.prefix_keys)
                 if failed is not None:
-                    return False, failed, None, None
+                    return False, failed, None, None, None
             else:
                 resolved = list(self.prefix)
                 if USE_CPP_REPLAY:
@@ -441,12 +445,12 @@ class Determinizer:
                     for c in self.prefix:
                         obs = env.step(c)
         except Exception:  # noqa: BLE001 -- any replay failure is a rejection (as in sample())
-            return False, "replay_error", None, None
+            return False, "replay_error", None, None, None
         ok = (root_obs_equal(obs, self.root_obs) if self.prefix_keys is not None
               else obs_equal(obs, self.root_obs))
         if ok:
-            return True, None, world, resolved
-        return False, "obs_mismatch", None, None
+            return True, None, world, resolved, env
+        return False, "obs_mismatch", None, None, None
 
     def sample_many(self, n: int, pool=None):
         """`n` results of `sample()`, bit-identical to `[self.sample() for _ in range(n)]`.
@@ -483,7 +487,7 @@ class Determinizer:
                         generated.append((mains, self.rng.getstate()))
                     remaining -= size
                     checked = list(pool.map(self._check_proposal, [m for m, _ in generated]))
-                    for i, (ok, reason, world, resolved) in enumerate(checked):
+                    for i, (ok, reason, world, resolved, env) in enumerate(checked):
                         if not ok:
                             continue
                         # First acceptance: count proposals 0..i exactly as `sample()` would.
@@ -493,11 +497,11 @@ class Determinizer:
                         self.proposals += 1
                         self.accepted += 1
                         self.rng.setstate(generated[i][1])
-                        result = (world, resolved)
+                        result = (world, resolved, env) if self.keep_env else (world, resolved)
                         done = True
                         break
                     if not done:
-                        for ok, reason, _, _ in checked:
+                        for ok, reason, _, _, _ in checked:
                             assert not ok
                             self.proposals += 1
                             self.reasons[reason] += 1

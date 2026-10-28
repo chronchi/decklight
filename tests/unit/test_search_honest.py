@@ -85,7 +85,7 @@ def test_ho_game_logs_decisions_and_overrides_only_significant(engine):
     rule = HonestRule(z=2.0, min_gap=0.05, s_max=4, step=2)
     ws = WindowSearch(engine, never, k=3, horizon=1, samples=2, seed=0)
     gen = search_game_gen(engine, cfg, ws, 0, argmax_select, 0, own_turn1=True, conf_skip=1.01, own_frac=1.0,
-                          honest=True, det_tries=4, ho=rule)
+                          honest=True, det_tries=4, ho=rule, max_searches=30)
     res = dict(drive_many([(0, gen)], fw, 2))[0]
     assert not res.truncated and res.winner in (0, 1)
     assert res.log and all("ho" in e for e in res.log)
@@ -106,7 +106,7 @@ def test_ho_game_logs_decisions_and_overrides_only_significant(engine):
     # an unreachable floor never overrides
     ws2 = WindowSearch(engine, never, k=3, horizon=1, samples=2, seed=0)
     gen2 = search_game_gen(engine, cfg, ws2, 0, argmax_select, 0, own_turn1=True, conf_skip=1.01, own_frac=1.0,
-                           ho=HonestRule(min_gap=1e9, s_max=2))
+                           ho=HonestRule(min_gap=1e9, s_max=2), max_searches=30)
     res2 = dict(drive_many([(0, gen2)], fw, 2))[0]
     assert res2.log and res2.n_override == 0
 
@@ -139,7 +139,7 @@ def test_replicate_overrides_item(engine):
     cfg = DuelConfig(load_ydk(paths[2]), load_ydk(paths[3]), seed=8)
     ws = WindowSearch(engine, never, k=3, horizon=1, samples=2, seed=0)
     res = dict(drive_many([(0, search_game_gen(engine, cfg, ws, 0, argmax_select, 0, own_turn1=True, conf_skip=1.01,
-                                               own_frac=1.0))], fw, 2))[0]
+                                               own_frac=1.0, max_searches=60))], fw, 2))[0]
     rec = {"decks": [paths[2].stem, paths[3].stem], "seed": 8, "s_seat": 0, "game_idx": 0, "choices": res.choices}
     ov = [e for e in res.log if e["chosen"] != e["played"]]
     assert ov, "no override in the fixture game"

@@ -9,6 +9,9 @@ if os.environ.get("YGO_CORE") == "rust":
     from decklight import _ygoenv_rs as _ygoenv
 else:
     from decklight import _ygoenv
+# R1: search builds branches by cloning a root env (Rust core only). YGO_SEARCH_CLONE=0 keeps the
+# prefix replays (for A/A).
+SEARCH_CLONE = os.environ.get("YGO_CORE") == "rust" and os.environ.get("YGO_SEARCH_CLONE", "1") != "0"
 from decklight.engine.duel import DuelConfig, Engine
 
 assert _ygoenv.OBS_VERSION == 1

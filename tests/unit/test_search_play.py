@@ -34,6 +34,9 @@ def _tiny_forward():
     n = len(codes)
     emb = {"codes": np.array(codes), "card": rng.normal(size=(n, 8)).astype(np.float32),
            "effects": rng.normal(size=(n, 2, 8)).astype(np.float32), "n_effects": np.ones(n, np.int64)}  # fmt: skip
+    # Seeded: with a random init, game length (and these uncapped search tests' runtime) varied run to run,
+    # 14 s to 4+ min for one test (NOTEBOOK 2026-10-28).
+    torch.manual_seed(0)
     net = PolicyNet(emb, d=16, layers=1, heads=2, dropout=0.0).eval()
 
     @torch.no_grad()
@@ -247,7 +250,7 @@ def test_priv_value_scores_sampled_worlds(engine, tmp_path):
 
     ws = WindowSearch(engine, never, k=2, horizon=1, samples=2, seed=0, value=value)
     gen = search_game_gen(engine, _cfg(), ws, 0, argmax_select, 0, own_turn1=True, conf_skip=1.01, own_frac=1.0,
-                          honest=True, det_tries=32, det_fallback="skip")
+                          honest=True, det_tries=32, det_fallback="skip", max_searches=20)
     res = dict(drive_many([(0, gen)], _tiny_forward(), 2))[0]
     assert res.winner in (0, 1) and not res.truncated
     assert seen and any(e["scores"] for e in res.log)

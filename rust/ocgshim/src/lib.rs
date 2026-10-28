@@ -251,12 +251,37 @@ pub extern "C" fn OCG_DestroyDuel(duel: OCG_Duel) {
     }));
 }
 
+/// Fail fast on a card the build left out (`YGO_CARDS_ONLY`): the port would play it without
+/// effects, silently. Same script choice as `Duel::new_card` (an alternative artwork uses the
+/// original's script). Normal (non-Pendulum) monsters and tokens need no script.
+fn missing_script(code: u32) -> Option<String> {
+    use ygo_core::constants::{TYPE_NORMAL, TYPE_PENDULUM, TYPE_TOKEN};
+    if code == 0 {
+        return None;
+    }
+    let data = global_db().get(code);
+    if data.type_ == 0 {
+        return Some(format!("ocgshim: card {code} is not in the card DB"));
+    }
+    let alias = data.alias;
+    let script = if alias != 0 && alias < code + 10 && code < alias + 10 { alias } else { code };
+    let vanilla = data.type_ & TYPE_TOKEN != 0
+        || (data.type_ & TYPE_NORMAL != 0 && data.type_ & TYPE_PENDULUM == 0);
+    if vanilla || global_scripts().get(script).is_some() {
+        return None;
+    }
+    Some(format!("ocgshim: card {code} has no compiled script (rebuild with it in YGO_CARDS_ONLY or FULL=1)"))
+}
+
 #[unsafe(no_mangle)]
 pub extern "C" fn OCG_DuelNewCard(duel: OCG_Duel, info: *const OCG_NewCardInfo) {
     with_handle(duel, (), |h| {
         if let Some(i) = unsafe { read_new_card(info) } {
             h.duel.ocg_new_card(&i);
             drain_logs(h);
+            if let Some(msg) = missing_script(i.code) {
+                report(h, &msg, 0);
+            }
         }
     });
 }

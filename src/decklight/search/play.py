@@ -34,7 +34,7 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
-from decklight.engine.cpp_env import CppEnv, FlightRecorder
+from decklight.engine.cpp_env import SEARCH_CLONE, CppEnv, FlightRecorder
 from decklight.engine.duel import DuelConfig, Engine
 from decklight.eval.loopguard import LoopGuard
 from decklight.search.determinize import Determinizer, SeenTracker, key_rank_of_choice
@@ -261,7 +261,7 @@ def search_game_gen(
                         det = Determinizer(
                             engine, config, auto_single, me, res.choices, trackers[me].seen,
                             obs, random.Random(f"{search.seed}:{game_seed}:{k}:det"),
-                            prefix_keys=res.choice_keys, tries=det_tries,
+                            prefix_keys=res.choice_keys, tries=det_tries, keep_env=SEARCH_CLONE,
                         )
                         if prof:
                             t_det_init = time.perf_counter() - t_di

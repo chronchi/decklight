@@ -29,6 +29,7 @@ from dataclasses import dataclass, field
 import numpy as np
 
 from decklight.engine import constants as C
+from decklight.engine import cpp_env as _cpp_env
 from decklight.engine.actions import Kind
 from decklight.engine.cpp_env import CppEnv
 from decklight.engine.duel import DuelConfig, Engine
@@ -149,19 +150,27 @@ class WindowSearch:
                      worlds: list[DuelConfig | tuple[DuelConfig, list[int]]] | None):
         """Branch envs + root obs, in branch order (E6: with `self.pool`, the prefix
         replays run in parallel via `pool.map`, which keeps order, so the result is
-        identical to the sequential loop)."""
-        specs = []
+        identical to the sequential loop). With the Rust core (`cpp_env.SEARCH_CLONE`, R1)
+        each distinct (config, prefix minus the candidate) is replayed once, or taken from
+        the world's root env (a 3-tuple `(cfg, prefix, env)` from the Determinizer), and
+        every branch is a clone of that root stepped by its candidate."""
+        specs, roots = [], []
         for p, _, _, s in branches:
+            root = None
             if worlds is None:
                 cfg, pp = config, p
             else:
                 w = worlds[s % len(worlds)]
                 if isinstance(w, tuple):
-                    cfg, wprefix = w
+                    cfg, wprefix = w[0], w[1]
+                    root = w[2] if len(w) > 2 else None
                     pp = list(wprefix) + [p[-1]]
                 else:  # plain DuelConfig (tests): today's replay of p
                     cfg, pp = w, p
             specs.append((cfg, list(pp)))
+            roots.append(root)
+        if _cpp_env.SEARCH_CLONE and all(pp for _, pp in specs):
+            return self._branch_clones(auto_single, specs, roots)
         if self.pool is None:
             envs, obs = [], []
             for cfg, pp in specs:
@@ -178,6 +187,26 @@ class WindowSearch:
 
         pairs = list(self.pool.map(_one, specs))
         return [e for e, _ in pairs], [o for _, o in pairs]
+
+    def _branch_clones(self, auto_single: bool, specs, roots):
+        """R1: one root per distinct (config, prefix[:-1]) (a given world root env, else one
+        replay), then clone + step(candidate) per branch. Same envs and obs as replaying each
+        prefix (tests/unit/test_search_clone.py)."""
+        cache: dict = {}
+        envs, obs = [], []
+        for (cfg, pp), root in zip(specs, roots, strict=True):
+            if root is None:
+                key = (id(cfg), tuple(pp[:-1]))
+                root = cache.get(key)
+                if root is None:
+                    root = CppEnv(self.engine, cfg, auto_single)
+                    if root.replay_from_reset(pp[:-1]) is None:
+                        raise RuntimeError("ALERT window: branch root replay ended the duel")
+                    cache[key] = root
+            e = root.clone()
+            obs.append(e.step(pp[-1]))
+            envs.append(e)
+        return envs, obs
 
     def _forward(self, obs_list: list[dict]) -> np.ndarray:
         out = [self.logits(_batch(obs_list[i : i + self.batch])) for i in range(0, len(obs_list), self.batch)]

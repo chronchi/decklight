@@ -181,6 +181,24 @@ def test_clone_outlives_original(engine):
         assert keep.winner == ref.winner
 
 
+def test_card_left_out_of_the_build_is_an_error(engine):
+    """A card outside YGO_CARDS_ONLY would play without effects: the shim reports it as an error."""
+    from dataclasses import replace
+
+    from decklight.engine.resources import load_cards
+
+    out = subprocess.run([sys.executable, str(ROOT / "scripts/rust_card_codes.py")], capture_output=True, text=True,
+                         check=True).stdout
+    built = {int(t[1:]) for t in out.split()}
+    cards = load_cards()
+    code = next(c for c in sorted(cards) if c not in built and not cards[c].alias
+                and cards[c].type & 0x21 == 0x21 and not cards[c].type & 0x4000)  # effect monster, not a token
+    deck = replace(DECK0, main=(code, *DECK0.main[1:]))
+    env = cpp_env_mod.CppEnv(engine, DuelConfig(deck, DECK1, seed=1))
+    env.reset()
+    assert any(f"card {code} has no compiled script" in e for e in env.errors), env.errors
+
+
 def test_location_query_returns_cardids(engine):
     """QUERY_CARDID: the Rust duel reports non-zero card ids."""
     env = mk_env(engine, seed=42)
