@@ -110,7 +110,7 @@ def main() -> int:
         k_of[rec["slug"]] += 1
         stem = f"{rec['slug']}-v{k_of[rec['slug']]}"
         fm.write_ydk(OUT / f"{stem}.ydk", rec, rec["main"], rec["extra"], run_day)
-        ctrl = min(by_arch[rec["slug"]])
+        ctrl = min(by_arch[rec["slug"]], key=lambda s: ("-meta" not in s, s))  # a tournament list when the pool has one
         diff = sum((multiset(rec["main"], rec["extra"]) - pool_lists[ctrl]).values())
         src.append(f"| {stem} | {ctrl} | {diff} | {rec['url']} ({rec['tournament']}, {rec['placement']}, "
                    f"{rec['date']}) |")
