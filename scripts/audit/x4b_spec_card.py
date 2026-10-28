@@ -49,6 +49,8 @@ def paired(a: dict, b: dict, label: str) -> tuple[list, list]:
 
 def stats(diffs: list[float]) -> dict:
     n = len(diffs)
+    if n == 0:  # e.g. a smoke --games-limit that stops before the held-out list
+        return {"n": 0, "diff_pp": None, "ci_pp": None}
     m = sum(diffs) / n
     se = (sum((x - m) ** 2 for x in diffs) / (n - 1) / n) ** 0.5 if n > 1 else 0.0
     return {"n": n, "diff_pp": round(m * 100, 2), "ci_pp": [round((m - 1.96 * se) * 100, 2),
@@ -77,8 +79,9 @@ def main() -> int:
         _, du = paired(p_unrel, su, f"{a}-unrel")
         r["unrelated"] = stats(du)
         print("  " + report("unrelated", du))
-        print(f"  train lists {r['train_lists']['diff_pp']:+.1f} pp, held-out {held} {r['heldout']['diff_pp']:+.1f} pp "
-              f"(n={r['heldout']['n']}); first {r['first']['diff_pp']:+.1f}, second {r['second']['diff_pp']:+.1f}")
+        print("  " + ", ".join(f"{lab} {v['diff_pp']:+.1f} pp (n={v['n']})" if v["n"] else f"{lab} n=0"
+                               for lab, v in (("train lists", r["train_lists"]), (f"held-out {held}", r["heldout"]),
+                                              ("first", r["first"]), ("second", r["second"]))))
         res["archetypes"][a] = r
     gainers = [a for a, r in res["archetypes"].items() if r["arch"]["diff_pp"] >= GAIN_PP]
     res["gainers"] = gainers

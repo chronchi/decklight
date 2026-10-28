@@ -2,7 +2,7 @@
 # X4b steps 1-2 (docs/plans/2026-10-28-specialists-distill.md; pre-registered NOTEBOOK 2026-10-28 "X4b"): 5
 # specialists (finetune_deck on each archetype's 3 tournament training lists) + the specialist card vs P, then the
 # stop rule (scripts/vast_x4b_spec.sh on the box). User 2026-10-28: "1-3 yes, 4 let's park it. Go ahead".
-# Env: HOURS (10; 0.6 when SMOKE=1), MAX_DPH (0.40), SMOKE=1 (2 iters, 2 archetypes, 64 games per arm),
+# Env: HOURS (10; 0.6 when SMOKE=1), MAX_DPH (0.40), SMOKE=1 (4 iters, 2 archetypes, 512 games per arm),
 #   ARCHS, FT_ITERS, FT_HOURS, PAR, ARCH_SEEDS, UNREL_SEEDS, MS_IT, MS_MIN, VAR_CAP (see vast_x4b_spec.sh).
 cd "$(dirname "$0")/../.."
 for f in data/cache/P/best.pt data/cache/P/metrics.jsonl data/cache/value_p2/best.pt data/cache/value_p2/metrics.jsonl \
