@@ -670,18 +670,11 @@ def main() -> None:
             else:
                 if args.deal_mode == "train" and (names[di] in hold or names[dj] in hold):
                     fail(f"train game drew a holdout deck: {names[di]} vs {names[dj]}")
-                if args.pairs:
-                    cfg = DuelConfig(
-                        load_ydk(_pair_path(names[di])),
-                        load_ydk(_pair_path(names[dj])),
-                        seed=s,
-                    )
-                else:
-                    cfg = DuelConfig(
-                        load_ydk(deck_dir / f"{names[di]}.ydk"),
-                        load_ydk(deck_dir / f"{names[dj]}.ydk"),
-                        seed=s,
-                    )
+                # S (deck di) sits in seat s_seat, as in the ygoagent branch and the record's "decks" (seat order).
+                # Before 2026-10-27 di always sat in seat 0, so with s_seat 1 S piloted dj (NOTEBOOK 2026-10-27 X2).
+                seat0, seat1 = (di, dj) if s_seat == 0 else (dj, di)
+                path = _pair_path if args.pairs else (lambda n: deck_dir / f"{n}.ydk")
+                cfg = DuelConfig(load_ydk(path(names[seat0])), load_ydk(path(names[seat1])), seed=s)
             cfgs[idx] = cfg
             if PROF:
                 inflight_meta[idx] = {"decks": [names[di], names[dj]], "seed": s, "s_seat": s_seat}
