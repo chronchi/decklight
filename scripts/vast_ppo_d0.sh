@@ -9,7 +9,9 @@
 #      holdout (seeds 4) and new-card decks (seeds 6), both seats; principles for P'.
 #   Gate (pre-registered, NOTEBOOK 2026-10-15): P' - P >= +2 pp paired vs ygo-agent AND unseen h2h vs P (holdout +
 #   new-card pooled) >= 0.50. Unseen h2h >= 0.53 with < +2 pp vs ygo-agent is reported as "stronger off-benchmark".
-# Env: ITERS (160), MS_IT (80), RL_HOURS (2.5), GA_SEEDS (24), VAR_CAP (60m), SMOKE=1.
+# Env: ITERS (160), MS_IT (80), RL_HOURS (2.5), GA_SEEDS (24), VAR_CAP (60m), SMOKE=1, RL_EXTRA (extra train_rl
+#      flags), DEAL0 (8000), CTRL (X1, 2026-10-27: a stored control checkpoint; the card adds it raw vs ygo-agent on
+#      the same deals, paired against P' in paired-ctrl.txt, and the unseen h2h opponent becomes CTRL instead of P).
 # Usage: bash scripts/vast_ppo_d0.sh <name>. vast GPU only.
 set -uo pipefail
 export PATH="$HOME/.local/bin:$PATH"
@@ -35,14 +37,16 @@ if [ "${SMOKE:-0}" = 1 ]; then ITERS=4; MS_IT=2; GS=1; HS=1; NS=1
 
 # 1. PPO from P
 uv run --no-sync python scripts/train_rl.py --init "$P" --value-init "$VP" --out "$OUT/rl" --device cuda --lr 4e-5 \
-  --iters "$ITERS" --hours "${RL_HOURS:-2.5}" --eval-every 40 "${RLX[@]}" > "$OUT/train.txt" 2>&1 &
+  --iters "$ITERS" --hours "${RL_HOURS:-2.5}" --eval-every 40 "${RLX[@]}" ${RL_EXTRA:-} > "$OUT/train.txt" 2>&1 &
 TP=$!
-( seen=0; done_ms=0; while kill -0 $TP 2>/dev/null; do
+( seen=0; seen_a=0; done_ms=0; while kill -0 $TP 2>/dev/null; do
     sleep 30
     n=$(grep -c '^\[eval it' "$OUT/train.txt" 2>/dev/null); n=${n:-0}
     if [ "$n" -gt "$seen" ]; then
       grep '^\[eval it' "$OUT/train.txt" | tail -n +$((seen + 1)) | sed "s/^/$(date +%T) /" >> "$OUT/PROGRESS"; seen=$n
     fi
+    na=$(grep -c '^ALERT' "$OUT/train.txt" 2>/dev/null); na=${na:-0}  # train_rl's own ALERTs (adv_filter), live
+    if [ "$na" -gt "$seen_a" ]; then grep '^ALERT' "$OUT/train.txt" | tail -n +$((seen_a + 1)) >> "$OUT/ALERT"; seen_a=$na; fi
     [ $done_ms = 0 ] && grep -q "^\[eval it $MS_IT\]" "$OUT/train.txt" || continue
     done_ms=1
     uv run --no-sync python - "$OUT" "$MS_IT" > "$OUT/milestone.txt" 2>&1 <<'EOF'
@@ -55,13 +59,18 @@ kl = [r["kl_bc"] for r in recs if "kl_bc" in r and it - 10 < r["iter"] <= it]
 vs = ev[-1]["vs_bc"]["wr"] if ev else float("nan")
 kl_m = sum(kl) / len(kl) if kl else float("nan")
 hv = ev[-1]["vs_bc_holdout"]["wr"] if ev else float("nan")
-print(f"milestone it{it}: vs frozen P {vs} (holdout decks {hv}); kl_bc mean {kl_m:.4f}")
+keep = [r["adv_keep"] for r in recs if "adv_keep" in r and it - 10 < r["iter"] <= it]
+thr = [r["adv_thr"] for r in recs if "adv_thr" in r and it - 10 < r["iter"] <= it]
+af = f"; adv_keep mean {sum(keep) / len(keep):.3f}, adv_thr mean {sum(thr) / len(thr):.4f}" if keep else ""
+print(f"milestone it{it}: vs frozen P {vs} (holdout decks {hv}); kl_bc mean {kl_m:.4f}{af}")
 bad = [b for b, c in ((f"vs frozen P {vs} < 0.45", not vs >= 0.45), (f"kl_bc mean {kl_m:.4f} > 0.1", not kl_m <= 0.1)) if c]
 for b in bad:
     print(f"ALERT milestone: {b}")
 sys.exit(1 if bad else 0)
 EOF
     rc=$?
+    case "${RL_EXTRA:-}" in *--adv-filter-q*) grep -q "adv_keep mean" "$OUT/milestone.txt" \
+      || { echo "ALERT milestone: --adv-filter-q set but no adv_keep in metrics" >> "$OUT/milestone.txt"; rc=1; } ;; esac
     echo "$(date +%T) $(grep '^milestone' "$OUT/milestone.txt")" >> "$OUT/PROGRESS"
     grep -h '^ALERT' "$OUT/milestone.txt" >> "$OUT/ALERT"
     if [ $rc -ne 0 ] && [ "${SMOKE:-0}" != 1 ]; then
@@ -81,18 +90,28 @@ mkdir -p "$OUT/Pp"; cp "$LAST" "$OUT/Pp/best.pt"; cp data/cache/P/metrics.jsonl 
 cmp -s "$OUT/Pp/best.pt" "$P" && { alert "P' equals P's weights"; exit 3; }
 tick "ppo $(basename "$LAST")"
 
-# 2. card on fresh deals (deal seeds 8000+)
-PP="$OUT/Pp/best.pt"
+# 2. card on fresh deals (deal seeds DEAL0+; 8000 for D0)
+PP="$OUT/Pp/best.pt"; H2H="${CTRL:-$P}"
+if [ -n "${CTRL:-}" ]; then
+  [ -s "$CTRL" ] || { alert "missing CTRL $CTRL"; exit 3; }
+  cmp -s "$CTRL" "$PP" && { alert "P' equals CTRL's weights"; exit 3; }
+fi
 V="praw|--opp ygoagent --raw 1"
 V="$V;pp|--opp ygoagent --raw 1 --ckpt $PP"
-V="$V;pp-hold|--opp ckpt --opp-ckpt $P --raw 1 --deck-set holdout --seeds $HS --ckpt $PP"
-V="$V;pp-new|--opp ckpt --opp-ckpt $P --raw 1 --deck-set newcards --seeds $NS --ckpt $PP"
-CKPT="$P" SM_ARGS="--ga-seeds $GS --deal-seed0 8000" VARIANTS="$V" PROBE_NPROC=1 VAR_CAP="${VAR_CAP:-60m}" \
+[ -n "${CTRL:-}" ] && V="$V;ctrl|--opp ygoagent --raw 1 --ckpt $CTRL"
+V="$V;pp-hold|--opp ckpt --opp-ckpt $H2H --raw 1 --deck-set holdout --seeds $HS --ckpt $PP"
+V="$V;pp-new|--opp ckpt --opp-ckpt $H2H --raw 1 --deck-set newcards --seeds $NS --ckpt $PP"
+CKPT="$P" SM_ARGS="--ga-seeds $GS --deal-seed0 ${DEAL0:-8000}" VARIANTS="$V" PROBE_NPROC=1 VAR_CAP="${VAR_CAP:-60m}" \
   bash scripts/vast_search_match.sh "$NAME"
 tick card
 uv run --no-sync python scripts/audit/paired_sm.py "$OUT/praw" "$OUT/pp" > "$OUT/paired.txt" 2>&1 \
   || alert "paired_sm: $(tail -1 "$OUT/paired.txt")"
 echo "$(date +%T) paired P' - P: $(sed -n 1,4p "$OUT/paired.txt" | tr '\n' ' ')" >> "$OUT/PROGRESS"
+if [ -n "${CTRL:-}" ]; then
+  uv run --no-sync python scripts/audit/paired_sm.py "$OUT/ctrl" "$OUT/pp" > "$OUT/paired-ctrl.txt" 2>&1 \
+    || alert "paired_sm ctrl: $(tail -1 "$OUT/paired-ctrl.txt")"
+  echo "$(date +%T) paired P' - CTRL: $(sed -n 1,4p "$OUT/paired-ctrl.txt" | tr '\n' ' ')" >> "$OUT/PROGRESS"
+fi
 for s in s ya; do
   uv run --no-sync python scripts/audit/principles.py --name "pp-$s" --games "$OUT/pp" --seat $s \
     --out "$OUT/principles-pp-$s.json" > "$OUT/principles-pp-$s.txt" 2>&1 || alert "principles $s failed"
