@@ -1,0 +1,95 @@
+{
+ "train": {
+  "branded-light-and-darkness-ritual": [
+   "branded-light-and-darkness-ritual-meta1",
+   "branded-light-and-darkness-ritual-v1",
+   "branded-light-and-darkness-ritual-v2"
+  ],
+  "invoked": [
+   "invoked-meta1",
+   "invoked-v1",
+   "invoked-v2"
+  ],
+  "radiant-typhoon": [
+   "radiant-typhoon-meta1",
+   "radiant-typhoon-v1",
+   "radiant-typhoon-v3"
+  ],
+  "sacred-beasts": [
+   "sacred-beasts-meta1",
+   "sacred-beasts-meta2",
+   "sacred-beasts-v1"
+  ],
+  "atlantean-mermail": [
+   "atlantean-mermail-meta1",
+   "atlantean-mermail-meta2",
+   "atlantean-mermail-v1"
+  ]
+ },
+ "heldout": {
+  "branded-light-and-darkness-ritual": "branded-light-and-darkness-ritual-v3",
+  "invoked": "invoked-v3",
+  "radiant-typhoon": "radiant-typhoon-v2",
+  "sacred-beasts": "sacred-beasts-v2",
+  "atlantean-mermail": "atlantean-mermail-v2"
+ },
+ "related": [
+  "azamina-light-and-darkness-ritual-meta1",
+  "azamina-light-and-darkness-ritual-meta2",
+  "azamina-light-and-darkness-ritual-v1",
+  "branded-angelechy-light-and-darkness-ritual-meta1",
+  "branded-blitzclique-meta1",
+  "branded-dracotail-meta1",
+  "branded-dracotail-meta2",
+  "despia-branded-meta1",
+  "despia-branded-meta2",
+  "despia-branded-v1",
+  "despia-branded-v2",
+  "despia-branded-v3",
+  "dogmatika-branded-light-and-darkness-ritual-meta1",
+  "dracotail-despia-branded-meta1",
+  "fiendsmith-light-and-darkness-ritual-meta1",
+  "fiendsmith-sacred-beasts-meta1",
+  "invoked-dracotail-meta1",
+  "invoked-dracotail-v1",
+  "light-and-darkness-ritual-sacred-beasts-meta1",
+  "magistus-invoked-fairy-tail-meta1",
+  "magistus-invoked-fairy-tail-meta2",
+  "magistus-invoked-fairy-tail-v1",
+  "mitsurugi-light-and-darkness-ritual-orcust-meta1",
+  "mitsurugi-yummy-light-and-darkness-ritual-meta1"
+ ],
+ "unrelated_fresh": [
+  "ars-magna-doomz-x1",
+  "ars-magna-elfnote-x1",
+  "blitzclique-v1",
+  "clown-crew-x1",
+  "crystron-trains-v1",
+  "dark-magician-yummy-x1",
+  "destiny-hero-x1",
+  "elfnote-v3",
+  "fur-hire-gmx-x1",
+  "ignister-maliss-x1",
+  "k9-dark-time-wizard-x1",
+  "lunalight-v2",
+  "phantom-knights-pumpking-x1",
+  "power-patron-artmage-v1"
+ ],
+ "unrelated_holdout": [
+  "doomz-meta1",
+  "doomz-meta2",
+  "ignister-maliss-meta1",
+  "ignister-maliss-meta2",
+  "magistus-fairy-tail-meta1"
+ ],
+ "opponents": [
+  "angelechy-elfnote-meta1",
+  "elfnote-mitsurugi-synchron-meta1",
+  "kewl-tune-meta1",
+  "onomat-constellar-tellarknights-meta1",
+  "power-patron-meta1",
+  "sky-striker-meta2",
+  "synchron-elfnote-meta2",
+  "trains-meta2"
+ ]
+}

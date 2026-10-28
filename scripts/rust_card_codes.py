@@ -2,7 +2,7 @@
 """Card codes for the Rust core's `YGO_CARDS_ONLY` build filter.
 
 Prints the space-separated `c<code>` tokens of every card in
-`decks/{pool,gauntlet,newcards,holdout,variants}/*.ydk` (main + extra + side),
+`decks/{pool,gauntlet,newcards,holdout,variants,x4b}/**/*.ydk` (main + extra + side),
 plus each card's alias target from the card DB, deduplicated and sorted.
 
 The format matches `third_party/ygopro-core-rust/ygo-cards/build.rs`
@@ -19,13 +19,13 @@ sys.path.insert(0, str(ROOT / "src"))
 from decklight.decks.ydk import parse_ydk
 from decklight.engine.resources import load_cards
 
-DIRS = ("pool", "gauntlet", "newcards", "holdout", "variants")
+DIRS = ("pool", "gauntlet", "newcards", "holdout", "variants", "x4b")
 
 
 def main() -> None:
     codes: set[int] = set()
     for d in DIRS:
-        for path in sorted((ROOT / "decks" / d).glob("*.ydk")):
+        for path in sorted((ROOT / "decks" / d).rglob("*.ydk")):
             deck = parse_ydk(path.read_text(encoding="utf-8"))
             codes.update(deck.main)
             codes.update(deck.extra)
