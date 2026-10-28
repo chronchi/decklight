@@ -1,8 +1,21 @@
+import argparse
+import importlib.util
+from pathlib import Path
+
 import numpy as np
+import pytest
 import torch
 
 from decklight.model.policy import PolicyNet
 from decklight.rl.ppo import SlotStore, gae, masked_log_softmax, ppo_loss
+
+
+def _train_rl_mod():
+    p = Path(__file__).resolve().parents[2] / "scripts" / "train_rl.py"
+    spec = importlib.util.spec_from_file_location("train_rl_advfilter_mod", p)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
 
 
 def _emb(d=8, n=10):
@@ -178,3 +191,87 @@ def test_slot_store_concurrent_put_release():
         t.join()
     assert not errors, errors[0] if errors else None
     assert not in_use and st.free == cap
+
+
+def _ppo_args(b=4, seed=3):
+    """Deterministic (model, ref_lp, obs, act, olp, adv, ret) for the keep-mask tests."""
+    torch.manual_seed(seed)
+    emb = _emb()
+    net = PolicyNet(emb, d=16, layers=1, heads=2, value=True, dropout=0.0).eval()
+    bc = PolicyNet(emb, d=16, layers=1, heads=2).eval()
+    obs = _batch(b=b, h=32)
+    act = torch.tensor([0, 1, 0, 1][:b], dtype=torch.long)
+    olp = torch.full((b,), -0.69)
+    adv = torch.tensor([0.5, -1.5, 0.1, 2.0][:b])
+    ret = torch.tensor([1.0, -1.0, 0.5, 0.0][:b])
+    with torch.no_grad():
+        ref_lp = masked_log_softmax(bc(obs))
+    return net, ref_lp, obs, act, olp, adv, ret
+
+
+def test_ppo_loss_keep_all_matches_none():
+    net, ref_lp, obs, act, olp, adv, ret = _ppo_args()
+    loss0, st0 = ppo_loss(net, ref_lp, obs, act, olp, adv, ret, 0.2, 0.5, 0.1, 0.01)
+    keep = torch.ones(len(act), dtype=torch.bool)
+    loss1, st1 = ppo_loss(net, ref_lp, obs, act, olp, adv, ret, 0.2, 0.5, 0.1, 0.01, keep=keep)
+    assert torch.isclose(loss0, loss1)
+    assert set(st1) == set(st0) | {"adv_keep"}
+    for k in st0:
+        assert torch.isclose(st0[k], st1[k]), k
+    assert float(st1["adv_keep"]) == pytest.approx(1.0)
+
+
+def test_ppo_loss_keep_subset_matches_sliced_policy_and_full_value():
+    net, ref_lp, obs, act, olp, adv, ret = _ppo_args()
+    keep = torch.tensor([True, False, True, False])
+    _, st = ppo_loss(net, ref_lp, obs, act, olp, adv, ret, 0.2, 0.5, 0.1, 0.01, keep=keep)
+    idx = torch.tensor([0, 2])
+    sub = ({k: v[idx] for k, v in obs.items()}, act[idx], olp[idx], adv[idx], ret[idx],
+           ref_lp[idx])
+    _, st_sub = ppo_loss(net, sub[5], sub[0], sub[1], sub[2], sub[3], sub[4], 0.2, 0.5, 0.1, 0.01)
+    _, st_full = ppo_loss(net, ref_lp, obs, act, olp, adv, ret, 0.2, 0.5, 0.1, 0.01)
+    for k in ("pg", "ent", "kl_bc", "clipfrac", "approx_kl"):
+        assert torch.isclose(st[k], st_sub[k]), (k, st[k], st_sub[k])
+    assert torch.isclose(st["vf"], st_full["vf"])
+    assert float(st["adv_keep"]) == pytest.approx(0.5)
+
+
+def test_ppo_loss_keep_none_is_value_only_and_finite():
+    net, ref_lp, obs, act, olp, adv, ret = _ppo_args()
+    keep = torch.zeros(len(act), dtype=torch.bool)
+    loss, st = ppo_loss(net, ref_lp, obs, act, olp, adv, ret, 0.2, 0.5, 0.1, 0.01, keep=keep)
+    assert torch.isfinite(loss)
+    assert float(loss.detach()) == pytest.approx(0.5 * float(st["vf"]))
+    for k in ("pg", "ent", "kl_bc", "clipfrac", "approx_kl"):
+        assert float(st[k]) == pytest.approx(0.0), k
+    assert float(st["adv_keep"]) == pytest.approx(0.0)
+
+
+def _adv_ns(**kw):
+    d = {"adv_filter_q": 0.0, "adv": "gae", "priv_critic": 0}
+    d.update(kw)
+    return argparse.Namespace(**d)
+
+
+def test_adv_filter_validation():
+    tr = _train_rl_mod()
+    ap = argparse.ArgumentParser()
+    tr.validate_adv_filter(_adv_ns(), ap)  # off: always fine
+    tr.validate_adv_filter(_adv_ns(adv_filter_q=0.5), ap)  # plain GAE: fine
+    for bad in (_adv_ns(adv_filter_q=0.75, adv="vrpo"),
+                _adv_ns(adv_filter_q=0.75, priv_critic=1),
+                _adv_ns(adv_filter_q=1.0),
+                _adv_ns(adv_filter_q=-0.1)):
+        with pytest.raises(SystemExit) as e:
+            tr.validate_adv_filter(bad, ap)
+        assert e.value.code == 2
+
+
+def test_adv_filter_keep_threshold_and_floor():
+    tr = _train_rl_mod()
+    adv = np.array([0.0, 0.5, -1.0, 2.0, -0.1], np.float32)
+    keep, thr = tr.adv_filter_keep(adv, 0.6, 0.01)
+    assert thr == pytest.approx(max(float(np.quantile(np.abs(adv), 0.6)), 0.01))
+    assert keep.dtype == np.bool_ and (keep == (np.abs(adv) >= thr)).all()
+    keep2, thr2 = tr.adv_filter_keep(adv, 0.6, 10.0)  # the min floor dominates
+    assert thr2 == pytest.approx(10.0) and not keep2.any()

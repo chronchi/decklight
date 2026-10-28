@@ -381,6 +381,33 @@ def gae_batch(store: SlotStore, finished: list, lam: float):
     return slots, adv, ret, adv_n
 
 
+def validate_adv_filter(args: argparse.Namespace, ap: argparse.ArgumentParser) -> None:
+    """Fail loud on bad --adv-filter-q combos (argparse error, exit 2).
+
+    Advantage filtering supports the plain GAE path only: VRPO advantages come from
+    the Q-critic (masking the policy terms would starve nothing, but the threshold
+    semantics were designed for GAE) and the privileged critic trains its value
+    from a separate head.
+    """
+    q = float(args.adv_filter_q)
+    if not 0.0 <= q < 1.0:
+        ap.error(f"--adv-filter-q must be in [0, 1), got {args.adv_filter_q}")
+    if q > 0 and (args.adv == "vrpo" or int(args.priv_critic) == 1):
+        ap.error("--adv-filter-q supports the plain GAE path only "
+                 "(not with --adv vrpo or --priv-critic 1)")
+
+
+def adv_filter_keep(adv: np.ndarray, q: float, min_thr: float) -> tuple[np.ndarray, float]:
+    """Advantage filtering (experiment X1): keep decisions with |adv| >= thr.
+
+    `thr = max(quantile(|adv|, q), min_thr)` over the iteration's batch, where `adv`
+    is the raw advantage array (before normalization). Returns the bool keep mask
+    (one per sample, aligned with the caller's batch) and the threshold.
+    """
+    thr = max(float(np.quantile(np.abs(adv), float(q))), float(min_thr))
+    return (np.abs(adv) >= thr), thr
+
+
 def vrpo_targets_batch(store: SlotStore, finished: list, lam: float):
     """Expected-SARSA(λ) per finished seat trajectory (VRPO). Returns (slots, adv, ret, adv_n, info).
 
@@ -422,8 +449,9 @@ def ppo_update(model: PolicyNet, upd_model, opt, vopt, store: SlotStore, slots: 
                adv_n: np.ndarray, ret: np.ndarray, rng: np.random.Generator, dev: torch.device,
                *, clip: float, vf_coef: float, kl_coef: float, ent_coef: float, epochs: int,
                minibatch: int, warm: bool, precision: str, max_upload_gb: float, compile: bool,
-                critic: PolicyNet | None = None, copt=None, priv_critic: bool = False,
-                adv: str = "gae", upd_critic=None, hint: dict | None = None) -> dict:
+               critic: PolicyNet | None = None, copt=None, priv_critic: bool = False,
+               adv: str = "gae", upd_critic=None, hint: dict | None = None,
+               adv_keep: np.ndarray | None = None) -> dict:
     """Upload-once + PPO epochs over one batch. Returns per-iteration mean stats (raises on non-finite).
 
     With `priv_critic`, the value loss trains `critic` (via `copt`) on the privileged
@@ -439,10 +467,14 @@ def ppo_update(model: PolicyNet, upd_model, opt, vopt, store: SlotStore, slots: 
     With `hint` ({"obs": numpy obs dict, "act": int32 actions, "coef": C, "batch": B};
     `--hint-bank`), after the PPO epochs one extra policy step minimizes
     `C x CE(policy(obs), banked action)` on a minibatch of B banked decisions
-    (hinted self-distillation: the bank holds successes found with the search's
+    per PPO update (hinted self-distillation: the bank holds successes found with the search's
     help; there is no hint-conditioned policy, so this is fine-tuning on hinted
     successes). Skipped during value warm-up. Stats gain `hint_ce` / `hint_acc`.
     `hint=None` (default) is bit-identical to before.
+
+    With `adv_keep` (bool array, one per sample, `--adv-filter-q`): the plain-GAE
+    policy terms are means over the kept rows only (value loss stays over all
+    rows); stats gain `adv_keep`. `None` (default) is bit-identical to before.
 
     Under DDP (process group initialized) every rank runs the same number of optimizer
     steps per epoch: the MIN local minibatch count is all-reduced and each rank drops its
@@ -464,6 +496,7 @@ def ppo_update(model: PolicyNet, upd_model, opt, vopt, store: SlotStore, slots: 
     upload_once = per_slot * len(slots) <= max_upload_gb * 1e9
     obs_dev = act_dev = olp_dev = ref_dev = adv_dev = ret_dev = perm_dev = None
     cobs_dev = None
+    keep_dev = None
     if upload_once:
         obs_dev = {k: torch.from_numpy(np.ascontiguousarray(store.obs[k][slots])).to(dev)
                    for k in store.obs}
@@ -473,6 +506,8 @@ def ppo_update(model: PolicyNet, upd_model, opt, vopt, store: SlotStore, slots: 
         adv_dev = torch.from_numpy(np.ascontiguousarray(adv_n)).to(dev)
         ret_dev = torch.from_numpy(np.ascontiguousarray(ret)).to(dev)
         perm_dev = torch.from_numpy(rng.permutation(len(slots))).to(dev)
+        if adv_keep is not None:
+            keep_dev = torch.from_numpy(np.ascontiguousarray(adv_keep)).to(dev)
         if priv_critic:
             assert cobs_np is not None
             cobs_dev = to_torch(cobs_np, dev)
@@ -502,6 +537,7 @@ def ppo_update(model: PolicyNet, upd_model, opt, vopt, store: SlotStore, slots: 
                 rl = ref_dev[idx] if kl_coef > 0 else None
                 a_t = adv_dev[idx]
                 r_t = ret_dev[idx]
+                k_t = keep_dev[idx] if keep_dev is not None else None
                 cobs_t = {key: v[idx] for key, v in cobs_dev.items()} if priv_critic else None
             else:
                 mb = perm[k : k + minibatch]
@@ -512,6 +548,7 @@ def ppo_update(model: PolicyNet, upd_model, opt, vopt, store: SlotStore, slots: 
                 rl = torch.from_numpy(store.ref_lp[sl]).to(dev) if kl_coef > 0 else None
                 a_t = torch.from_numpy(adv_n[mb]).to(dev)
                 r_t = torch.from_numpy(ret[mb]).to(dev)
+                k_t = torch.from_numpy(adv_keep[mb]).to(dev) if adv_keep is not None else None
                 cobs_t = to_torch({key: v[mb] for key, v in cobs_np.items()}, dev) \
                     if priv_critic else None
             fwd = _fwd_of(upd_model)
@@ -598,7 +635,7 @@ def ppo_update(model: PolicyNet, upd_model, opt, vopt, store: SlotStore, slots: 
                                                 kl_coef, ent_coef)  # fmt: skip
                     else:
                         loss, s = ppo_loss(fwd, rl, obs, act, olp, a_t, r_t, clip, vf_coef,
-                                           kl_coef, ent_coef)  # fmt: skip
+                                           kl_coef, ent_coef, keep=k_t)  # fmt: skip
                 opt.zero_grad(set_to_none=True)
                 loss.backward()
                 distmod.average_grads_(model)
@@ -745,6 +782,11 @@ def main() -> None:
     ap.add_argument("--lam", type=float, default=0.95)
     ap.add_argument("--adv", choices=("gae", "vrpo"), default="gae",
                     help="gae: GAE advantages (default); vrpo: Q-critic + expected-SARSA(λ) advantages")
+    ap.add_argument("--adv-filter-q", type=float, default=0.0,
+                    help="X1: train the PPO policy terms only on the decisions with the largest "
+                    "|advantage| (quantile q of the iteration batch, 0 = off, bit-identical)")
+    ap.add_argument("--adv-filter-min", type=float, default=0.01,
+                    help="X1: floor for the advantage-filter threshold")
     ap.add_argument("--vf-coef", type=float, default=0.5)
     ap.add_argument("--ent-coef", type=float, default=0.003)
     ap.add_argument("--kl-coef", type=float, default=0.1)
@@ -790,6 +832,7 @@ def main() -> None:
     ap.add_argument("--overlap", action="store_true", default=False,
                     help="overlap the next rollout with the PPO update (background collect, one-iteration lag)")
     args = ap.parse_args()
+    validate_adv_filter(args, ap)
     t_start = time.time()
     _dev_type = torch.device(args.device).type
     dist_rank, dist_world = distmod.init_from_env(_dev_type)
@@ -1485,6 +1528,14 @@ def main() -> None:
                 if dist_rank == 0 and _n_drop:
                     print(f"[curriculum it {it}] dropped {_n_drop} solved-start samples", flush=True)
             dfail_if_any(len(slots) == 0, lambda: f"iteration {it}: collected 0 samples")
+            adv_keep, adv_thr = None, None
+            if args.adv_filter_q > 0 and len(slots):
+                # after the curriculum filter, so the mask aligns with the final slots
+                adv_keep, adv_thr = adv_filter_keep(adv, args.adv_filter_q, args.adv_filter_min)
+                _n_keep = int(adv_keep.sum())
+                if _n_keep < 0.01 * len(slots) or _n_keep > 0.99 * len(slots):
+                    print(f"ALERT adv_filter: kept {_n_keep} of {len(slots)} samples "
+                          f"(thr {adv_thr:.6g})", flush=True)
             warm = it <= args.value_warmup
             upd_ok = True
             upd_err = ""
@@ -1496,7 +1547,7 @@ def main() -> None:
                     warm=warm, precision=args.precision, max_upload_gb=args.max_upload_gb,
                     compile=args.compile, critic=critic, copt=copt,
                     priv_critic=bool(args.priv_critic), adv=args.adv, upd_critic=upd_critic,
-                    hint=hint)
+                    hint=hint, adv_keep=adv_keep)
             except RuntimeError as e:  # includes CUDA OOM: report the real error (stage P3 full run 1 said "non-finite")
                 upd_ok = False
                 upd_err = f"{type(e).__name__}: {str(e)[:300]}"
@@ -1642,6 +1693,8 @@ def main() -> None:
                         "adv_diff": round(vrpo_info["adv_diff"], 4)} if vrpo_info else {}),
                     **({"league": st["league"], "t_ga": round(st["t_ga"], 1)} if league is not None else {}),
                     **{k: round(v, 4) for k, v in agg_mean.items()},
+                    **({"adv_keep": round(float(adv_keep.mean()), 4),
+                        "adv_thr": round(float(adv_thr), 4)} if adv_keep is not None else {}),
                 }  # fmt: skip
                 print(json.dumps(rec), flush=True)
                 if league is not None:
@@ -1738,6 +1791,14 @@ def main() -> None:
             if dist_rank == 0 and _n_drop:
                 print(f"[curriculum it {it}] dropped {_n_drop} solved-start samples", flush=True)
         dfail_if_any(len(slots) == 0, lambda: f"iteration {it}: collected 0 samples")
+        adv_keep, adv_thr = None, None
+        if args.adv_filter_q > 0 and len(slots):
+            # after the curriculum filter, so the mask aligns with the final slots
+            adv_keep, adv_thr = adv_filter_keep(adv, args.adv_filter_q, args.adv_filter_min)
+            _n_keep = int(adv_keep.sum())
+            if _n_keep < 0.01 * len(slots) or _n_keep > 0.99 * len(slots):
+                print(f"ALERT adv_filter: kept {_n_keep} of {len(slots)} samples "
+                      f"(thr {adv_thr:.6g})", flush=True)
         warm = it <= args.value_warmup
         upd_ok2 = True
         upd_err2 = ""
@@ -1749,7 +1810,7 @@ def main() -> None:
                 warm=warm, precision=args.precision, max_upload_gb=args.max_upload_gb,
                 compile=args.compile, critic=critic, copt=copt,
                 priv_critic=bool(args.priv_critic), adv=args.adv, upd_critic=upd_critic,
-                hint=hint)
+                hint=hint, adv_keep=adv_keep)
         except RuntimeError as e:  # includes CUDA OOM: report the real error
             upd_ok2 = False
             upd_err2 = f"{type(e).__name__}: {str(e)[:300]}"
@@ -1866,6 +1927,8 @@ def main() -> None:
                         "adv_diff": round(vrpo_info2["adv_diff"], 4)} if vrpo_info2 else {}),
                     **({"league": st["league"], "t_ga": round(st["t_ga"], 1)} if league is not None else {}),
                     **{k: round(v, 4) for k, v in agg_mean.items()},
+                    **({"adv_keep": round(float(adv_keep.mean()), 4),
+                        "adv_thr": round(float(adv_thr), 4)} if adv_keep is not None else {}),
                 }  # fmt: skip
             print(json.dumps(rec), flush=True)
             if league is not None:

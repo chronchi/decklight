@@ -170,28 +170,53 @@ def ppo_loss_priv(policy, critic, ref_lp, obs, cobs, action, old_logp, adv, ret,
 
 
 def ppo_loss(model, ref_lp, obs, action, old_logp, adv, ret, clip: float, vf_coef: float, kl_coef: float,
-             ent_coef: float) -> tuple[torch.Tensor, dict]:  # fmt: skip
+             ent_coef: float, keep: torch.Tensor | None = None) -> tuple[torch.Tensor, dict]:  # fmt: skip
+    """`keep` (bool [B], advantage filtering): policy terms (pg, entropy, KL to the
+    reference) are means over the kept rows only; the value loss stays over all rows.
+    `None` (default) is exactly today's computation."""
     logits, value = model.forward_value(obs)
     lp_all = masked_log_softmax(logits)
     legal = torch.isfinite(logits)
     p = lp_all.exp() * legal
     logp = lp_all.gather(1, action[:, None]).squeeze(1)
     ratio = torch.exp(logp - old_logp)
-    pg = -torch.min(ratio * adv, ratio.clamp(1 - clip, 1 + clip) * adv).mean()
+    pg_row = -torch.min(ratio * adv, ratio.clamp(1 - clip, 1 + clip) * adv)
     vf = F.mse_loss(value.float(), ret)
-    ent = -(p * lp_all).sum(1).mean()
+    ent_row = -(p * lp_all).sum(1)
+    if keep is None:
+        pg = pg_row.mean()
+        ent = ent_row.mean()
+        loss = pg + vf_coef * vf - ent_coef * ent
+        kl = torch.zeros((), device=logits.device)
+        if ref_lp is not None and kl_coef > 0:
+            ref_lp = ref_lp.to(dtype=torch.float32) if torch.is_tensor(ref_lp) else torch.as_tensor(ref_lp)
+            ref_lp = ref_lp.to(device=logits.device, dtype=torch.float32)
+            kl = (p.float() * (lp_all - ref_lp)).sum(1).mean()  # KL(pi || pi_BC), exact over the legal options
+            loss = loss + kl_coef * kl
+        # Detached 0-d tensors (no host sync here): callers accumulate on-device and
+        # convert once per iteration. Same keys/values as the old per-minibatch .item() path.
+        stats = {
+            "pg": pg.detach(), "vf": vf.detach(), "ent": ent.detach(), "kl_bc": kl.detach(),
+            "clipfrac": ((ratio - 1).abs() > clip).float().mean().detach(),
+            "approx_kl": ((ratio - 1) - torch.log(ratio)).mean().detach(),
+        }  # fmt: skip
+        return loss, stats
+    k = keep.to(device=logits.device, dtype=torch.bool)
+    m = k.to(dtype=pg_row.dtype)
+    denom = m.sum().clamp_min(1)  # 0 kept rows: policy terms are 0 (no NaN), value loss untouched
+    pg = (pg_row * m).sum() / denom
+    ent = (ent_row * m).sum() / denom
     loss = pg + vf_coef * vf - ent_coef * ent
     kl = torch.zeros((), device=logits.device)
     if ref_lp is not None and kl_coef > 0:
         ref_lp = ref_lp.to(dtype=torch.float32) if torch.is_tensor(ref_lp) else torch.as_tensor(ref_lp)
         ref_lp = ref_lp.to(device=logits.device, dtype=torch.float32)
-        kl = (p.float() * (lp_all - ref_lp)).sum(1).mean()  # KL(pi || pi_BC), exact over the legal options
+        kl = ((p.float() * (lp_all - ref_lp)).sum(1) * m).sum() / denom
         loss = loss + kl_coef * kl
-    # Detached 0-d tensors (no host sync here): callers accumulate on-device and
-    # convert once per iteration. Same keys/values as the old per-minibatch .item() path.
     stats = {
         "pg": pg.detach(), "vf": vf.detach(), "ent": ent.detach(), "kl_bc": kl.detach(),
-        "clipfrac": ((ratio - 1).abs() > clip).float().mean().detach(),
-        "approx_kl": ((ratio - 1) - torch.log(ratio)).mean().detach(),
+        "clipfrac": ((((ratio - 1).abs() > clip).float() * m).sum() / denom).detach(),
+        "approx_kl": ((((ratio - 1) - torch.log(ratio)) * m).sum() / denom).detach(),
+        "adv_keep": m.mean().detach(),
     }  # fmt: skip
     return loss, stats
