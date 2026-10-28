@@ -15,11 +15,12 @@ games (decision cap) are still written, with winner 3.
         [--decks decks/pool] [--ygoagent-decks decks/gauntlet] [--seed S] [--threads T] [--device cuda]
 
 Schedule: N games; per game (seeded) an opponent entry is drawn by league weight, the
-student deck (always from --decks) and the opponent deck are drawn, the duel seed is
+student deck (always from --decks) and the opponent deck (from --opp-decks when given,
+else from --decks) are drawn, the duel seed is
 S + k and the student's seat alternates (even k: seat 0, odd k: seat 1). The opponent
 deck comes from --ygoagent-decks when the opponent is ygoagent (it only knows those
-cards), else from --decks. Stems listed in --holdout-file (default decks/pool/HOLDOUT)
-and `kewl-tune` are never drawn from --decks. `--policy stub` (tests and the laptop)
+cards), else from --opp-decks/--decks. Stems listed in --holdout-file (default decks/pool/HOLDOUT)
+and `kewl-tune` are never drawn from --decks nor --opp-decks. `--policy stub` (tests and the laptop)
 uses RandomPolicy (student) and Greedy/Random policies (league entries): the laptop must
 never instantiate YgoAgentPolicy or BCPolicy.
 """
@@ -134,6 +135,9 @@ def main() -> None:
     ap.add_argument("--temp", type=float, default=1.0)
     ap.add_argument("--league", default="self:0.5,ygoagent:0.2,greedy:0.15,random:0.15")
     ap.add_argument("--decks", type=Path, default=ROOT / "decks" / "pool")
+    ap.add_argument("--opp-decks", type=Path, default=None,
+                    help="opponent deck dir (non-ygoagent opponents draw from here; "
+                    "default: --decks, today's behaviour)")
     ap.add_argument("--ygoagent-decks", type=Path, default=ROOT / "decks" / "gauntlet")
     ap.add_argument("--holdout-file", type=Path, default=ROOT / "decks" / "pool" / "HOLDOUT")
     ap.add_argument("--seed", type=int, default=0)
@@ -157,6 +161,15 @@ def main() -> None:
     pool_decks = [load_ydk(f) for f in pool_files]
     pool_stems = [f.stem for f in pool_files]
     np_pool = len(pool_decks)
+    if args.opp_decks is None:
+        opp_files, opp_decks, opp_stems = pool_files, pool_decks, pool_stems
+    else:
+        opp_files = sorted(p for p in args.opp_decks.glob("*.ydk")
+                           if p.is_file() and p.stem not in excluded)
+        if not opp_files:
+            raise SystemExit(f"no .ydk decks in {args.opp_decks} after exclusions")
+        opp_decks = [load_ydk(f) for f in opp_files]
+        opp_stems = [f.stem for f in opp_files]
     yg_files: list[Path] = []
     if "ygoagent" in names:
         yg_files = sorted(p for p in args.ygoagent_decks.glob("*.ydk") if p.is_file())
@@ -164,8 +177,15 @@ def main() -> None:
             raise SystemExit(f"league needs ygoagent but no .ydk decks in {args.ygoagent_decks}")
     yg_decks = [load_ydk(f) for f in yg_files]
     yg_stems = [f.stem for f in yg_files]
-    all_decks = pool_decks + yg_decks
-    all_stems = pool_stems + yg_stems
+    if args.opp_decks is None:
+        all_decks = pool_decks + yg_decks
+        all_stems = pool_stems + yg_stems
+        opp_base = 0  # opponent indices into the shared pool region (today's layout)
+    else:
+        all_decks = pool_decks + opp_decks + yg_decks
+        all_stems = pool_stems + opp_stems + yg_stems
+        opp_base = len(pool_decks)
+    yg_base = len(all_decks) - len(yg_decks)
     rng = np.random.default_rng(args.seed)
     draws = rng.random(args.games)
     cum = np.cumsum(weights)
@@ -176,10 +196,10 @@ def main() -> None:
         s_stem = pool_stems[sp]
         if opp == "ygoagent":
             yg = int(rng.integers(len(yg_decks)))
-            o_stem, o_idx = yg_stems[yg], np_pool + yg
+            o_stem, o_idx = yg_stems[yg], yg_base + yg
         else:
-            op = int(rng.integers(np_pool))
-            o_stem, o_idx = pool_stems[op], op
+            op = int(rng.integers(len(opp_decks)))
+            o_stem, o_idx = opp_stems[op], (op if args.opp_decks is None else opp_base + op)
         seat = k % 2
         i, j = (sp, o_idx) if seat == 0 else (o_idx, sp)
         sched.append((i, j, args.seed + k, k, seat, opp, s_stem, o_stem))

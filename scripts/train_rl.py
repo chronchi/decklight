@@ -162,28 +162,40 @@ def focus_copies(n_other: int, share: float) -> int:
     return max(1, round(share * n_other / (1.0 - share)))
 
 
-def apply_focus_deck(pool_train: list, g_decks: list, focus_deck, share: float,
+def apply_focus_deck(pool_train: list, g_decks: list, focus_decks, share: float,
                      learner_gauntlet: int) -> tuple[list, set[int], list, list]:
-    """Insert the focus deck into the training list so a uniformly drawn seat holds it with ≈ share.
+    """Insert the focus deck(s) into the training list so a uniformly drawn seat holds one with ≈ share.
 
-    Decks identical to the focus deck (same main + extra) are dropped first. With the default
+    `focus_decks` is one deck or a list of them (a single deck behaves exactly as before).
+    Decks identical to any focus deck (same main + extra) are dropped first. With the default
     overfitting rule (learner_gauntlet=0) ordinary episodes draw uniformly from [:pool_count]
     only (VecEnv.set_pool_count; cpp/ygoenv/vecenv.cpp ordinary branch: deck0/deck1 uniform
     over [0, pool_n)), so the k copies live in the pool region and n_other = len(pool);
     with --learner-gauntlet 1 every episode draws uniformly over the whole list, so the
-    copies are appended at the end and n_other covers pool + gauntlet. Returns
-    (train_decks, focus_indices into it, new_pool_train, new_g_decks) where the new pool
+    copies are appended at the end and n_other covers pool + gauntlet. The k focus slots are
+    filled round-robin over the focus decks so they split the share evenly; k smaller than the
+    number of focus decks raises ValueError. Returns
+    (train_decks, focus_indices into it, new_pool, new_g_decks) where the new pool
     is the set_pool_count region and new_g_decks the gauntlet slice (both keep the
     train_decks = pool + gauntlet layout the rest of main() assumes).
     """
-    pool = [d for d in pool_train if not same_deck(d, focus_deck)]
-    gaunt = [d for d in g_decks if not same_deck(d, focus_deck)]
+    if not isinstance(focus_decks, (list, tuple)):
+        focus_decks = [focus_decks]
+    focus_decks = list(focus_decks)
+    if not focus_decks:
+        raise ValueError("--focus-deck needs at least one deck")
+    pool = [d for d in pool_train if not any(same_deck(d, f) for f in focus_decks)]
+    gaunt = [d for d in g_decks if not any(same_deck(d, f) for f in focus_decks)]
     n_other = len(pool) + len(gaunt) if learner_gauntlet else len(pool)
     k = focus_copies(n_other, share)
+    if k < len(focus_decks):
+        raise ValueError(f"--focus-deck has {len(focus_decks)} decks but --focus-share {share} "
+                         f"gives only k={k} focus slots (each focus deck needs at least one slot)")
+    slots = [focus_decks[i % len(focus_decks)] for i in range(k)]
     if learner_gauntlet:
-        return pool + gaunt + [focus_deck] * k, set(range(len(pool) + len(gaunt),
+        return pool + gaunt + slots, set(range(len(pool) + len(gaunt),
                len(pool) + len(gaunt) + k)), pool, gaunt
-    new_pool = pool + [focus_deck] * k
+    new_pool = pool + slots
     return new_pool + gaunt, set(range(len(pool), len(pool) + k)), new_pool, gaunt
 
 
@@ -797,8 +809,9 @@ def main() -> None:
                     help="1: separate privileged critic (sees hidden cards); the policy stays honest")
     ap.add_argument("--value-init", type=Path, default=None,
                     help="copy value_head from this checkpoint (e.g. value_p: same trunk as --init, trained head)")
-    ap.add_argument("--focus-deck", type=Path, default=None,
-                    help="per-deck fine-tune: a .ydk file; the focus deck fills --focus-share of seats")
+    ap.add_argument("--focus-deck", type=Path, nargs="+", default=None,
+                    help="per-deck fine-tune: one or more .ydk files or directories (whose *.ydk "
+                    "files are read in sorted order); the focus decks fill --focus-share of seats")
     ap.add_argument("--focus-share", type=float, default=0.5,
                     help="share of uniformly drawn seats holding the --focus-deck (0, 1 exclusive)")
     ap.add_argument("--log-games", type=int, default=0,
@@ -949,21 +962,33 @@ def main() -> None:
     train_decks = pool_train + [load_ydk(p) for p in gfiles]
     focus_idx: set[int] | None = None
     if args.focus_deck is not None:
-        try:
-            focus_deck = load_ydk(args.focus_deck)
-        except OSError as e:
-            fail2(f"--focus-deck {args.focus_deck}: cannot read: {e}")
-        if not focus_deck.main:
-            fail2(f"--focus-deck {args.focus_deck}: no main-deck cards (unparseable deck)")
+        focus_paths: list[Path] = []
+        for p in args.focus_deck:
+            if p.is_dir():
+                focus_paths.extend(sorted(p.glob("*.ydk")))
+            else:
+                focus_paths.append(p)
+        if not focus_paths:
+            fail2(f"--focus-deck: no .ydk files in {args.focus_deck}")
+        focus_decks = []
+        for p in focus_paths:
+            try:
+                _d = load_ydk(p)
+            except OSError as e:
+                fail2(f"--focus-deck {p}: cannot read: {e}")
+            if not _d.main:
+                fail2(f"--focus-deck {p}: no main-deck cards (unparseable deck)")
+            focus_decks.append(_d)
         try:
             train_decks, focus_idx, pool_train, g_decks = apply_focus_deck(
                 pool_train, [load_ydk(p) for p in gfiles],
-                focus_deck, args.focus_share, args.learner_gauntlet)
+                focus_decks, args.focus_share, args.learner_gauntlet)
         except ValueError as e:
             fail2(str(e))
         if dist_rank == 0:
             n_f = len(focus_idx)
-            print(f"[focus] {args.focus_deck} x{n_f} of {len(train_decks)} seats "
+            shown = ", ".join(str(p) for p in focus_paths)
+            print(f"[focus] {shown} x{n_f} of {len(train_decks)} seats "
                   f"(share {n_f / len(train_decks):.3f}, target {args.focus_share})", flush=True)
     r = random.Random(1234)
     ev_names = r.sample([p.stem for p in pool if p.stem not in hold], 4) + r.sample(sorted(hold & {p.stem for p in pool}), 4)

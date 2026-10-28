@@ -171,7 +171,9 @@ def last_iter_metrics(rl_out: Path) -> dict:
 
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--deck", type=Path, required=True, help="target .ydk file, anywhere")
+    ap.add_argument("--deck", type=Path, nargs="+", required=True,
+                      help="target .ydk file(s), anywhere (several = multi-list fine-tune, "
+                      "round-robin over --focus-deck)")
     ap.add_argument("--out", type=Path, required=True)
     ap.add_argument("--hours", type=float, default=2.0,
                     help="training budget; 2 h beat 0.75 h on Blue-Eyes (docs/results.md)")
@@ -199,11 +201,12 @@ def main() -> None:
     if device == "cpu":
         print("warning: --device cpu will be very slow (fine-tunes run on a vast GPU box)", flush=True)
     try:
-        deck = load_ydk(args.deck)
+        decks = [load_ydk(p) for p in args.deck]
     except OSError as e:
-        fail(f"--deck {args.deck}: cannot read: {e}")
-    if not deck.main:
-        fail(f"--deck {args.deck}: no main-deck cards (unparseable deck)")
+        fail(f"--deck: cannot read: {e}")
+    for p, deck in zip(args.deck, decks, strict=True):
+        if not deck.main:
+            fail(f"--deck {p}: no main-deck cards (unparseable deck)")
     for p, label in ((args.init, "--init"), (args.value_init, "--value-init")):
         if not p.is_file():
             fail(f"{label} {p} missing")
@@ -213,7 +216,7 @@ def main() -> None:
 
     cmd = [sys.executable, str(ROOT / "scripts" / "train_rl.py"),
            "--init", str(args.init), "--value-init", str(args.value_init),
-           "--focus-deck", str(args.deck), "--focus-share", str(args.share),
+           "--focus-deck", *[str(p) for p in args.deck], "--focus-share", str(args.share),
            "--lr", str(args.lr), "--kl-coef", str(args.kl_coef),
            "--eval-every", str(args.eval_every), "--device", device,
            "--hours", str(args.hours), "--iters", str(args.iters),
@@ -251,7 +254,9 @@ def main() -> None:
     if args.snap_every > 0 and not snapshots and last["iter"] >= args.snap_every:
         fail(f"--snap-every {args.snap_every}: no snapshot written although training ran {last['iter']} iterations")
     info = {
-        "deck": str(args.deck), "deck_sha256": sha256_file(args.deck),
+        "deck": str(args.deck[0]), "deck_sha256": sha256_file(args.deck[0]),
+        "decks": [str(p) for p in args.deck],
+        "deck_sha256s": [sha256_file(p) for p in args.deck],
         "base_ckpt": str(args.init), "base_sha256": sha256_file(args.init),
         "base_value": str(args.value_init), "base_value_sha256": sha256_file(args.value_init),
         "iterations": last["iter"], "hours": last.get("hours"),
@@ -267,7 +272,7 @@ def main() -> None:
     from decklight.play.bundle import Bundle as _Bundle
 
     extra = args.extra_cards.split(_os.pathsep) if args.extra_cards else None
-    bundle_dir = write_bundle(out, deck=args.deck, policy_pt=policy_pt, value_pt=value_pt,
+    bundle_dir = write_bundle(out, deck=args.deck[0], policy_pt=policy_pt, value_pt=value_pt,
                               cards=extra)
     try:
         _Bundle.load(bundle_dir)
@@ -275,10 +280,11 @@ def main() -> None:
         fail(f"fresh bundle {bundle_dir} does not validate: {e}")
     print(f"bot bundle: {bundle_dir} (copy it into bots/ to play it anywhere)", flush=True)
     print(f"[finetune] wrote {policy_pt}, {value_pt} + {out}/FINETUNE.json "
-          f"(it {info['iterations']}, focus_wr_vs_bc {info['focus_wr_vs_bc']}, "
+          f"(decks {info['decks']}, it {info['iterations']}, "
+          f"focus_wr_vs_bc {info['focus_wr_vs_bc']}, "
           f"focus_seat_share {info['focus_seat_share']})", flush=True)
     print(f"play it: uv run python scripts/web_play.py --ckpt {policy_pt} --value {value_pt}", flush=True)
-    print(f"or:      uv run python scripts/edopro_host.py --deck {args.deck} --opponent product "
+    print(f"or:      uv run python scripts/edopro_host.py --deck {args.deck[0]} --opponent product "
           f"--ckpt {policy_pt} --value {value_pt}", flush=True)
 
 

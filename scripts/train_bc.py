@@ -110,6 +110,53 @@ def kl_to_init(logits: torch.Tensor, ref_logits: torch.Tensor, mask: torch.Tenso
     return torch.where(mask, p_ref * diff, torch.zeros((), device=logp.device, dtype=logp.dtype)).sum(-1)
 
 
+def batch_teacher_kl(student_logits: torch.Tensor, obs: dict, batch_teacher: np.ndarray,
+                     teachers: list, amp: bool = False) -> torch.Tensor:
+    """Per-sample KL(pi_teacher || pi_student) with a per-row teacher, over legal options.
+
+    `batch_teacher` holds one teacher index per row; each distinct teacher runs one forward
+    on its own rows (no gradients). Matches kl_to_init row for row.
+    """
+    kl = torch.empty(student_logits.shape[0], dtype=torch.float32, device=student_logits.device)
+    mask = obs["action_mask"]
+    for t in np.unique(batch_teacher):
+        rows = torch.from_numpy(np.flatnonzero(batch_teacher == int(t))).to(student_logits.device)
+        with torch.no_grad(), torch.autocast(student_logits.device.type, dtype=torch.bfloat16, enabled=amp):
+            ref_logits = teachers[int(t)]({k: v[rows] for k, v in obs.items()})
+        kl[rows] = kl_to_init(student_logits[rows].float(), ref_logits.float(), mask[rows])
+    return kl
+
+
+def mixed_loss(hard_per: torch.Tensor, w: torch.Tensor, kl: torch.Tensor,
+               kl_coef: float, ce_coef: float) -> torch.Tensor:
+    """Distillation loss: ce_coef * mean(hard targets) + kl_coef * mean(KL).
+
+    ce_coef == 1.0 is exactly today's loss (the hard term is not rescaled).
+    ce_coef == 0 is pure distillation (kl_coef * KL only).
+    """
+    hard = (hard_per * w).sum() / w.sum()
+    if ce_coef == 1.0:
+        return hard + kl_coef * kl.mean()
+    return ce_coef * hard + kl_coef * kl.mean()
+
+
+def load_kl_ref_map(path: Path) -> dict:
+    """Parse a --kl-ref-map file: {"default": "<ckpt>", "decks": {"<stem>": "<ckpt>", ...}}."""
+    try:
+        m = json.loads(path.read_text())
+    except (OSError, ValueError) as e:
+        print(f"ALERT train_bc: --kl-ref-map {path}: cannot read: {e}", flush=True)
+        raise SystemExit(2)
+    if not isinstance(m, dict) or not isinstance(m.get("decks"), dict) or "default" not in m:
+        print(f"ALERT train_bc: --kl-ref-map {path}: want "
+              f'{{"default": "<ckpt>", "decks": {{<stem>: "<ckpt>"}}}}', flush=True)
+        raise SystemExit(2)
+    if len(m["decks"]) == 0:
+        print(f"ALERT train_bc: --kl-ref-map {path} has 0 deck entries", flush=True)
+        raise SystemExit(2)
+    return m
+
+
 def gumbel_soft_target(
     ref_logits: torch.Tensor, mask: torch.Tensor, soft_idx: torch.Tensor | None,
     soft_q: torch.Tensor | None, scale: float, norm: str = "minmax",
@@ -362,6 +409,14 @@ def main() -> None:
                     "computed on the fly (plan-v4 pilot: the student of P). Without --init the student takes the "
                     "ref's architecture with fresh weights")
     ap.add_argument("--kl-ref-coef", type=float, default=1.0)
+    ap.add_argument("--kl-ref-map", type=Path, default=None,
+                    help="per-deck distillation teachers: a JSON file "
+                    '{"default": "<ckpt>", "decks": {"<deck stem>": "<ckpt>", ...}}; every train '
+                    "sample is distilled from its acting deck's teacher (data[\"deck\"]), else "
+                    "default (mutually exclusive with --kl-ref)")
+    ap.add_argument("--ce-coef", type=float, default=1.0,
+                    help="weight of the hard-target term (1.0 = today's loss, bit-identical; "
+                    "0 = pure distillation, KL only; < 1 needs --kl-ref or --kl-ref-map)")
     ap.add_argument("--soft-targets", choices=["off", "gumbel"], default="off",
                     help="off = hard targets (default, unchanged); gumbel = distill the search improved "
                     "policy softmax(prior + c*q_hat) on samples with search info (requires --init)")
@@ -394,6 +449,21 @@ def main() -> None:
     if args.kl_ref and (args.kl_init or args.soft_targets != "off"):
         print("error: --kl-ref excludes --kl-init and --soft-targets", flush=True)
         raise SystemExit(2)
+    if args.kl_ref_map is not None and args.kl_ref is not None:
+        print("error: --kl-ref-map and --kl-ref are mutually exclusive", flush=True)
+        raise SystemExit(2)
+    if args.kl_ref_map is not None and (args.kl_init or args.soft_targets != "off"):
+        print("error: --kl-ref-map excludes --kl-init and --soft-targets", flush=True)
+        raise SystemExit(2)
+    if args.ce_coef < 1.0 and args.kl_ref is None and args.kl_ref_map is None:
+        print("error: --ce-coef < 1 without --kl-ref or --kl-ref-map", flush=True)
+        raise SystemExit(2)
+    kl_map = load_kl_ref_map(args.kl_ref_map) if args.kl_ref_map is not None else None
+    if kl_map is not None:
+        for ckpt in [kl_map["default"], *kl_map["decks"].values()]:
+            if not Path(ckpt).is_file():
+                print(f"ALERT train_bc: --kl-ref-map teacher checkpoint missing: {ckpt}", flush=True)
+                raise SystemExit(2)
     if args.soft_targets == "gumbel" and not args.init:
         print("error: --soft-targets gumbel requires --init (the search prior)", flush=True)
         raise SystemExit(2)
@@ -428,7 +498,7 @@ def main() -> None:
             sys.exit(3)
     print({k: len(v) for k, v in idx.items()}, "decks:", sorted(set(map(str, data["deck"]))), flush=True)
 
-    arch_src = args.init or args.kl_ref
+    arch_src = args.init or args.kl_ref or (Path(kl_map["default"]) if kl_map is not None else None)
     if arch_src:  # the starting checkpoint (or the distillation teacher) fixes the architecture
         src_args = _run_args(arch_src)
         args.d, args.layers, args.heads = src_args.get("d", args.d), src_args.get("layers", args.layers), src_args.get("heads", args.heads)
@@ -456,6 +526,37 @@ def main() -> None:
         ref.eval().requires_grad_(False)
         kl_coef = args.kl_ref_coef
         print(f"distillation teacher {args.kl_ref} (KL coef {kl_coef})", flush=True)
+    teachers: list = []
+    teacher_of: dict[str, int] = {}
+    teacher_labels: list[str] = []
+    sample_teacher: np.ndarray | None = None
+    if kl_map is not None:
+        # every train sample gets its acting deck's teacher (data["deck"]), else the default
+        have = set(map(str, np.unique(data["deck"][idx["train"]]).tolist()))
+        empty = [d for d in kl_map["decks"] if d not in have]
+        if empty:
+            print(f"ALERT train_bc: --kl-ref-map decks with 0 train samples: {empty}", flush=True)
+            raise SystemExit(2)
+        order: list[str] = []
+        for ckpt in [kl_map["default"], *kl_map["decks"].values()]:
+            if ckpt not in order:
+                order.append(ckpt)
+        for ckpt in order:
+            t = make_policy(args.emb, vars(args), dropout=0.0, card_dropout=0.0).to(device)
+            tstate = torch.load(ckpt, map_location="cpu")
+            tstate = tstate.get("model", tstate)
+            t.load_state_dict({k: v.float() if v.is_floating_point() else v for k, v in tstate.items()})
+            t.eval().requires_grad_(False)
+            teachers.append(t)
+            teacher_labels.append(Path(ckpt).parent.name)
+        default_pos = order.index(kl_map["default"])
+        teacher_of = {d: order.index(c) for d, c in kl_map["decks"].items()}
+        sample_teacher = np.array([teacher_of.get(str(d), default_pos) for d in data["deck"]],
+                                  dtype=np.int64)
+        kl_coef = args.kl_ref_coef
+        print(f"per-deck distillation teachers: {len(order)} distinct ckpts "
+              f"({len(kl_map['decks'])} decks, KL coef {kl_coef}, CE coef {args.ce_coef})", flush=True)
+    eval_ref = ref if ref is not None else (teachers[default_pos] if teachers else None)
     soft = args.soft_targets == "gumbel"
     n_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     print(f"params {n_params / 1e6:.2f}M device {device} amp {amp}", flush=True)
@@ -487,7 +588,7 @@ def main() -> None:
         for split in ("val", "holdout"):
             if len(idx[split]):
                 rec[split] = evaluate(model, data, idx[split], args.batch * 2, device, amp, args.set_target,
-                                      args.hist, not args.hist_all, args.known, ref=ref)
+                                      args.hist, not args.hist_all, args.known, ref=eval_ref)
         print(json.dumps(rec), flush=True)
         log.write(json.dumps(rec) + "\n")
         log.flush()
@@ -496,6 +597,8 @@ def main() -> None:
         torch.save({k: v.half() if v.is_floating_point() else v for k, v in model.state_dict().items()}, args.out / "best.pt")
     for ep in range(args.epochs):
         run = {"loss": 0.0, "n": 0, "kl": 0.0, "soft_n": 0, "soft_ent": 0.0, "soft_agree": 0.0}
+        lab_sum: dict[str, float] = {}
+        lab_n: dict[str, int] = {}
         ep_idx = epoch_train_idx(data, idx["train"], kind_frac, rng)
         for obs, act, w, eq, si, sq, j in batches(data, ep_idx, args.batch, device, True, rng,
                                             args.hist, not args.hist_all, args.known):
@@ -507,7 +610,17 @@ def main() -> None:
                 per = F.cross_entropy(
                     logits.float(), act, reduction="none", label_smoothing=args.label_smoothing
                 )
-            if ref is not None:
+            if teachers:
+                assert sample_teacher is not None
+                bt = sample_teacher[np.asarray(j)]
+                kl = batch_teacher_kl(logits, obs, bt, teachers, amp)
+                loss = mixed_loss(per, w, kl, kl_coef, args.ce_coef)
+                kl_det = kl.detach()
+                for t in np.unique(bt):
+                    lab = teacher_labels[int(t)]
+                    lab_sum[lab] = lab_sum.get(lab, 0.0) + float(kl_det[bt == int(t)].sum())
+                    lab_n[lab] = lab_n.get(lab, 0) + int((bt == int(t)).sum())
+            elif ref is not None:
                 with torch.no_grad(), torch.autocast(device.type, dtype=torch.bfloat16, enabled=amp):
                     ref_logits = ref(obs)
                 if soft:
@@ -530,7 +643,7 @@ def main() -> None:
                         run["soft_agree"] += (pi_prime.argmax(-1) == act)[has_soft].sum().item()
                 kl = kl_to_init(logits.float(), ref_logits.float(), obs["action_mask"])
                 loss = (per * w).sum() / w.sum() + kl_coef * kl.mean()
-            else:
+            elif not teachers:
                 loss = (per * w).sum() / w.sum()
             opt.zero_grad(set_to_none=True)
             loss.backward()
@@ -539,13 +652,13 @@ def main() -> None:
             sched.step()
             run["loss"] += loss.item() * len(j)
             run["n"] += len(j)
-            if ref is not None:
+            if ref is not None or teachers:
                 run["kl"] += kl.detach().sum().item()
-        if ref is not None:
+        if ref is not None or teachers:
             train_kl = run["kl"] / max(run["n"], 1)
             if not math.isfinite(train_kl):
                 print(f"ALERT {args.out.name}: KL is NaN", flush=True)
-                raise SystemExit(3)
+                raise SystemExit(2 if teachers else 3)
         if soft:
             if run["soft_n"] == 0:
                 print(f"ALERT {args.out.name}: --soft-targets gumbel with 0 soft samples in epoch {ep}",
@@ -558,15 +671,18 @@ def main() -> None:
             rec["soft_n"] = run["soft_n"]
             rec["soft_ent"] = run["soft_ent"] / run["soft_n"]
             rec["soft_argmax_agree"] = run["soft_agree"] / run["soft_n"]
-        if ref is not None:
+        if ref is not None or teachers:
             rec["train_kl"] = train_kl
+        if teachers:
+            rec["kl_teacher"] = {lab: lab_sum[lab] / lab_n[lab] for lab in sorted(lab_n)}
+            rec["teacher_rows"] = {lab: lab_n[lab] for lab in sorted(lab_n)}
         if ep == 0:
             rec["args"] = args_rec
         for split in ("val", "holdout"):
             if len(idx[split]):
                 rec[split] = evaluate(
                     model, data, idx[split], args.batch * 2, device, amp, args.set_target,
-                    args.hist, not args.hist_all, args.known, ref=ref,
+                    args.hist, not args.hist_all, args.known, ref=eval_ref,
                 )
         print(json.dumps(rec), flush=True)
         log.write(json.dumps(rec) + "\n")
@@ -600,7 +716,7 @@ def main() -> None:
         for split in ("val", "holdout"):
             if len(idx[split]):
                 rec[split] = evaluate(model, data, idx[split], args.batch * 2, device, amp, args.set_target,
-                                      args.hist, not args.hist_all, args.known, ref=ref)
+                                      args.hist, not args.hist_all, args.known, ref=eval_ref)
         print(json.dumps(rec), flush=True)
         log.write(json.dumps(rec) + "\n")
         log.flush()
