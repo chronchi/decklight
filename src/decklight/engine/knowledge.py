@@ -19,7 +19,10 @@ duel and the C++ duel, in lockstep). Layouts verified against the core's message
   (code u32, controller u8, location u8, sequence u32). `viewer` is the player the cards are
   shown to; confirm-to-self does not count.
 - MSG_SHUFFLE_HAND (0x21): player u8 + count u32 + count x code u32, in the new hand order.
-  Identical copies are interchangeable, so the known flags are re-aligned by code.
+  Identical copies are interchangeable, so the known flags are re-aligned by code. The Rust core
+  (third_party/ygopro-core-rust, "Differences from upstream") also sets the top bit of a face-up
+  card's code and appends count x u8 (each card's index before the shuffle); both are ignored
+  here, so the two cores give the same knowledge.
 - MSG_SWAP_GRAVE_DECK never touches hands; MSG_TAG_SWAP only exists in tag duels (1v1: never
   sent). Anything else that would desynchronise the lists is caught by the resync guard in
   `Duel.advance` (tracked length vs queried hand size at every decision).
@@ -153,9 +156,9 @@ class HandMemory:
         if len(raw) < 6:
             return True
         player, (count,) = raw[1], struct.unpack_from("<I", raw, 2)
-        if player not in (0, 1) or len(raw) != 6 + 4 * count:
+        if player not in (0, 1) or len(raw) not in (6 + 4 * count, 6 + 5 * count):
             return True
-        codes = [struct.unpack_from("<I", raw, 6 + 4 * i)[0] for i in range(count)]
+        codes = [struct.unpack_from("<I", raw, 6 + 4 * i)[0] & 0x7FFFFFFF for i in range(count)]
         cur, cur_codes = self.known[player], self.codes[player]
         if len(codes) != len(cur) or len(cur_codes) != len(cur):
             self.known[player] = [False] * len(codes)

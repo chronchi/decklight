@@ -1,0 +1,24 @@
+diff --git a/ygo-core/src/card.rs b/ygo-core/src/card.rs
+index cf7d74f..8ffddcb 100644
+--- a/ygo-core/src/card.rs
++++ b/ygo-core/src/card.rs
+@@ -525,6 +525,7 @@ impl CardId {
+         ins!(QUERY_BASE_DEFENSE, self.get_base_defense(d));
+         ins!(QUERY_REASON, self.c(d).current.reason);
+         ins!(QUERY_COVER, self.c(d).cover);
++        ins!(QUERY_CARDID, self.c(d).cardid);
+         let loc_or_zero = |d: &Duel, buf: &mut Vec<u8>, c: Option<CardId>| match c {
+             Some(c) => {
+                 let info = c.get_info_location(d);
+diff --git a/ygo-core/src/constants.rs b/ygo-core/src/constants.rs
+index d8cb617..ba11ab6 100644
+--- a/ygo-core/src/constants.rs
++++ b/ygo-core/src/constants.rs
+@@ -668,6 +668,7 @@ pub const QUERY_RSCALE: u32 = 0x400000;
+ pub const QUERY_LINK: u32 = 0x800000;
+ pub const QUERY_IS_HIDDEN: u32 = 0x1000000;
+ pub const QUERY_COVER: u32 = 0x2000000;
++pub const QUERY_CARDID: u32 = 0x4000000; // decklight patch (third_party/patches/ygopro-core-query-cardid.patch)
+ pub const QUERY_END: u32 = 0x80000000;
+ pub const LINK_MARKER_BOTTOM_LEFT: u32 = 0x1;
+ pub const LINK_MARKER_BOTTOM: u32 = 0x2;

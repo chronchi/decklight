@@ -1,0 +1,18 @@
+[package]
+name = "ocgshim"
+version = "0.1.0"
+edition = "2024"
+
+[workspace]
+
+[lib]
+name = "ocgcore_rs"
+crate-type = ["cdylib"]
+
+[profile.release]
+debug = 1
+panic = "unwind"
+
+[dependencies]
+ygo-core = { path = "../../third_party/ygopro-core-rust/ygo-core" }
+ygo-cards = { path = "../../third_party/ygopro-core-rust/ygo-cards" }

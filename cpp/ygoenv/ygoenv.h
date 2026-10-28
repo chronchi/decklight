@@ -104,6 +104,9 @@ class Duel {
   ~Duel();
   Duel(const Duel&) = delete;
   Duel& operator=(const Duel&) = delete;
+  // A full, independent copy at the current decision (Rust build only: needs
+  // OCG_DuelClone; throws std::runtime_error on the C++ core).
+  std::unique_ptr<Duel> clone_duel() const;
 
   // Run until a response is needed (returns the raw select message) or the duel ends (nullptr).
   const Bytes* advance();
@@ -131,6 +134,8 @@ class Duel {
 
   private:
    OCG_Duel handle_ = nullptr;
+   struct NoInit {};  // clone_duel: build without creating a core duel
+   Duel(Engine& engine, const DuelConfig& config, NoInit);
    uint64_t hint_ = 0;
    Bytes pending_;
    bool has_pending_ = false;
@@ -170,6 +175,7 @@ class Decision {
   explicit Decision(int msg_type, int player) : msg_type(msg_type), player(player) {}
   virtual ~Decision() = default;
   virtual std::vector<Option> options() = 0;
+  virtual std::unique_ptr<Decision> clone() const = 0;
   // Returns true and fills `response` once the selection is complete.
   bool choose(int index, Bytes& response);
 
@@ -311,6 +317,9 @@ class Env {
     int knowledge_resyncs() const { return duel_->knowledge_resyncs(); }
     int history_len() const { return static_cast<int>(history_.size()); }
     std::vector<DebugCard> cards() { return duel_->cards_debug(); }
+   // A full, independent copy at the current decision (Rust build only; the C++
+   // build throws std::runtime_error("clone needs the Rust core")). VecEnv is untouched.
+   std::unique_ptr<Env> clone() const;
    // All recorded entries in absolute form: stored row (10) + actor, turn, phase, public.
    std::vector<std::array<int32_t, HLOG_COLS>> history_log() const;
 

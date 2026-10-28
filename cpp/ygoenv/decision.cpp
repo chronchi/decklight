@@ -100,6 +100,7 @@ class Fixed : public Decision {
     response = resps[index];
     return true;
   }
+  std::unique_ptr<Decision> clone() const override { return std::make_unique<Fixed>(*this); }
 };
 
 std::unique_ptr<Decision> idle(Reader& r, int t) {
@@ -219,6 +220,7 @@ class SelectCard : public PickCards {
   bool addable(int) override { return true; }
   bool can_finish() override { return min <= picked.size() && picked.size() < max; }
   bool auto_send() override { return picked.size() >= max; }
+  std::unique_ptr<Decision> clone() const override { return std::make_unique<SelectCard>(*this); }
 };
 
 class SelectTribute : public PickCards {
@@ -247,6 +249,7 @@ class SelectTribute : public PickCards {
   }
   bool can_finish() override { return total() >= min && picked.size() < max; }
   bool auto_send() override { return picked.size() >= max; }
+  std::unique_ptr<Decision> clone() const override { return std::make_unique<SelectTribute>(*this); }
 };
 
 // select_sum_check1 from playerop.cpp, as in random_agent._sum_check_exact
@@ -327,6 +330,7 @@ class SelectSum : public PickCards {
     return std::find(valid.begin(), valid.end(), cur) != valid.end();
   }
   bool auto_send() override { return false; }
+  std::unique_ptr<Decision> clone() const override { return std::make_unique<SelectSum>(*this); }
 };
 
 // ---------------------------------------------------------------- other multi-step messages
@@ -356,6 +360,7 @@ class UnselectCard : public Decision {
     }
     return true;
   }
+  std::unique_ptr<Decision> clone() const override { return std::make_unique<UnselectCard>(*this); }
 };
 
 class Place : public Decision {
@@ -386,6 +391,7 @@ class Place : public Decision {
     response = zones;
     return true;
   }
+  std::unique_ptr<Decision> clone() const override { return std::make_unique<Place>(*this); }
 };
 
 class Bits : public Decision {
@@ -415,6 +421,7 @@ class Bits : public Decision {
     }
     return true;
   }
+  std::unique_ptr<Decision> clone() const override { return std::make_unique<Bits>(*this); }
 };
 
 class Counter : public Decision {
@@ -447,6 +454,7 @@ class Counter : public Decision {
     }
     return true;
   }
+  std::unique_ptr<Decision> clone() const override { return std::make_unique<Counter>(*this); }
 };
 
 class Sort : public Decision {
@@ -477,6 +485,7 @@ class Sort : public Decision {
     for (size_t r = 0; r < order.size(); ++r) response[order[r]] = static_cast<uint8_t>(r);
     return true;
   }
+  std::unique_ptr<Decision> clone() const override { return std::make_unique<Sort>(*this); }
 };
 
 std::vector<uint32_t> declare_options(const std::vector<uint64_t>& opcodes, Engine& engine,

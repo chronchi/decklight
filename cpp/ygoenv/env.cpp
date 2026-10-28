@@ -461,6 +461,19 @@ bool Env::step(int index, Obs& obs) {
   return settle(obs);
 }
 
+std::unique_ptr<Env> Env::clone() const {
+  auto out = std::make_unique<Env>(engine_, config_, auto_single_);
+  out->duel_ = duel_->clone_duel();
+  if (dec_) out->dec_ = dec_->clone();
+  if (board_) out->board_ = std::make_unique<Board>(*board_);
+  out->opts_ = opts_;
+  out->history_ = history_;
+  out->choices = choices;
+  out->decisions = decisions;
+  out->truncated = truncated;
+  return out;
+}
+
 std::vector<std::array<int32_t, HLOG_COLS>> Env::history_log() const {
   std::vector<std::array<int32_t, HLOG_COLS>> out(history_.size());
   for (size_t i = 0; i < history_.size(); ++i) {

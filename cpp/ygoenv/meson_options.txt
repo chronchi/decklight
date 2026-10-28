@@ -1,0 +1,2 @@
+option('core', type : 'combo', choices : ['cpp', 'rust'], value : 'cpp',
+  description : 'OCG core to link: the C++ libocgcore (default) or the Rust libocgcore_rs shim')

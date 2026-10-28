@@ -200,6 +200,25 @@ def test_hand_memory_messages():
     assert m.guard((5, 3))
 
 
+def test_hand_memory_rust_shuffle_format():
+    """The Rust core's MSG_SHUFFLE_HAND (face-up bit on codes + one prior-index byte per card) gives the
+    same knowledge as the upstream format."""
+    import struct
+
+    from decklight.engine import constants as C
+    from decklight.engine.knowledge import HandMemory
+
+    up, rs = HandMemory(), HandMemory()
+    for m in (up, rs):
+        m.note(_draw(0, [101, 102, 103]))
+        m.note(_confirm(1, [(102, 0, C.LOCATION_HAND, 1)]))
+    assert up.note(_shuffle(0, [103, 102, 101]))
+    raw = bytes([C.MSG_SHUFFLE_HAND, 0]) + struct.pack("<I", 3)
+    raw += struct.pack("<III", 103, 102 | 0x80000000, 101) + bytes([2, 1, 0])
+    assert rs.note(raw)
+    assert rs.known == up.known and rs.codes == up.codes == [[103, 102, 101], []]
+
+
 def test_hand_memory_setup_hands():
     from decklight.engine.knowledge import HandMemory
 

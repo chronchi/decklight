@@ -9,6 +9,9 @@
 #include "lauxlib.h"
 #include "lua.h"
 #include "ygoenv.h"
+#ifdef YGOENV_RUST
+#include "ocg_clone.h"
+#endif
 
 #ifndef QUERY_CARDID
 #define QUERY_CARDID 0x4000000
@@ -160,6 +163,37 @@ Duel::Duel(Engine& engine, const DuelConfig& config) : engine(engine), config(co
 
 Duel::~Duel() {
   if (handle_) OCG_DestroyDuel(handle_);
+}
+
+Duel::Duel(Engine& engine, const DuelConfig& config, NoInit) : engine(engine), config(config) {}
+
+std::unique_ptr<Duel> Duel::clone_duel() const {
+#ifdef YGOENV_RUST
+  auto out = std::unique_ptr<Duel>(new Duel(engine, config, NoInit{}));
+  out->handle_ = OCG_DuelClone(handle_, out.get());  // log() payload = the new Duel
+  if (!out->handle_) throw std::runtime_error("OCG_DuelClone failed");
+  out->responses = responses;
+  out->errors = errors;
+  out->ended = ended;
+  out->winner = winner;
+  out->win_reason = win_reason;
+  out->turn = turn;
+  out->turn_player = turn_player;
+  out->first_player = first_player;
+  out->phase = phase;
+  out->select_hint = select_hint;
+  for (int p = 0; p < 2; ++p) {
+    out->hand_known_[p] = hand_known_[p];
+    out->hand_codes_[p] = hand_codes_[p];
+  }
+  out->knowledge_resyncs_ = knowledge_resyncs_;
+  out->hint_ = hint_;
+  out->pending_ = pending_;
+  out->has_pending_ = has_pending_;
+  return out;
+#else
+  throw std::runtime_error("clone needs the Rust core");
+#endif
 }
 
 void Duel::add_cards(uint8_t team, uint32_t location, const std::vector<uint32_t>& codes) {
@@ -325,14 +359,16 @@ void Duel::track_message(const uint8_t* m, uint32_t size) {
         hand_known_[con][seq] = 1;
     }
   } else if (t == MSG_SHUFFLE_HAND) {
-    // player u8 + count u32 + count x code u32 in the new hand order. Identical copies are
+    // player u8 + count u32 + count x code u32 in the new hand order (the patched/Rust core adds
+    // the 0x80000000 face-up bit to codes and count x u8 old indices: 6 + 5 * count bytes; the
+    // realignment below ignores both, as knowledge.py does). Identical copies are
     // interchangeable: per code, keep the number of known instances, assign to first positions.
     if (size < 6) return;
     uint8_t player = m[1];
     uint32_t count = rd32(m + 2);
-    if (player > 1 || size != 6 + 4 * count) return;
+    if (player > 1 || (size != 6 + 4 * count && size != 6 + 5 * count)) return;
     std::vector<uint32_t> codes(count);
-    for (uint32_t i = 0; i < count; ++i) codes[i] = rd32(m + 6 + 4 * i);
+    for (uint32_t i = 0; i < count; ++i) codes[i] = rd32(m + 6 + 4 * i) & 0x7FFFFFFFu;
     auto& known = hand_known_[player];
     auto& hc = hand_codes_[player];
     if (codes.size() != known.size() || hc.size() != known.size()) {

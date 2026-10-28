@@ -8,6 +8,11 @@
 namespace py = pybind11;
 using namespace ygo;
 
+// The module name is _ygoenv, or _ygoenv_rs in the Rust build (-Dcore=rust).
+#ifndef YGOENV_MODULE
+#define YGOENV_MODULE _ygoenv
+#endif
+
 namespace {
 
 template <typename T, size_t N>
@@ -51,7 +56,7 @@ py::array view(py::object owner, std::vector<Obs>& obs, const T* first, std::vec
 
 }  // namespace
 
-PYBIND11_MODULE(_ygoenv, m) {
+PYBIND11_MODULE(YGOENV_MODULE, m) {
   m.attr("OBS_VERSION") = OBS_VERSION;
 
   py::class_<Engine>(m, "Engine")
@@ -161,7 +166,8 @@ PYBIND11_MODULE(_ygoenv, m) {
       .def("cards", [](Env& e) {
         py::gil_scoped_release nogil;
         return e.cards();
-      });
+      })
+      .def("clone", [](Env& env) { return env.clone(); }, py::keep_alive<0, 1>());
 
   py::class_<DebugCard>(m, "DebugCard")
       .def_readonly("controller", &DebugCard::controller)

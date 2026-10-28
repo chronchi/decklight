@@ -5,7 +5,10 @@ import json
 import os
 from collections.abc import Sequence
 
-from decklight import _ygoenv
+if os.environ.get("YGO_CORE") == "rust":
+    from decklight import _ygoenv_rs as _ygoenv
+else:
+    from decklight import _ygoenv
 from decklight.engine.duel import DuelConfig, Engine
 
 assert _ygoenv.OBS_VERSION == 1
@@ -51,7 +54,7 @@ class FlightRecorder:
             return
         os.makedirs(d, exist_ok=True)
         self.path = os.path.join(d, f"{os.getpid()}-{next(self._ids)}.jsonl")
-        self._f = open(self.path, "w", buffering=1)
+        self._f = open(self.path, "w", buffering=1)  # noqa: SIM115 (kept open for the game)
         self._f.write(json.dumps({
             "deck0_main": list(config.main_of(0)), "deck0_extra": list(config.deck0.extra),
             "deck1_main": list(config.main_of(1)), "deck1_extra": list(config.deck1.extra),
@@ -96,6 +99,14 @@ class CppEnv:
         were consumed). When every key resolved, reason is None and obs is the final obs
         (None if the duel ended exactly at the end, as in the Python loop)."""
         return self._env.replay_keys([(tuple(int(x) for x in k), int(r)) for k, r in keys_ranks])
+
+    def clone(self) -> "CppEnv":
+        """A full, independent copy at the current decision (Rust build only:
+        the default C++ build raises RuntimeError)."""
+        new = object.__new__(CppEnv)
+        new.config = self.config
+        new._env = self._env.clone()
+        return new
 
     def cards(self) -> dict:
         """Every card of both players (DECK/HAND/MZONE/SZONE/GRAVE/REMOVED/EXTRA) with its

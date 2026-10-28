@@ -10,3 +10,6 @@
 	path = third_party/BabelCDB
 	url = https://github.com/ProjectIgnis/BabelCDB.git
 	shallow = true
+[submodule "third_party/ygopro-core-rust"]
+	path = third_party/ygopro-core-rust
+	url = https://github.com/tsoj/ygopro-core-rust
