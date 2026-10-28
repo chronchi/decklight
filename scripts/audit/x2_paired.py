@@ -6,7 +6,9 @@ overall and per-seat difference (paired_sm.report), then per archetype (V's -vN 
 V - T. Exit 2 when fewer than 90% of T's games pair up, a pair's opponent differs between arms, or most
 seat twins replay one game. Engine-free.
 
-    python scripts/audit/x2_paired.py runs/x2-<stamp>/t runs/x2-<stamp>/v
+    python scripts/audit/x2_paired.py runs/x2-<stamp>/t runs/x2-<stamp>/v [--s-first]
+
+--s-first reads records written before search_match's 2026-10-27 record fix (S's deck first, not seat order).
 """
 
 from __future__ import annotations
@@ -20,20 +22,23 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from paired_sm import report
 
 
-def games(d: Path) -> dict:
+def games(d: Path, s_first: bool) -> dict:
     out = {}
     for f in sorted(d.glob("games-*.jsonl")):
         for raw in f.read_text().splitlines():
             if raw.strip():
                 g = json.loads(raw)
                 s = g["s_seat"]
+                si = 0 if s_first else s  # --s-first: records of runs before 2026-10-27 (S's deck listed first)
                 score = 0.5 if g.get("truncated") else float(g["winner"] == s)
-                out[(g["seed"], s)] = (g["decks"][s], g["decks"][1 - s], score, g.get("choices"))
+                out[(g["seed"], s)] = (g["decks"][si], g["decks"][1 - si], score, g.get("choices"))
     return out
 
 
 def main() -> int:
-    t, v = games(Path(sys.argv[1])), games(Path(sys.argv[2]))
+    s_first = "--s-first" in sys.argv
+    a = [x for x in sys.argv[1:] if x != "--s-first"]
+    t, v = games(Path(a[0]), s_first), games(Path(a[1]), s_first)
     keys = sorted(set(t) & set(v))
     if len(keys) < 0.9 * len(t):
         print(f"ALERT x2_paired: only {len(keys)} of {len(t)} games pair up")
@@ -46,8 +51,8 @@ def main() -> int:
     if bad:
         print(f"ALERT x2_paired: {len(bad)} pairs have different opponents, e.g. {bad[0]}: {t[bad[0]][:2]} vs {v[bad[0]][:2]}")
         return 2
-    print(f"A=T {sys.argv[1]} ({sum(x[2] for x in t.values()) / len(t):.3f}, n={len(t)})  "
-          f"B=V {sys.argv[2]} ({sum(x[2] for x in v.values()) / len(v):.3f}, n={len(v)})")
+    print(f"A=T {a[0]} ({sum(x[2] for x in t.values()) / len(t):.3f}, n={len(t)})  "
+          f"B=V {a[1]} ({sum(x[2] for x in v.values()) / len(v):.3f}, n={len(v)})")
     print(report("all", [v[k][2] - t[k][2] for k in keys]))
     for seat, label in ((0, "first"), (1, "second")):
         print(report(label, [v[k][2] - t[k][2] for k in keys if k[1] == seat]))

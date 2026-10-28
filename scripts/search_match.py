@@ -854,8 +854,9 @@ def main() -> None:
                 if args.opp == "ygoagent":
                     opp.reset_keys([idx])  # drop ygo-agent's LSTM state for the finished game
                 rec = {
-                    "decks": [names[di], names[dj]] if args.opp != "ygoagent" else
-                             [names[di if s_seat == 0 else dj], names[dj if s_seat == 0 else di]],
+                    # seat order in every mode (S's deck is decks[s_seat]); until 2026-10-27 the non-ygoagent
+                    # branch wrote S's deck first
+                    "decks": [names[di if s_seat == 0 else dj], names[dj if s_seat == 0 else di]],
                     "seed": s, "s_seat": s_seat, "game_idx": idx,
                     "winner": res.winner, "truncated": res.truncated, "turns": res.turns,
                     "choices": res.choices, "actors": res.actors,
