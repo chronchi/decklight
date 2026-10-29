@@ -1,0 +1,73 @@
+{
+ "archs": [
+  "elfnote",
+  "sky-striker",
+  "mitsurugi",
+  "fiendsmith-yummy"
+ ],
+ "train": {
+  "elfnote": [
+   "elfnote-f59",
+   "elfnote-f61",
+   "elfnote-v1"
+  ],
+  "sky-striker": [
+   "sky-striker-f27",
+   "sky-striker-f28",
+   "sky-striker-meta1"
+  ],
+  "mitsurugi": [
+   "mitsurugi-meta1",
+   "mitsurugi-meta2",
+   "mitsurugi-f20"
+  ],
+  "fiendsmith-yummy": [
+   "fiendsmith-yummy-f3",
+   "fiendsmith-yummy-f4",
+   "fiendsmith-yummy-f5"
+  ]
+ },
+ "heldout": {
+  "elfnote": "elfnote-v2",
+  "sky-striker": "sky-striker-f29",
+  "mitsurugi": "mitsurugi-f21",
+  "fiendsmith-yummy": "fiendsmith-yummy-f6"
+ },
+ "opponents": {
+  "elfnote": [
+   "kewl-tune-meta1",
+   "onomat-constellar-tellarknights-meta1",
+   "power-patron-meta1",
+   "sky-striker-meta2",
+   "trains-meta2"
+  ],
+  "sky-striker": [
+   "angelechy-elfnote-meta1",
+   "elfnote-mitsurugi-synchron-meta1",
+   "kewl-tune-meta1",
+   "onomat-constellar-tellarknights-meta1",
+   "power-patron-meta1",
+   "synchron-elfnote-meta2",
+   "trains-meta2"
+  ],
+  "mitsurugi": [
+   "angelechy-elfnote-meta1",
+   "kewl-tune-meta1",
+   "onomat-constellar-tellarknights-meta1",
+   "power-patron-meta1",
+   "sky-striker-meta2",
+   "synchron-elfnote-meta2",
+   "trains-meta2"
+  ],
+  "fiendsmith-yummy": [
+   "angelechy-elfnote-meta1",
+   "elfnote-mitsurugi-synchron-meta1",
+   "kewl-tune-meta1",
+   "onomat-constellar-tellarknights-meta1",
+   "power-patron-meta1",
+   "sky-striker-meta2",
+   "synchron-elfnote-meta2",
+   "trains-meta2"
+  ]
+ }
+}
