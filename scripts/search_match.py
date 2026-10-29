@@ -471,6 +471,19 @@ def main() -> None:
             # names S's deck first; every pair plays --seeds seeds in both seats, S always on di.
             spec = Path(args.pairs[1:]).read_text() if args.pairs.startswith("@") else args.pairs  # @file: long lists
             want = [tuple(x.strip().split(":")) for x in spec.replace("\n", ",").split(",") if x.strip()]
+            # S may pilot a list outside the gauntlet (--deck-dir, then decks/pool; X4b vs ygo-agent). ygo-agent
+            # only ever pilots its own gauntlet lists: an opponent outside them is an error.
+            bad_opp = sorted({o for _, o in want if o not in names})
+            if bad_opp or any(len(pr) != 2 for pr in want):
+                fail(f"--opp ygoagent --pairs: opponents must be gauntlet lists: {bad_opp or want}")
+            for s_name in sorted({s for s, _ in want if s not in names}):
+                cands = ([args.deck_dir / f"{s_name}.ydk"] if args.deck_dir is not None else []) + \
+                        [ROOT / "decks" / "pool" / f"{s_name}.ydk"]
+                path = next((c for c in cands if c.is_file()), None)
+                if path is None:
+                    fail(f"--opp ygoagent --pairs: S deck {s_name} not in --deck-dir or decks/pool")
+                names.append(s_name)
+                decks.append(load_ydk(path))
             sched = pairs_schedule(names, want, args.seeds, args.deal_seed0, bool(args.seed_per_pair))
         else:
             sched = ga_schedule(names, args.ga_opps, args.ga_seeds, args.deal_seed0)
