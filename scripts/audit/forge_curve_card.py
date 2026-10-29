@@ -36,11 +36,12 @@ def main() -> int:
     ap.add_argument("card", type=Path)
     ap.add_argument("--split", type=Path, required=True)
     ap.add_argument("--its", type=int, nargs="+", required=True)
+    ap.add_argument("--archs", nargs="+", default=None, help="default: split.json's archs")
     a = ap.parse_args()
     split = json.loads(a.split.read_text())
     res: dict = {"archetypes": {}, "pooled": {}}
     pooled: dict[int, list[float]] = {i: [] for i in a.its}
-    for arch in split["archs"]:
+    for arch in a.archs or split["archs"]:
         if not (a.card / f"R-{arch}").is_dir():
             print(f"ALERT forge_curve_card: R-{arch} missing; archetype skipped")
             continue

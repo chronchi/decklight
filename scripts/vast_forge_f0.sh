@@ -9,7 +9,7 @@
 #   3. scripts/audit/forge_curve_card.py -> runs/<name>/curve_card.{json,txt}.
 # Env: ARCHS (split.json's), FT_ITERS (160), SNAP (20), CARD_ITS ("20 40 60 80 120 160"), FT_HOURS (6, a cap),
 #   SHARE (0.5), ARCH_GAMES (1536: seeds per pair = ceil(ARCH_GAMES / 2 / pairs)), PAR (2), MS_IT (40), MS_MIN (0.5),
-#   SMOKE (1: FT_ITERS 6, SNAP 2, CARD_ITS "4 6", 512 games per arm), VAR_CAP (25m).
+#   SMOKE (1: FT_ITERS 6, SNAP 3, CARD_ITS "3 6", 512 games per arm), VAR_CAP (25m).
 # Usage: bash scripts/vast_forge_f0.sh <name>. Do NOT run on the laptop (vast GPU only).
 set -uo pipefail
 export PATH="$HOME/.local/bin:$PATH"
@@ -26,7 +26,7 @@ FT_HOURS=${FT_HOURS:-6}; SHARE=${SHARE:-0.5}; ARCH_GAMES=${ARCH_GAMES:-1536}
 MS_IT=${MS_IT:-40}; MS_MIN=${MS_MIN:-0.5}
 SMOKE=${SMOKE:-0}
 if [ "$SMOKE" = 1 ]; then
-  FT_ITERS=6; SNAP=2; CARD_ITS="4 6"; MS_IT=0
+  FT_ITERS=6; SNAP=3; CARD_ITS="3 6"; MS_IT=0  # SNAP must skip the 2 value-only warmup iterations
 fi
 FAILED=0
 
@@ -131,7 +131,7 @@ PROBE_NPROC=${PROBE_NPROC:-40} CKPT=$REL SM_ARGS="$SM" VARIANTS="$V" VAR_CAP="${
   bash scripts/vast_search_match.sh "$NAME/card" > "$OUT/card.log" 2>&1 || { alert "card job exit $?"; FAILED=1; }
 
 # shellcheck disable=SC2086
-if uv run --no-sync python scripts/audit/forge_curve_card.py "$OUT/card" --split "$F0/split.json" --its $CARD_ITS \
+if uv run --no-sync python scripts/audit/forge_curve_card.py "$OUT/card" --split "$F0/split.json" --its $CARD_ITS --archs $OK \
     > "$OUT/curve_card.txt" 2>&1; then
   tick "curve card: $(grep -h '^BUDGET\|^pooled' "$OUT/curve_card.txt" | tr '\n' ' ')"
 else
