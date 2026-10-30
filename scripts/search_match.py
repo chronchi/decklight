@@ -153,10 +153,12 @@ def summarize(out: Path) -> dict:
     bad = [r for r in recs if r["winner"] is None and not r.get("truncated")]
     if bad:
         fail(f"{len(bad)} games ended with neither winner nor truncation")
-    no_ya = [r for r in recs if r.get("ya_decisions") == 0]
+    # a game that ends on turn 1 before the opponent's first decision (S wins or loses on its own turn, e.g. a
+    # self-loop that decks out) is legal: only longer games prove broken routing (NOTEBOOK 2026-10-30 Forge F0)
+    no_ya = [r for r in recs if r.get("ya_decisions") == 0 and r.get("turns", 2) > 1]
     if no_ya:
         fail(f"{len(no_ya)} games where ygo-agent made 0 decisions (routing broke)")
-    no_opp = [r for r in recs if r.get("opp_decisions") == 0]
+    no_opp = [r for r in recs if r.get("opp_decisions") == 0 and r.get("turns", 2) > 1]
     if no_opp:
         fail(f"{len(no_opp)} games where R made 0 decisions (routing broke)")
     n = len(recs)
