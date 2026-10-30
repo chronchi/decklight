@@ -3,14 +3,14 @@
 # GitHub release, verify its sha256, and extract it at the repo root.
 #
 # Usage: bash scripts/fetch_release.sh [TAG] [--file PATH] [--root DIR] [--force]
-#   TAG default v0.1. --file PATH skips the download and uses a local tarball
+#   TAG default v0.2. --file PATH skips the download and uses a local tarball
 #   (offline / test path). --root DIR extracts into DIR instead of the repo
 #   root (test path). Refuses to overwrite existing files unless --force.
 #   Exits 2 on checksum mismatch, before extracting anything. Works from any cwd.
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")/.." && pwd)"
 
-TAG="v0.1"
+TAG="v0.2"
 FILE=""
 DEST="."
 FORCE=0

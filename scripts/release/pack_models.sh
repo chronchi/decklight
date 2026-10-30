@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Pack the release model bundle: the 9 untracked product files into one
+# Pack the release model bundle: the 9 untracked product files (+ the Forge base r1 from v0.2) into one
 # deterministic tarball, plus checksums.
 #
 # Usage: bash scripts/release/pack_models.sh [TAG]   (default TAG v0.1)
@@ -21,6 +21,8 @@ FILES=(
   data/cards/emb/strings-qwen3-0.6b-d512.npz
   data/cards/lua_desc.npz
 )
+# v0.2+: the Forge base release r1 (contributors fine-tune from it; docs/contributing-packs.md).
+[ "$TAG" = v0.1 ] || FILES+=(data/cache/forge_r1/best.pt data/cache/forge_r1/metrics.jsonl)
 for f in "${FILES[@]}"; do
   if [ ! -f "$f" ]; then
     echo "pack_models: missing $f" >&2

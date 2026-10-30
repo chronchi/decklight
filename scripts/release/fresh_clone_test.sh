@@ -40,7 +40,7 @@ step clone git clone --recursive "$IN/decklight.bundle" "$WORK/decklight" || exi
 step submodules_pinned bash -c 'git submodule status; [ "$(git submodule status | wc -l)" -eq 3 ] && ! git submodule status | grep -q "^[-+U]"' || true
 step uv_sync uv sync --group dev --group ml --group web || exit 1
 step build_ext scripts/build_ext.sh || exit 1
-step fetch_release scripts/fetch_release.sh v0.1 --file "$IN/decklight-models-v0.1.tar.gz" || exit 1
+step fetch_release scripts/fetch_release.sh v0.2 --file "$IN/decklight-models-v0.2.tar.gz" || exit 1
 step no_private_files bash -c '! ls NOTEBOOK.md STATUS.md AGENTS.md CLAUDE.md docs/briefs 2>/dev/null | grep .' || true
 
 # Unit tests: the README's `uv run pytest tests/unit -q`, one file per core so it fits the cap.

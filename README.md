@@ -26,7 +26,7 @@ git clone --recursive https://github.com/chronchi/decklight.git
 cd decklight
 uv sync --group dev --group ml --group web
 scripts/build_ext.sh                 # builds the patched engine core and the C++ environment
-scripts/fetch_release.sh             # model bundle (~68 MB) from the GitHub release, checksum-verified
+scripts/fetch_release.sh             # model bundle (~77 MB) from the GitHub release, checksum-verified
 uv run pytest tests/unit -q          # optional
 ```
 

@@ -7,14 +7,15 @@ with kind "Deck lists only" and paste each `.ydk`, with its source (event, placi
 date) or `casual`. The maintainers review deck lists by hand.
 
 **(B) Train a pack on your GPU.** You need a CUDA GPU (~9 GB used; about 1 h on a
-consumer card) and the current release bundle:
+consumer card) and the release bundle (`bash scripts/fetch_release.sh`, v0.2 or later), which holds the Forge base
+release r1 in `data/cache/forge_r1/`. Fine-tune from r1:
 
 ```bash
-uv run python scripts/finetune_deck.py --deck my.ydk --out runs/ft-my --hours 1
-uv run python scripts/forge.py pack --ft runs/ft-my --release <release best.pt> \
-    --release-name <rN> --archetype <a> --train-decks decks/*.ydk \
+uv run python scripts/finetune_deck.py --deck my.ydk --out runs/ft-my --hours 1 --init data/cache/forge_r1/best.pt
+uv run python scripts/forge.py pack --ft runs/ft-my --release data/cache/forge_r1/best.pt \
+    --release-name r1 --archetype <a> --train-decks decks/*.ydk \
     --heldout-decks heldout/*.ydk --out data/forge/packs/<a> --contributor "<name>"
-uv run python scripts/forge.py validate <pack> --release <release best.pt>
+uv run python scripts/forge.py validate data/forge/packs/<a> --release data/cache/forge_r1/best.pt
 ```
 
 Then write the file to submit (`<pack_id>.tar.gz`, named after the pack's weights hash):
