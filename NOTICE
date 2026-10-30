@@ -20,3 +20,8 @@ Third-party components
 
 Yu-Gi-Oh! and all card names, card text and card art are trademarks and copyrights of Konami. This is an unofficial,
 non-commercial research project, not affiliated with or endorsed by Konami.
+
+Contributed Forge packs
+-----------------------
+Specialist packs distilled into a release are licensed CC BY 4.0 by their contributors; each release's notes list
+them (scripts/forge.py credits). None yet.

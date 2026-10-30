@@ -4,6 +4,10 @@
         --release-name r0 --archetype <a> --train-decks decks/forge/f0/train/<a>/*.ydk \\
         --heldout-decks decks/forge/f0/heldout/<a>-*.ydk --out data/forge/packs/<a>
     uv run python scripts/forge.py validate <pack dir or .tar.gz> [--release data/cache/x4b_D/best.pt]
+    uv run python scripts/forge.py validate <pack> --fingerprint src/decklight/forge/fingerprints/r1.json
+    uv run python scripts/forge.py fingerprint <release .pt|.safetensors> --name r1 --out <json>
+    uv run python scripts/forge.py credits <pack dir>...
+    uv run python scripts/forge.py archive <pack dir> [--out-dir .]   # -> <pack_id>.tar.gz to submit
     uv run python scripts/forge.py migrate <v1 pack dir> --out <dir> [--license CC-BY-4.0]
 """
 
@@ -19,7 +23,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from decklight.forge.pack import build_pack, extract, migrate_pack, validate_pack
+from decklight.forge.pack import archive, build_pack, extract, fingerprint_of, migrate_pack, validate_pack
 
 DEFAULT_EMB = ROOT / "data" / "cards" / "emb" / "qwen3-0.6b-d512.npz"
 
@@ -101,6 +105,55 @@ def _cmd_validate(args: argparse.Namespace) -> int:
     return 2
 
 
+def _cmd_fingerprint(args: argparse.Namespace) -> int:
+    try:
+        fp = fingerprint_of(args.release, args.name)
+    except (ValueError, FileNotFoundError, OSError) as e:
+        print(f"forge fingerprint: {e}", file=sys.stderr)
+        return 1
+    out = Path(args.out)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(json.dumps(fp, indent=1) + "\n", encoding="utf-8")
+    print(f"forge fingerprint: wrote {out} ({fp['release']}, {len(fp['tensors'])} tensors)")
+    return 0
+
+
+def _cmd_credits(args: argparse.Namespace) -> int:
+    """One release-notes line per pack, sorted by archetype; exit 2 if any pack is invalid."""
+    rows: list[tuple[str, str, str]] = []
+    failed = False
+    for raw in args.packs:
+        pack = Path(raw)
+        errors, _warnings = validate_pack(pack)
+        if errors:
+            print(f"forge credits: {pack} is not a valid pack:", file=sys.stderr)
+            for e in errors:
+                print(f"  ERROR {e}", file=sys.stderr)
+            failed = True
+            continue
+        try:
+            manifest = json.loads((pack / "pack.json").read_text(encoding="utf-8"))
+            rows.append((manifest["archetype"], manifest["contributor"]["name"], manifest["pack_id"]))
+        except (OSError, ValueError, KeyError, TypeError) as e:
+            print(f"forge credits: {pack} manifest unreadable: {e}", file=sys.stderr)
+            failed = True
+    if failed:
+        return 2
+    for archetype, name, pack_id in sorted(rows):
+        print(f"- {archetype}: pack by {name}, CC BY 4.0 ({pack_id})")
+    return 0
+
+
+def _cmd_archive(args: argparse.Namespace) -> int:
+    errors, _warnings = validate_pack(Path(args.pack))
+    if errors:
+        for e in errors:
+            print(f"ERROR {e}")
+        return 2
+    print(archive(Path(args.pack), Path(args.out_dir)))
+    return 0
+
+
 def _cmd_migrate(args: argparse.Namespace) -> int:
     try:
         out = migrate_pack(args.pack, args.out, license=args.license)
@@ -141,6 +194,18 @@ def main() -> int:
     v.add_argument("--cards-db", nargs="*", default=None)
     v.add_argument("--fingerprint", default=None)
     v.set_defaults(func=_cmd_validate)
+    f = sub.add_parser("fingerprint", help="write a release fingerprint JSON for offline pack checks")
+    f.add_argument("release", help="release best.pt or .safetensors")
+    f.add_argument("--name", required=True, help="release name recorded in the fingerprint")
+    f.add_argument("--out", required=True, help="output JSON path")
+    f.set_defaults(func=_cmd_fingerprint)
+    c = sub.add_parser("credits", help="print one release-notes line per pack dir")
+    c.add_argument("packs", nargs="+", help="pack directories")
+    c.set_defaults(func=_cmd_credits)
+    a = sub.add_parser("archive", help="write <pack_id>.tar.gz (the file to submit) from a valid pack dir")
+    a.add_argument("pack")
+    a.add_argument("--out-dir", default=".")
+    a.set_defaults(func=_cmd_archive)
     m = sub.add_parser("migrate", help="migrate a retired v1 pack dir to v2")
     m.add_argument("pack")
     m.add_argument("--out", required=True)

@@ -1,0 +1,25 @@
+name: validate-pack
+on:
+  issues:
+    types: [labeled]
+permissions:
+  contents: read
+  issues: write
+jobs:
+  validate:
+    if: github.event.label.name == 'validate'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with: {persist-credentials: false}
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2  # v10.3.3
+      - name: validate
+        env:
+          ISSUE_BODY: ${{ github.event.issue.body }}
+        run: uv run --no-project --with numpy --with safetensors python scripts/forge_ci.py --body-env ISSUE_BODY --fingerprint src/decklight/forge/fingerprints/r1.json --out comment.md
+      - name: comment
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE: ${{ github.event.issue.number }}
+        run: gh issue comment "$ISSUE" --repo "$GITHUB_REPOSITORY" --body-file comment.md

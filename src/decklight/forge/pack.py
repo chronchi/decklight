@@ -22,13 +22,12 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import numpy as np
-import torch
 from safetensors import safe_open
-from safetensors.torch import save_file
 
-from decklight.decks.ydk import load_ydk
-from decklight.engine.obs import OBS_VERSION
-from decklight.model.ckpt import load_state
+# NOTE: torch, safetensors.torch, decklight.decks.ydk, decklight.engine.obs and
+# decklight.model.ckpt are imported lazily inside the functions that need them,
+# so that importing this module (and validating a pack against a fingerprint)
+# needs neither torch nor the engine.
 
 PROTOCOL = "forge-pack/2"
 RETIRED = "forge-pack/1"
@@ -87,6 +86,8 @@ def sha256_file(p: Path) -> str:
 
 def deck_hash(path: Path) -> str:
     """Canonical deck hash: main/extra sorted codes, side ignored."""
+    from decklight.decks.ydk import load_ydk
+
     d = load_ydk(path)
     main = ",".join(str(c) for c in sorted(d.main))
     extra = ",".join(str(c) for c in sorted(d.extra))
@@ -162,6 +163,8 @@ def _cards_db_ids(cards_db: Path | list[Path]) -> set[int] | None:
 
 
 def compat_fingerprint(release_metrics: Path, emb: Path, cards_db: Path | list[Path], core: str = "") -> dict:
+    from decklight.engine.obs import OBS_VERSION
+
     args = _read_args(Path(release_metrics))
     emb_p = Path(emb)
     return {
@@ -180,6 +183,11 @@ def fingerprint_of(release_path: str | Path, name: str) -> dict:
     Lets the coordinator validate pack key sets, shapes and arch without moving
     the (large) release weights to the checking machine.
     """
+    import torch
+
+    from decklight.engine.obs import OBS_VERSION
+    from decklight.model.ckpt import load_state
+
     release_path = Path(release_path)
     state = load_state(release_path)
     return {
@@ -193,6 +201,8 @@ def fingerprint_of(release_path: str | Path, name: str) -> dict:
 
 def _load_state_flat(path: Path) -> dict:
     # Trusted local files only (our own fine-tune / release .pt files), never stranger packs.
+    import torch
+
     state = torch.load(path, map_location="cpu", weights_only=True)
     if isinstance(state, dict) and "model" in state and isinstance(state["model"], dict):
         state = state["model"]
@@ -230,6 +240,9 @@ def build_pack(*, ft_policy: Path, train_metrics: Path, release: Path, release_n
     release_metrics = release.parent / "metrics.jsonl"
     if not release_metrics.is_file():
         raise FileNotFoundError(f"{release_metrics} missing: cannot read the release architecture")
+
+    import torch
+    from safetensors.torch import save_file
 
     out.mkdir(parents=True)
     (out / "policy").mkdir(parents=True)
@@ -284,6 +297,9 @@ def migrate_pack(v1dir: str | Path, out: str | Path, license: str = "CC-BY-4.0")
     manifest = json.loads((v1dir / "pack.json").read_text(encoding="utf-8"))
     if manifest.get("protocol") != RETIRED:
         raise ValueError(f"migrate needs a {RETIRED} pack, has {manifest.get('protocol')!r}")
+    import torch
+    from safetensors.torch import save_file
+
     old_id = manifest.get("pack_id", "")
     state = torch.load(v1dir / "policy" / "best.pt", map_location="cpu", weights_only=True)
     if isinstance(state, dict) and isinstance(state.get("model"), dict):
@@ -659,6 +675,10 @@ def _validate_pack(pack: str | Path, release: str | Path | None = None, *, emb: 
                 is_release = False
                 if release is not None:
                     is_release = True
+                    import torch
+
+                    from decklight.model.ckpt import load_state
+
                     try:
                         loaded = load_state(Path(release))
                     except Exception as e:  # noqa: BLE001
@@ -737,9 +757,11 @@ def _validate_pack(pack: str | Path, release: str | Path | None = None, *, emb: 
                     _err(errors, f"compat.obs_version {compat['obs_version']} != reference {ref_obs}")
 
     # 9. compat obs version vs the running engine
-    if (isinstance(compat, dict) and isinstance(compat.get("obs_version"), int)
-            and compat["obs_version"] != OBS_VERSION):
-        _err(errors, f"compat.obs_version {compat['obs_version']} != current {OBS_VERSION}")
+    if (isinstance(compat, dict) and isinstance(compat.get("obs_version"), int)):
+        from decklight.engine.obs import OBS_VERSION
+
+        if compat["obs_version"] != OBS_VERSION:
+            _err(errors, f"compat.obs_version {compat['obs_version']} != current {OBS_VERSION}")
 
     # warnings vs the given release / files
     if release is not None and isinstance(base, dict) and isinstance(base.get("sha256"), str):

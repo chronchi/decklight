@@ -1,0 +1,57 @@
+name: Submit a deck or pack
+description: Contribute deck lists or a trained Forge pack
+title: "[pack] <archetype>"
+labels: ["pack-submission"]
+body:
+  - type: dropdown
+    id: kind
+    attributes:
+      label: What are you submitting?
+      options:
+        - Trained pack (.tar.gz)
+        - Deck lists only
+    validations:
+      required: true
+  - type: input
+    id: archetype
+    attributes:
+      label: Archetype
+      description: lowercase letters, digits and dashes, e.g. kewl-tune
+    validations:
+      required: true
+  - type: textarea
+    id: pack
+    attributes:
+      label: Trained pack
+      description: Drag your pack .tar.gz here (forge.py pack output, ≤ 25 MB). Leave empty for deck lists only.
+  - type: textarea
+    id: decks
+    attributes:
+      label: Deck lists
+      description: Deck lists only: paste each .ydk, with its source (event, placing, date) or 'casual'.
+      render: text
+  - type: input
+    id: credit_name
+    attributes:
+      label: Credit name
+      description: Name to credit in releases (CC BY 4.0 attribution)
+    validations:
+      required: true
+  - type: input
+    id: contact
+    attributes:
+      label: Contact (optional)
+      description: How to reach you about this submission
+    validations:
+      required: false
+  - type: checkboxes
+    id: licence
+    attributes:
+      label: Licence and acceptance
+      options:
+        - label: I license this pack and these deck lists under CC BY 4.0 (https://creativecommons.org/licenses/by/4.0/).
+          required: true
+        - label: I have the right to submit this material (I made the pack; the deck lists are mine or public tournament lists).
+          required: true
+        - label: I understand the pack is accepted only if it beats the current release on its decks in the maintainers' tests.
+          required: true

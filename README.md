@@ -120,6 +120,8 @@ uv run --no-sync python scripts/web_play.py --ckpt runs/ft-my/policy/best.pt --v
 | `docs/results.md`, `docs/model-card.md`, `docs/how-it-was-built.md` | results, model card, how it was built |
 | `third_party/` | submodules (ygopro-core, CardScripts, BabelCDB) and our two engine patches |
 
+Contribute a deck or a trained pack: see docs/contributing-packs.md.
+
 ## License
 AGPL-3.0 (see [LICENSE](LICENSE) and [NOTICE](NOTICE)). Yu-Gi-Oh! is a trademark of Konami; this is an unofficial,
 non-commercial project.
