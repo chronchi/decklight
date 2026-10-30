@@ -1,0 +1,782 @@
+{
+ "params": {
+  "n": 11,
+  "covered_archs": [
+   "branded-light-and-darkness-ritual",
+   "invoked",
+   "radiant-typhoon",
+   "sacred-beasts",
+   "atlantean-mermail",
+   "elfnote",
+   "sky-striker",
+   "mitsurugi",
+   "fiendsmith-yummy"
+  ],
+  "pages": 40,
+  "days": 60,
+  "min_lists": 4,
+  "reserve": 20,
+  "newest": "2026-10-25",
+  "cutoff": "2026-08-26"
+ },
+ "staples_n": 26,
+ "covered": [
+  "branded-light-and-darkness-ritual",
+  "invoked",
+  "radiant-typhoon",
+  "sacred-beasts",
+  "atlantean-mermail",
+  "elfnote",
+  "sky-striker",
+  "mitsurugi",
+  "fiendsmith-yummy"
+ ],
+ "picked": [
+  {
+   "arch": "kewl-tune",
+   "popularity": 44,
+   "novelty": 0.9473684210526315,
+   "score": 41.68421052631579,
+   "shares": {}
+  },
+  {
+   "arch": "power-patron-artmage",
+   "popularity": 21,
+   "novelty": 0.7241379310344828,
+   "score": 15.206896551724139,
+   "shares": {
+    "kewl-tune": 0.0
+   }
+  },
+  {
+   "arch": "blitzclique",
+   "popularity": 22,
+   "novelty": 0.5,
+   "score": 11.0,
+   "shares": {
+    "kewl-tune": 0.10526315789473684,
+    "power-patron-artmage": 0.05
+   }
+  },
+  {
+   "arch": "ignister-maliss",
+   "popularity": 9,
+   "novelty": 0.7741935483870968,
+   "score": 6.967741935483871,
+   "shares": {
+    "kewl-tune": 0.0,
+    "power-patron-artmage": 0.034482758620689655,
+    "blitzclique": 0.0
+   }
+  },
+  {
+   "arch": "lunalight",
+   "popularity": 8,
+   "novelty": 0.8387096774193549,
+   "score": 6.709677419354839,
+   "shares": {
+    "kewl-tune": 0.0,
+    "power-patron-artmage": 0.034482758620689655,
+    "blitzclique": 0.05,
+    "ignister-maliss": 0.03225806451612903
+   }
+  },
+  {
+   "arch": "magistus-invoked-fairy-tail",
+   "popularity": 7,
+   "novelty": 0.6470588235294118,
+   "score": 4.529411764705882,
+   "shares": {
+    "kewl-tune": 0.0,
+    "power-patron-artmage": 0.06896551724137931,
+    "blitzclique": 0.05,
+    "ignister-maliss": 0.03225806451612903,
+    "lunalight": 0.06451612903225806
+   }
+  },
+  {
+   "arch": "trains",
+   "popularity": 5,
+   "novelty": 0.84375,
+   "score": 4.21875,
+   "shares": {
+    "kewl-tune": 0.0,
+    "power-patron-artmage": 0.06896551724137931,
+    "blitzclique": 0.05,
+    "ignister-maliss": 0.0,
+    "lunalight": 0.06451612903225806,
+    "magistus-invoked-fairy-tail": 0.0625
+   }
+  }
+ ],
+ "reserve": [
+  {
+   "arch": "angelechy-tenpai-dragon",
+   "stem": "angelechy-tenpai-dragon-f1",
+   "url": "https://ygoprodeck.com/deck/angelechy-tenpai-dragon-741525",
+   "date": "2026-10-25"
+  },
+  {
+   "arch": "azamina-white-forest",
+   "stem": "azamina-white-forest-meta1",
+   "url": "https://ygoprodeck.com/deck/azamina-white-forest-734647",
+   "date": "2026-09-26"
+  },
+  {
+   "arch": "constellar-tellarknights",
+   "stem": "constellar-tellarknights-f1",
+   "url": "https://ygoprodeck.com/deck/constellar-tellarknights-732583",
+   "date": "2026-09-13"
+  },
+  {
+   "arch": "dark-magician-azamina-snake-eye",
+   "stem": "dark-magician-azamina-snake-eye-meta1",
+   "url": "https://ygoprodeck.com/deck/dark-magician-azamina-snake-eye-734878",
+   "date": "2026-09-26"
+  },
+  {
+   "arch": "dracotail",
+   "stem": "dracotail-f1",
+   "url": "https://ygoprodeck.com/deck/dracotail-730237",
+   "date": "2026-08-29"
+  },
+  {
+   "arch": "k9-fur-hire",
+   "stem": "k9-fur-hire-f1",
+   "url": "https://ygoprodeck.com/deck/k9-fur-hire-730999",
+   "date": "2026-09-05"
+  },
+  {
+   "arch": "melodious",
+   "stem": "melodious-meta1",
+   "url": "https://ygoprodeck.com/deck/melodious-734651",
+   "date": "2026-09-26"
+  },
+  {
+   "arch": "phantom-knights",
+   "stem": "phantom-knights-f1",
+   "url": "https://ygoprodeck.com/deck/phantom-knights-731095",
+   "date": "2026-09-06"
+  },
+  {
+   "arch": "ryzeal-onomat",
+   "stem": "ryzeal-onomat-f1",
+   "url": "https://ygoprodeck.com/deck/ryzeal-onomat-732762",
+   "date": "2026-09-13"
+  },
+  {
+   "arch": "superheavy-samurai-centur-ion",
+   "stem": "superheavy-samurai-centur-ion-f1",
+   "url": "https://ygoprodeck.com/deck/superheavy-samurai-centur-ion-731215",
+   "date": "2026-09-06"
+  },
+  {
+   "arch": "angelechy",
+   "stem": "angelechy-meta2",
+   "url": "https://ygoprodeck.com/deck/angelechy-735188",
+   "date": "2026-09-26"
+  },
+  {
+   "arch": "azamina-orcust",
+   "stem": "azamina-orcust-f2",
+   "url": "https://ygoprodeck.com/deck/azamina-orcust-732758",
+   "date": "2026-09-13"
+  },
+  {
+   "arch": "d-d-d",
+   "stem": "d-d-d-f2",
+   "url": "https://ygoprodeck.com/deck/d-d-d-739389",
+   "date": "2026-10-17"
+  },
+  {
+   "arch": "k9-vanquish-soul",
+   "stem": "k9-vanquish-soul-f2",
+   "url": "https://ygoprodeck.com/deck/k9-vanquish-soul-733106",
+   "date": "2026-09-12"
+  },
+  {
+   "arch": "orcust",
+   "stem": "orcust-meta1",
+   "url": "https://ygoprodeck.com/deck/orcust-735396",
+   "date": "2026-09-27"
+  },
+  {
+   "arch": "onomat-ryzeal",
+   "stem": "onomat-ryzeal-f3",
+   "url": "https://ygoprodeck.com/deck/onomat-ryzeal-741680",
+   "date": "2026-10-25"
+  }
+ ],
+ "table": [
+  {
+   "arch": "kewl-tune",
+   "lists": 44,
+   "popularity": 44,
+   "novelty": 0.9473684210526315,
+   "score": 41.68421052631579,
+   "top2": [
+    {
+     "arch": "mitsurugi",
+     "overlap": 0.05263157894736842
+    },
+    {
+     "arch": "atlantean-mermail",
+     "overlap": 0.0
+    }
+   ],
+   "picked": true,
+   "reserve": false
+  },
+  {
+   "arch": "power-patron-artmage",
+   "lists": 21,
+   "popularity": 21,
+   "novelty": 0.7241379310344828,
+   "score": 15.206896551724139,
+   "top2": [
+    {
+     "arch": "elfnote",
+     "overlap": 0.25
+    },
+    {
+     "arch": "sacred-beasts",
+     "overlap": 0.13043478260869565
+    }
+   ],
+   "picked": true,
+   "reserve": false
+  },
+  {
+   "arch": "ars-magna-elfnote",
+   "lists": 35,
+   "popularity": 35,
+   "novelty": 0.4,
+   "score": 14.0,
+   "top2": [
+    {
+     "arch": "elfnote",
+     "overlap": 0.6666666666666666
+    },
+    {
+     "arch": "mitsurugi",
+     "overlap": 0.08695652173913043
+    }
+   ],
+   "picked": false,
+   "reserve": false
+  },
+  {
+   "arch": "blitzclique",
+   "lists": 22,
+   "popularity": 22,
+   "novelty": 0.55,
+   "score": 12.100000000000001,
+   "top2": [
+    {
+     "arch": "branded-light-and-darkness-ritual",
+     "overlap": 0.25
+    },
+    {
+     "arch": "mitsurugi",
+     "overlap": 0.2
+    }
+   ],
+   "picked": true,
+   "reserve": false
+  },
+  {
+   "arch": "despia-branded",
+   "lists": 26,
+   "popularity": 26,
+   "novelty": 0.3548387096774194,
+   "score": 9.225806451612904,
+   "top2": [
+    {
+     "arch": "branded-light-and-darkness-ritual",
+     "overlap": 0.72
+    },
+    {
+     "arch": "mitsurugi",
+     "overlap": 0.17391304347826086
+    }
+   ],
+   "picked": false,
+   "reserve": false
+  },
+  {
+   "arch": "ignister-maliss",
+   "lists": 9,
+   "popularity": 9,
+   "novelty": 0.7741935483870968,
+   "score": 6.967741935483871,
+   "top2": [
+    {
+     "arch": "mitsurugi",
+     "overlap": 0.08695652173913043
+    },
+    {
+     "arch": "sacred-beasts",
+     "overlap": 0.08695652173913043
+    }
+   ],
+   "picked": true,
+   "reserve": false
+  },
+  {
+   "arch": "lunalight",
+   "lists": 8,
+   "popularity": 8,
+   "novelty": 0.8387096774193549,
+   "score": 6.709677419354839,
+   "top2": [
+    {
+     "arch": "mitsurugi",
+     "overlap": 0.17391304347826086
+    },
+    {
+     "arch": "atlantean-mermail",
+     "overlap": 0.0967741935483871
+    }
+   ],
+   "picked": true,
+   "reserve": false
+  },
+  {
+   "arch": "ryzeal-blitzclique",
+   "lists": 7,
+   "popularity": 7,
+   "novelty": 0.8,
+   "score": 5.6000000000000005,
+   "top2": [
+    {
+     "arch": "mitsurugi",
+     "overlap": 0.17391304347826086
+    },
+    {
+     "arch": "branded-light-and-darkness-ritual",
+     "overlap": 0.16
+    }
+   ],
+   "picked": false,
+   "reserve": false
+  },
+  {
+   "arch": "synchron-elfnote",
+   "lists": 20,
+   "popularity": 20,
+   "novelty": 0.23333333333333334,
+   "score": 4.666666666666667,
+   "top2": [
+    {
+     "arch": "elfnote",
+     "overlap": 0.9166666666666666
+    },
+    {
+     "arch": "branded-light-and-darkness-ritual",
+     "overlap": 0.12
+    }
+   ],
+   "picked": false,
+   "reserve": false
+  },
+  {
+   "arch": "magistus-invoked-fairy-tail",
+   "lists": 7,
+   "popularity": 7,
+   "novelty": 0.6470588235294118,
+   "score": 4.529411764705882,
+   "top2": [
+    {
+     "arch": "invoked",
+     "overlap": 0.44
+    },
+    {
+     "arch": "sacred-beasts",
+     "overlap": 0.13043478260869565
+    }
+   ],
+   "picked": true,
+   "reserve": false
+  },
+  {
+   "arch": "trains",
+   "lists": 5,
+   "popularity": 5,
+   "novelty": 0.84375,
+   "score": 4.21875,
+   "top2": [
+    {
+     "arch": "sacred-beasts",
+     "overlap": 0.13043478260869565
+    },
+    {
+     "arch": "elfnote",
+     "overlap": 0.08333333333333333
+    }
+   ],
+   "picked": true,
+   "reserve": false
+  },
+  {
+   "arch": "angelechy-elfnote",
+   "lists": 12,
+   "popularity": 12,
+   "novelty": 0.3333333333333333,
+   "score": 4.0,
+   "top2": [
+    {
+     "arch": "elfnote",
+     "overlap": 0.75
+    },
+    {
+     "arch": "branded-light-and-darkness-ritual",
+     "overlap": 0.08
+    }
+   ],
+   "picked": false,
+   "reserve": false
+  },
+  {
+   "arch": "synchron-kewl-tune",
+   "lists": 4,
+   "popularity": 4,
+   "novelty": 1.0,
+   "score": 4.0,
+   "top2": [
+    {
+     "arch": "atlantean-mermail",
+     "overlap": 0.0
+    },
+    {
+     "arch": "branded-light-and-darkness-ritual",
+     "overlap": 0.0
+    }
+   ],
+   "picked": false,
+   "reserve": false
+  },
+  {
+   "arch": "magistus-fairy-tail",
+   "lists": 5,
+   "popularity": 5,
+   "novelty": 0.7857142857142857,
+   "score": 3.9285714285714284,
+   "top2": [
+    {
+     "arch": "invoked",
+     "overlap": 0.2
+    },
+    {
+     "arch": "sacred-beasts",
+     "overlap": 0.13043478260869565
+    }
+   ],
+   "picked": false,
+   "reserve": false
+  },
+  {
+   "arch": "azamina-adventurer-mitsurugi-light-and-darkness-ritual",
+   "lists": 8,
+   "popularity": 8,
+   "novelty": 0.43902439024390244,
+   "score": 3.5121951219512195,
+   "top2": [
+    {
+     "arch": "mitsurugi",
+     "overlap": 0.5217391304347826
+    },
+    {
+     "arch": "sacred-beasts",
+     "overlap": 0.34782608695652173
+    }
+   ],
+   "picked": false,
+   "reserve": false
+  },
+  {
+   "arch": "power-patron",
+   "lists": 6,
+   "popularity": 6,
+   "novelty": 0.5483870967741935,
+   "score": 3.290322580645161,
+   "top2": [
+    {
+     "arch": "elfnote",
+     "overlap": 0.25
+    },
+    {
+     "arch": "mitsurugi",
+     "overlap": 0.21739130434782608
+    }
+   ],
+   "picked": false,
+   "reserve": false
+  },
+  {
+   "arch": "ars-magna-power-patron-artmage",
+   "lists": 4,
+   "popularity": 4,
+   "novelty": 0.7948717948717948,
+   "score": 3.1794871794871793,
+   "top2": [
+    {
+     "arch": "elfnote",
+     "overlap": 0.25
+    },
+    {
+     "arch": "mitsurugi",
+     "overlap": 0.13043478260869565
+    }
+   ],
+   "picked": false,
+   "reserve": false
+  },
+  {
+   "arch": "onomat-ryzeal",
+   "lists": 3,
+   "popularity": 3,
+   "novelty": 0.9117647058823529,
+   "score": 2.735294117647059,
+   "top2": [
+    {
+     "arch": "mitsurugi",
+     "overlap": 0.08695652173913043
+    },
+    {
+     "arch": "sacred-beasts",
+     "overlap": 0.08695652173913043
+    }
+   ],
+   "picked": false,
+   "reserve": true
+  },
+  {
+   "arch": "ars-magna-power-patron-light-and-darkness-ritual",
+   "lists": 4,
+   "popularity": 4,
+   "novelty": 0.6176470588235294,
+   "score": 2.4705882352941178,
+   "top2": [
+    {
+     "arch": "elfnote",
+     "overlap": 0.2916666666666667
+    },
+    {
+     "arch": "branded-light-and-darkness-ritual",
+     "overlap": 0.24
+    }
+   ],
+   "picked": false,
+   "reserve": false
+  },
+  {
+   "arch": "branded-blitzclique",
+   "lists": 4,
+   "popularity": 4,
+   "novelty": 0.5,
+   "score": 2.0,
+   "top2": [
+    {
+     "arch": "branded-light-and-darkness-ritual",
+     "overlap": 0.52
+    },
+    {
+     "arch": "mitsurugi",
+     "overlap": 0.21739130434782608
+    }
+   ],
+   "picked": false,
+   "reserve": false
+  },
+  {
+   "arch": "d-d-d",
+   "lists": 2,
+   "popularity": 2,
+   "novelty": 0.9090909090909091,
+   "score": 1.8181818181818181,
+   "top2": [
+    {
+     "arch": "fiendsmith-yummy",
+     "overlap": 0.10344827586206896
+    },
+    {
+     "arch": "sacred-beasts",
+     "overlap": 0.08695652173913043
+    }
+   ],
+   "picked": false,
+   "reserve": true
+  },
+  {
+   "arch": "k9-vanquish-soul",
+   "lists": 2,
+   "popularity": 2,
+   "novelty": 0.8611111111111112,
+   "score": 1.7222222222222223,
+   "top2": [
+    {
+     "arch": "mitsurugi",
+     "overlap": 0.13043478260869565
+    },
+    {
+     "arch": "sacred-beasts",
+     "overlap": 0.08695652173913043
+    }
+   ],
+   "picked": false,
+   "reserve": true
+  },
+  {
+   "arch": "azamina-orcust",
+   "lists": 2,
+   "popularity": 2,
+   "novelty": 0.8571428571428571,
+   "score": 1.7142857142857142,
+   "top2": [
+    {
+     "arch": "mitsurugi",
+     "overlap": 0.13043478260869565
+    },
+    {
+     "arch": "invoked",
+     "overlap": 0.12
+    }
+   ],
+   "picked": false,
+   "reserve": true
+  },
+  {
+   "arch": "azamina-light-and-darkness-ritual",
+   "lists": 4,
+   "popularity": 4,
+   "novelty": 0.4074074074074074,
+   "score": 1.6296296296296295,
+   "top2": [
+    {
+     "arch": "branded-light-and-darkness-ritual",
+     "overlap": 0.4
+    },
+    {
+     "arch": "sacred-beasts",
+     "overlap": 0.30434782608695654
+    }
+   ],
+   "picked": false,
+   "reserve": false
+  },
+  {
+   "arch": "ars-magna-maliss",
+   "lists": 2,
+   "popularity": 2,
+   "novelty": 0.8108108108108109,
+   "score": 1.6216216216216217,
+   "top2": [
+    {
+     "arch": "sacred-beasts",
+     "overlap": 0.13043478260869565
+    },
+    {
+     "arch": "invoked",
+     "overlap": 0.12
+    }
+   ],
+   "picked": false,
+   "reserve": false
+  },
+  {
+   "arch": "odion",
+   "lists": 2,
+   "popularity": 2,
+   "novelty": 0.7954545454545454,
+   "score": 1.5909090909090908,
+   "top2": [
+    {
+     "arch": "mitsurugi",
+     "overlap": 0.21739130434782608
+    },
+    {
+     "arch": "sky-striker",
+     "overlap": 0.17391304347826086
+    }
+   ],
+   "picked": false,
+   "reserve": false
+  },
+  {
+   "arch": "angelechy",
+   "lists": 2,
+   "popularity": 2,
+   "novelty": 0.7619047619047619,
+   "score": 1.5238095238095237,
+   "top2": [
+    {
+     "arch": "atlantean-mermail",
+     "overlap": 0.09523809523809523
+    },
+    {
+     "arch": "fiendsmith-yummy",
+     "overlap": 0.047619047619047616
+    }
+   ],
+   "picked": false,
+   "reserve": true
+  },
+  {
+   "arch": "orcust",
+   "lists": 2,
+   "popularity": 2,
+   "novelty": 0.7586206896551724,
+   "score": 1.5172413793103448,
+   "top2": [
+    {
+     "arch": "mitsurugi",
+     "overlap": 0.17391304347826086
+    },
+    {
+     "arch": "sacred-beasts",
+     "overlap": 0.13043478260869565
+    }
+   ],
+   "picked": false,
+   "reserve": true
+  },
+  {
+   "arch": "exosister",
+   "lists": 2,
+   "popularity": 2,
+   "novelty": 0.7142857142857143,
+   "score": 1.4285714285714286,
+   "top2": [
+    {
+     "arch": "mitsurugi",
+     "overlap": 0.21739130434782608
+    },
+    {
+     "arch": "branded-light-and-darkness-ritual",
+     "overlap": 0.2
+    }
+   ],
+   "picked": false,
+   "reserve": false
+  },
+  {
+   "arch": "memento",
+   "lists": 2,
+   "popularity": 2,
+   "novelty": 0.7027027027027027,
+   "score": 1.4054054054054055,
+   "top2": [
+    {
+     "arch": "sky-striker",
+     "overlap": 0.21739130434782608
+    },
+    {
+     "arch": "branded-light-and-darkness-ritual",
+     "overlap": 0.2
+    }
+   ],
+   "picked": false,
+   "reserve": false
+  }
+ ]
+}

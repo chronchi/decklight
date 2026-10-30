@@ -70,34 +70,60 @@ def deck_id_of(url: str) -> str:
     return url.rsplit("/", 1)[-1]
 
 
-def main() -> int:
-    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--archs", nargs="+", required=True, help="archetype slugs (exact match)")
-    ap.add_argument("--out", type=Path, default=ROOT / "decks/forge/f0")
-    ap.add_argument("--pages", type=int, default=40)
-    ap.add_argument("--opponents", type=Path, default=X4B / "opponents.txt")
-    ap.add_argument("--n-train", type=int, default=3)
-    args = ap.parse_args()
-    archs: list[str] = args.archs
-    OUT: Path = args.out
+_VALID_ENGINE = None
+_VALID_NAMES = None
 
-    opps = [l.strip() for l in args.opponents.read_text().splitlines() if l.strip()]
+
+def _valid_init() -> None:
+    """Process-pool initializer: one Engine + CardNames per validation worker."""
+    global _VALID_ENGINE, _VALID_NAMES
+    _VALID_ENGINE, _VALID_NAMES = Engine(), CardNames()
+
+
+def _valid_one(rec: dict) -> tuple[bool, str, list, list]:
+    """Validate one normalised record; return (ok, reason, main, extra)."""
+    ok, why = fm.validate_record(rec, _VALID_ENGINE, _VALID_NAMES)
+    return ok, why, rec["main"], rec["extra"]
+
+
+def gather_candidates(
+    pages: int,
+    opponents: Path | list[str] | None = None,
+    archs: list[str] | None = None,
+) -> tuple[dict[str, list[dict]], Counter, int, object]:
+    """Pool meta + variant + fresh tournament candidates with exclusions.
+
+    `opponents`: path to an opponents.txt file (default ``decks/x4b/opponents.txt``)
+    or a list of pool stems. Every X4b list plus every opponent list excludes a
+    candidate by URL deck id or card multiset. `archs`: when given, only these
+    archetype slugs are gathered (fresh records of other slugs count as
+    rejected "other archetype", as the CLI always did); when None, every
+    archetype is gathered. Returns (by_arch, rejected, fetched, today) where each
+    candidate is ``{stem, item, meta, kind, ms, date}`` (deduped per archetype: same card
+    multiset keeps the newer); rejected counts parse/dup/validation/exclusion drops,
+    fetched is the number of pages pulled from the network, today the fetch date.
+    """
+    opp_src: Path | None = opponents if isinstance(opponents, Path) else None
+    if opponents is None:
+        opp_src = X4B / "opponents.txt"
+    if opp_src is not None:
+        opps = [l.strip() for l in opp_src.read_text().splitlines() if l.strip()]
+    else:
+        opps = list(opponents) if opponents is not None else []
     opp_paths = [POOL / f"{s}.ydk" for s in opps]
-    missing = [str(p) for p in opp_paths if not p.is_file()]
-    if missing:
-        print(f"forge_lists: opponent lists missing from {POOL}: {missing[:5]}", file=sys.stderr)
-        return 1
 
-    # Exclusion sets: every X4b list plus every --opponents list (URL deck id + card multiset).
+    # Exclusion sets: every X4b list plus every opponents list (URL deck id + card multiset).
     excluded_ids: set[str] = set()
     excluded_keys: set = set()
     for p in [*X4B.rglob("*.ydk"), *opp_paths]:
+        if not p.is_file():
+            continue
         m = x4b_lists.header_source(p)
         if m is not None:
             excluded_ids.add(deck_id_of(m["url"]))
         excluded_keys.add(multiset_key(x4b_lists.multiset(load_ydk(p))))
 
-    # Pool / variant tournament candidates whose archetype equals the archetype exactly.
+    # Pool / variant tournament candidates.
     meta = {p.stem: p for p in POOL.glob("*-meta*.ydk")}
     var = {p.stem: p for p in VAR.glob("*.ydk")}
     src = {s: m for s, p in {**meta, **var}.items() if (m := x4b_lists.header_source(p)) is not None}
@@ -106,31 +132,61 @@ def main() -> int:
     # Fresh fetches, validated exactly as x4b_lists.main does.
     fm.CACHE = ROOT / "data/cache/meta_decks_forge"
     fm.CACHE.mkdir(parents=True, exist_ok=True)
-    entries, fetched = fm.fetch_pages(args.pages, 50, "Tournament Meta Decks")
+    entries, fetched = fm.fetch_pages(pages, 50, "Tournament Meta Decks")
     today = datetime.now(UTC).date()
-    engine, names = Engine(), CardNames()
-    rejected: Counter = Counter()
-    fresh: list[dict] = []
+    # Cheap per-entry steps stay sequential (exact original order); the expensive
+    # engine validation runs in a process pool and is replayed in input order, so
+    # `fresh` and `rejected` are identical to the sequential version.
+    pending: list[dict] = []  # records awaiting validation, in entries order
+    events: list[tuple[str, int | None]] = []  # ("drop", None) with bucket prefilled, or ("valid", idx)
+    drops: list[str] = []
     seen = set()
     for e in entries:
         rec = fm.normalise(e, today)
         if rec is None or rec["deck_num"] in seen:
-            rejected["parse/dup"] += 1
+            drops.append("parse/dup")
+            events.append(("drop", len(drops) - 1))
             continue
         seen.add(rec["deck_num"])
-        if rec["slug"] not in archs:
-            rejected["other archetype"] += 1
+        if archs is not None and rec["slug"] not in archs:
+            drops.append("other archetype")
+            events.append(("drop", len(drops) - 1))
             continue
-        ok, why = fm.validate_record(rec, engine, names)
-        if not ok:
-            rejected[why] += 1
-            continue
-        fresh.append(rec)
+        events.append(("valid", len(pending)))
+        pending.append(rec)
+    outcomes: list[tuple[bool, str, list, list]] = []
+    if pending:
+        if len(pending) > 1:
+            import concurrent.futures
+
+            with concurrent.futures.ProcessPoolExecutor(max_workers=4,
+                                                        initializer=_valid_init) as ex:
+                outcomes = list(ex.map(_valid_one, pending))
+        else:
+            _valid_init()
+            outcomes = [_valid_one(pending[0])]
+    rejected: Counter = Counter()
+    fresh: list[dict] = []
+    for kind, idx in events:
+        if kind == "drop":
+            rejected[drops[idx]] += 1  # type: ignore[index]
+        else:
+            rec = pending[idx]  # type: ignore[index]
+            ok, why, main, extra = outcomes[idx]  # type: ignore[index]
+            if not ok:
+                rejected[why] += 1
+                continue
+            rec["main"], rec["extra"] = main, extra
+            fresh.append(rec)
 
     # Per archetype: filter, dedupe (same multiset keeps the newer), split.
-    final: dict[str, dict[str, tuple[object, dict]]] = {}  # arch -> stem -> (Path | rec, source meta)
-    counts: dict[str, Counter] = {}
-    for arch in archs:
+    by_arch: dict[str, list[dict]] = {}
+    wanted: set[str] = set(archs) if archs is not None else set()
+    if archs is None:
+        for s in {**meta, **var}:
+            wanted.add(re.sub(r"-(meta|v)\d+$", "", s))
+        wanted.update(r["slug"] for r in fresh)
+    for arch in sorted(wanted):
         cands: dict[str, tuple[object, dict, str, Counter, str]] = {}  # stem -> (item, meta, kind, ms, date)
         for s, p in {**meta, **var}.items():
             if re.sub(r"-(meta|v)\d+$", "", s) != arch or s not in src:
@@ -154,8 +210,38 @@ def main() -> int:
         for stem, v in sorted(cands.items(), key=lambda kv: (kv[1][4], kv[0])):
             best[multiset_key(v[3])] = (stem, v)
         kept = sorted(best.values(), key=lambda t: (t[1][4], t[0]))
-        final[arch] = {stem: (v[0], v[1]) for stem, v in kept}
-        counts[arch] = Counter(v[2] for _, v in kept)
+        by_arch[arch] = [{"stem": stem, "item": v[0], "meta": v[1], "kind": v[2],
+                          "ms": v[3], "date": v[4]} for stem, v in kept]
+    return by_arch, rejected, fetched, today
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--archs", nargs="+", required=True, help="archetype slugs (exact match)")
+    ap.add_argument("--out", type=Path, default=ROOT / "decks/forge/f0")
+    ap.add_argument("--pages", type=int, default=40)
+    ap.add_argument("--opponents", type=Path, default=X4B / "opponents.txt")
+    ap.add_argument("--n-train", type=int, default=3)
+    args = ap.parse_args()
+    archs: list[str] = args.archs
+    OUT: Path = args.out
+
+    opps = [l.strip() for l in args.opponents.read_text().splitlines() if l.strip()]
+    opp_paths = [POOL / f"{s}.ydk" for s in opps]
+    missing = [str(p) for p in opp_paths if not p.is_file()]
+    if missing:
+        print(f"forge_lists: opponent lists missing from {POOL}: {missing[:5]}", file=sys.stderr)
+        return 1
+
+    by_arch, rejected, fetched, today = gather_candidates(args.pages, args.opponents, archs)
+
+    # Per archetype: split.
+    final: dict[str, dict[str, tuple[object, dict]]] = {}  # arch -> stem -> (Path | rec, source meta)
+    counts: dict[str, Counter] = {}
+    for arch in archs:
+        kept = by_arch.get(arch, [])
+        final[arch] = {c["stem"]: (c["item"], c["meta"]) for c in kept}
+        counts[arch] = Counter(c["kind"] for c in kept)
 
     short = {a: len(final[a]) for a in archs if len(final[a]) < args.n_train + 1}
     if short:
