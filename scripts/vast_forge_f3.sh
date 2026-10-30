@@ -38,6 +38,14 @@ if [ "$SMOKE" = 1 ]; then
 fi
 FAILED=0
 
+# page-fault probe: touching 4 GB takes ~1-2 s on a healthy host; F3's first full run (machine 148266) spent 98% of
+# train_bc's CPU in the kernel under host memory pressure (shard load ~1 min per file) -> drop such a host at once
+pf=$(python3 -c "import time; t = time.time(); b = bytearray(4 << 30); print(round(time.time() - t, 1))")
+echo "page-fault probe: 4 GB in ${pf}s" >> "$OUT/PROGRESS"
+python3 -c "import sys; sys.exit(0 if $pf < 15 else 1)" || { alert "slow host memory: touching 4 GB took ${pf}s"; exit 3; }
+# numpy madvises big arrays for transparent hugepages; with THP defrag "madvise" a fragmented host compacts memory on
+# every fault (F3 2026-10-30: train_bc 98% system time, shard load ~1 min per file). Plain pages instead.
+export NUMPY_MADVISE_HUGEPAGE=0
 export HF_HOME="$PWD/data/cache/hf"
 uv sync --group dev --group ml --group gauntlet -q --no-install-package torch
 export UV_HTTP_TIMEOUT=300

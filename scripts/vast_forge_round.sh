@@ -51,6 +51,9 @@ fi
 MIN_LIST=100; [ "$SMOKE" = 1 ] && MIN_LIST=5
 FAILED=0
 
+# numpy madvises big arrays for transparent hugepages; with THP defrag "madvise" a fragmented host compacts memory on
+# every fault (F3 2026-10-30: train_bc 98% system time, shard load ~1 min per file). Plain pages instead.
+export NUMPY_MADVISE_HUGEPAGE=0
 export HF_HOME="$PWD/data/cache/hf"
 uv sync --group dev --group ml --group gauntlet -q --no-install-package torch
 export UV_HTTP_TIMEOUT=300
