@@ -1,0 +1,145 @@
+{
+ "archs": [
+  "kewl-tune",
+  "power-patron-artmage",
+  "blitzclique",
+  "ignister-maliss",
+  "lunalight",
+  "magistus-invoked-fairy-tail",
+  "trains"
+ ],
+ "train": {
+  "kewl-tune": [
+   "kewl-tune-f43",
+   "kewl-tune-f44",
+   "kewl-tune-f45"
+  ],
+  "power-patron-artmage": [
+   "power-patron-artmage-f18",
+   "power-patron-artmage-f19",
+   "power-patron-artmage-f20"
+  ],
+  "blitzclique": [
+   "blitzclique-meta1",
+   "blitzclique-meta2",
+   "blitzclique-f23"
+  ],
+  "ignister-maliss": [
+   "ignister-maliss-f6",
+   "ignister-maliss-f10",
+   "ignister-maliss-f8"
+  ],
+  "lunalight": [
+   "lunalight-f6",
+   "lunalight-meta1",
+   "lunalight-meta2"
+  ],
+  "magistus-invoked-fairy-tail": [
+   "magistus-invoked-fairy-tail-f6",
+   "magistus-invoked-fairy-tail-f7",
+   "magistus-invoked-fairy-tail-f9"
+  ],
+  "trains": [
+   "trains-f2",
+   "trains-f3",
+   "trains-f4"
+  ]
+ },
+ "heldout": {
+  "kewl-tune": "kewl-tune-f46",
+  "power-patron-artmage": "power-patron-artmage-f21",
+  "blitzclique": "blitzclique-f24",
+  "ignister-maliss": "ignister-maliss-f12",
+  "lunalight": "lunalight-v1",
+  "magistus-invoked-fairy-tail": "magistus-invoked-fairy-tail-f10",
+  "trains": "trains-meta1"
+ },
+ "opponents": {
+  "kewl-tune": [
+   "angelechy-elfnote-meta1",
+   "elfnote-mitsurugi-synchron-meta1",
+   "onomat-constellar-tellarknights-meta1",
+   "power-patron-meta1",
+   "sky-striker-meta2",
+   "synchron-elfnote-meta2",
+   "trains-meta2"
+  ],
+  "power-patron-artmage": [
+   "angelechy-elfnote-meta1",
+   "elfnote-mitsurugi-synchron-meta1",
+   "kewl-tune-meta1",
+   "onomat-constellar-tellarknights-meta1",
+   "power-patron-meta1",
+   "sky-striker-meta2",
+   "synchron-elfnote-meta2",
+   "trains-meta2"
+  ],
+  "blitzclique": [
+   "angelechy-elfnote-meta1",
+   "elfnote-mitsurugi-synchron-meta1",
+   "kewl-tune-meta1",
+   "onomat-constellar-tellarknights-meta1",
+   "power-patron-meta1",
+   "sky-striker-meta2",
+   "synchron-elfnote-meta2",
+   "trains-meta2"
+  ],
+  "ignister-maliss": [
+   "angelechy-elfnote-meta1",
+   "elfnote-mitsurugi-synchron-meta1",
+   "kewl-tune-meta1",
+   "onomat-constellar-tellarknights-meta1",
+   "power-patron-meta1",
+   "sky-striker-meta2",
+   "synchron-elfnote-meta2",
+   "trains-meta2"
+  ],
+  "lunalight": [
+   "angelechy-elfnote-meta1",
+   "elfnote-mitsurugi-synchron-meta1",
+   "kewl-tune-meta1",
+   "onomat-constellar-tellarknights-meta1",
+   "power-patron-meta1",
+   "sky-striker-meta2",
+   "synchron-elfnote-meta2",
+   "trains-meta2"
+  ],
+  "magistus-invoked-fairy-tail": [
+   "angelechy-elfnote-meta1",
+   "elfnote-mitsurugi-synchron-meta1",
+   "kewl-tune-meta1",
+   "onomat-constellar-tellarknights-meta1",
+   "power-patron-meta1",
+   "sky-striker-meta2",
+   "synchron-elfnote-meta2",
+   "trains-meta2"
+  ],
+  "trains": [
+   "angelechy-elfnote-meta1",
+   "elfnote-mitsurugi-synchron-meta1",
+   "kewl-tune-meta1",
+   "onomat-constellar-tellarknights-meta1",
+   "power-patron-meta1",
+   "sky-striker-meta2",
+   "synchron-elfnote-meta2"
+  ]
+ },
+ "reserve": {
+  "angelechy-tenpai-dragon": "angelechy-tenpai-dragon-f1",
+  "azamina-white-forest": "azamina-white-forest-meta1",
+  "constellar-tellarknights": "constellar-tellarknights-f1",
+  "dark-magician-azamina-snake-eye": "dark-magician-azamina-snake-eye-meta1",
+  "dracotail": "dracotail-f1",
+  "k9-fur-hire": "k9-fur-hire-f1",
+  "melodious": "melodious-meta1",
+  "phantom-knights": "phantom-knights-f1",
+  "ryzeal-onomat": "ryzeal-onomat-f1",
+  "superheavy-samurai-centur-ion": "superheavy-samurai-centur-ion-f1",
+  "angelechy": "angelechy-meta2",
+  "azamina-orcust": "azamina-orcust-f2",
+  "d-d-d": "d-d-d-f2",
+  "k9-vanquish-soul": "k9-vanquish-soul-f2",
+  "orcust": "orcust-meta1",
+  "onomat-ryzeal": "onomat-ryzeal-f3"
+ }
+}

@@ -222,6 +222,9 @@ def main() -> int:
     ap.add_argument("--pages", type=int, default=40)
     ap.add_argument("--opponents", type=Path, default=X4B / "opponents.txt")
     ap.add_argument("--n-train", type=int, default=3)
+    ap.add_argument("--reserve", type=Path, default=None,
+                    help="a forge_select selection.json: also write its reserve lists to <out>/reserve/ and "
+                         "pairs/reserve.pairs (each vs the opponents not containing its archetype)")
     args = ap.parse_args()
     archs: list[str] = args.archs
     OUT: Path = args.out
@@ -233,7 +236,9 @@ def main() -> int:
         print(f"forge_lists: opponent lists missing from {POOL}: {missing[:5]}", file=sys.stderr)
         return 1
 
-    by_arch, rejected, fetched, today = gather_candidates(args.pages, args.opponents, archs)
+    reserve = json.loads(args.reserve.read_text())["reserve"] if args.reserve else []
+    by_arch, rejected, fetched, today = gather_candidates(
+        args.pages, args.opponents, sorted(set(archs) | {r["arch"] for r in reserve}))
 
     # Per archetype: split.
     final: dict[str, dict[str, tuple[object, dict]]] = {}  # arch -> stem -> (Path | rec, source meta)
@@ -250,8 +255,21 @@ def main() -> int:
               f"({detail}; excluded/dup/rejected {dict(rejected)})", file=sys.stderr)
         return 1
 
+    res_items = []
+    for r in reserve:
+        c = next((c for c in by_arch.get(r["arch"], []) if c["stem"] == r["stem"]), None)
+        if c is None:
+            print(f"forge_lists: reserve list {r['stem']} not found among the candidates", file=sys.stderr)
+            return 1
+        res_items.append((r["arch"], c))
+
+    keep = {}  # files in OUT that are not ours (e.g. selection.json) survive the rebuild
     if OUT.exists():
+        keep = {p.name: p.read_bytes() for p in OUT.iterdir() if p.is_file() and p.name not in ("SOURCES.md", "split.json")}
         shutil.rmtree(OUT)
+    OUT.mkdir(parents=True)
+    for name, data in keep.items():
+        (OUT / name).write_bytes(data)
     run_day = today.isoformat()
     split: dict = {"archs": archs, "train": {}, "heldout": {}, "opponents": {}}
     rows = ["# Forge tournament lists (scripts/forge_lists.py)", "",
@@ -289,6 +307,17 @@ def main() -> int:
         c = counts[arch]
         print(f"{arch}: found pool={c.get('pool', 0)} variant={c.get('variant', 0)} fresh={c.get('fresh', 0)} "
               f"train={','.join(train)} heldout={held} opponents={len(split['opponents'][arch])}")
+
+    if res_items:
+        split["reserve"] = {}
+        lines = []
+        for arch, c in res_items:
+            put("reserve", c["stem"], c["item"], c["meta"])
+            split["reserve"][arch] = c["stem"]
+            lines += [f"{c['stem']}:{o}\n" for o in opponents_for(arch, opps)]
+        (OUT / "pairs").mkdir(parents=True, exist_ok=True)
+        (OUT / "pairs" / "reserve.pairs").write_text("".join(lines))
+        print(f"reserve: {len(res_items)} lists, {len(lines)} pairs")
 
     rows += ["", "Opponents (--opponents minus stems containing the archetype): "
                  + "; ".join(f"{a}: {','.join(split['opponents'][a])}" for a in archs), ""]
