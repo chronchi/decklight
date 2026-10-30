@@ -12,7 +12,8 @@
 # Env: REL (data/cache/x4b_D/best.pt), REL_NAME (r0), NEXT_NAME (r1), SPLIT (decks/forge/f2/split.json),
 #   ARCHS (SPLIT's archs), PACKS_IN (data/forge/packs), FT_ITERS (40), PAR (2), SHARE (0.5), FT_HOURS (3, a cap),
 #   OPPS (decks/x4b/opponents.txt), LOOK_GAMES (256), K (6), MARGIN (0.03), VERIFY_SEED0 (41000),
-#   TEACH_GAMES (1500), ANCHOR_GAMES (7500), EPOCHS (2), LR (1e-4), CARD_SEED0 (43000), NEW_GAMES (1536),
+#   TEACH_GAMES (564; F3 2026-10-30: 3x fewer than F2's 1500 keeps 92% of r1's gain, all gates pass),
+#   ANCHOR_GAMES (256 per distilled pack, the F3 share), EPOCHS (2), LR (1e-4), CARD_SEED0 (43000), NEW_GAMES (1536),
 #   OLD_ARCHS (the 5 X4b archetypes), OLD_GAMES (768), RES_PAIRS (decks/forge/f2/pairs/reserve.pairs),
 #   RES_GAMES (3072), GA_SEEDS (24), VAR_CAP (40m),
 #   SMOKE (1: FT_ITERS 4, LOOK_GAMES 64, K 2, TEACH_GAMES 40, ANCHOR_GAMES 120, EPOCHS 2,
@@ -35,7 +36,7 @@ PACKS_IN=${PACKS_IN:-data/forge/packs}
 FT_ITERS=${FT_ITERS:-40}; PAR=${PAR:-2}; SHARE=${SHARE:-0.5}; FT_HOURS=${FT_HOURS:-3}
 OPPS=${OPPS:-decks/x4b/opponents.txt}
 LOOK_GAMES=${LOOK_GAMES:-256}; K=${K:-6}; MARGIN=${MARGIN:-0.03}; VERIFY_SEED0=${VERIFY_SEED0:-41000}
-TEACH_GAMES=${TEACH_GAMES:-1500}; ANCHOR_GAMES=${ANCHOR_GAMES:-7500}; EPOCHS=${EPOCHS:-2}; LR=${LR:-1e-4}
+TEACH_GAMES=${TEACH_GAMES:-564}; ANCHOR_GAMES=${ANCHOR_GAMES:-}; EPOCHS=${EPOCHS:-2}; LR=${LR:-1e-4}
 CARD_SEED0=${CARD_SEED0:-43000}
 NEW_GAMES=${NEW_GAMES:-1536}
 OLD_ARCHS=${OLD_ARCHS:-branded-light-and-darkness-ritual invoked radiant-typhoon sacred-beasts atlantean-mermail}
@@ -314,6 +315,7 @@ for a in $ACCEPTED; do
   gen "$a" "$OUT/packs/$a/policy/best.pt" "$OUT/packs/$a/decks/train" "$TEACH_GAMES" $((700000 + 1000000 * i)); i=$((i + 1))
   tick "games $a: $(cat "$OUT"/pgames/"$a"-p*/*.jsonl 2>/dev/null | wc -l)"
 done
+[ -n "$ANCHOR_GAMES" ] || ANCHOR_GAMES=$(( 256 * $(echo $ACCEPTED | wc -w) ))
 gen anchor "$REL" "$OUT/anchor_decks" "$ANCHOR_GAMES" 7700000
 tick "games anchor: $(cat "$OUT"/pgames/anchor-p*/*.jsonl 2>/dev/null | wc -l)"
 WANTS=""; for a in $ACCEPTED; do WANTS="$WANTS $a:$TEACH_GAMES"; done
