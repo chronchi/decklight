@@ -4,6 +4,7 @@
         --release-name r0 --archetype <a> --train-decks decks/forge/f0/train/<a>/*.ydk \\
         --heldout-decks decks/forge/f0/heldout/<a>-*.ydk --out data/forge/packs/<a>
     uv run python scripts/forge.py validate <pack dir or .tar.gz> [--release data/cache/x4b_D/best.pt]
+    uv run python scripts/forge.py migrate <v1 pack dir> --out <dir> [--license CC-BY-4.0]
 """
 
 from __future__ import annotations
@@ -18,7 +19,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from decklight.forge.pack import build_pack, extract, validate_pack
+from decklight.forge.pack import build_pack, extract, migrate_pack, validate_pack
 
 DEFAULT_EMB = ROOT / "data" / "cards" / "emb" / "qwen3-0.6b-d512.npz"
 
@@ -86,8 +87,10 @@ def _cmd_validate(args: argparse.Namespace) -> int:
         except ValueError as e:
             print(f"ERROR {e}")
             return 2
+    cards_db = [Path(p) for p in args.cards_db] if args.cards_db else _default_cards_db()
     errors, warnings = validate_pack(target, Path(args.release) if args.release else None,
-                                     emb=DEFAULT_EMB, cards_db=_default_cards_db())
+                                     emb=DEFAULT_EMB, cards_db=cards_db,
+                                     fingerprint=args.fingerprint)
     for w in warnings:
         print(f"WARN {w}")
     for e in errors:
@@ -96,6 +99,25 @@ def _cmd_validate(args: argparse.Namespace) -> int:
         print("OK")
         return 0
     return 2
+
+
+def _cmd_migrate(args: argparse.Namespace) -> int:
+    try:
+        out = migrate_pack(args.pack, args.out, license=args.license)
+    except (ValueError, FileExistsError, FileNotFoundError, OSError) as e:
+        print(f"forge migrate: {e}", file=sys.stderr)
+        return 1
+    cards_db = [Path(p) for p in args.cards_db] if args.cards_db else _default_cards_db()
+    errors, warnings = validate_pack(out, Path(args.release) if args.release else None,
+                                     emb=DEFAULT_EMB, cards_db=cards_db)
+    for w in warnings:
+        print(f"WARN {w}")
+    for e in errors:
+        print(f"ERROR {e}")
+    if errors:
+        return 2
+    print(f"forge migrate: wrote {out}")
+    return 0
 
 
 def main() -> int:
@@ -110,13 +132,22 @@ def main() -> int:
     p.add_argument("--heldout-decks", nargs="*", default=[])
     p.add_argument("--out", required=True)
     p.add_argument("--contributor", default="ygo-zero")
-    p.add_argument("--license", default="unspecified")
+    p.add_argument("--license", default="CC-BY-4.0")
     p.add_argument("--sources", default=None)
     p.set_defaults(func=_cmd_pack)
     v = sub.add_parser("validate", help="validate a pack dir or .tar.gz")
     v.add_argument("pack")
     v.add_argument("--release", default=None)
+    v.add_argument("--cards-db", nargs="*", default=None)
+    v.add_argument("--fingerprint", default=None)
     v.set_defaults(func=_cmd_validate)
+    m = sub.add_parser("migrate", help="migrate a retired v1 pack dir to v2")
+    m.add_argument("pack")
+    m.add_argument("--out", required=True)
+    m.add_argument("--license", default="CC-BY-4.0")
+    m.add_argument("--release", default=None)
+    m.add_argument("--cards-db", nargs="*", default=None)
+    m.set_defaults(func=_cmd_migrate)
     args = ap.parse_args()
     return args.func(args)
 

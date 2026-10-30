@@ -21,6 +21,7 @@ gauntlet = [
 # Models: card text embeddings + BC policy. CPU-only torch on the laptop (ADR 0001); vast installs a CUDA wheel over it.
 ml = [
     "torch>=2.9",
+    "safetensors>=0.6",
     "sentence-transformers>=5.1",
 ]
 web = [

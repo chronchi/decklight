@@ -70,7 +70,7 @@ def test_klmap_train_only_and_dup(tmp_path):
     p = _run(PREP, "klmap", "--packs", a, "--default", "rel.pt", "--out", out)
     assert p.returncode == 0, p.stderr
     m = json.loads(out.read_text())
-    assert m == {"default": "rel.pt", "decks": {"t1": f"{a}/policy/best.pt", "t2": f"{a}/policy/best.pt"}}
+    assert m == {"default": "rel.pt", "decks": {"t1": f"{a}/policy/weights.safetensors", "t2": f"{a}/policy/weights.safetensors"}}
     b = _pack(tmp_path / "b", "bb", ["t2"], ["h2"])
     p = _run(PREP, "klmap", "--packs", a, b, "--default", "rel.pt", "--out", out)
     assert p.returncode == 2

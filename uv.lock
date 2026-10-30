@@ -125,6 +125,7 @@ gauntlet = [
     { name = "ai-edge-litert" },
 ]
 ml = [
+    { name = "safetensors" },
     { name = "sentence-transformers" },
     { name = "torch", version = "2.14.1", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "sys_platform == 'darwin'" },
     { name = "torch", version = "2.14.1+cpu", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "sys_platform != 'darwin'" },
@@ -150,6 +151,7 @@ dev = [
 ]
 gauntlet = [{ name = "ai-edge-litert", specifier = ">=2.2.0" }]
 ml = [
+    { name = "safetensors", specifier = ">=0.6" },
     { name = "sentence-transformers", specifier = ">=5.1" },
     { name = "torch", specifier = ">=2.9", index = "https://download.pytorch.org/whl/cpu" },
 ]

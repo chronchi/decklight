@@ -43,6 +43,7 @@ from decklight.model.bc_data import (
     load_shards,
     split_masks,
 )
+from decklight.model.ckpt import load_state
 from decklight.model.policy_v3 import make_policy
 
 
@@ -509,8 +510,7 @@ def main() -> None:
         args.desc_lua = src_args.get("desc_lua", args.desc_lua)
     model = make_policy(args.emb, vars(args), dropout=args.dropout, card_dropout=args.card_dropout).to(device)
     if args.init:
-        state = torch.load(args.init, map_location="cpu")
-        state = state.get("model", state)
+        state = load_state(args.init)
         model.load_state_dict({k: v.float() if v.is_floating_point() else v for k, v in state.items()})
     ref = None
     if args.kl_init or args.soft_targets == "gumbel":
@@ -520,8 +520,7 @@ def main() -> None:
     kl_coef = args.kl_init
     if args.kl_ref:
         ref = make_policy(args.emb, vars(args), dropout=0.0, card_dropout=0.0).to(device)
-        rstate = torch.load(args.kl_ref, map_location="cpu")
-        rstate = rstate.get("model", rstate)
+        rstate = load_state(args.kl_ref)
         ref.load_state_dict({k: v.float() if v.is_floating_point() else v for k, v in rstate.items()})
         ref.eval().requires_grad_(False)
         kl_coef = args.kl_ref_coef
@@ -543,12 +542,11 @@ def main() -> None:
                 order.append(ckpt)
         for ckpt in order:
             t = make_policy(args.emb, vars(args), dropout=0.0, card_dropout=0.0).to(device)
-            tstate = torch.load(ckpt, map_location="cpu")
-            tstate = tstate.get("model", tstate)
+            tstate = load_state(ckpt)
             t.load_state_dict({k: v.float() if v.is_floating_point() else v for k, v in tstate.items()})
             t.eval().requires_grad_(False)
             teachers.append(t)
-            # label = the checkpoint's dir; a pack's policy/best.pt is labelled by the pack dir
+            # label = the checkpoint's dir; a pack's policy/weights.safetensors is labelled by the pack dir
             d = Path(ckpt).parent
             teacher_labels.append(d.parent.name if d.name == "policy" else d.name)
         default_pos = order.index(kl_map["default"])
@@ -661,11 +659,10 @@ def main() -> None:
             if not math.isfinite(train_kl):
                 print(f"ALERT {args.out.name}: KL is NaN", flush=True)
                 raise SystemExit(2 if teachers else 3)
-        if soft:
-            if run["soft_n"] == 0:
-                print(f"ALERT {args.out.name}: --soft-targets gumbel with 0 soft samples in epoch {ep}",
-                      flush=True)
-                raise SystemExit(3)
+        if soft and run["soft_n"] == 0:
+            print(f"ALERT {args.out.name}: --soft-targets gumbel with 0 soft samples in epoch {ep}",
+                  flush=True)
+            raise SystemExit(3)
         if args.merge_last > 1:
             recent = (recent + [{k: v.detach().to("cpu", copy=True) for k, v in model.state_dict().items()}])[-args.merge_last:]
         rec = {"epoch": ep, "time": round(time.time() - t0, 1), "n_train": len(ep_idx), "train_loss": run["loss"] / max(run["n"], 1)}

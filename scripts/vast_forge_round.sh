@@ -191,7 +191,7 @@ for ((k = 1; k <= K; k++)); do
   for a in $(cat "$OUT/verify/LIVE"); do
     s_p=$(cat "$OUT/verify/$a.seeds")
     V="$V;R-$a|--pairs @$OUT/verify/$a.pairs --seeds $s_p"
-    V="$V;S-$a|--ckpt $OUT/packs/$a/policy/best.pt --pairs @$OUT/verify/$a.pairs --seeds $s_p"
+    V="$V;S-$a|--ckpt $OUT/packs/$a/policy/weights.safetensors --pairs @$OUT/verify/$a.pairs --seeds $s_p"
   done
   V="${V#;}"
   SM="--raw 1 --opp ckpt --opp-ckpt $REL --seed-per-pair 1 --deal-seed0 $((VERIFY_SEED0 + 1000 * (k - 1))) --deck-dir $OUT/decks"
@@ -312,7 +312,7 @@ gen() { # <tag> <ckpt> <decks dir> <games> <seed0>
 }
 i=0
 for a in $ACCEPTED; do
-  gen "$a" "$OUT/packs/$a/policy/best.pt" "$OUT/packs/$a/decks/train" "$TEACH_GAMES" $((700000 + 1000000 * i)); i=$((i + 1))
+  gen "$a" "$OUT/packs/$a/policy/weights.safetensors" "$OUT/packs/$a/decks/train" "$TEACH_GAMES" $((700000 + 1000000 * i)); i=$((i + 1))
   tick "games $a: $(cat "$OUT"/pgames/"$a"-p*/*.jsonl 2>/dev/null | wc -l)"
 done
 [ -n "$ANCHOR_GAMES" ] || ANCHOR_GAMES=$(( 256 * $(echo $ACCEPTED | wc -w) ))

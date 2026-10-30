@@ -14,6 +14,7 @@ import torch
 
 from decklight.eval.loopguard import LoopGuard
 from decklight.model.bc_data import KNOWN_KEYS, OBS_KEYS
+from decklight.model.ckpt import load_state
 from decklight.model.policy_v3 import make_policy
 
 
@@ -36,8 +37,7 @@ class BCPolicy:
         self.hist = int(a.get("hist", 0) or 0)
         self.known = bool(a.get("known", False))
         self.model = make_policy(emb, a)
-        state = torch.load(ckpt, map_location="cpu")
-        state = state.get("model", state)
+        state = load_state(ckpt)
         self.model.load_state_dict({k: v.float() if v.is_floating_point() else v for k, v in state.items()})
         self.device = torch.device(device)
         self.model.to(self.device).eval()

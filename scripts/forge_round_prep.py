@@ -78,10 +78,10 @@ def cmd_klmap(args: argparse.Namespace) -> int:
         for d in info["decks"]:
             if d["role"] != "train":
                 continue
-            if d["stem"] in decks and decks[d["stem"]] != f"{pack}/policy/best.pt":
+            if d["stem"] in decks and decks[d["stem"]] != f"{pack}/policy/weights.safetensors":
                 print(f"forge_round_prep klmap: stem {d['stem']} maps to two packs")
                 return 2
-            decks[d["stem"]] = f"{pack}/policy/best.pt"
+            decks[d["stem"]] = f"{pack}/policy/weights.safetensors"
     Path(args.out).write_text(json.dumps({"default": args.default, "decks": decks}, indent=1) + "\n")
     print(f"klmap {len(decks)}")
     return 0
