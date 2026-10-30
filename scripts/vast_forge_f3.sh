@@ -13,7 +13,7 @@
 # Analysis on the laptop: scripts/audit/forge_f3_card.py.
 # Env: REL (data/cache/x4b_D/best.pt), F3 (data/forge/f3), ARMS ("T D"), EPOCHS (2), LR (1e-4), D_GAMES (94 per
 #   worker), D_WORKERS (6), NEW_GAMES (1536), RES_GAMES (3072), OLD_SEEDS (24), VAR_CAP (40m),
-#   SMOKE (1: D_GAMES 4, 2 packs' D games only, tgames cut to 8 games per file, card --games-limit 128).
+#   SMOKE (1: D games from worker p0 only, tgames cut to 8 games per file, card --games-limit 128).
 # Usage: bash scripts/vast_forge_f3.sh <name>. Do NOT run on the laptop (vast GPU only).
 set -uo pipefail
 export PATH="$HOME/.local/bin:$PATH"
@@ -30,11 +30,11 @@ D_GAMES=${D_GAMES:-94}; D_WORKERS=${D_WORKERS:-6}
 NEW_GAMES=${NEW_GAMES:-1536}; RES_GAMES=${RES_GAMES:-3072}; OLD_SEEDS=${OLD_SEEDS:-24}; VAR_CAP=${VAR_CAP:-40m}
 RES_PAIRS=decks/forge/f2/pairs/reserve.pairs
 OLD_ARCHS="branded-light-and-darkness-ritual invoked radiant-typhoon sacred-beasts atlantean-mermail"
-PACKS=$(ls "$F3/packs")
+PACKS=$(ls "$F3/packs" | xargs)  # space-separated: D_PACKS is matched with " $a "
 SMOKE=${SMOKE:-0}
 D_PACKS="$PACKS"
 if [ "$SMOKE" = 1 ]; then
-  D_GAMES=4; D_PACKS=$(echo "$PACKS" | head -2 | xargs); PROBE_NPROC=${PROBE_NPROC:-2}
+  D_WORKERS=1  # one real 94-game worker per pack: the deal assert is real, and train_bc needs every kl_map deck; PROBE_NPROC=${PROBE_NPROC:-2}
 fi
 FAILED=0
 
@@ -59,12 +59,12 @@ for a in $PACKS; do
 done
 
 # ---- 1. games: T = the staged teacher games; D = r0 on the same deals ------------------------------------------------
-mkdir -p "$OUT/games/T" "$OUT/games/D"
-cp -r "$F3"/tgames/* "$OUT/games/T/"
+mkdir -p "$OUT/games-T/pgames" "$OUT/games-D/pgames"
+cp -r "$F3"/tgames/* "$OUT/games-T/pgames/"
 if [ "$SMOKE" = 1 ]; then  # 8 games per deck file keep the smoke's shards and training small
-  for f in "$OUT"/games/T/*/*.jsonl; do head -8 "$f" > "$f.tmp" && mv "$f.tmp" "$f"; done
+  for f in "$OUT"/games-T/pgames/*/*.jsonl; do head -8 "$f" > "$f.tmp" && mv "$f.tmp" "$f"; done
 fi
-cp -r "$OUT"/games/T/anchor-p* "$OUT/games/D/"
+cp -r "$OUT"/games-T/pgames/anchor-p* "$OUT/games-D/pgames/"
 GMB=$(nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits | head -1); RMB=$(free -m | awk '/Mem/{print $2}')
 NP=$(python3 -c "print(max(1, min($J, $GMB // 1500, $RMB // 3000)))")  # gen_selfplay: student + league opponent
 UNITS="$OUT/dunits.txt"; : > "$UNITS"
@@ -79,19 +79,19 @@ tick "D games: $(wc -l < "$UNITS") units of $D_GAMES games, $NP at a time (cores
 export REL F3 OUT D_GAMES
 # a unit is capped at 30 min (F2: one worker hung 16 min in an engine loop; a normal 94-game unit takes 2-7 min)
 xargs -P "$NP" -L 1 bash -c 'timeout 30m uv run --no-sync python scripts/gen_selfplay.py --ckpt "$REL" \
-    --out "$OUT/games/D/$0-p$1" --games "$D_GAMES" --temp 1.0 --league "R=$REL:1" --decks "$F3/packs/$0/decks/train" \
+    --out "$OUT/games-D/pgames/$0-p$1" --games "$D_GAMES" --temp 1.0 --league "R=$REL:1" --decks "$F3/packs/$0/decks/train" \
     --opp-decks "$F3/anchor_decks" --seed "$2" --threads 1 --device cuda > "$OUT/gen-$0-$1.txt" 2>&1 \
     || echo "ALERT gen D $0 p$1 exit $?" >> "$OUT/ALERT"' < "$UNITS"
-tick "D games done: $(cat "$OUT"/games/D/*/*.jsonl 2>/dev/null | wc -l) rows (anchor included)"
+tick "D games done: $(cat "$OUT"/games-D/pgames/*/*.jsonl 2>/dev/null | wc -l) rows (anchor included)"
 # invariants: D's deals are T's (same game_id -> same decks, seed and student seat), D is not T's play (choices differ),
-# (smoke: the 4-game schedule is not the 94-game one, so deals are not compared), >= 95% of the units' games present, no pack deck under 100 games (smoke: 1)
+# >= 95% of the units' games present, no pack deck under 100 games (smoke: 1)
 uv run --no-sync python - "$OUT" "$D_GAMES" "$D_WORKERS" "$SMOKE" $D_PACKS <<'PY' >> "$OUT/PROGRESS" 2>&1
 import collections, glob, json, sys
 from pathlib import Path
 out, dg, dw, smoke, packs = Path(sys.argv[1]), int(sys.argv[2]), int(sys.argv[3]), sys.argv[4] == "1", sys.argv[5:]
 def load(arm, tag):
     g = {}
-    for f in glob.glob(str(out / f"games/{arm}/{tag}-p*/*.jsonl")):
+    for f in glob.glob(str(out / f"games-{arm}/pgames/{tag}-p*/*.jsonl")):
         for line in open(f):
             r = json.loads(line); g[r["game_id"]] = r
     return g
@@ -108,7 +108,7 @@ for a in packs:
     print(f"D {a}: {len(d)} games, paired with T {len(both)}, same deal {same_deal}, same play {same_play}, "
           f"cut {cut}, r0 win rate vs r0 {win:.3f}, per deck {dict(per)}")
     want = dg * dw
-    if (len(d) < 0.95 * want or (not smoke and len(both) < 0.9 * min(len(d), len(t))) or (not smoke and same_deal < len(both))
+    if (len(d) < 0.95 * want or (not smoke and len(both) < 0.9 * min(len(d), len(t))) or same_deal < len(both)
             or same_play > 0.5 * max(len(both), 1) or cut > 0.02 * max(len(d), 1)
             or min(per.values(), default=0) < (1 if smoke else 100)):
         fails.append(a)
@@ -121,10 +121,13 @@ PY
 # ---- 2. distill each arm (shards, then train_bc; the two trainings run together) -----------------------------------
 HOLD="kewl-tune $(tr '\n' ' ' < decks/pool/HOLDOUT)"
 for x in $ARMS; do
-  uv run --no-sync python scripts/build_bc_shards.py --glob "$OUT/games/$x/*/*.jsonl" --out "data/cache/bc_shards_f3_$x" \
+  uv run --no-sync python scripts/build_bc_shards.py --glob "$OUT/games-$x/pgames/*/*.jsonl" --out "data/cache/bc_shards_f3_$x" \
     --jobs "$J" > "$OUT/shards-$x.txt" 2>&1 || { alert "shards $x failed: $(tail -1 "$OUT/shards-$x.txt")"; exit 3; }
   grep -h "^ALERT" "$OUT/shards-$x.txt" >> "$OUT/ALERT"
   tick "shards $x $(grep -m1 '^samples' "$OUT/shards-$x.txt")"
+  # the record kind comes from the path (a "pgames" component -> pgame); 0 samples = a wrong path (smoke 2026-10-30)
+  ns=$(grep -m1 '^samples' "$OUT/shards-$x.txt" | grep -o '[0-9]*' | head -1)
+  [ "${ns:-0}" -gt 0 ] || { alert "shards $x: 0 samples"; exit 4; }
 done
 TPIDS=""
 for x in $ARMS; do
