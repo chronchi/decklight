@@ -117,11 +117,18 @@ ft_one() { # <arch> <slot>
 }
 
 tick "fine-tunes from $REL: $ARCHS, $FT_ITERS it each, $PAR at a time, $((J / PAR)) cores each"
-slot=0
+# each run takes a free core slot (slot-<s>.busy markers); round-robin by launch order put two runs on the same cores
+# while the other slot idled (F2 2026-10-30: lunalight and trains both on cores 0-12)
+rm -f "$OUT"/slot-*.busy
 for a in $ARCHS; do
-  ft_one "$a" "$slot" &
-  slot=$(( (slot + 1) % PAR ))
-  while [ "$(jobs -rp | wc -l)" -ge $((PAR + 1)) ]; do wait -n; done
+  while true; do
+    slot=""
+    for ((s = 0; s < PAR; s++)); do [ -f "$OUT/slot-$s.busy" ] || { slot=$s; break; }; done
+    [ -n "$slot" ] && break
+    sleep 10
+  done
+  touch "$OUT/slot-$slot.busy"
+  ( ft_one "$a" "$slot"; rm -f "$OUT/slot-$slot.busy" ) &
 done
 for a in $ARCHS; do while [ ! -f "$OUT/ft-$a/DONE_FT" ]; do sleep 20; done; done
 
@@ -261,18 +268,43 @@ uv run --no-sync python scripts/forge_round_prep.py klmap --packs $ACCPACKS --de
   --out "$OUT/kl_map.json" > "$OUT/klmap.txt" 2>&1 || { alert "klmap: $(tail -1 "$OUT/klmap.txt")"; exit 4; }
 tick "$(cat "$OUT/anchor.txt") $(cat "$OUT/klmap.txt")"
 GMB=$(nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits | head -1); RMB=$(free -m | awk '/Mem/{print $2}')
-NP=$(python3 -c "print(max(1, min($J, $GMB // 1500, $RMB // 3000)))")
+# per-process GPU memory from the verify probe (one policy), x2 for gen_selfplay's league opponent; 1500 MB when
+# unmeasured. A fixed 1500 MB left 10 of 26 cores idle in F2 (probe 530 MB).
+PGMB=$(grep -oh 'probe gpu [0-9]*MB' "$OUT/verify-L1/sizing.txt" 2>/dev/null | grep -oh '[0-9]*' | head -1)
+GPP=$(( ${PGMB:-750} * 2 ))
+NP=$(python3 -c "print(max(1, min($J, $GMB // $GPP, $RMB // 3000)))")
 tick "games: $NP procs per source (cores $J, gpu ${GMB}MB, ram ${RMB}MB)"
 gen() { # <tag> <ckpt> <decks dir> <games> <seed0>
   local tag="$1" ck="$2" dk="$3" games="$4" s0="$5" per p pids=()
   per=$(( (games + NP - 1) / NP ))
+  mkdir -p "$OUT/pgames"
   for ((p = 0; p < NP; p++)); do
     uv run --no-sync python scripts/gen_selfplay.py --ckpt "$ck" --out "$OUT/pgames/$tag-p$p" --games "$per" --temp 1.0 \
       --league "R=$REL:1" --decks "$dk" --opp-decks "$OUT/anchor_decks" --seed $((s0 + 10000 * p)) --threads 1 \
       --device cuda > "$OUT/gen-$tag-$p.txt" 2>&1 &
     pids+=($!)
   done
-  for p in "${pids[@]}"; do wait "$p" || alert "gen $tag proc $p exit $?"; done
+  # watchdog: once half the workers are done, kill any still running after 3x the median finish time + 120 s
+  # (F2 2026-10-30: one kewl-tune worker hung 16 min in an engine loop with no decision, so the decision cap never fired)
+  local t0 done_t=() alive n med lim
+  t0=$(date +%s)
+  while true; do
+    alive=0; done_t=()
+    for p in "${pids[@]}"; do
+      if kill -0 "$p" 2>/dev/null; then alive=$((alive + 1)); else done_t+=("$(cat "$OUT/pgames/.done-$p" 2>/dev/null || { date +%s > "$OUT/pgames/.done-$p"; cat "$OUT/pgames/.done-$p"; })"); fi
+    done
+    [ "$alive" = 0 ] && break
+    n=${#done_t[@]}
+    if [ "$n" -ge $(( (${#pids[@]} + 1) / 2 )) ]; then
+      med=$(printf '%s\n' "${done_t[@]}" | sort -n | awk -v t0="$t0" '{a[NR]=$1-t0} END{print a[int((NR+1)/2)]}')
+      lim=$(( 3 * med + 120 ))
+      if [ $(( $(date +%s) - t0 )) -gt "$lim" ]; then
+        for p in "${pids[@]}"; do kill -0 "$p" 2>/dev/null && { alert "gen $tag: worker $p still running after ${lim}s (3x median + 120); killed"; pkill -P "$p"; kill "$p"; }; done
+      fi
+    fi
+    sleep 10
+  done
+  for p in "${pids[@]}"; do wait "$p" || alert "gen $tag proc $p exit $?"; rm -f "$OUT/pgames/.done-$p"; done
 }
 i=0
 for a in $ACCEPTED; do
