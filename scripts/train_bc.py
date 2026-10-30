@@ -548,7 +548,9 @@ def main() -> None:
             t.load_state_dict({k: v.float() if v.is_floating_point() else v for k, v in tstate.items()})
             t.eval().requires_grad_(False)
             teachers.append(t)
-            teacher_labels.append(Path(ckpt).parent.name)
+            # label = the checkpoint's dir; a pack's policy/best.pt is labelled by the pack dir
+            d = Path(ckpt).parent
+            teacher_labels.append(d.parent.name if d.name == "policy" else d.name)
         default_pos = order.index(kl_map["default"])
         teacher_of = {d: order.index(c) for d, c in kl_map["decks"].items()}
         sample_teacher = np.array([teacher_of.get(str(d), default_pos) for d in data["deck"]],

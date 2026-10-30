@@ -26,6 +26,11 @@ USAGE_PID=$!
 export OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 export PYTHONFAULTHANDLER=1  # a segfaulting proc (exit 139, B1 card 2026-10-13) leaves its Python stack in proc-*.txt
 # measure one process (GPU memory, RSS) on the first variant's args, then size the pool
+if [ -n "${NPROC:-}" ]; then
+  case "$NPROC" in ''|*[!0-9]*|0) echo "ALERT NPROC must be a positive integer, got '$NPROC'" | tee -a "$OUT/ALERT"; exit 3;; esac
+  NP=$NPROC
+  echo "NPROC given: $NPROC procs" | tee "$OUT/sizing.txt" >> "$OUT/PROGRESS"
+else
 FIRST_ARGS="${VARIANTS%%;*}"; FIRST_ARGS="${PROBE_ARGS:-${FIRST_ARGS#*|}}"
 # shellcheck disable=SC2086
 uv run --no-sync python scripts/search_match.py --ckpt "$CKPT" --device cuda --out "$OUT/probe" --nproc "${PROBE_NPROC:-1000}" --proc 0 \
@@ -52,6 +57,7 @@ RTOT=$(free -m | awk '/Mem/{print $2}')
 [ "$RMB" -gt 0 ] || RMB=2000
 NP=$(python3 -c "print(max(1, min($J, int($GTOT*0.85/($GMB*${GPU_MARGIN:-1.5})), int($RTOT*0.8/($RMB*1.3)))))")
 echo "cores $J, gpu ${GTOT}MB, ram ${RTOT}MB; probe gpu ${GMB}MB rss ${RMB}MB per proc -> $NP procs" | tee "$OUT/sizing.txt"
+fi
 IFS=';' read -ra VS <<< "$VARIANTS"
 for v in "${VS[@]}"; do
   tag="${v%%|*}"; vargs="${v#*|}"; d="$OUT/$tag"; mkdir -p "$d"
