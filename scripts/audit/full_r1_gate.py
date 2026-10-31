@@ -17,6 +17,10 @@ runs/full-p-ho-20261021-1204/full_p_ho (Full-P + ho, 0.623, n 1,488). Play input
   3. improvement (Forge archetypes): paired fz_r1 - fz_p, pooled over the 11 archetypes, lower 95% > 0;
   4. no new waste: own-turn Maxx games share and own-turn hand-trap games share not higher than Full-P's by > 2 SE.
 Pass = 2, 3 and 4 (with 1 OK). Exit 0 pass, 1 fail, 2 missing inputs, 3 drift. Per-archetype rows are reported only.
+
+Amendment (NOTEBOOK 2026-10-31 "fresh Full-P arm", before its data): the first run was INVALID by 1. Rerun with
+`--stored runs/full-p-fresh-<stamp>/full_p` (today's Full-P on all 1,488 deals) and `principles-p-s.json` /
+`maxx-p.json` recomputed from it; 1 then checks full_p_rep against the fresh arm (same code, both today).
 """
 
 from __future__ import annotations
@@ -49,9 +53,11 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("run", type=Path)
     ap.add_argument("--json", type=Path, default=None)
+    ap.add_argument("--stored", type=Path, default=STORED,
+                    help="reference Full-P arm (amendment 2026-10-31: the fresh full-p-fresh-* arm)")
     a = ap.parse_args()
     run = a.run
-    st, r1, rep = games(STORED), games(run / "full_r1"), games(run / "full_p_rep")
+    st, r1, rep = games(a.stored), games(run / "full_r1"), games(run / "full_p_rep")
     fr, fp = games(run / "fz_r1"), games(run / "fz_p")
     for label, g in (("stored", st), ("full_r1", r1), ("full_p_rep", rep), ("fz_r1", fr), ("fz_p", fp)):
         if not g:
