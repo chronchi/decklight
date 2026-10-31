@@ -7,7 +7,10 @@
 #   2026-10-21 + --ho 1 (honest override)  0.623 vs ygo-agent, -0.6 pp (SE 1.2) vs without, own-turn Maxx games
 #              23% -> 16%, overrides 0.54 -> 0.10 (full-p-ho-20261021-1204; gate FAIL by 0.6 pp, user: "let's switch
 #              to ho anyways")
-PRODUCT_CKPT=data/cache/P/best.pt
+#   2026-10-31 policy P -> Forge release r1 (P + 16 archetype specialists distilled): 0.624 vs ygo-agent, +0.1 pp
+#              (SE 1.27) vs P on the 1,488 deals, +11.0 pp [+7.3, +14.7] on the 11 Forge archetypes (full-r1-20261030-1609
+#              + full-p-fresh-20261031-0608; gate PASS, NOTEBOOK 2026-10-31 15:00; user: "Yes, make the changes")
+PRODUCT_CKPT=data/cache/forge_r1/best.pt
 PRODUCT_VALUE=data/cache/value_p2/best.pt
 PRODUCT_VALUE_DIR=data/cache/value_p2  # what launchers ship to the box (--data)
 # search_match args of the product's search (honest k4 s4 h1, det-tries 32, skip, conf-skip 0.9, ho)

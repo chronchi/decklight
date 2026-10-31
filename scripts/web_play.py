@@ -36,7 +36,7 @@ def main() -> None:
     ap.add_argument("--token", default=None, help="access token (default: random)")
     ap.add_argument("--opponent-default", default="product",
                     help="product (default) | fast | random")
-    ap.add_argument("--ckpt", type=Path, default=None, help="product P checkpoint (default data/cache/P/best.pt)")
+    ap.add_argument("--ckpt", type=Path, default=None, help="product policy checkpoint (default data/cache/forge_r1/best.pt)")
     ap.add_argument("--value", type=Path, default=None,
                     help="product value checkpoint (default data/cache/value_p2/best.pt)")
     ap.add_argument("--device", default="cpu")

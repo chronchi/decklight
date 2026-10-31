@@ -1,16 +1,16 @@
-"""Per-deck fine-tune (user-facing): continue P's PPO with the target deck in `--share` of seats.
+"""Per-deck fine-tune (user-facing): continue the product policy's PPO (r1; P before 2026-10-31) with the target deck in `--share` of seats.
 
     uv run python scripts/finetune_deck.py --deck my.ydk --out runs/ft-my [--hours 2] [--iters 0] [--share 0.5]
         [--device cuda] [--lr 4e-5] [--kl-coef 0.1] [extra train_rl args after --]
 
-Runs scripts/train_rl.py with --init data/cache/P/best.pt, --value-init data/cache/value_p2/best.pt,
+Runs scripts/train_rl.py with --init data/cache/forge_r1/best.pt, --value-init data/cache/value_p2/best.pt,
 --focus-deck/--focus-share (train_rl.py), --eval-every huge (no periodic general evals) and --no-ygoagent
-unless --ygoagent is passed. Writes, fp16 weights-only, in the product's layout (P + value_p2):
+unless --ygoagent is passed. Writes, fp16 weights-only, in the product's layout (policy + value_p2):
 <out>/policy/best.pt (policy, no value head) and <out>/value/best.pt (trunk + trained value head), each with its
 base's metrics.jsonl (the loaders read the architecture from it), plus <out>/FINETUNE.json; prints the play commands.
 
 Invariants (exit non-zero with a clear message): the deck file does not parse; train_rl failed; last.pt is
-missing; the policy weights equal P's exactly (nothing trained); the value head equals value_p2's exactly; either
+missing; the policy weights equal the base's exactly (nothing trained); the value head equals value_p2's exactly; either
 file fails to load through the product loaders (BCPolicy / ValueNet).
 """
 
@@ -32,7 +32,7 @@ sys.path.insert(0, str(ROOT / "src"))
 
 from decklight.decks import load_ydk
 
-BASE_CKPT = Path("data/cache/P/best.pt")
+BASE_CKPT = Path("data/cache/forge_r1/best.pt")  # the product policy (r1 since 2026-10-31; was P)
 BASE_VALUE = Path("data/cache/value_p2/best.pt")
 
 
@@ -55,7 +55,7 @@ def load_state(path: Path) -> dict:
 
 
 def check_invariants(final: Path, base_ckpt: Path, base_value: Path) -> None:
-    """Fail loud when the fine-tune trained nothing: policy weights equal P's, or value head equal value_p2's."""
+    """Fail loud when the fine-tune trained nothing: policy weights equal the base's, or value head equal value_p2's."""
     f = load_state(final)
     b = load_state(base_ckpt)
     v = load_state(base_value)
@@ -234,7 +234,7 @@ def main() -> None:
     last_pt = rl_out / "last.pt"
     if not last_pt.is_file():
         fail(f"{last_pt} missing (train_rl wrote no checkpoint)")
-    # Two files like the product (P + value_p2): BCPolicy loads strictly without the value head, ValueNet with it.
+    # Two files like the product (policy + value_p2): BCPolicy loads strictly without the value head, ValueNet with it.
     # Each dir gets its base's metrics.jsonl: the loaders take the architecture from <ckpt dir>/metrics.jsonl
     # (bc_policy._run_args; a missing file silently means default args, value_p2's adds `value: true`).
     policy_pt, value_pt = export(load_state(last_pt), out, args.init, args.value_init)

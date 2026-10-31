@@ -7,7 +7,7 @@ with kind "Deck lists only" and paste each `.ydk`, with its source (event, placi
 date) or `casual`. The maintainers review deck lists by hand.
 
 **(B) Train a pack on your GPU.** You need a CUDA GPU (~9 GB used; about 1 h on a
-consumer card) and the release bundle (`bash scripts/fetch_release.sh`, v0.2 or later), which holds the Forge base
+consumer card) and the release bundle (`bash scripts/fetch_release.sh`, v0.2.0 or later), which holds the Forge base
 release r1 in `data/cache/forge_r1/`. Fine-tune from r1:
 
 ```bash

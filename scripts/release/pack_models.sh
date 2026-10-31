@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
-# Pack the release model bundle: the 9 untracked product files (+ the Forge base r1 from v0.2) into one
+# Pack the release model bundle: the 9 untracked product files (+ the product policy r1 from v0.2.0) into one
 # deterministic tarball, plus checksums.
 #
-# Usage: bash scripts/release/pack_models.sh [TAG]   (default TAG v0.1)
+# Usage: bash scripts/release/pack_models.sh [TAG]   (default TAG v0.2.0)
 #   Writes data/cache/release/decklight-models-$TAG.tar.gz,
 #   data/cache/release/SHA256SUMS and the tracked release/MODELS-$TAG.sha256.
 #   Exits 3 naming the first missing file. Works from any cwd.
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 
-TAG="${1:-v0.1}"
+TAG="${1:-v0.2.0}"
 FILES=(
   data/cache/P/best.pt
   data/cache/P/metrics.jsonl
@@ -21,7 +21,7 @@ FILES=(
   data/cards/emb/strings-qwen3-0.6b-d512.npz
   data/cards/lua_desc.npz
 )
-# v0.2+: the Forge base release r1 (contributors fine-tune from it; docs/contributing-packs.md).
+# v0.2+: the Forge release r1 (the product policy since v0.2.0; contributors fine-tune from it).
 [ "$TAG" = v0.1 ] || FILES+=(data/cache/forge_r1/best.pt data/cache/forge_r1/metrics.jsonl)
 for f in "${FILES[@]}"; do
   if [ ! -f "$f" ]; then

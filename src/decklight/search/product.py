@@ -32,7 +32,8 @@ PRODUCT_ROLLOUT_TEMP = 1.0
 PRODUCT_EMB = ROOT / "data" / "cards" / "emb" / "qwen3-0.6b-d512.npz"  # same file search_match uses
 # Custom cards: $YGO_EMB points the product at a merged card-embedding npz (default: stock).
 EMB_ENV = "YGO_EMB"
-PRODUCT_CKPT = ROOT / "data" / "cache" / "P" / "best.pt"
+# Policy: Forge release r1 since 2026-10-31 (was P; scripts/product.sh history).
+PRODUCT_CKPT = ROOT / "data" / "cache" / "forge_r1" / "best.pt"
 PRODUCT_VALUE = ROOT / "data" / "cache" / "value_p2" / "best.pt"
 
 

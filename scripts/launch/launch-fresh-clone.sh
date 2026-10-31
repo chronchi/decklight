@@ -6,7 +6,7 @@
 # Env: HOURS (1.5), MAX_DPH (0.15), MIN_CPUS (16).
 set -euo pipefail
 cd "$(dirname "$0")/../.."
-TAR=data/cache/release/decklight-models-v0.2.tar.gz
+TAR=data/cache/release/decklight-models-v0.2.0.tar.gz
 [ -f "$TAR" ] || { echo "missing $TAR (scripts/release/pack_models.sh)"; exit 3; }
 EXP=/tmp/decklight-public-test
 bash scripts/release/make_public.sh --force HEAD "$EXP" > data/cache/release-export.log 2>&1 \

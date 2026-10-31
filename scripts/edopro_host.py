@@ -59,7 +59,7 @@ def main() -> None:
     ap.add_argument("--port", type=int, default=7911)
     ap.add_argument("--bind", default="127.0.0.1", help="bind address (default 127.0.0.1)")
     ap.add_argument("--opponent", default="random", choices=["random", "product"])
-    ap.add_argument("--ckpt", type=Path, default=None, help="product P checkpoint (default data/cache/P/best.pt)")
+    ap.add_argument("--ckpt", type=Path, default=None, help="product policy checkpoint (default data/cache/forge_r1/best.pt)")
     ap.add_argument("--value", type=Path, default=None,
                     help="product value checkpoint (default data/cache/value_p2/best.pt)")
     ap.add_argument("--emb", type=Path, default=None, help="card embeddings (default qwen3-0.6b-d512)")

@@ -1,6 +1,6 @@
 [project]
 name = "decklight"
-version = "0.0.1"
+version = "0.2.0"
 description = "Learn to pilot any Yu-Gi-Oh! deck (edo9300 ocgcore)"
 requires-python = ">=3.12"
 dependencies = [

@@ -7,9 +7,9 @@
 A Yu-Gi-Oh! duelist that pilots **any deck you give it**, including decks and cards it never trained on, and a
 phone-friendly web client to play and study against it.
 
-- **Strength:** 0.623 [0.598, 0.647] win rate against [ygo-agent](https://github.com/sbl1996/ygo-agent), an
-  open-source RL agent, on ygo-agent's own 31 decks (1,488 paired games). Details in
-  [docs/results.md](docs/results.md).
+- **Strength:** 0.624 [0.599, 0.648] win rate against [ygo-agent](https://github.com/sbl1996/ygo-agent), an
+  open-source RL agent, on ygo-agent's own 31 decks (1,488 paired games), and +11 pp over the previous model P on the
+  11 archetypes added in the latest Forge release. Details in [docs/results.md](docs/results.md).
 - **How it plays:**
   - a learned policy proposes moves;
   - a learned value net judges positions;
@@ -100,13 +100,42 @@ uv run --no-sync python scripts/web_play.py --ckpt runs/ft-my/policy/best.pt --v
   "decklight's model", next to the deck they were tuned for. Hints, win chance and the review use the chosen model.
 - A 16 GB card is enough (~9 GB used). 2 h is ~180 training iterations on an RTX 4060 Ti; on Blue-Eyes, 2 h gained
   about twice as much as 0.75 h (raw policy +7.9 pp vs +3.8 pp).
-- **What to expect** (two decks, 0.75 h fine-tunes, product vs ygo-agent piloting the other 30 benchmark decks):
+- Fine-tunes start from the product policy r1 (`--init` to change it).
+- **What to expect** (two decks, 0.75 h fine-tunes from P, the previous base; product vs ygo-agent piloting the
+  other 30 benchmark decks):
   Branded 0.61 → 0.77 (+16 pp, 95% CI +9 to +23), Blue-Eyes 0.37 → 0.44 (+8 pp, CI +1 to +15). See
   [docs/results.md](docs/results.md#fine-tuning-on-one-deck). The fine-tuned model is for that deck: use the
   base model for other decks.
 - Measure your own deck with `scripts/deck_card.py` (needs the benchmark setup above): it plays the base and
   fine-tuned models on the same deals against every other benchmark deck, in both seats, and prints the paired
   difference.
+
+### The Forge: many specialists, one model
+Fine-tuning helps one deck. The Forge folds many fine-tunes back into the one shared model, so every deck gains
+without picking a model per deck:
+1. **Specialists:** a short fine-tune per archetype (`finetune_deck.py`), each saved as a **pack**: weights
+   (safetensors), the deck lists, training config and metrics (`scripts/forge.py pack`).
+2. **Verify:** each pack must beat the current release on its own decks, on held-out deals (a sequential test).
+3. **Distill:** the release learns every accepted pack's moves on its own decks (KL to the pack teacher) while
+   staying close to itself elsewhere. The result is the next release.
+4. **Gate:** the new release must keep the specialists' gain without losing anything on other decks or against
+   ygo-agent.
+
+Releases so far, raw policy:
+- **r0** = the base model P + 5 specialists (Branded Light-and-Darkness ritual, Invoked, Radiant-Typhoon, Sacred
+  Beasts, Atlantean-Mermail): +7 to +22 pp on those archetypes vs P (+15 pp pooled when piloting them against
+  ygo-agent), no loss elsewhere.
+- **r1** = r0 + 11 more (Blitzclique, Elfnote, Fiendsmith-Yummy, Ignister-Maliss, Kewl-Tune, Lunalight,
+  Magistus-Invoked-Fairy-Tail, Mitsurugi, Power-Patron-Artmage, Sky-Striker, Trains): +16 pp on those 11 vs r0
+  (85% of the specialists' gain kept), +0.2 on r0's 5, +2.4 on a reserve of unrelated lists, 0.0 vs ygo-agent.
+  **r1 is the product policy since v0.2.0** (`data/cache/forge_r1/`): with search it is level with P against
+  ygo-agent (+0.1 pp) and +11 pp better on the Forge archetypes. Details in
+  [docs/results.md](docs/results.md#the-forge).
+
+**Contribute:** send deck lists, or train a pack on your own GPU (about 1 h on a consumer card) and submit it through
+the "Submit a deck or pack" issue form. Packs are data only (no code runs), are checked automatically, and are
+verified on undisclosed deals before distillation; releases credit their contributors (CC BY 4.0). See
+[docs/contributing-packs.md](docs/contributing-packs.md).
 
 ## Repository map
 | path | what |
@@ -120,7 +149,6 @@ uv run --no-sync python scripts/web_play.py --ckpt runs/ft-my/policy/best.pt --v
 | `docs/results.md`, `docs/model-card.md`, `docs/how-it-was-built.md` | results, model card, how it was built |
 | `third_party/` | submodules (ygopro-core, CardScripts, BabelCDB) and our two engine patches |
 
-Contribute a deck or a trained pack: see docs/contributing-packs.md.
 
 ## License
 AGPL-3.0 (see [LICENSE](LICENSE) and [NOTICE](NOTICE)). Yu-Gi-Oh! is a trademark of Konami; this is an unofficial,

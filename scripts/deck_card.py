@@ -1,6 +1,6 @@
 """The per-deck paired card: our bot always pilots the target deck, ygo-agent pilots each other gauntlet deck.
 
-    uv run python scripts/deck_card.py --deck decks/gauntlet/BlueEyes.ydk --arm base=data/cache/P/best.pt:data/cache/value_p2/best.pt \\
+    uv run python scripts/deck_card.py --deck decks/gauntlet/BlueEyes.ydk --arm base=data/cache/forge_r1/best.pt:data/cache/value_p2/best.pt \\
         --arm ft=runs/ft-x/policy/best.pt:runs/ft-x/value/best.pt --search 0|1 --seeds 8 --out runs/card-x [--nproc N --proc i] [--summarize]
 
 Deals: our side plays the target deck in both seats against each other gauntlet deck (30 opponents),
