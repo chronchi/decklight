@@ -1,0 +1,28 @@
+{
+ "primers": {
+  "built": "2026-10-19",
+  "ckpt_sha256": "06746ffc156a3fe52b8584c6ac44bca5c60ae5570433c5b6511638c3e6679db3",
+  "games": [
+   "value-p2-20261015-2044/hppo-p",
+   "value-p2-20261015-2044/hppo-p2",
+   "primer-games-v2-20261019-1104 (pool, newcards)"
+  ],
+  "model": "P",
+  "note": "impact-scored with value_p2",
+  "value": "value_p2",
+  "value_sha256": "56cba4eb61abe4772901b3693971ab168b533b64c0e26ddbef6337275e0cfb94"
+ },
+ "puzzles": {
+  "built": "2026-10-18",
+  "ckpt_sha256": "06746ffc156a3fe52b8584c6ac44bca5c60ae5570433c5b6511638c3e6679db3",
+  "games": [
+   "value-p2-20261015-2044/hppo-p",
+   "value-p2-20261015-2044/hppo-p2",
+   "primer-games-20261018 (pool, newcards)"
+  ],
+  "model": "P",
+  "note": "mined by mine-puzzles-20261018-0321; verified with P answering",
+  "value": "value_p2",
+  "value_sha256": "56cba4eb61abe4772901b3693971ab168b533b64c0e26ddbef6337275e0cfb94"
+ }
+}

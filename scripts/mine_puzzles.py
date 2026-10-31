@@ -35,6 +35,13 @@ def parse_args(argv=None):
     ap.add_argument("--shard", default=None, help="i/n: verify only every n-th candidate from i")
     ap.add_argument("--out", type=Path, default=ROOT / "data" / "puzzles" / "puzzles-smoke.json")
     ap.add_argument("--commit-copy", action="store_true")
+    ap.add_argument("--source-model", default=None, help="model name that played the games (e.g. P)")
+    ap.add_argument(
+        "--source-games", action="append", default=[], help="run dir/description (repeatable)"
+    )
+    ap.add_argument("--source-ckpt", type=Path, default=None)
+    ap.add_argument("--source-value", type=Path, default=None)
+    ap.add_argument("--source-note", default="")
     ap.add_argument(
         "--fast",
         action="store_true",
@@ -74,6 +81,13 @@ def main(argv=None) -> int:
     from decklight.engine.duel import Engine
 
     args = parse_args(argv)
+    if args.commit_copy and (not args.source_model or not args.source_games):
+        print(
+            "ALERT mine_puzzles: --commit-copy needs --source-model and "
+            "--source-games (content provenance)",
+            flush=True,
+        )
+        return 2
     recs = read_records(args.games or DEFAULT_DIRS, args.pattern, args.max_games)
     if recs is None or not recs:
         print("ALERT mine_puzzles: 0 games read", flush=True)
@@ -159,11 +173,31 @@ def main(argv=None) -> int:
     args.out.parent.mkdir(parents=True, exist_ok=True)
     args.out.write_text(json.dumps(verified) + "\n", encoding="utf-8")
     if args.commit_copy:
+        from decklight.search.product import resolve_product_paths
+        from decklight.web import provenance
+
+        src_ckpt = args.source_ckpt
+        src_value = args.source_value
+        if src_ckpt is None or src_value is None:
+            _ckpt_p, _value_p, _ = resolve_product_paths()
+            if src_ckpt is None:
+                src_ckpt = _ckpt_p
+            if src_value is None:
+                src_value = _value_p
         stripped = [{k: v for k, v in p.items() if k != "solution_steps"} for p in verified]
         payload = json.dumps(stripped)
         if len(payload.encode()) <= COMMIT_LIMIT:
             COMMIT_COPY.write_text(payload + "\n", encoding="utf-8")
             print(f"puzzles: committed copy -> {COMMIT_COPY}", flush=True)
+            provenance.stamp(
+                "puzzles",
+                model=args.source_model,
+                ckpt=src_ckpt,
+                value=src_value,
+                games=args.source_games,
+                note=args.source_note,
+                path=provenance.SOURCES_PATH,
+            )
         else:
             print(
                 f"ALERT mine_puzzles: payload {len(payload.encode())} B > 300 KB, committed copy skipped",

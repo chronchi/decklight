@@ -58,7 +58,21 @@ def main(argv=None) -> int:
     ap.add_argument("shards", type=Path, nargs="+", help="shard dirs (several runs merge, deduped by id)")
     ap.add_argument("--target", type=int, default=80)
     ap.add_argument("--out", type=Path, default=ROOT / "data" / "puzzles" / "puzzles.json")
+    ap.add_argument("--source-model", default=None, help="model name that played the games (e.g. P)")
+    ap.add_argument(
+        "--source-games", action="append", default=[], help="run dir/description (repeatable)"
+    )
+    ap.add_argument("--source-ckpt", type=Path, default=None)
+    ap.add_argument("--source-value", type=Path, default=None)
+    ap.add_argument("--source-note", default="")
     args = ap.parse_args(argv)
+    if not args.source_model or not args.source_games:
+        print(
+            "ALERT merge_puzzles: --commit-copy needs --source-model and "
+            "--source-games (content provenance)",
+            flush=True,
+        )
+        return 2
     seen: dict[str, dict] = {}
     for f in sorted(f for d in args.shards for f in d.glob("*.json")):
         for p in json.loads(f.read_text(encoding="utf-8")):
@@ -73,7 +87,27 @@ def main(argv=None) -> int:
     if len(payload.encode()) > COMMIT_LIMIT:
         print(f"ALERT merge_puzzles: committed copy {len(payload.encode())} B > 300 KB", flush=True)
         return 2
+    from decklight.search.product import resolve_product_paths
+    from decklight.web import provenance
+
+    src_ckpt = args.source_ckpt
+    src_value = args.source_value
+    if src_ckpt is None or src_value is None:
+        _ckpt_p, _value_p, _ = resolve_product_paths()
+        if src_ckpt is None:
+            src_ckpt = _ckpt_p
+        if src_value is None:
+            src_value = _value_p
     COMMIT_COPY.write_text(payload + "\n", encoding="utf-8")
+    provenance.stamp(
+        "puzzles",
+        model=args.source_model,
+        ckpt=src_ckpt,
+        value=src_value,
+        games=args.source_games,
+        note=args.source_note,
+        path=provenance.SOURCES_PATH,
+    )
     diff = Counter(p.get("difficulty") for p in chosen)
     decks = Counter(d for p in chosen for d in p["decks"])
     naive = [p.get("naive_win_rate") for p in chosen if p.get("naive_win_rate") is not None]

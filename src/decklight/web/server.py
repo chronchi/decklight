@@ -2115,6 +2115,16 @@ def create_app(
     card_art_default: bool = False,
 ) -> Starlette:
     _register_stack_dump()
+    try:
+        from decklight.search.product import PRODUCT_CKPT, PRODUCT_VALUE
+        from decklight.web import provenance as _provenance
+
+        _live_ckpt = Path(ckpt) if ckpt is not None else PRODUCT_CKPT
+        _live_value = Path(value) if value is not None else PRODUCT_VALUE
+        for _line in _provenance.check_live(_live_ckpt, _live_value):
+            print(f"WARN web content: {_line}", flush=True)
+    except Exception as _e:  # noqa: BLE001 -- startup check never fails the server
+        print(f"WARN web content: provenance check failed: {_e}", flush=True)
     srv = Server(
         token=token,
         engine=engine,

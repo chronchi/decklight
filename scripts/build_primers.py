@@ -64,6 +64,13 @@ def parse_args(argv=None):
     ap.add_argument(
         "--commit-copy", action="store_true", help=f"also write {COMMIT_COPY} (gzip) when <= 300 KB"
     )
+    ap.add_argument("--source-model", default=None, help="model name that played the games (e.g. P)")
+    ap.add_argument(
+        "--source-games", action="append", default=[], help="run dir/description (repeatable)"
+    )
+    ap.add_argument("--source-ckpt", type=Path, default=None)
+    ap.add_argument("--source-value", type=Path, default=None)
+    ap.add_argument("--source-note", default="")
     return ap.parse_args(argv)
 
 
@@ -136,6 +143,13 @@ def main(argv=None) -> int:
     from decklight.web.view import DB
 
     args = parse_args(argv)
+    if args.commit_copy and (not args.source_model or not args.source_games):
+        print(
+            "ALERT build_primers: --commit-copy needs --source-model and "
+            "--source-games (content provenance)",
+            flush=True,
+        )
+        return 2
     overrides: dict[str, str] = {}
     for item in args.archetype:
         h, _, name = item.partition(":")
@@ -265,6 +279,17 @@ def main(argv=None) -> int:
     if args.commit_copy:
         import gzip
 
+        from decklight.search.product import resolve_product_paths
+        from decklight.web import provenance
+
+        src_ckpt = args.source_ckpt
+        src_value = args.source_value
+        if src_ckpt is None or src_value is None:
+            _ckpt_p, _value_p, _ = resolve_product_paths()
+            if src_ckpt is None:
+                src_ckpt = _ckpt_p
+            if src_value is None:
+                src_value = _value_p
         slim = {
             **store,
             "decks": {h: {k: v for k, v in e.items() if k != "files"} for h, e in store["decks"].items()},
@@ -273,6 +298,15 @@ def main(argv=None) -> int:
         if len(blob) <= COMMIT_LIMIT:
             COMMIT_COPY.write_bytes(blob)
             print(f"primers: committed copy {len(blob)} B -> {COMMIT_COPY}", flush=True)
+            provenance.stamp(
+                "primers",
+                model=args.source_model,
+                ckpt=src_ckpt,
+                value=src_value,
+                games=args.source_games,
+                note=args.source_note,
+                path=provenance.SOURCES_PATH,
+            )
         else:
             print(
                 f"ALERT build_primers: gzip copy {len(blob)} B > 300 KB, committed copy skipped", flush=True
