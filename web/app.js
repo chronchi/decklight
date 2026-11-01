@@ -1444,7 +1444,18 @@ function renderLobby() {
     '<svg class="chev" viewBox="0 0 20 20" aria-hidden="true"><path d="M5 8l5 5 5-5"/></svg></button></section>';
   if (MOCK) h += '<div class="mocknav">mock ' + (mockIdx + 1) + "/" + MOCKS.length + " · ← → to step</div>";
   h += '</div><div id="startwrap"><button id="startbtn" data-act="start">Start duel</button></div></div>';
+  // Every lobby click re-renders: keep the scroll position, the pasted .ydk and its open state.
+  const oldYdk = document.getElementById("ydk");
+  const ydkVal = oldYdk ? oldYdk.value : "";
+  const ydkOpen = !!(oldYdk && oldYdk.closest("details") && oldYdk.closest("details").open);
+  const restoreScroll = saveScrolls(app, [".lscroll"]);
   app.innerHTML = h;
+  const newYdk = document.getElementById("ydk");
+  if (newYdk) {
+    newYdk.value = ydkVal;
+    if (ydkOpen) newYdk.closest("details").open = true;
+  }
+  restoreScroll();
   app.classList.remove("busy");
   logside.innerHTML = '<div class="loghead">Duel log</div><div class="loglist"><p class="emptytx">No duel yet.</p></div>';
   morph(ovLog, "");
