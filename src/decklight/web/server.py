@@ -28,6 +28,16 @@ from starlette.websockets import WebSocket, WebSocketDisconnect
 
 ROOT = Path(__file__).resolve().parents[3]
 DECK_DIRS = (("pool", ROOT / "decks" / "pool"), ("newcards", ROOT / "decks" / "newcards"))
+# Which lobby decks the Forge trained on (scripts/build_deck_coverage.py); shown as a tag on the bot's deck.
+COVERAGE_PATH = Path(__file__).resolve().parent / "deck_coverage.json"
+
+
+def _load_coverage(path: Path = COVERAGE_PATH) -> dict:
+    try:
+        return json.loads(path.read_text())["decks"]
+    except (OSError, ValueError, KeyError) as e:
+        print(f"WARN web content: deck coverage unreadable ({e}); no Trained/Related tags", flush=True)
+        return {}
 PICS_DIR = ROOT / "data" / "cache" / "pics"
 PUZZLES_PATH = ROOT / "src" / "decklight" / "web" / "puzzles.json"
 PRIMERS_PATH = ROOT / "src" / "decklight" / "web" / "primers.json.gz"  # scripts/build_primers.py --commit-copy
@@ -125,6 +135,7 @@ class Server:
         self._last_sig: tuple = ()
         self.user_decks: dict[str, str] = {}  # id -> ydk text (pasted this session)
         self.tuned_decks: dict[str, tuple[str, Path]] = {}  # id -> (deck name, .ydk path) of fine-tunes' own decks
+        self.coverage = _load_coverage()
         self.chain_mode = "auto"  # "auto": skip quiet chain windows (session.auto_pass_index); "all"
         self.winchance_on = False  # client setting, off by default, reset per connection
         self.winchance = None  # {"p","turn","history"} while on (sent as null when off)
@@ -309,7 +320,10 @@ class Server:
                 if p.stem in seen:
                     continue
                 seen.add(p.stem)
-                out.append({"id": p.stem, "name": _pretty_deck_name(p.stem), "group": group})
+                row = {"id": p.stem, "name": _pretty_deck_name(p.stem), "group": group}
+                if p.stem in self.coverage:
+                    row["forge"] = self.coverage[p.stem]
+                out.append(row)
         for deck_id, (name, _p) in sorted(self.tuned_decks.items(), key=lambda kv: kv[1][0]):
             out.append({"id": deck_id, "name": name, "group": "tuned"})  # same name as "Tuned for <name>"
         for i, (deck_id, _text) in enumerate(sorted(self.user_decks.items())):

@@ -1,0 +1,583 @@
+{
+ "version": 1,
+ "release": "r1",
+ "related_threshold": 0.5,
+ "decks": {
+  "angelechy-elfnote-meta1": {
+   "level": "related",
+   "arch": "elfnote",
+   "overlap": 0.56,
+   "release": "r1",
+   "vs": "r0",
+   "gain_pp": 12.3,
+   "gain_ci": [
+    9.6,
+    15.0
+   ]
+  },
+  "angelechy-elfnote-meta2": {
+   "level": "related",
+   "arch": "elfnote",
+   "overlap": 0.56,
+   "release": "r1",
+   "vs": "r0",
+   "gain_pp": 12.3,
+   "gain_ci": [
+    9.6,
+    15.0
+   ]
+  },
+  "atlantean-mermail-meta1": {
+   "level": "trained",
+   "arch": "atlantean-mermail",
+   "overlap": 1.0,
+   "release": "r0",
+   "vs": "P",
+   "gain_pp": 19.1,
+   "gain_ci": [
+    16.4,
+    21.9
+   ]
+  },
+  "atlantean-mermail-meta2": {
+   "level": "trained",
+   "arch": "atlantean-mermail",
+   "overlap": 1.0,
+   "release": "r0",
+   "vs": "P",
+   "gain_pp": 19.1,
+   "gain_ci": [
+    16.4,
+    21.9
+   ]
+  },
+  "blitzclique-meta1": {
+   "level": "trained",
+   "arch": "blitzclique",
+   "overlap": 1.0,
+   "release": "r1",
+   "vs": "r0",
+   "gain_pp": 7.9,
+   "gain_ci": [
+    5.7,
+    10.2
+   ]
+  },
+  "blitzclique-meta2": {
+   "level": "trained",
+   "arch": "blitzclique",
+   "overlap": 1.0,
+   "release": "r1",
+   "vs": "r0",
+   "gain_pp": 7.9,
+   "gain_ci": [
+    5.7,
+    10.2
+   ]
+  },
+  "branded-light-and-darkness-ritual-meta1": {
+   "level": "trained",
+   "arch": "branded-light-and-darkness-ritual",
+   "overlap": 1.0,
+   "release": "r0",
+   "vs": "P",
+   "gain_pp": 6.6,
+   "gain_ci": [
+    4.5,
+    8.7
+   ]
+  },
+  "branded-light-and-darkness-ritual-meta2": {
+   "level": "related",
+   "arch": "branded-light-and-darkness-ritual",
+   "overlap": 0.96,
+   "release": "r0",
+   "vs": "P",
+   "gain_pp": 6.6,
+   "gain_ci": [
+    4.5,
+    8.7
+   ]
+  },
+  "crystron-trains-meta1": {
+   "level": "related",
+   "arch": "trains",
+   "overlap": 0.54,
+   "release": "r1",
+   "vs": "r0",
+   "gain_pp": 13.8,
+   "gain_ci": [
+    11.0,
+    16.5
+   ]
+  },
+  "despia-branded-meta2": {
+   "level": "related",
+   "arch": "branded-light-and-darkness-ritual",
+   "overlap": 0.57,
+   "release": "r0",
+   "vs": "P",
+   "gain_pp": 6.6,
+   "gain_ci": [
+    4.5,
+    8.7
+   ]
+  },
+  "dogmatika-branded-light-and-darkness-ritual-meta1": {
+   "level": "related",
+   "arch": "branded-light-and-darkness-ritual",
+   "overlap": 0.67,
+   "release": "r0",
+   "vs": "P",
+   "gain_pp": 6.6,
+   "gain_ci": [
+    4.5,
+    8.7
+   ]
+  },
+  "elfnote": {
+   "level": "related",
+   "arch": "elfnote",
+   "overlap": 0.91,
+   "release": "r1",
+   "vs": "r0",
+   "gain_pp": 12.3,
+   "gain_ci": [
+    9.6,
+    15.0
+   ]
+  },
+  "elfnote-meta1": {
+   "level": "related",
+   "arch": "elfnote",
+   "overlap": 0.91,
+   "release": "r1",
+   "vs": "r0",
+   "gain_pp": 12.3,
+   "gain_ci": [
+    9.6,
+    15.0
+   ]
+  },
+  "elfnote-meta2": {
+   "level": "related",
+   "arch": "elfnote",
+   "overlap": 0.91,
+   "release": "r1",
+   "vs": "r0",
+   "gain_pp": 12.3,
+   "gain_ci": [
+    9.6,
+    15.0
+   ]
+  },
+  "fiendsmith-elfnote-meta1": {
+   "level": "related",
+   "arch": "elfnote",
+   "overlap": 0.57,
+   "release": "r1",
+   "vs": "r0",
+   "gain_pp": 12.3,
+   "gain_ci": [
+    9.6,
+    15.0
+   ]
+  },
+  "ignister-maliss-meta1": {
+   "level": "related",
+   "arch": "ignister-maliss",
+   "overlap": 0.96,
+   "release": "r1",
+   "vs": "r0",
+   "gain_pp": 19.5,
+   "gain_ci": [
+    16.9,
+    22.2
+   ]
+  },
+  "ignister-maliss-meta2": {
+   "level": "related",
+   "arch": "ignister-maliss",
+   "overlap": 1.0,
+   "release": "r1",
+   "vs": "r0",
+   "gain_pp": 19.5,
+   "gain_ci": [
+    16.9,
+    22.2
+   ]
+  },
+  "invoked-meta1": {
+   "level": "trained",
+   "arch": "invoked",
+   "overlap": 1.0,
+   "release": "r0",
+   "vs": "P",
+   "gain_pp": 17.6,
+   "gain_ci": [
+    14.8,
+    20.4
+   ]
+  },
+  "invoked-meta2": {
+   "level": "related",
+   "arch": "invoked",
+   "overlap": 0.74,
+   "release": "r0",
+   "vs": "P",
+   "gain_pp": 17.6,
+   "gain_ci": [
+    14.8,
+    20.4
+   ]
+  },
+  "kewl-tune": {
+   "level": "related",
+   "arch": "kewl-tune",
+   "overlap": 0.79,
+   "release": "r1",
+   "vs": "r0",
+   "gain_pp": 16.9,
+   "gain_ci": [
+    14.1,
+    19.7
+   ]
+  },
+  "kewl-tune-meta1": {
+   "level": "related",
+   "arch": "kewl-tune",
+   "overlap": 1.0,
+   "release": "r1",
+   "vs": "r0",
+   "gain_pp": 16.9,
+   "gain_ci": [
+    14.1,
+    19.7
+   ]
+  },
+  "light-and-darkness-ritual-sacred-beasts-meta1": {
+   "level": "related",
+   "arch": "sacred-beasts",
+   "overlap": 0.5,
+   "release": "r0",
+   "vs": "P",
+   "gain_pp": 13.1,
+   "gain_ci": [
+    10.6,
+    15.5
+   ]
+  },
+  "lunalight": {
+   "level": "related",
+   "arch": "lunalight",
+   "overlap": 0.52,
+   "release": "r1",
+   "vs": "r0",
+   "gain_pp": 11.9,
+   "gain_ci": [
+    9.0,
+    14.7
+   ]
+  },
+  "lunalight-meta1": {
+   "level": "trained",
+   "arch": "lunalight",
+   "overlap": 1.0,
+   "release": "r1",
+   "vs": "r0",
+   "gain_pp": 11.9,
+   "gain_ci": [
+    9.0,
+    14.7
+   ]
+  },
+  "lunalight-meta2": {
+   "level": "trained",
+   "arch": "lunalight",
+   "overlap": 1.0,
+   "release": "r1",
+   "vs": "r0",
+   "gain_pp": 11.9,
+   "gain_ci": [
+    9.0,
+    14.7
+   ]
+  },
+  "magistus-fairy-tail-meta1": {
+   "level": "related",
+   "arch": "magistus-invoked-fairy-tail",
+   "overlap": 0.96,
+   "release": "r1",
+   "vs": "r0",
+   "gain_pp": 19.1,
+   "gain_ci": [
+    16.4,
+    21.9
+   ]
+  },
+  "magistus-invoked-fairy-tail-meta1": {
+   "level": "related",
+   "arch": "magistus-invoked-fairy-tail",
+   "overlap": 0.97,
+   "release": "r1",
+   "vs": "r0",
+   "gain_pp": 19.1,
+   "gain_ci": [
+    16.4,
+    21.9
+   ]
+  },
+  "magistus-invoked-fairy-tail-meta2": {
+   "level": "related",
+   "arch": "magistus-invoked-fairy-tail",
+   "overlap": 0.97,
+   "release": "r1",
+   "vs": "r0",
+   "gain_pp": 19.1,
+   "gain_ci": [
+    16.4,
+    21.9
+   ]
+  },
+  "maliss": {
+   "level": "related",
+   "arch": "ignister-maliss",
+   "overlap": 0.71,
+   "release": "r1",
+   "vs": "r0",
+   "gain_pp": 19.5,
+   "gain_ci": [
+    16.9,
+    22.2
+   ]
+  },
+  "mitsurugi-clown-crew-meta1": {
+   "level": "related",
+   "arch": "mitsurugi",
+   "overlap": 0.5,
+   "release": "r1",
+   "vs": "r0",
+   "gain_pp": 11.4,
+   "gain_ci": [
+    9.0,
+    13.8
+   ]
+  },
+  "mitsurugi-magnet-warrior-meta1": {
+   "level": "related",
+   "arch": "mitsurugi",
+   "overlap": 0.56,
+   "release": "r1",
+   "vs": "r0",
+   "gain_pp": 11.4,
+   "gain_ci": [
+    9.0,
+    13.8
+   ]
+  },
+  "mitsurugi-meta1": {
+   "level": "trained",
+   "arch": "mitsurugi",
+   "overlap": 1.0,
+   "release": "r1",
+   "vs": "r0",
+   "gain_pp": 11.4,
+   "gain_ci": [
+    9.0,
+    13.8
+   ]
+  },
+  "mitsurugi-meta2": {
+   "level": "trained",
+   "arch": "mitsurugi",
+   "overlap": 1.0,
+   "release": "r1",
+   "vs": "r0",
+   "gain_pp": 11.4,
+   "gain_ci": [
+    9.0,
+    13.8
+   ]
+  },
+  "power-patron-artmage-meta1": {
+   "level": "related",
+   "arch": "power-patron-artmage",
+   "overlap": 0.97,
+   "release": "r1",
+   "vs": "r0",
+   "gain_pp": 13.2,
+   "gain_ci": [
+    10.8,
+    15.7
+   ]
+  },
+  "power-patron-artmage-meta2": {
+   "level": "related",
+   "arch": "power-patron-artmage",
+   "overlap": 0.82,
+   "release": "r1",
+   "vs": "r0",
+   "gain_pp": 13.2,
+   "gain_ci": [
+    10.8,
+    15.7
+   ]
+  },
+  "power-patron-meta1": {
+   "level": "related",
+   "arch": "power-patron-artmage",
+   "overlap": 0.85,
+   "release": "r1",
+   "vs": "r0",
+   "gain_pp": 13.2,
+   "gain_ci": [
+    10.8,
+    15.7
+   ]
+  },
+  "radiant-typhoon-meta1": {
+   "level": "trained",
+   "arch": "radiant-typhoon",
+   "overlap": 1.0,
+   "release": "r0",
+   "vs": "P",
+   "gain_pp": 22.4,
+   "gain_ci": [
+    19.4,
+    25.4
+   ]
+  },
+  "radiant-typhoon-meta2": {
+   "level": "related",
+   "arch": "radiant-typhoon",
+   "overlap": 1.0,
+   "release": "r0",
+   "vs": "P",
+   "gain_pp": 22.4,
+   "gain_ci": [
+    19.4,
+    25.4
+   ]
+  },
+  "sacred-beasts-meta1": {
+   "level": "trained",
+   "arch": "sacred-beasts",
+   "overlap": 1.0,
+   "release": "r0",
+   "vs": "P",
+   "gain_pp": 13.1,
+   "gain_ci": [
+    10.6,
+    15.5
+   ]
+  },
+  "sacred-beasts-meta2": {
+   "level": "trained",
+   "arch": "sacred-beasts",
+   "overlap": 1.0,
+   "release": "r0",
+   "vs": "P",
+   "gain_pp": 13.1,
+   "gain_ci": [
+    10.6,
+    15.5
+   ]
+  },
+  "sky-striker": {
+   "level": "related",
+   "arch": "sky-striker",
+   "overlap": 0.6,
+   "release": "r1",
+   "vs": "r0",
+   "gain_pp": 16.3,
+   "gain_ci": [
+    13.6,
+    19.1
+   ]
+  },
+  "sky-striker-meta1": {
+   "level": "trained",
+   "arch": "sky-striker",
+   "overlap": 1.0,
+   "release": "r1",
+   "vs": "r0",
+   "gain_pp": 16.3,
+   "gain_ci": [
+    13.6,
+    19.1
+   ]
+  },
+  "sky-striker-meta2": {
+   "level": "related",
+   "arch": "sky-striker",
+   "overlap": 0.94,
+   "release": "r1",
+   "vs": "r0",
+   "gain_pp": 16.3,
+   "gain_ci": [
+    13.6,
+    19.1
+   ]
+  },
+  "synchron-elfnote-meta1": {
+   "level": "related",
+   "arch": "elfnote",
+   "overlap": 0.7,
+   "release": "r1",
+   "vs": "r0",
+   "gain_pp": 12.3,
+   "gain_ci": [
+    9.6,
+    15.0
+   ]
+  },
+  "synchron-elfnote-meta2": {
+   "level": "related",
+   "arch": "elfnote",
+   "overlap": 0.67,
+   "release": "r1",
+   "vs": "r0",
+   "gain_pp": 12.3,
+   "gain_ci": [
+    9.6,
+    15.0
+   ]
+  },
+  "synchron-kewl-tune-meta1": {
+   "level": "related",
+   "arch": "kewl-tune",
+   "overlap": 0.87,
+   "release": "r1",
+   "vs": "r0",
+   "gain_pp": 16.9,
+   "gain_ci": [
+    14.1,
+    19.7
+   ]
+  },
+  "trains-meta1": {
+   "level": "related",
+   "arch": "trains",
+   "overlap": 1.0,
+   "release": "r1",
+   "vs": "r0",
+   "gain_pp": 13.8,
+   "gain_ci": [
+    11.0,
+    16.5
+   ]
+  },
+  "trains-meta2": {
+   "level": "related",
+   "arch": "trains",
+   "overlap": 0.83,
+   "release": "r1",
+   "vs": "r0",
+   "gain_pp": 13.8,
+   "gain_ci": [
+    11.0,
+    16.5
+   ]
+  }
+ }
+}

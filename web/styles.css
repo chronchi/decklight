@@ -616,6 +616,14 @@ html.short #app { height: var(--app-h); }
   padding: 10px 12px; font: 13px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 .pastebox .linkbtn { align-self: flex-start; }
+/* Forge coverage tag on the bot's decks: text, not colour alone. */
+.ftag {
+  flex: 0 0 auto; font-size: 11px; letter-spacing: 0.04em; padding: 2px 7px; border-radius: 999px;
+  border: 1px solid var(--line-2); color: var(--muted);
+}
+.ftag.trained { color: var(--accent); border-color: rgba(184, 154, 94, 0.55); }
+.prnote.fnote { margin-bottom: 14px; }
+.prnote.fnote .ftag { margin-right: 4px; }
 .field-group { margin-top: 26px; }
 .flabel { font-size: 13px; color: var(--muted); margin: 0 0 8px 2px; }
 .pickbtn {

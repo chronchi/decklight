@@ -214,6 +214,7 @@ let hidePuzzleResult = false; // suppress the Solved/Not-solved dialog during so
 let primerOpen = false;
 let primer = null;         // trimmed primer reply, or null (not enough games)
 let primerDeck = "";       // pretty bot deck name shown as the title
+let primerForge;           // lobby: the bot deck's Forge coverage (null = not trained); undefined in a game
 let primerHash = null;     // hash of the asked bot list (matches study_status.hash)
 let primerLoading = false;
 let canStudy = false;      // the primer reply said no primer but the list can be studied
@@ -1081,6 +1082,34 @@ function deckName(decks, id) {
 
 const GROUPS = {pool: "Pool", newcards: "New cards", tuned: "Fine-tuned", user: "Yours"};
 
+// Forge coverage of a lobby deck (server: deck_coverage.json). The bot side shows it: decks the Forge trained on (or
+// that share most of their cards with one) play stronger than the rest.
+const FORGE_TAG = {trained: "Trained", related: "Related"};
+function forgeTagHTML(d, side) {
+  if (side !== "bot" || !d || !d.forge) return "";
+  return '<span class="ftag ' + d.forge.level + '">' + FORGE_TAG[d.forge.level] + "</span>";
+}
+function archName(id) {
+  return String(id || "").split("-").map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(" ")
+    .replace("Light And Darkness", "Light-and-Darkness");
+}
+function forgeNoteHTML(f) {
+  if (!f) {
+    return '<p class="prnote fnote">Not trained on this archetype: decklight plays it with its general skill only.</p>';
+  }
+  const a = esc(archName(f.arch));
+  const ci = "+" + f.gain_ci[0].toFixed(0) + " to +" + f.gain_ci[1].toFixed(0);
+  const gain = "On " + a + " lists that training added " + f.gain_pp.toFixed(0) + " points of win rate (" + ci +
+    ", against the model before it).";
+  if (f.level === "trained") {
+    return '<p class="prnote fnote"><span class="ftag trained">Trained</span> decklight was trained on this exact list. ' +
+      gain + "</p>";
+  }
+  return '<p class="prnote fnote"><span class="ftag related">Related</span> ' + Math.round(f.overlap * 100) +
+    "% of its distinctive cards are in the " + a + " lists decklight was trained on. " + gain +
+    " Not measured on this list.</p>";
+}
+
 function pickerHTML(decks, side, label) {
   const cur = lobbyPick[side];
   const open = pickerOpen === side;
@@ -1089,7 +1118,7 @@ function pickerHTML(decks, side, label) {
   h += '<button class="pickbtn' + (open ? " open" : "") + '" data-pickopen="' + side + '" aria-expanded="' + open + '">' +
     '<span class="dot ' + (side === "you" ? "you" : "bot") + '"></span>' +
     '<span class="nm">' + esc(deckName(decks, cur)) + "</span>" +
-    (d ? '<span class="g">' + esc(GROUPS[d.group] || d.group) + "</span>" : "") +
+    forgeTagHTML(d, side) + (d ? '<span class="g">' + esc(GROUPS[d.group] || d.group) + "</span>" : "") +
     '<svg class="chev" viewBox="0 0 20 20" aria-hidden="true"><path d="M5 8l5 5 5-5"/></svg></button>';
   if (open) {
     h += '<div class="pickpanel"><input class="decksearch" type="search" placeholder="Search ' + decks.length +
@@ -1098,7 +1127,7 @@ function pickerHTML(decks, side, label) {
     h += '<div class="decklist" role="listbox" aria-label="' + esc(label) + '">';
     for (const x of decks) {
       h += '<button role="option" aria-selected="' + (cur === x.id) + '" class="deckrow' + (cur === x.id ? " sel" : "") + '" data-' + side + 'deck="' + esc(x.id) +
-        '" data-dname="' + esc(x.name.toLowerCase()) + '"><span class="nm">' + esc(x.name) + '</span><span class="g">' +
+        '" data-dname="' + esc(x.name.toLowerCase()) + '"><span class="nm">' + esc(x.name) + "</span>" + forgeTagHTML(x, side) + '<span class="g">' +
         esc(GROUPS[x.group] || x.group) + "</span></button>";
     }
     h += "</div></div>";
@@ -1252,7 +1281,7 @@ function primerCardHTML(code, name) {
 
 function primerSheetHTML() {
   if (!primerOpen) return "";
-  let body = "";
+  let body = primerForge === undefined ? "" : forgeNoteHTML(primerForge);
   if (primerLoading) {
     body = '<p class="emptytx">Loading the primer…</p>';
   } else if (!primer) {
@@ -2087,6 +2116,8 @@ function onAction(kind, el) {
     opener = describe(el) || opener;  // focus returns here when the sheet closes
     if (msg && msg.t === "lobby") {
       primerDeck = deckName((lobby && lobby.decks) || [], lobbyPick.bot);
+      const bd = ((lobby && lobby.decks) || []).find((x) => x.id === lobbyPick.bot);
+      primerForge = bd ? (bd.forge || null) : undefined;
       if (MOCK) {
         primerDeck = "Tenpai Dragon";
       } else if (ws) {
@@ -2094,6 +2125,7 @@ function onAction(kind, el) {
       }
     } else {
       primerDeck = "Opponent's deck";
+      primerForge = undefined;
       if (!MOCK && ws) ws.send({t: "primer"});
     }
     if (MOCK) {
