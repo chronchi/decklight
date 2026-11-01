@@ -5,6 +5,7 @@ import {logHTML} from "./render/log.js";
 import {LOG_TABS, tabStripHTML, tabPanelOpen, statsPanelHTML, cardsPanelHTML, reviewPanelHTML} from "./render/stats.js";
 import {artImg, esc, isHidden, phHTML, setCardArt} from "./render/card.js";
 import {morph} from "./render/morph.js";
+import {deckSheetHTML} from "./render/decks.js";
 import {createCuePlayer, recapItem, chainTracker, planSteps, stepText} from "./cues.js";
 import {kwHTML, glossaryEntry} from "./glossary.js";
 
@@ -104,7 +105,9 @@ function setLogTab(t) {
 let detail = null;       // card for the full-screen detail view
 let lobby = null;
 let lobbyPick = {you: null, bot: null, first: "rps", mode: "product", play: "duel", model: null};
-let pickerOpen = null;   // "you" | "bot" | "model" | null
+let pickerOpen = null;   // "model" | null (the deck pickers open the deck browser sheet instead)
+let deckBrowser = null;  // {side, q, f: {group: [values]}, sort, view: deckId|null, top} while the deck sheet is open
+let deckIndex;           // /deck_index.json: undefined = not fetched, null = loading
 let optsOpen = false;     // lobby Options section expanded
 let pasteOpen = false;    // lobby .ydk paste box shown (from the "Your deck" picker)
 let modelNotice = null;  // status line under the model field (auto-switch), cleared on the next lobby change
@@ -1111,28 +1114,15 @@ function forgeNoteHTML(f) {
 }
 
 function pickerHTML(decks, side, label) {
+  // Opens the deck browser sheet (render/decks.js: search, filters, deck lists).
   const cur = lobbyPick[side];
-  const open = pickerOpen === side;
   const d = decks.find((x) => x.id === cur);
-  let h = '<section class="field-group"><div class="flabel">' + esc(label) + "</div>";
-  h += '<button class="pickbtn' + (open ? " open" : "") + '" data-pickopen="' + side + '" aria-expanded="' + open + '">' +
+  return '<section class="field-group"><div class="flabel">' + esc(label) + "</div>" +
+    '<button class="pickbtn" data-pickopen="' + side + '" aria-haspopup="dialog">' +
     '<span class="dot ' + (side === "you" ? "you" : "bot") + '"></span>' +
     '<span class="nm">' + esc(deckName(decks, cur)) + "</span>" +
     forgeTagHTML(d, side) + (d ? '<span class="g">' + esc(GROUPS[d.group] || d.group) + "</span>" : "") +
-    '<svg class="chev" viewBox="0 0 20 20" aria-hidden="true"><path d="M5 8l5 5 5-5"/></svg></button>';
-  if (open) {
-    h += '<div class="pickpanel"><input class="decksearch" type="search" placeholder="Search ' + decks.length +
-      ' decks" aria-label="Search decks" data-search="' + side + '">';
-    if (side === "you") h += '<button class="deckrow paste" data-act="pasteydk"><span class="nm">Paste a deck list (.ydk)…</span></button>';
-    h += '<div class="decklist" role="listbox" aria-label="' + esc(label) + '">';
-    for (const x of decks) {
-      h += '<button role="option" aria-selected="' + (cur === x.id) + '" class="deckrow' + (cur === x.id ? " sel" : "") + '" data-' + side + 'deck="' + esc(x.id) +
-        '" data-dname="' + esc(x.name.toLowerCase()) + '"><span class="nm">' + esc(x.name) + "</span>" + forgeTagHTML(x, side) + '<span class="g">' +
-        esc(GROUPS[x.group] || x.group) + "</span></button>";
-    }
-    h += "</div></div>";
-  }
-  return h + "</section>";
+    '<svg class="chev" viewBox="0 0 20 20" aria-hidden="true"><path d="M5 8l5 5 5-5"/></svg></button></section>';
 }
 
 function segHTML(label, key, items) {
@@ -1430,7 +1420,7 @@ function renderLobby() {
     logside.innerHTML = '<div class="loghead">Duel log</div><div class="loglist"><p class="emptytx">No duel yet.</p></div>';
     morph(ovLog, "");
     morph(ovMenu, "");
-    morph(ovGame, primerSheetHTML() + puzzlesSheetHTML());
+    morph(ovGame, primerSheetHTML() + puzzlesSheetHTML() + deckSheet());
     morph(ovDetail, detail ? detailHTML() : "");
     morph(ovReveal, "");
     morph(ovOver, "");
@@ -1515,11 +1505,43 @@ function renderLobby() {
   logside.innerHTML = '<div class="loghead">Duel log</div><div class="loglist"><p class="emptytx">No duel yet.</p></div>';
   morph(ovLog, "");
   morph(ovMenu, "");
-  morph(ovGame, primerSheetHTML() + puzzlesSheetHTML());
+  morph(ovGame, primerSheetHTML() + puzzlesSheetHTML() + deckSheet());
   morph(ovDetail, detail ? detailHTML() : "");
   morph(ovReveal, "");
   morph(ovOver, "");
   syncOv();
+}
+
+// ---- deck browser sheet (render/decks.js) ----
+function deckSheet() {
+  if (!deckBrowser) return "";
+  const decks = (lobby && lobby.decks) || [];
+  return deckSheetHTML(deckBrowser, decks, deckIndex, lobbyPick[deckBrowser.side], {art: cardArt, forgeNote: forgeNoteHTML});
+}
+function renderDeckSheet() {
+  morph(ovGame, primerSheetHTML() + puzzlesSheetHTML() + deckSheet());
+  syncOv();
+  manageFocus();
+}
+function loadDeckIndex() {
+  if (deckIndex !== undefined) return;
+  deckIndex = null;
+  const url = MOCK ? "mock/deck-index.json" : "/deck_index.json" + (TOKEN ? "?t=" + encodeURIComponent(TOKEN) : "");
+  fetch(url).then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
+    .then((j) => { deckIndex = j; })
+    .catch(() => { deckIndex = {decks: {}, names: {}}; })  // names-only browsing still works
+    .finally(() => { if (deckBrowser) renderDeckSheet(); });
+}
+function openDeckBrowser(side, el) {
+  deckBrowser = {side, q: "", f: {}, sort: "name", view: null, top: 0};
+  opener = describe(el) || opener;
+  loadDeckIndex();
+  renderDeckSheet();
+}
+function closeDeckBrowser() {
+  deckBrowser = null;
+  renderLobby();
+  manageFocus();
 }
 
 function render() {
@@ -1621,6 +1643,10 @@ app.addEventListener("click", (ev) => {
   if (pick) {
     const side = pick.getAttribute("data-pickopen");
     if (side === "model" && lobbyPick.mode === "random") return;  // not used by Random
+    if (side !== "model") {
+      openDeckBrowser(side, pick);
+      return;
+    }
     pickerOpen = pickerOpen === side ? null : side;
     renderLobby();
     const inp = app.querySelector(".decksearch");
@@ -1821,8 +1847,39 @@ function onOverlayClick(ev) {
     return;
   }
   if (onRecapRow(ev.target)) return;
+  if (onDeckSheetClick(ev.target)) return;
   const act = ev.target.closest("[data-act]");
   if (act) onAction(act.getAttribute("data-act"), act);
+}
+
+// Deck browser sheet: filter chips, sort, and picking a deck (from a row or the list view's button).
+function onDeckSheetClick(t) {
+  if (!deckBrowser) return false;
+  const dfl = t.closest("[data-dfilter]");
+  if (dfl) {
+    const [k, v] = dfl.getAttribute("data-dfilter").split(":");
+    const cur = deckBrowser.f[k] || [];
+    deckBrowser.f[k] = cur.includes(v) ? cur.filter((x) => x !== v) : [...cur, v];
+    renderDeckSheet();
+    return true;
+  }
+  const dso = t.closest("[data-dsort]");
+  if (dso) {
+    deckBrowser.sort = dso.getAttribute("data-dsort");
+    renderDeckSheet();
+    return true;
+  }
+  for (const key of ["youdeck", "botdeck"]) {
+    const el = t.closest("#decksheet [data-" + key + "]");
+    if (el) {
+      lobbyPick[key === "youdeck" ? "you" : "bot"] = el.getAttribute("data-" + key);
+      if (key === "youdeck") pasteOpen = false;
+      modelNotice = null;
+      closeDeckBrowser();
+      return true;
+    }
+  }
+  return false;
 }
 document.getElementById("layer").addEventListener("click", onOverlayClick);
 logside.addEventListener("click", onOverlayClick);
@@ -1936,6 +1993,30 @@ function onAction(kind, el) {
   } else if (kind === "cuerecap") {
     cueRecap = !cueRecap;
     saveSetting("ygo-cue-recap", cueRecap ? "1" : "0");
+  } else if (kind === "closedecks") {
+    closeDeckBrowser();
+    return;
+  } else if (kind === "decklist" && deckBrowser) {
+    const sc = document.querySelector("#decksheet .dklist");
+    deckBrowser.top = sc ? sc.scrollTop : 0;
+    deckBrowser.view = el.getAttribute("data-deck");
+    renderDeckSheet();
+    const b = document.querySelector("#decksheet .dkview");
+    if (b) b.scrollTop = 0;
+    return;
+  } else if (kind === "deckback" && deckBrowser) {
+    const id = deckBrowser.view;
+    deckBrowser.view = null;
+    renderDeckSheet();
+    const sc = document.querySelector("#decksheet .dklist");
+    if (sc) sc.scrollTop = deckBrowser.top;
+    const back = document.querySelector('#decksheet [data-act="decklist"][data-deck="' + CSS.escape(id) + '"]');
+    if (back) back.focus({preventScroll: true});
+    return;
+  } else if (kind === "dclear" && deckBrowser) {
+    deckBrowser.f = {};
+    renderDeckSheet();
+    return;
   } else if (kind === "opts") {
     optsOpen = !optsOpen;
     renderLobby();
@@ -1943,6 +2024,7 @@ function onAction(kind, el) {
   } else if (kind === "pasteydk") {
     pasteOpen = true;
     pickerOpen = null;
+    deckBrowser = null;
     renderLobby();
     const ta = document.getElementById("ydk");
     if (ta) ta.focus({preventScroll: true});
@@ -2335,11 +2417,9 @@ document.addEventListener("input", (ev) => {
       (b.closest(".optw") || b).style.display = b.textContent.toLowerCase().includes(q) ? "" : "none";
     }
   }
-  if (t.matches(".decksearch")) {
-    const q = t.value.toLowerCase();
-    for (const b of t.closest(".pickpanel").querySelectorAll(".deckrow")) {
-      b.style.display = (b.getAttribute("data-dname") || "").includes(q) ? "" : "none";
-    }
+  if (t.matches(".dksearch") && deckBrowser) {
+    deckBrowser.q = t.value;
+    renderDeckSheet();
   }
 });
 
@@ -2350,7 +2430,7 @@ const FOCUSABLE = 'button:not([disabled]), [href], input, textarea, select, summ
 const visible = (el) => !!el && el.getClientRects().length > 0 && getComputedStyle(el).visibility !== "hidden";
 function topModal() {
   if (IS_REPLAY) return null;
-  for (const sel of ["#kwpop", "#detail", "#menu", "#gamemenu", "#puzzlesheet", "#primersheet", "#sheet.pilesheet", "#reviewframe", "#logdrawer", "#puzzleresult[role=alertdialog]", "#gameover[role=alertdialog]"]) {
+  for (const sel of ["#kwpop", "#detail", "#menu", "#gamemenu", "#puzzlesheet", "#primersheet", "#decksheet", "#sheet.pilesheet", "#reviewframe", "#logdrawer", "#puzzleresult[role=alertdialog]", "#gameover[role=alertdialog]"]) {
     const el = document.querySelector(sel);
     if (el && visible(el)) return el;
   }
@@ -2406,6 +2486,11 @@ function closeTop() {
   if (gameMenu) { closeState("gamemenu"); render(); closeOv("gamemenu"); return true; }
   if (primerOpen) { closeState("primer"); render(); closeOv("primer"); return true; }
   if (puzzlesOpen) { puzzlesOpen = false; render(); return true; }
+  if (deckBrowser) {
+    if (deckBrowser.view) onAction("deckback", null);
+    else closeDeckBrowser();
+    return true;
+  }
   if (inSolution) { exitSolution(); return true; }
   if (pileOpen) { closeState("pile"); render(); closeOv("pile"); return true; }
   if (logOpen) { closeState("log"); render(); closeOv("log"); return true; }
@@ -2733,7 +2818,11 @@ async function loadMock(i) {
     if (el) { menuUid = qs.get("menu"); menuRect = el.getBoundingClientRect(); }
   }
   if (qs.get("sel") && msg.t === "state") sel = qs.get("sel").split(",").map(Number);
-  if (qs.get("picker") && msg.t === "lobby") pickerOpen = qs.get("picker");
+  if (qs.get("picker") && msg.t === "lobby") {
+    const side = qs.get("picker");
+    if (side === "model") pickerOpen = side;
+    else { deckBrowser = {side, q: "", f: {}, sort: "name", view: qs.get("deckview"), top: 0}; loadDeckIndex(); }
+  }
   if (qs.get("play") === "practice" && msg.t === "lobby") lobbyPick.play = "practice";
   if (qs.get("gamemenu") && msg.t === "state") gameMenu = true;
   // Screenshot hooks for the duel-log sheet: ?log=1 opens it, ?logtab=log|stats|cards|review picks the tab.

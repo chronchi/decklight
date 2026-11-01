@@ -1220,3 +1220,88 @@ details.ydk textarea {
   transition: opacity 400ms var(--ease);
 }
 #ov-cues .cue-rule.on { opacity: 1; }
+
+/* ---------- deck browser (render/decks.js) ----------
+   Full height on a phone, a centred column on desktop. Header and tools stay put; the list scrolls. */
+#dkscrim { position: fixed; inset: 0; z-index: 71; background: rgba(10, 9, 7, 0.55); animation: fade var(--t); }
+#decksheet {
+  position: fixed; z-index: 72; top: 0; bottom: 0; left: 50%; transform: translateX(-50%);
+  width: min(100%, 560px); display: flex; flex-direction: column; background: var(--sheet);
+  box-shadow: 0 0 0 1px var(--line-2), 0 18px 40px rgba(10, 9, 7, 0.55);
+  padding-bottom: env(safe-area-inset-bottom); animation: up 240ms var(--ease);
+}
+#decksheet .mhead {
+  display: flex; align-items: center; gap: 4px; min-height: 56px; padding: 4px 6px 4px 18px;
+  border-bottom: 1px solid var(--line); flex: 0 0 auto;
+}
+#decksheet .mhead .iconbtn:first-child { margin-left: -12px; }
+#decksheet .mtitle {
+  flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-size: 14px; color: var(--muted); font-variant-caps: all-small-caps; letter-spacing: 0.14em;
+}
+.dktools { flex: 0 0 auto; padding: 12px 14px 8px; display: flex; flex-direction: column; gap: 8px; border-bottom: 1px solid var(--line); }
+.dksearch {
+  width: 100%; min-height: 44px; padding: 0 14px; border-radius: 10px; font-size: 15px;
+  border: 1px solid var(--line-2); background: rgba(15, 14, 12, 0.5); color: var(--text);
+}
+.dkchiprow {
+  display: flex; gap: 12px; overflow-x: auto; scrollbar-width: none; margin: 0 -14px; padding: 2px 14px;
+}
+.dkchiprow::-webkit-scrollbar { display: none; }
+.dkchips { display: flex; flex: 0 0 auto; gap: 6px; }
+.dkchips + .dkchips { border-left: 1px solid var(--line-2); padding-left: 12px; }
+.dkchip {
+  flex: 0 0 auto; white-space: nowrap; min-height: 36px; padding: 0 12px; border-radius: 999px; font-size: 13px;
+  border: 1px solid var(--line-2); color: var(--muted);
+}
+.dkchip.small { min-height: 32px; padding: 0 10px; font-size: 12px; }
+.dkchip.on { color: var(--accent); border-color: rgba(184, 154, 94, 0.6); background: var(--accent-tint); }
+.dkchip.on::before { content: "✓ "; }
+.dkmeta { display: flex; align-items: center; gap: 10px; font-size: 12px; color: var(--muted); }
+.dksort { margin-left: auto; display: flex; gap: 6px; }
+#decksheet .mbody { flex: 1; min-height: 0; overflow-y: auto; padding: 6px 10px 16px; }
+.dkrows { list-style: none; margin: 0; padding: 0; }
+.dkrow { display: flex; align-items: stretch; border-bottom: 1px solid var(--line); }
+.dkrow.sel .dkname { color: var(--accent); }
+.dkpick {
+  flex: 1; min-width: 0; display: flex; align-items: center; gap: 10px; text-align: left;
+  padding: 8px 8px; min-height: 60px; border-radius: 8px;
+}
+.dktext { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.dkpick:active { background: var(--raise); }
+.dktop { display: flex; align-items: center; gap: 8px; }
+.dkname { font-size: 15px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dksub, .dkhit { font-size: 12px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dkhit { color: var(--text); }
+.dksig { flex: 0 0 auto; display: flex; gap: 3px; }
+.dksig img { width: 30px; height: 44px; object-fit: cover; border-radius: 3px; background: var(--raise); }
+.dkinfo { flex: 0 0 auto; width: 48px; display: flex; align-items: center; justify-content: center; color: var(--muted); border-radius: 8px; }
+.dkinfo svg, #decksheet .mhead svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; }
+#decksheet .deckrow.paste { width: 100%; margin: 4px 0 6px; }
+/* One deck's list. */
+.dkview { padding: 12px 18px 18px !important; }
+.dkview .prsub { margin: 0 0 6px; font-size: 13px; color: var(--muted); }
+.dkview .prnote { margin: 0 0 6px; font-size: 12px; line-height: 1.5; color: var(--muted); }
+.dkabout { margin: 0 0 8px; font-size: 14px; line-height: 1.5; }
+.dkview h3 {
+  margin: 16px 0 6px; font-size: 12px; font-variant-caps: all-small-caps; letter-spacing: 0.14em;
+  font-weight: 500; color: var(--muted);
+}
+.dkcards { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: 1fr; }
+.dkcards.art { grid-template-columns: repeat(auto-fill, minmax(76px, 1fr)); gap: 8px; }
+.dkcard { width: 100%; min-height: 40px; display: flex; align-items: center; gap: 8px; text-align: left; font-size: 14px; padding: 4px 2px; border-bottom: 1px solid var(--line); }
+.dkcards.art .dkcard { flex-direction: column; align-items: stretch; gap: 4px; border-bottom: 0; position: relative; padding: 0; }
+.dkcards.art img { width: 100%; aspect-ratio: 59 / 86; object-fit: cover; border-radius: 4px; background: var(--raise); }
+.dkcards.art .dkcn { font-size: 11px; line-height: 1.3; color: var(--muted); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.dkcn { flex: 1; min-width: 0; }
+.dkcx { font-size: 12px; color: var(--muted); }
+.dkcards.art .dkcx {
+  position: absolute; top: 4px; right: 4px; padding: 1px 6px; border-radius: 999px;
+  background: rgba(15, 14, 12, 0.85); color: var(--text);
+}
+.dkfoot { flex: 0 0 auto; padding: 10px 14px 12px; border-top: 1px solid var(--line); }
+.dkfoot .primary {
+  width: 100%; min-height: 50px; border-radius: 12px; font-size: 15px; letter-spacing: 0.08em;
+  color: var(--accent); background: var(--accent-tint); border: 1px solid rgba(184, 154, 94, 0.6);
+}
+@media (prefers-reduced-motion: reduce) { #decksheet, #dkscrim { animation: none; } }

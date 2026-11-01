@@ -2207,6 +2207,22 @@ def create_app(
             return JSONResponse({"error": "bad code"}, status_code=404)
         return JSONResponse(_card_json(code))
 
+    deck_index_gz: list[bytes] = []  # built once: the lobby deck browser's index (scripts/build_deck_index.py)
+
+    async def deck_index(req):
+        if not need_token(req):
+            return JSONResponse({"error": "unauthorized"}, status_code=401)
+        if not deck_index_gz:
+            import gzip
+
+            try:
+                deck_index_gz.append(gzip.compress((Path(__file__).resolve().parent / "deck_index.json").read_bytes()))
+            except OSError as e:
+                print(f"WARN web content: deck index unreadable ({e})", flush=True)
+                return JSONResponse({"error": "no deck index"}, status_code=404)
+        return Response(deck_index_gz[0], media_type="application/json",
+                        headers={"Content-Encoding": "gzip", **NO_CACHE})
+
     async def img(req):
         if not need_token(req):
             return JSONResponse({"error": "unauthorized"}, status_code=401)
@@ -2320,6 +2336,7 @@ def create_app(
     routes = [
         Route("/", index),
         Route("/card/{code}", card),
+        Route("/deck_index.json", deck_index),
         Route("/img/{code}.jpg", img),
         WebSocketRoute("/ws", ws_handler),
     ]
