@@ -80,7 +80,8 @@ function rowHTML(r, side, cur, names, art) {
   // Same-archetype tournament lists share a name: their event tells them apart.
   const plain = (x) => String(x || "").toLowerCase().replace(/[^a-z0-9]/g, "");
   const event = meta && /\d{4}-\d\d-\d\d$/.test(meta.origin) ? meta.origin.split(",")[0] : "";
-  const first = meta && (plain(meta.arch) === plain(d.name) && event ? event : meta.arch);
+  const runtime = d.group === "tuned" ? "Fine-tuned model's deck" : d.group === "user" ? "Pasted this session" : "";
+  const first = meta && (runtime || (plain(meta.arch) === plain(d.name) && event ? event : meta.arch));
   const line = meta ? [first, meta.year, meta.mech.join(", ")].filter(Boolean).join(" · ")
     : d.group === "tuned" ? "The deck a fine-tuned model was trained for" : d.group === "user" ? "Pasted this session" : "";
   const sel = d.id === cur;
@@ -108,12 +109,17 @@ function cardListHTML(title, list, names, art) {
 
 function detailHTML(d, meta, names, side, art, forgeNote) {
   let b = "";
-  if (side === "bot") b += forgeNote(d.forge || null);
+  if (d.group === "tuned") {
+    b += '<p class="prnote">A fine-tuned model was trained on this list. Pick it under Options → decklight\'s model ' +
+      "for the bot to play it at its best.</p>";
+  } else if (side === "bot" && d.group !== "user") {
+    b += forgeNote(d.forge || null);
+  }
   if (meta) {
     const style = meta.style && !meta.arch.toLowerCase().includes(meta.style) ? meta.style : "";
-    b += '<p class="prsub">' + esc([meta.arch, style].filter(Boolean).join(" · ")) + "</p>";
+    if (meta.arch) b += '<p class="prsub">' + esc([meta.arch, style].filter(Boolean).join(" · ")) + "</p>";
     if (meta.about) b += '<p class="dkabout">' + esc(meta.about) + "</p>";
-    b += '<p class="prnote">' + esc(meta.origin) + "</p>";
+    if (d.group !== "tuned") b += '<p class="prnote">' + esc(meta.origin) + "</p>";  // tuned: the note above says it
     const [m, s, t] = meta.counts;
     b += '<p class="prnote">' + m + " monsters · " + s + " spells · " + t + " traps" +
       (meta.mech.length ? " · " + esc(meta.mech.join(", ")) : "") + "</p>";

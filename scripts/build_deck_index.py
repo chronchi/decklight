@@ -27,12 +27,12 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from build_deck_coverage import LOBBY_DIRS, STAPLE_SHARE, read_ydk
 
+from decklight.web.deck_index import deck_summary
+
 OUT = ROOT / "src" / "decklight" / "web" / "deck_index.json"
 MOCK_OUT = ROOT / "web" / "mock" / "deck-index.json"  # for scripts/web_screens.py: the mock lobby's ids
 PRIMERS = ROOT / "src" / "decklight" / "web" / "primers.json.gz"
 STYLES = ("combo", "control", "midrange", "otk", "stun", "burn", "turbo", "ritual", "stall", "beatdown")
-# A summon type counts as the deck's own when it is more than a staple splash (measured on the 189 lobby decks).
-MECH_MIN = {"Fusion": 4, "Synchro": 4, "Xyz": 4, "Link": 6, "Ritual": 2, "Pendulum": 4}
 
 
 def parse_generated(path: Path) -> dict[str, dict]:
@@ -76,7 +76,6 @@ def styles_in(text: str) -> list[str]:
 
 def build() -> dict:
     from decklight.analysis.primer import hash_of
-    from decklight.engine import constants as C
     from decklight.engine.resources import load_cards
     from decklight.web.view import DB
 
@@ -97,29 +96,10 @@ def build() -> dict:
         g, s, n = gen.get(k, {}), src.get(k, {}), newc.get(k, {})
         arch_long = g.get("arch") or n.get("arch") or s.get("name") or k.replace("-", " ").title()
         arch = re.sub(r"\s*\(.*\)$", "", arch_long).strip()
-        ty = lambda c: cards[c].type if c in cards else 0
-        cnt = collections.Counter()
-        for c in main:
-            t = ty(c)
-            cnt["m" if t & C.TYPE_MONSTER else "s" if t & C.TYPE_SPELL else "t" if t & C.TYPE_TRAP else "?"] += 1
-            if t & C.TYPE_MONSTER and t & C.TYPE_RITUAL:
-                cnt["Ritual"] += 1
-            if t & C.TYPE_PENDULUM:
-                cnt["Pendulum"] += 1
-        for c in extra:
-            t = ty(c)
-            for name, bit in (("Fusion", C.TYPE_FUSION), ("Synchro", C.TYPE_SYNCHRO), ("Xyz", C.TYPE_XYZ),
-                              ("Link", C.TYPE_LINK)):
-                if t & bit:
-                    cnt[name] += 1
-        if cnt["?"]:
-            raise SystemExit(f"ALERT build_deck_index: {k} has {cnt['?']} main-deck codes missing from the card DB")
-        mech = [m for m, lo in MECH_MIN.items() if cnt[m] >= lo]
         pr = primers.get(hash_of({"main": main, "extra": extra}))
-        sig = [c["code"] for c in (pr or {}).get("key_cards", [])[:3]]
-        if len(sig) < 3:  # no primer: the most-copied distinctive monsters
-            mons = collections.Counter(c for c in main if c not in staple and ty(c) & C.TYPE_MONSTER)
-            sig += [c for c, _ in mons.most_common() if c not in sig][: 3 - len(sig)]
+        summ, missing = deck_summary(main, extra, cards, staple, [c["code"] for c in (pr or {}).get("key_cards", [])])
+        if missing:
+            raise SystemExit(f"ALERT build_deck_index: {k} has {missing} main-deck codes missing from the card DB")
         era = g.get("era", "")
         year = s.get("year") or (int(m.group(0)) if (m := re.search(r"\d{4}", era)) else None)
         origin = s.get("origin") or (f"Assembled for decklight from {era} builds" if era else
@@ -128,12 +108,10 @@ def build() -> dict:
         about = g.get("plan") or n.get("plan") or ""
         if "ygoprodeck meta" in about:  # meta lists' plan cell only repeats the event (shown as origin)
             about = ""
-        out[k] = {"arch": arch, "style": style, "about": about, "origin": origin,
-                  "year": year, "mech": mech, "counts": [cnt["m"], cnt["s"], cnt["t"]], "sig": sig,
-                  "main": [[c, x] for c, x in collections.Counter(main).items()],
-                  "extra": [[c, x] for c, x in collections.Counter(extra).items()]}
+        out[k] = {"arch": arch, "style": style, "about": about, "origin": origin, "year": year, **summ}
         used |= set(main) | set(extra)
-    return {"version": 1, "decks": out, "names": {str(c): names.get(c, f"#{c}") for c in sorted(used)}}
+    return {"version": 1, "decks": out, "names": {str(c): names.get(c, f"#{c}") for c in sorted(used)},
+            "staples": sorted(staple)}  # the server's run-time decks (deck_index.DeckIndex) use the same staples
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -167,7 +145,7 @@ def write_mock(res: dict) -> None:
         if real:
             decks[d["id"]] = res["decks"][real]
     used = {str(c) for v in decks.values() for c, _n in v["main"] + v["extra"]}
-    MOCK_OUT.write_text(json.dumps({"version": 1, "decks": decks,
+    MOCK_OUT.write_text(json.dumps({"version": 1, "decks": decks, "staples": res["staples"],
                                     "names": {c: n for c, n in res["names"].items() if c in used}}) + "\n")
     print(f"wrote {MOCK_OUT} ({len(decks)} of {len(mock)} mock decks)")
 

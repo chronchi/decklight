@@ -1083,6 +1083,9 @@ function deckName(decks, id) {
   return d ? d.name : "Choose a deck";
 }
 
+// Product (r1 + search) vs r0 on the Forge archetypes (runs/full-r1-20261030-1609/fz_r1): Sky Striker 0.93 pooled
+// (n 56, best of 11), Mitsurugi 0.86 (n 56; its gain held with search, Blitzclique's did not). Both lists are trained.
+const DEFAULT_DECKS = {you: "mitsurugi-meta2", bot: "sky-striker-meta1"};
 const GROUPS = {pool: "Pool", newcards: "New cards", tuned: "Fine-tuned", user: "Yours"};
 
 // Forge coverage of a lobby deck (server: deck_coverage.json). The bot side shows it: decks the Forge trained on (or
@@ -1410,8 +1413,13 @@ function startingHTML() {
 
 function renderLobby() {
   const decks = (lobby && lobby.decks) || [];
-  if (!lobbyPick.you && decks.length) lobbyPick.you = decks[0].id;
-  if (!lobbyPick.bot && decks.length) lobbyPick.bot = decks[Math.min(1, decks.length - 1)].id;
+  // First visit: decks the Forge trained on that the product plays best (user 2026-11-01: "leave decks that were fine
+  // tuned and have very good performance"; NOTEBOOK 2026-11-01 "Default lobby decks"). Fallback: the first two.
+  const has = (id) => decks.some((x) => x.id === id);
+  if (!lobbyPick.you && decks.length) lobbyPick.you = has(DEFAULT_DECKS.you) ? DEFAULT_DECKS.you : decks[0].id;
+  if (!lobbyPick.bot && decks.length) {
+    lobbyPick.bot = has(DEFAULT_DECKS.bot) ? DEFAULT_DECKS.bot : decks[Math.min(1, decks.length - 1)].id;
+  }
   if (starting) {
     const h = '<div id="lobby"><div class="lscroll">' + startingHTML() +
       '</div><div id="startwrap"><button id="startbtn" data-act="start" disabled aria-busy="true">Starting…</button></div></div>';
@@ -1523,14 +1531,17 @@ function renderDeckSheet() {
   syncOv();
   manageFocus();
 }
+let deckIndexLoading = false;
 function loadDeckIndex() {
-  if (deckIndex !== undefined) return;
-  deckIndex = null;
+  // Refetched on every open: the server adds decks pasted this session; the last copy stays on screen meanwhile.
+  if (deckIndexLoading) return;
+  deckIndexLoading = true;
+  if (deckIndex === undefined) deckIndex = null;
   const url = MOCK ? "mock/deck-index.json" : "/deck_index.json" + (TOKEN ? "?t=" + encodeURIComponent(TOKEN) : "");
   fetch(url).then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
     .then((j) => { deckIndex = j; })
-    .catch(() => { deckIndex = {decks: {}, names: {}}; })  // names-only browsing still works
-    .finally(() => { if (deckBrowser) renderDeckSheet(); });
+    .catch(() => { if (!deckIndex) deckIndex = {decks: {}, names: {}}; })  // names-only browsing still works
+    .finally(() => { deckIndexLoading = false; if (deckBrowser) renderDeckSheet(); });
 }
 function openDeckBrowser(side, el) {
   deckBrowser = {side, q: "", f: {}, sort: "name", view: null, top: 0};

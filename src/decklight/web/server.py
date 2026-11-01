@@ -330,6 +330,23 @@ class Server:
             out.append({"id": deck_id, "name": f"Pasted deck {i + 1}", "group": "user"})
         return out
 
+    def runtime_decks(self) -> list[tuple[str, str, str, list[int], list[int]]]:
+        """Lobby decks not in the committed deck index: fine-tunes' own decks and decks pasted this session
+        (id, name, origin, main, extra), named as in list_decks."""
+        from decklight.decks import load_ydk, parse_ydk
+
+        out = []
+        for deck_id, (name, p) in sorted(self.tuned_decks.items(), key=lambda kv: kv[1][0]):
+            try:
+                d = load_ydk(p)
+            except (OSError, ValueError):
+                continue
+            out.append((deck_id, name, "The deck a fine-tuned model was trained for", list(d.main), list(d.extra)))
+        for i, (deck_id, text) in enumerate(sorted(self.user_decks.items())):
+            d = parse_ydk(text, deck_id)
+            out.append((deck_id, f"Pasted deck {i + 1}", "Pasted this session", list(d.main), list(d.extra)))
+        return out
+
     def resolve_deck(self, spec, engine=None, emb_codes=None):
         """A deck id or {"ydk": text} -> (Deck, error text|None).
 
@@ -2207,21 +2224,24 @@ def create_app(
             return JSONResponse({"error": "bad code"}, status_code=404)
         return JSONResponse(_card_json(code))
 
-    deck_index_gz: list[bytes] = []  # built once: the lobby deck browser's index (scripts/build_deck_index.py)
+    deck_index: list = []  # [DeckIndex] once loaded: the lobby deck browser's index (scripts/build_deck_index.py)
 
-    async def deck_index(req):
+    async def deck_index_route(req):
         if not need_token(req):
             return JSONResponse({"error": "unauthorized"}, status_code=401)
-        if not deck_index_gz:
-            import gzip
+        import gzip
 
+        from decklight.web.deck_index import DeckIndex
+
+        if not deck_index:
             try:
-                deck_index_gz.append(gzip.compress((Path(__file__).resolve().parent / "deck_index.json").read_bytes()))
-            except OSError as e:
+                deck_index.append(DeckIndex())
+            except (OSError, ValueError) as e:
                 print(f"WARN web content: deck index unreadable ({e})", flush=True)
                 return JSONResponse({"error": "no deck index"}, status_code=404)
-        return Response(deck_index_gz[0], media_type="application/json",
-                        headers={"Content-Encoding": "gzip", **NO_CACHE})
+        body = await asyncio.to_thread(lambda: gzip.compress(json.dumps(
+            deck_index[0].json_for(srv.runtime_decks()), separators=(",", ":")).encode(), 5))
+        return Response(body, media_type="application/json", headers={"Content-Encoding": "gzip", **NO_CACHE})
 
     async def img(req):
         if not need_token(req):
@@ -2336,7 +2356,7 @@ def create_app(
     routes = [
         Route("/", index),
         Route("/card/{code}", card),
-        Route("/deck_index.json", deck_index),
+        Route("/deck_index.json", deck_index_route),
         Route("/img/{code}.jpg", img),
         WebSocketRoute("/ws", ws_handler),
     ]
