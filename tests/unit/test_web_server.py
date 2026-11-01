@@ -624,6 +624,42 @@ def test_img_offline_fallback_and_back(tmp_path, engine, monkeypatch):
     assert r.status_code == 200 and r.headers["content-type"] == "image/svg+xml"
 
 
+def test_img_throttle_rate_dedupe_and_429(monkeypatch):
+    """Upstream image fetches stay under YGOPRODeck's 20 req/s, one per image, and stop after a 429."""
+    import asyncio
+    import itertools
+    import time
+    import urllib.error
+
+    import decklight.web.server as S
+
+    calls: list[tuple[str, float]] = []
+
+    def fake(url, timeout=5.0):
+        calls.append((url, time.monotonic()))
+        time.sleep(0.005)  # a network round trip: the duplicate requests arrive while the first is in flight
+        if "bad" in url:
+            raise urllib.error.HTTPError(url, 429, "Too Many Requests", {}, None)
+        return JPEG
+
+    monkeypatch.setattr(S, "_fetch_img", fake)
+    t = S.ImgThrottle()
+    t.RATE = 50.0  # same logic, faster test
+
+    async def run():
+        urls = [f"u{i}" for i in range(10)] * 3  # 30 requests, 10 distinct images, all at once
+        res = await asyncio.gather(*(t.fetch(u) for u in urls))
+        assert all(r == JPEG for r in res)
+        assert len(calls) == 10, "one upstream fetch per image"
+        gaps = [b[1] - a[1] for a, b in itertools.pairwise(calls)]
+        assert min(gaps) >= 1 / t.RATE * 0.9, gaps
+        assert await t.fetch("bad") is None
+        n = len(calls)
+        assert await t.fetch("u-new") is None and len(calls) == n, "paused after a 429"
+
+    asyncio.run(run())
+
+
 def test_card_json(tmp_path, engine):
     app = _make_app(tmp_path, engine)
     r = _client(app).get("/card/14558128", params={"t": TOKEN})

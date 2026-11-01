@@ -17,6 +17,7 @@ import json
 import random
 import re
 import time
+import urllib.error
 import urllib.request
 from pathlib import Path
 
@@ -73,6 +74,64 @@ def _fetch_img(url: str, timeout: float = 5.0) -> bytes:
     req = urllib.request.Request(url, headers={"User-Agent": "decklight-web/1.0"})
     with urllib.request.urlopen(req, timeout=timeout) as r:
         return r.read()
+
+
+class ImgThrottle:
+    """Upstream image fetches within YGOPRODeck's limits (user 2026-11-01: "are we respecting their limits? That's
+    very important"). Their API guide: at most 20 requests/s, an hour's IP block above it, and store images locally
+    instead of hot-linking; the /img route already serves each image from data/cache/pics after its first fetch.
+    Here: one request at a time at most RATE per second (well under 20, however many images a page asks for at once),
+    a request for an image already being fetched waits for that fetch, a failed code is not retried for RETRY_S, and
+    an HTTP 429 (or 403) pauses every fetch for PAUSE_S."""
+
+    RATE = 8.0
+    RETRY_S = 600.0
+    PAUSE_S = 3600.0
+
+    def __init__(self) -> None:
+        self._lock = asyncio.Lock()
+        self._last = 0.0
+        self._inflight: dict[str, asyncio.Future] = {}
+        self._failed: dict[str, float] = {}
+        self._paused_until = 0.0
+        self._last_error = ""
+
+    async def fetch(self, url: str) -> bytes | None:
+        """The image bytes, or None (offline, missing, throttled or paused: the caller shows the card back)."""
+        now = time.monotonic()
+        if now < self._paused_until or now < self._failed.get(url, 0.0):
+            return None
+        if url in self._inflight:
+            return await asyncio.shield(self._inflight[url])
+        fut: asyncio.Future = asyncio.get_running_loop().create_future()
+        self._inflight[url] = fut
+        data = None
+        try:
+            async with self._lock:
+                if time.monotonic() < self._paused_until:
+                    return None
+                wait = self._last + 1.0 / self.RATE - time.monotonic()
+                if wait > 0:
+                    await asyncio.sleep(wait)
+                try:
+                    data = await asyncio.to_thread(_fetch_img, url)
+                except urllib.error.HTTPError as e:
+                    if e.code in (403, 429):
+                        self._paused_until = time.monotonic() + self.PAUSE_S
+                        print(f"WARN web img: upstream answered {e.code}; no image fetches for "
+                              f"{self.PAUSE_S / 60:.0f} min", flush=True)
+                except Exception as e:  # noqa: BLE001 -- offline / timeout: card back, retry after RETRY_S
+                    data = None
+                    self._last_error = repr(e)
+                finally:
+                    self._last = time.monotonic()
+            if data is None or data[:2] != b"\xff\xd8":
+                self._failed[url] = time.monotonic() + self.RETRY_S
+                data = None
+            return data
+        finally:
+            fut.set_result(data)
+            del self._inflight[url]
 
 
 def _pretty_deck_name(stem: str) -> str:
@@ -136,6 +195,7 @@ class Server:
         self.user_decks: dict[str, str] = {}  # id -> ydk text (pasted this session)
         self.tuned_decks: dict[str, tuple[str, Path]] = {}  # id -> (deck name, .ydk path) of fine-tunes' own decks
         self.coverage = _load_coverage()
+        self.img_throttle = ImgThrottle()  # every upstream card-image fetch goes through it
         self.chain_mode = "auto"  # "auto": skip quiet chain windows (session.auto_pass_index); "all"
         self.winchance_on = False  # client setting, off by default, reset per connection
         self.winchance = None  # {"p","turn","history"} while on (sent as null when off)
@@ -2264,11 +2324,8 @@ def create_app(
             cand = d / "pics" / f"{code}.jpg"
             if cand.is_file():
                 return Response(cand.read_bytes(), media_type="image/jpeg")
-        try:
-            data = await asyncio.to_thread(_fetch_img, IMG_URLS[size].format(code=code))
-        except Exception:  # noqa: BLE001 -- offline: the card-back placeholder
-            return Response(CARD_BACK_SVG, media_type="image/svg+xml")
-        if data[:2] != b"\xff\xd8":
+        data = await srv.img_throttle.fetch(IMG_URLS[size].format(code=code))
+        if data is None:
             return Response(CARD_BACK_SVG, media_type="image/svg+xml")
         cached.parent.mkdir(parents=True, exist_ok=True)
         cached.write_bytes(data)
