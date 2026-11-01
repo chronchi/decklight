@@ -570,12 +570,52 @@ html.short #app { height: var(--app-h); }
 
 /* ---------- lobby ---------- */
 #lobby { height: 100dvh; display: flex; flex-direction: column; }
-.lscroll { flex: 1; min-height: 0; overflow-y: auto; padding: 28px 18px 18px; }
+.lscroll { flex: 1; min-height: 0; overflow-y: auto; padding: 20px 18px 18px; }
 .hero { text-align: center; padding: 8px 0 10px; }
 .mark { height: 92px; margin-bottom: 14px; }
 .mark svg { height: 92px; width: auto; margin: 0 auto; overflow: visible; }  /* the glow runs past the cropped viewBox */
 /* the wordmark alone, as in the approved logo (docs/brand/decklight/final): no seal beside it */
 .hero h1 { margin: 0; font-size: 28px; font-weight: 300; letter-spacing: 0.08em; }
+/* Lobby header (2026-10-31): a small mark beside the wordmark, then Play | Puzzles. */
+.lhead { display: flex; align-items: center; justify-content: center; gap: 10px; padding: 0 0 4px; }
+.lmark svg { height: 34px; width: auto; overflow: visible; }
+.lhead h1 { margin: 0; font-size: 22px; font-weight: 300; letter-spacing: 0.08em; }
+.ltabs { display: flex; margin: 14px 0 2px; border-bottom: 1px solid var(--line-2); }
+.ltabs button {
+  flex: 1; min-height: 44px; font-size: 14px; color: var(--muted); display: flex; align-items: center;
+  justify-content: center; gap: 8px; border-bottom: 1.5px solid transparent; margin-bottom: -1px;
+}
+.ltabs button.sel { color: var(--text); border-bottom-color: var(--accent); }
+/* Duel / Practice: two cards, each with its one-line meaning (always visible). */
+.modecards { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.modecard {
+  display: flex; flex-direction: column; gap: 4px; text-align: left; padding: 12px 12px 13px; min-height: 92px;
+  border-radius: 12px; border: 1px solid var(--line-2); color: var(--muted);
+  transition: border-color var(--t) var(--ease), background var(--t) var(--ease);
+}
+.modecard .mt { font-size: 15px; color: var(--text); }
+.modecard .md { font-size: 12px; line-height: 1.45; }
+.modecard.sel { border-color: rgba(184, 154, 94, 0.6); background: var(--accent-tint); }
+.modecard.sel .mt { color: var(--accent); }
+/* Options: one quiet row with a summary of the current choices; expands in place. */
+.optsec { margin-top: 26px; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+.optbtn { width: 100%; min-height: 60px; padding: 8px 4px; display: flex; align-items: center; gap: 12px; text-align: left; }
+.optbtn .ot { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.optbtn .nm { font-size: 15px; }
+.optbtn .os { font-size: 12px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.optbtn.open .chev { transform: rotate(180deg); }
+#optbody { padding: 0 0 18px; }
+#optbody .field-group:first-child { margin-top: 6px; }
+/* Pasted deck list (from the "Your deck" picker). */
+.deckrow.paste { color: var(--text); border-bottom: 1px solid var(--line); border-radius: 8px 8px 0 0; margin-top: 6px; }
+.pastebox { margin-top: 10px; display: flex; flex-direction: column; gap: 8px; }
+.pastebox label { font-size: 13px; color: var(--muted); margin-left: 2px; }
+.pastebox textarea {
+  display: block; width: 100%; min-height: 120px; resize: vertical;
+  border-radius: 10px; border: 1px solid var(--line-2); background: rgba(15, 14, 12, 0.5); color: var(--text);
+  padding: 10px 12px; font: 13px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+.pastebox .linkbtn { align-self: flex-start; }
 .field-group { margin-top: 26px; }
 .flabel { font-size: 13px; color: var(--muted); margin: 0 0 8px 2px; }
 .pickbtn {
@@ -793,7 +833,7 @@ details.ydk textarea {
 .prow .psolved { flex: 0 0 auto; font-size: 12px; color: var(--muted); border: 1px solid var(--line-2); border-radius: 999px; padding: 2px 8px; }
 
 /* Lobby quiet text button (opponent primer). */
-.aboutrow { padding: 0 2px 10px; }
+.aboutrow { padding: 2px 2px 0; }
 .linkbtn {
   min-height: 32px; padding: 4px 2px; font-size: 13px; color: var(--muted);
   text-decoration: underline; text-underline-offset: 3px; text-decoration-color: var(--line-2);

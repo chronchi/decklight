@@ -105,6 +105,8 @@ let detail = null;       // card for the full-screen detail view
 let lobby = null;
 let lobbyPick = {you: null, bot: null, first: "rps", mode: "product", play: "duel", model: null};
 let pickerOpen = null;   // "you" | "bot" | "model" | null
+let optsOpen = false;     // lobby Options section expanded
+let pasteOpen = false;    // lobby .ydk paste box shown (from the "Your deck" picker)
 let modelNotice = null;  // status line under the model field (auto-switch), cleared on the next lobby change
 let gameModel = null;    // running game's model label (starting screen + menu fallback)
 let savedModel = null;
@@ -1091,7 +1093,9 @@ function pickerHTML(decks, side, label) {
     '<svg class="chev" viewBox="0 0 20 20" aria-hidden="true"><path d="M5 8l5 5 5-5"/></svg></button>';
   if (open) {
     h += '<div class="pickpanel"><input class="decksearch" type="search" placeholder="Search ' + decks.length +
-      ' decks" aria-label="Search decks" data-search="' + side + '"><div class="decklist" role="listbox" aria-label="' + esc(label) + '">';
+      ' decks" aria-label="Search decks" data-search="' + side + '">';
+    if (side === "you") h += '<button class="deckrow paste" data-act="pasteydk"><span class="nm">Paste a deck list (.ydk)…</span></button>';
+    h += '<div class="decklist" role="listbox" aria-label="' + esc(label) + '">';
     for (const x of decks) {
       h += '<button role="option" aria-selected="' + (cur === x.id) + '" class="deckrow' + (cur === x.id ? " sel" : "") + '" data-' + side + 'deck="' + esc(x.id) +
         '" data-dname="' + esc(x.name.toLowerCase()) + '"><span class="nm">' + esc(x.name) + '</span><span class="g">' +
@@ -1404,8 +1408,10 @@ function renderLobby() {
     syncOv();
     return;
   }
+  // Lobby (user 2026-10-31: "Essentials + Options"): decks, mode and Start first; the rarely changed settings
+  // fold into Options; Puzzles is a tab; pasting a .ydk lives in the "Your deck" picker.
   let h = '<div id="lobby"><div class="lscroll">';
-  h += '<header class="hero"><div class="mark" aria-hidden="true">' +
+  h += '<header class="lhead"><div class="lmark" aria-hidden="true">' +
     '<svg viewBox="70 145 370 255"><title>decklight mark</title>' +
     '<defs><radialGradient id="dl-glow"><stop offset="0" stop-color="#b89a5e" stop-opacity="0.5"/>' +
     '<stop offset="1" stop-color="#b89a5e" stop-opacity="0"/></radialGradient>' +
@@ -1422,42 +1428,59 @@ function renderLobby() {
     '<circle cx="357.2" cy="221.4" r="13.8" fill="#b89a5e"/>' +
     "</svg></div>" +
     '<h1>decklight</h1></header>';
+  h += '<nav class="ltabs" aria-label="Lobby"><button class="sel" aria-current="page">Play</button>' +
+    '<button data-act="puzzles" aria-haspopup="dialog">Puzzles<span class="g">' +
+    esc(puzzles ? String(puzzles.length) : "") + "</span></button></nav>";
   h += '<h2 class="sr-only">New duel</h2>';
   h += pickerHTML(decks, "you", "Your deck");
+  if (pasteOpen) {
+    h += '<div class="pastebox"><label for="ydk">Deck list (.ydk), used instead of the deck above</label>' +
+      '<textarea id="ydk" placeholder="#main&#10;14558128&#10;…" spellcheck="false"></textarea>' +
+      '<button class="linkbtn" data-act="closepaste">Use the deck above instead</button></div>';
+  }
   h += pickerHTML(decks, "bot", "decklight plays");
   h += '<div class="aboutrow"><button class="linkbtn" data-act="primer">About this deck</button></div>';
-  h += modelPickerHTML();
-  h += '<section class="field-group"><div class="flabel">Card art</div>' +
-    '<button class="pickbtn" role="switch" aria-checked="' + cardArt + '" data-act="cardart" aria-label="Card art">' +
-    '<span class="nm">Card art</span>' +
-    '<span class="g">' + (cardArt ? "On" : "Off") + "</span>" +
-    '<span class="sw' + (cardArt ? " on" : "") + '" aria-hidden="true"><i></i></span></button>' +
-    '<div class="modelsub">Card images from YGOPRODeck, fetched when shown. Not bundled.</div></section>';
-  h += segHTML("Mode", "play", [["duel", "Duel"], ["practice", "Practice"]]);
-  h += segHTML("Going first", "first", [["rps", "Rock-paper-scissors"], ["me", "Me"], ["bot", "Bot"]]);
-  h += segHTML("Bot strength", "mode", [["product", "Full"], ["fast", "Fast"], ["random", "Random"]]);
-  h += '<details class="ydk"><summary>Paste a .ydk instead<svg class="chev" viewBox="0 0 20 20" aria-hidden="true"><path d="M5 8l5 5 5-5"/></svg></summary>' +
-    '<textarea id="ydk" aria-label="Deck list in .ydk format" placeholder="#main&#10;14558128&#10;…" spellcheck="false"></textarea></details>';
-  h += '<section class="field-group"><div class="flabel">Puzzles</div>' +
-    '<button class="pickbtn" data-act="puzzles" aria-haspopup="dialog"><span class="nm">Win this turn puzzles</span>' +
-    '<span class="g">' + esc(puzzles ? String(puzzles.length) : "…") + '</span>' +
-    '<svg class="chev" viewBox="0 0 20 20" aria-hidden="true"><path d="M5 8l5 5 5-5"/></svg></button></section>';
+  h += '<section class="field-group"><div class="flabel" id="lb-play">Mode</div>' +
+    '<div class="modecards" role="radiogroup" aria-labelledby="lb-play">' +
+    [["duel", "Duel", "A normal game. Counts in your stats; no hints or take-backs."],
+     ["practice", "Practice", "Hints from the bot, undo and what-if replays. Not counted."]]
+      .map(([k, t, d]) => '<button role="radio" aria-checked="' + (lobbyPick.play === k) + '" class="modecard' +
+        (lobbyPick.play === k ? " sel" : "") + '" data-play="' + k + '"><span class="mt">' + t +
+        '</span><span class="md">' + d + "</span></button>").join("") + "</div></section>";
+  const firstLbl = {rps: "Rock-paper-scissors", me: "You go first", bot: "Bot goes first"}[lobbyPick.first] || "";
+  const modeLbl = {product: "Full strength", fast: "Fast", random: "Random"}[lobbyPick.mode] || "";
+  const curModel = modelById(lobbyPick.model);
+  const optSum = [firstLbl, modeLbl, curModel && curModel.kind !== "base" ? curModel.label : "",
+    "Card art " + (cardArt ? "on" : "off")].filter(Boolean).join(" · ");
+  h += '<section class="optsec"><button class="optbtn' + (optsOpen ? " open" : "") + '" data-act="opts" aria-expanded="' +
+    optsOpen + '" aria-controls="optbody"><span class="ot"><span class="nm">Options</span><span class="os">' +
+    esc(optSum) + '</span></span><svg class="chev" viewBox="0 0 20 20" aria-hidden="true"><path d="M5 8l5 5 5-5"/></svg></button>';
+  if (optsOpen) {
+    h += '<div id="optbody">';
+    h += segHTML("Going first", "first", [["rps", "Rock-paper-scissors"], ["me", "Me"], ["bot", "Bot"]]);
+    h += segHTML("Bot strength", "mode", [["product", "Full"], ["fast", "Fast"], ["random", "Random"]]);
+    h += modelPickerHTML();
+    h += '<section class="field-group"><div class="flabel">Card art</div>' +
+      '<button class="pickbtn" role="switch" aria-checked="' + cardArt + '" data-act="cardart" aria-label="Card art">' +
+      '<span class="nm">Card art</span>' +
+      '<span class="g">' + (cardArt ? "On" : "Off") + "</span>" +
+      '<span class="sw' + (cardArt ? " on" : "") + '" aria-hidden="true"><i></i></span></button>' +
+      '<div class="modelsub">Card images from YGOPRODeck, fetched when shown. Not bundled.</div></section>';
+    h += "</div>";
+  }
+  h += "</section>";
   if (MOCK) h += '<div class="mocknav">mock ' + (mockIdx + 1) + "/" + MOCKS.length + " · ← → to step</div>";
   h += '</div><div id="startwrap"><button id="startbtn" data-act="start">Start duel</button></div></div>';
   // Every lobby click re-renders: keep the scroll position, the pasted .ydk and its open state.
   const oldYdk = document.getElementById("ydk");
   const ydkVal = oldYdk ? oldYdk.value : "";
-  const ydkOpen = !!(oldYdk && oldYdk.closest("details") && oldYdk.closest("details").open);
   const restoreScroll = saveScrolls(app, [".lscroll"]);
   // Patch the lobby in place when it is already shown (the scroller element survives, so no browser resets it;
   // a scrollTop restore alone did not hold on the user's phone, 2026-10-31); build it fresh otherwise.
   if (app.querySelector("#lobby .lscroll") && !app.querySelector("#startbtn[disabled]")) morph(app, h);
   else app.innerHTML = h;
   const newYdk = document.getElementById("ydk");
-  if (newYdk) {
-    newYdk.value = ydkVal;
-    if (ydkOpen) newYdk.closest("details").open = true;
-  }
+  if (newYdk && !newYdk.value) newYdk.value = ydkVal;
   restoreScroll();
   app.classList.remove("busy");
   logside.innerHTML = '<div class="loghead">Duel log</div><div class="loglist"><p class="emptytx">No duel yet.</p></div>';
@@ -1884,6 +1907,21 @@ function onAction(kind, el) {
   } else if (kind === "cuerecap") {
     cueRecap = !cueRecap;
     saveSetting("ygo-cue-recap", cueRecap ? "1" : "0");
+  } else if (kind === "opts") {
+    optsOpen = !optsOpen;
+    renderLobby();
+    return;
+  } else if (kind === "pasteydk") {
+    pasteOpen = true;
+    pickerOpen = null;
+    renderLobby();
+    const ta = document.getElementById("ydk");
+    if (ta) ta.focus({preventScroll: true});
+    return;
+  } else if (kind === "closepaste") {
+    pasteOpen = false;
+    renderLobby();
+    return;
   } else if (kind === "cardart") {
     cardArt = !cardArt;
     cardArtChosen = true;

@@ -739,8 +739,8 @@ def main() -> int:
                         errors.append("01-lobby: old name still visible in the lobby text")
                     if page.evaluate("document.title.includes('ygo-zero')"):
                         errors.append("01-lobby: old name still in the page title")
-                    if not page.evaluate("!!document.querySelector('.hero .mark svg')"):
-                        errors.append("01-lobby: no decklight mark in the hero")
+                    if not page.evaluate("!!document.querySelector('.lhead .lmark svg')"):
+                        errors.append("01-lobby: no decklight mark in the lobby header")
                 if name == "08-game-over":
                     gap = gameover_gap(page)
                     if not isinstance(gap, (int, float)) or gap < 8:
