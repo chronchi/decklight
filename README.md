@@ -34,7 +34,10 @@ uv run pytest tests/unit -q          # optional
 ```bash
 uv run python scripts/web_play.py    # prints http://127.0.0.1:8765/?t=<token>
 ```
-- Pick one of ~180 decks or paste a `.ydk`, then duel the bot.
+- Pick one of ~190 decks or paste a `.ydk`, then duel the bot. The deck browser searches by deck or by card
+  ("which decks run Ash Blossom?"), filters by summon type, era and training, and shows every list card by card.
+- Decks marked **Trained** were in the Forge's specialist training (the bot plays them best); **Related** decks share
+  most of their cards with one.
 - The client has hints, a turn recap, deck primers and puzzles.
 - **Card art:** on by default (images load from YGOPRODeck when shown; nothing is bundled). Turn it off in the lobby or with `--card-art off`.
 - To reach it from your phone, use `--bind tailscale` (or any address you trust).
