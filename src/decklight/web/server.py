@@ -2104,6 +2104,27 @@ def _register_stack_dump() -> None:
 NO_CACHE = {"Cache-Control": "no-cache"}
 
 
+def versioned_index(html: str, web_dir: Path | None = None) -> str:
+    """Point index.html at versioned client URLs (`?v=<content hash>`) so a browser holding an old heuristically-cached
+    copy (Firefox on Android kept the pre-fix app.js across reloads, 2026-10-31) fetches the new one. Module imports
+    inside app.js are versioned through an import map."""
+    import hashlib
+
+    web_dir = web_dir or ROOT / "web"
+    mods = sorted([*web_dir.glob("*.js"), *(web_dir / "render").glob("*.js")])
+    h = hashlib.sha256()
+    for f in [*mods, web_dir / "styles.css"]:
+        if f.is_file():
+            h.update(f.name.encode() + b"\0" + f.read_bytes())
+    v = h.hexdigest()[:12]
+    imap = {"imports": {"/" + f.relative_to(web_dir).as_posix(): "/" + f.relative_to(web_dir).as_posix() + "?v=" + v
+                        for f in mods}}
+    html = html.replace('href="styles.css"', f'href="styles.css?v={v}"')
+    return html.replace('<script type="module" src="app.js"></script>',
+                        f'<script type="importmap">{json.dumps(imap)}</script>\n'
+                        f'<script type="module" src="/app.js?v={v}"></script>')
+
+
 class RevalidatingStaticFiles(StaticFiles):
     def file_response(self, *args, **kwargs):
         resp = super().file_response(*args, **kwargs)
@@ -2160,7 +2181,7 @@ def create_app(
             return Response("unauthorized", status_code=401)
         page = ROOT / "web" / "index.html"
         if page.is_file():
-            return Response(page.read_text(encoding="utf-8"), media_type="text/html", headers=NO_CACHE)
+            return Response(versioned_index(page.read_text(encoding="utf-8")), media_type="text/html", headers=NO_CACHE)
         return Response(PLACEHOLDER, media_type="text/html")
 
     async def card(req):

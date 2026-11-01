@@ -36,7 +36,7 @@ uv run python scripts/web_play.py    # prints http://127.0.0.1:8765/?t=<token>
 ```
 - Pick one of ~180 decks or paste a `.ydk`, then duel the bot.
 - The client has hints, a turn recap, deck primers and puzzles.
-- **Card art:** off by default; turn on "Card art" in settings to load images from YGOPRODeck.
+- **Card art:** on by default (images load from YGOPRODeck when shown; nothing is bundled). Turn it off in the lobby or with `--card-art off`.
 - To reach it from your phone, use `--bind tailscale` (or any address you trust).
 
 ### Play from EDOPro

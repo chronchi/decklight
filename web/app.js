@@ -1425,6 +1425,7 @@ function renderLobby() {
   h += '<h2 class="sr-only">New duel</h2>';
   h += pickerHTML(decks, "you", "Your deck");
   h += pickerHTML(decks, "bot", "decklight plays");
+  h += '<div class="aboutrow"><button class="linkbtn" data-act="primer">About this deck</button></div>';
   h += modelPickerHTML();
   h += '<section class="field-group"><div class="flabel">Card art</div>' +
     '<button class="pickbtn" role="switch" aria-checked="' + cardArt + '" data-act="cardart" aria-label="Card art">' +
@@ -1432,7 +1433,6 @@ function renderLobby() {
     '<span class="g">' + (cardArt ? "On" : "Off") + "</span>" +
     '<span class="sw' + (cardArt ? " on" : "") + '" aria-hidden="true"><i></i></span></button>' +
     '<div class="modelsub">Card images from YGOPRODeck, fetched when shown. Not bundled.</div></section>';
-  h += '<div class="aboutrow"><button class="linkbtn" data-act="primer">About this deck</button></div>';
   h += segHTML("Mode", "play", [["duel", "Duel"], ["practice", "Practice"]]);
   h += segHTML("Going first", "first", [["rps", "Rock-paper-scissors"], ["me", "Me"], ["bot", "Bot"]]);
   h += segHTML("Bot strength", "mode", [["product", "Full"], ["fast", "Fast"], ["random", "Random"]]);

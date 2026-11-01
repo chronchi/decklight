@@ -41,8 +41,8 @@ def main() -> None:
                     help="product value checkpoint (default data/cache/value_p2/best.pt)")
     ap.add_argument("--device", default="cpu")
     ap.add_argument("--replay-threads", type=int, default=1)
-    ap.add_argument("--card-art", choices=("on", "off"), default="off",
-                    help="default card-art switch for clients that never chose (default off)")
+    ap.add_argument("--card-art", choices=("on", "off"), default="on",
+                    help="default card-art switch for clients that never chose (default on; user 2026-10-31)")
     ap.add_argument("--models-dir", action="append", default=None, dest="models_dir",
                     help="fine-tune search dir (repeatable, default runs)")
     a = ap.parse_args()
