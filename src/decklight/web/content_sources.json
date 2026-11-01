@@ -1,14 +1,13 @@
 {
  "primers": {
-  "built": "2026-10-19",
-  "ckpt_sha256": "06746ffc156a3fe52b8584c6ac44bca5c60ae5570433c5b6511638c3e6679db3",
+  "built": "2026-11-01",
+  "ckpt_sha256": "585ad48eccf6442873f57b0f4731351732b907d84e1e6edc63e5983131182994",
   "games": [
-   "value-p2-20261015-2044/hppo-p",
-   "value-p2-20261015-2044/hppo-p2",
-   "primer-games-v2-20261019-1104 (pool, newcards)"
+   "full-r1-20261030-1609/full_r1",
+   "primer-games-v2-20261019-1104 (pool, newcards; played by raw P)"
   ],
-  "model": "P",
-  "note": "impact-scored with value_p2",
+  "model": "r1 (gauntlet decks) + P (pool, newcards)",
+  "note": "impact-scored with value_p2; the 31 ygo-agent gauntlet decks from r1's searched games vs ygo-agent, every other lobby deck from P's raw games (NOTEBOOK 2026-10-31)",
   "value": "value_p2",
   "value_sha256": "56cba4eb61abe4772901b3693971ab168b533b64c0e26ddbef6337275e0cfb94"
  },
