@@ -1449,7 +1449,10 @@ function renderLobby() {
   const ydkVal = oldYdk ? oldYdk.value : "";
   const ydkOpen = !!(oldYdk && oldYdk.closest("details") && oldYdk.closest("details").open);
   const restoreScroll = saveScrolls(app, [".lscroll"]);
-  app.innerHTML = h;
+  // Patch the lobby in place when it is already shown (the scroller element survives, so no browser resets it;
+  // a scrollTop restore alone did not hold on the user's phone, 2026-10-31); build it fresh otherwise.
+  if (app.querySelector("#lobby .lscroll") && !app.querySelector("#startbtn[disabled]")) morph(app, h);
+  else app.innerHTML = h;
   const newYdk = document.getElementById("ydk");
   if (newYdk) {
     newYdk.value = ydkVal;
