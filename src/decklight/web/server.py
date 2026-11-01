@@ -2099,6 +2099,18 @@ def _register_stack_dump() -> None:
         pass
 
 
+# Browsers may reuse a cached app.js after an update (no Cache-Control: heuristic freshness, user report 2026-10-31);
+# no-cache keeps the ETag/304 path but makes every load revalidate.
+NO_CACHE = {"Cache-Control": "no-cache"}
+
+
+class RevalidatingStaticFiles(StaticFiles):
+    def file_response(self, *args, **kwargs):
+        resp = super().file_response(*args, **kwargs)
+        resp.headers.update(NO_CACHE)
+        return resp
+
+
 def create_app(
     *,
     token: str,
@@ -2148,7 +2160,7 @@ def create_app(
             return Response("unauthorized", status_code=401)
         page = ROOT / "web" / "index.html"
         if page.is_file():
-            return Response(page.read_text(encoding="utf-8"), media_type="text/html")
+            return Response(page.read_text(encoding="utf-8"), media_type="text/html", headers=NO_CACHE)
         return Response(PLACEHOLDER, media_type="text/html")
 
     async def card(req):
@@ -2278,7 +2290,7 @@ def create_app(
     ]
     web_dir = ROOT / "web"
     if web_dir.is_dir():  # client code is public; game data (ws, img, card) needs the token
-        routes.append(Mount("/", StaticFiles(directory=web_dir)))
+        routes.append(Mount("/", RevalidatingStaticFiles(directory=web_dir)))
 
     from contextlib import asynccontextmanager
 
