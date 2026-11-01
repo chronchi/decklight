@@ -1,10 +1,25 @@
+import os
 from pathlib import Path
 
 import pytest
 
+# Under pytest-xdist each worker gets one intra-op thread: 4 workers x 4 torch/OpenMP threads on the laptop's 4 cores
+# spun against each other and turned a 3 s collector test into 203 s (NOTEBOOK 2026-11-01, test budget). Set before
+# torch is imported, so test subprocesses inherit it too.
+if os.environ.get("PYTEST_XDIST_WORKER"):
+    for _v in ("OMP_NUM_THREADS", "MKL_NUM_THREADS", "OPENBLAS_NUM_THREADS"):
+        os.environ.setdefault(_v, "1")
+
 from decklight.engine.resources import CORE_LIB
 
 FIXTURES = Path(__file__).parent / "fixtures"
+
+
+def pytest_configure(config):
+    if os.environ.get("PYTEST_XDIST_WORKER"):
+        import torch
+
+        torch.set_num_threads(1)
 
 
 def pytest_collection_modifyitems(config, items):

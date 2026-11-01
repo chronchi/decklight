@@ -24,7 +24,7 @@ gen_search = _load("gen_search")
 gen_window = _load("gen_window")
 
 
-def _random_games(engine, tmp_path: Path, n: int = 3, max_len: int = 400) -> Path:
+def _random_games(engine, tmp_path: Path, n: int = 3, max_len: int = 100) -> Path:  # 400 took 40-130 s a test
     """Full random-policy games in gold record format (config, choices, actors, turns)."""
     from decklight.decks import load_ydk
     from decklight.engine.cpp_env import CppEnv
@@ -300,10 +300,8 @@ def test_game_gen_honest_skip_never_uses_true_config(engine, tmp_path):
     from decklight.engine.duel import Engine
     from decklight.search.window import WindowSearch
 
-    src = _random_games(engine, tmp_path, n=2)
+    src = _random_games(engine, tmp_path, n=2, max_len=60)
     recs = [_json.loads(x) for x in src.read_text().splitlines()]
-    for r in recs:  # short prefixes: early turn>=2 own-turn decisions still search, determinizer replays stay cheap
-        r["choices"] = r["choices"][:100]
     ws = WindowSearch(Engine(), gen_search.greedy_logits, own_frac=1.0, seed=0, samples=1)
     orig = ws.rollouts_gen
     seen: list = []
@@ -339,7 +337,7 @@ def test_decisive_label_mode(engine, tmp_path):
     from decklight.demos.dataset import record_config
     from decklight.engine.cpp_env import CppEnv
 
-    src = _random_games(engine, tmp_path, n=1, max_len=120)  # one 400-decision game takes ~280 s in this mode
+    src = _random_games(engine, tmp_path, n=1, max_len=70)  # one 400-decision game takes ~280 s in this mode
     for honest in ("0", "1"):
         out = tmp_path / f"hw{honest}"
         old = sys.argv

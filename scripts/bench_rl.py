@@ -154,7 +154,7 @@ def main() -> None:
         print(f"ALERT bench_rl: unknown sections {bad}", flush=True)
         raise SystemExit(2)
     if args.smoke:
-        args.seconds = 1.0
+        args.seconds = min(args.seconds, 1.0)  # the unit test runs 0.25 s per measurement
     seconds = float(args.seconds)
 
     dev = torch.device(args.device)
@@ -259,14 +259,14 @@ def main() -> None:
         ref_roll = copy.deepcopy(model).eval()
         for p in ref_roll.parameters():
             p.requires_grad_(False)
-        tgt = 256 if args.smoke else 2048
+        tgt = 64 if args.smoke else 2048  # smoke: one collect(256) took 5-15 s on the laptop
         for nenv in rollout_envs:
             for trim, use_bf16 in ((False, False), (True, True)):
                 prec = "bf16" if (use_bf16 and dev.type == "cuda") else "fp32"
                 model.trim = trim
                 ref_roll.trim = trim
                 vec = VecEnv(engine, decks, nenv, args.threads, seed=4242)
-                vec.set_max_decisions(1500)  # train_rl's --max-decisions default
+                vec.set_max_decisions(150 if args.smoke else 1500)  # train_rl's default; smoke: games end sooner
                 store = SlotStore(store_cap, gather(vec.buf, np.arange(1), hist, known))
                 col = Collector(vec, model, ref_roll, store, hist, known, dev, 0.0, -0.5,
                                 max(1, nenv // 4), np.random.default_rng(4242), prec)

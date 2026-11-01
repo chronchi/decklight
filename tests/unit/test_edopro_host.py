@@ -11,6 +11,7 @@ import random
 import socket
 import struct
 import threading
+import time
 
 import numpy as np
 import pytest
@@ -366,9 +367,14 @@ def test_udp_discovery():
         listener.settimeout(5)
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         s.sendto(struct.pack("<H", P.NETWORK_CLIENT_ID), ("127.0.0.1", P.DISCOVERY_PORT))
-        data, _ = listener.recvfrom(512)
-        assert struct.unpack_from("<H", data)[0] == P.NETWORK_SERVER_ID
-        assert struct.unpack_from("<H", data, 4)[0] == port
+        # Discovery ports are fixed, so a host in another xdist worker may answer too: wait for ours.
+        deadline = time.monotonic() + 5
+        while True:
+            data, _ = listener.recvfrom(512)
+            assert struct.unpack_from("<H", data)[0] == P.NETWORK_SERVER_ID
+            if struct.unpack_from("<H", data, 4)[0] == port:
+                break
+            assert time.monotonic() < deadline, "no discovery reply from this host"
         assert P.decode_name(data[12:52]) == "ygo-zero"  # 2 pad bytes before ipaddr
         assert len(data) == 120  # sizeof(HostPacket) in gframe/network.h
     finally:

@@ -90,8 +90,10 @@ def _never(buf):
     raise AssertionError("unused")
 
 
+# max_searches: the first few S decisions search, the rest play raw. Equivalence of routing, choices and the search
+# log holds the same way; a full game of searches took 2-5 min (test budget, user 2026-11-01: "All tests together <5min").
 KW = {"own_turn1": True, "conf_skip": 1.01, "own_frac": 1.0,
-      "honest": True, "det_tries": 8, "det_fallback": "skip"}  # fmt: skip
+      "honest": True, "det_tries": 8, "det_fallback": "skip", "max_searches": 4}  # fmt: skip
 
 
 def _reference_game(engine, cfg, s_seat, forward, seed=0, game_seed=0, ho=None):
@@ -185,7 +187,7 @@ class _TinyLauncher:
         return ProductDriver(
             engine, config, bot_seat=bot_seat, base_logits=self.forward, value=None,
             search_kwargs={"k": 2, "samples": 1, "honest": False, "conf_skip": 1.01,
-                            "own_frac": 1.0, "own_turn1": True},
+                            "own_frac": 1.0, "own_turn1": True, "max_searches": 4},
             game_seed=game_seed, ws_seed=ws_seed).start()
 
     def record_info(self, seed: int) -> dict:

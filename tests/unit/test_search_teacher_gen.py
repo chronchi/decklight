@@ -67,7 +67,8 @@ def _run_kind(search_match, tmp_path: Path, emb: Path, ckpt: Path, kind: str, ex
             "--save-records", str(recdir),
             "--k", "2", "--samples", "1", "--horizon", "1",
             "--conf-skip", "0.9", "--own-frac", "1.0", "--own-turn1", "1",
-            "--width", "2", "--batch", "16", "--out", str(out)] + extra  # fmt: skip
+            "--width", "2", "--batch", "16", "--max-searches", "6",  # full-game searching took 80-250 s
+            "--out", str(out)] + extra  # fmt: skip
     old = sys.argv
     sys.argv = argv
     try:

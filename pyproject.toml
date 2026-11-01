@@ -10,6 +10,8 @@ dependencies = [
 [dependency-groups]
 dev = [
     "pytest>=8",
+    "pytest-timeout>=2.3",
+    "pytest-xdist>=3.6",
     "ruff>=0.6",
     "meson>=1.4",
     "ninja>=1.11",
@@ -52,6 +54,9 @@ line-length = 110
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# 4 workers = the laptop's 4 cores (tests/conftest.py gives each one torch thread); the unit suite takes ~9 min.
+# A hung test fails after 5 min instead of blocking the run. `-n 0` runs one test in-process.
+addopts = "-n 4 --timeout 300"
 markers = [
     "unit: fast, no built artifacts",
     "engine: needs build/core/libocgcore.so",

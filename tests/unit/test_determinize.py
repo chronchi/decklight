@@ -312,7 +312,8 @@ def test_search_game_honest_ends_with_det_counters(engine, decks):
     cfg = DuelConfig(decks[names[2]], decks[names[3]], seed=8)
     ws = WindowSearch(engine, never, k=2, horizon=1, samples=1, seed=0)
     gen = search_game_gen(engine, cfg, ws, 0, argmax_select, game_seed=0,
-                          own_turn1=True, conf_skip=1.01, own_frac=1.0, honest=True)
+                          own_turn1=True, conf_skip=1.01, own_frac=1.0, honest=True,
+                          max_searches=6)  # a full game of honest searches ran past 300 s (test budget 2026-11-01)
     res = dict(drive_many([(0, gen)], forward, 2))[0]
     assert not res.truncated and res.winner in (0, 1)
     assert res.n_searched >= 1

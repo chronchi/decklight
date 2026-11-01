@@ -12,7 +12,7 @@ def test_bench_rl_smoke(tmp_path):
     out = tmp_path / "b.jsonl"
     p = subprocess.run(
         [sys.executable, str(ROOT / "scripts/bench_rl.py"), "--smoke", "--device", "cpu",
-         "--sections", "env", "infer", "rollout", "update", "profile", "--seconds", "1", "--out", str(out)],
+         "--sections", "env", "infer", "rollout", "update", "profile", "--seconds", "0.25", "--threads", "2", "--out", str(out)],
         cwd=ROOT, capture_output=True, text=True, timeout=240, check=False,
     )
     assert p.returncode == 0, p.stderr[-2000:]

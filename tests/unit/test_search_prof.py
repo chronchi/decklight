@@ -71,8 +71,9 @@ def test_prof_is_bit_identical(engine):
     searches are fully timed, the rest plays raw."""
     fw = _tiny_forward()
     for seed in (0, 1):
-        off = _play(engine, fw, game_seed=seed, max_searches=4, **_honest_kw())
-        on = _play(engine, fw, prof=True, game_seed=seed, max_searches=4, **_honest_kw())
+        # stop_turn: the raw remainder after the cap added minutes (525 s for both seeds) and compares nothing new
+        off = _play(engine, fw, game_seed=seed, max_searches=4, stop_turn=4, **_honest_kw())
+        on = _play(engine, fw, prof=True, game_seed=seed, max_searches=4, stop_turn=4, **_honest_kw())
         assert off.choices == on.choices
         assert off.actors == on.actors
         assert (off.n_searched, off.n_override, off.det_proposals, off.det_accepted,
@@ -95,9 +96,10 @@ def test_prof_is_bit_identical(engine):
 
 
 def test_latency_records_walls(engine):
-    """latency mode on a full non-honest game: every decision lands in lat_raw or lat_search, searched moves match
-    n_searched, own turns span."""
-    res = _play(engine, _tiny_forward(), latency=True, game_seed=0, conf_skip=1.01, own_frac=1.0)
+    """latency mode on a non-honest game (first 4 turns, 6 searches; a full game took > 10 min): every decision lands
+    in lat_raw or lat_search, searched moves match n_searched, own turns span."""
+    res = _play(engine, _tiny_forward(), latency=True, game_seed=0, conf_skip=1.01, own_frac=1.0, max_searches=6,
+                stop_turn=4)
     assert len(res.lat_raw) + len(res.lat_search) == len(res.choices)
     assert len(res.lat_search) == res.n_searched >= 1
     assert all(w >= 0 for w in res.lat_raw + res.lat_search + res.lat_turn)

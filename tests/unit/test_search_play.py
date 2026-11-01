@@ -71,12 +71,24 @@ def _play(engine, forward, **kw):
     return dict(drive_many([(0, gen)], forward, 2))[0], cfg
 
 
+_FULL: dict = {}
+
+
+def _full_game(engine):
+    """The fully searched default game (conf_skip 1.01, own_frac 1.0, seed 0), played once per module: five tests read
+    the same deterministic game, which took 40-60 s each (test budget, user 2026-11-01: "All tests together <5min")."""
+    if "res" not in _FULL:
+        _FULL["fw"] = _tiny_forward()
+        _FULL["res"], _FULL["cfg"] = _play(engine, _FULL["fw"], conf_skip=1.01, own_frac=1.0)
+    return _FULL["res"], _FULL["cfg"], _FULL["fw"]
+
+
 def test_full_game_searches_and_replays(engine):
     """One live game under drive_many: it ends, S searches >= 1 decision, and the choice list
     replays to the same winner on a fresh env."""
     from decklight.engine.cpp_env import CppEnv
 
-    res, cfg = _play(engine, _tiny_forward(), conf_skip=1.01, own_frac=1.0)
+    res, cfg, _ = _full_game(engine)
     assert not res.truncated
     assert res.winner in (0, 1)
     assert res.n_searched >= 1
@@ -97,12 +109,11 @@ def test_conf_skip_gates_search(engine):
     from decklight.search.turn1 import _masked
     from decklight.search.window import WindowSearch, is_window
 
-    forward = _tiny_forward()
+    res1, cfg, forward = _full_game(engine)
     res0, _ = _play(engine, forward, conf_skip=0.0, own_frac=1.0)
     assert res0.n_searched == 0 and res0.n_branches == 0
     assert not res0.truncated and res0.winner in (0, 1)
 
-    res1, cfg = _play(engine, forward, conf_skip=1.01, own_frac=1.0)
     assert res1.n_searched >= 1
     # every eligible S decision (window, or own turn with >= 2 options from turn 1) with >= 2
     # candidates was searched: replay the same trajectory with the same guard discipline
@@ -141,7 +152,7 @@ def test_honest_skip_skips_searches_and_ends(engine):
     skipped = 0
     for seed in range(4):
         res, _ = _play(engine, forward, conf_skip=1.01, own_frac=1.0,
-                       honest=True, det_tries=1, det_fallback="skip", game_seed=seed)
+                       honest=True, det_tries=1, det_fallback="skip", game_seed=seed, max_searches=8)
         assert res.det_proposals > 0
         assert not res.truncated and res.winner in (0, 1)
         skipped += res.det_skipped
@@ -189,7 +200,7 @@ def test_summarize_win_rate(tmp_path):
 
 def test_log_holds_per_sample_scores(engine):
     """Every searched decision logs its per-sample selection scores; their mean per candidate is the logged score."""
-    res, _ = _play(engine, _tiny_forward(), conf_skip=1.01, own_frac=1.0)
+    res, _, _ = _full_game(engine)
     assert res.log
     for e in res.log:
         assert len(e["samples"]) == len(e["cands"])
@@ -201,7 +212,8 @@ def test_log_holds_per_sample_scores(engine):
 def test_guard_modes_validate_and_play(engine):
     """per_seat + an unguarded seat plays to the end (a win, or the decision cap: the random tiny net may loop when
     unguarded); an unknown guard_mode fails loud."""
-    res, _ = _play(engine, _tiny_forward(), conf_skip=1.01, own_frac=1.0, guard_mode="per_seat", unguarded_seat=1)
+    res, _ = _play(engine, _tiny_forward(), conf_skip=1.01, own_frac=1.0, guard_mode="per_seat", unguarded_seat=1,
+                   max_searches=4)
     assert res.winner in (0, 1) or res.truncated
     with pytest.raises(ValueError):
         _play(engine, _tiny_forward(), guard_mode="nope")
@@ -272,10 +284,10 @@ def test_priv_value_rejects_non_priv_ckpt(tmp_path):
 def test_margin_keeps_policy_move_unless_clear(engine):
     """A margin above any score gap plays the policy's move at every searched decision (overrides 0, log keeps the
     search's best); margin 0 logs chosen == best."""
-    res, _ = _play(engine, _tiny_forward(), conf_skip=1.01, own_frac=1.0, margin=1e9)
+    res, _ = _play(engine, _tiny_forward(), conf_skip=1.01, own_frac=1.0, margin=1e9, max_searches=8)
     assert res.log and res.n_override == 0
     assert all(e["chosen"] == e["played"] for e in res.log if e["played"] in e["cands"])
-    res0, _ = _play(engine, _tiny_forward(), conf_skip=1.01, own_frac=1.0)
+    res0, _, _ = _full_game(engine)
     assert all(e["chosen"] == e["best"] for e in res0.log)
 
 
@@ -291,8 +303,7 @@ def test_turn_limits_for_label_generation(engine):
 def test_max_searches_caps_then_plays_raw(engine):
     """max_searches=2: at most 2 search attempts, the game still ends, and search_cut marks the raw remainder
     (a looping game slowed a proc for 45+ min; NOTEBOOK 2026-10-11 00:10)."""
-    fw = _tiny_forward()
-    full, _ = _play(engine, fw, conf_skip=1.01, own_frac=1.0)
+    full, _, fw = _full_game(engine)
     assert full.n_searched > 2 and not full.search_cut
     res, _ = _play(engine, fw, conf_skip=1.01, own_frac=1.0, max_searches=2)
     assert res.n_searched + res.det_skipped == 2
