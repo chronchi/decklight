@@ -135,7 +135,11 @@ class ImgThrottle:
 
 
 def _pretty_deck_name(stem: str) -> str:
-    return re.sub(r"-meta\d+$", "", stem).replace("-", " ").title()
+    s = re.sub(r"-meta\d+$", "", stem)
+    if any(c.isupper() for c in s):  # CamelCase stems: "SnakeEyeAlter" -> "Snake Eye Alter", "Branded60" -> "Branded 60"
+        s = re.sub(r"(?<=[a-z])(?=[A-Z])", " ", s)
+        s = re.sub(r"(?<=[A-Za-z])(?=\d+$)", " ", s)
+    return s.replace("-", " ").title()
 
 
 class Server:
@@ -157,8 +161,12 @@ class Server:
         models_dirs=None,
         bundle_dirs=None,
         card_art_default: bool = False,
+        fixed_seed: int | None = None,
     ) -> None:
         self.token = token
+        # Tests and parity harnesses (A2c): game k of this server gets seed fixed_seed + k instead of a random one.
+        self.fixed_seed = fixed_seed
+        self.games_started = 0
         self._engine = engine
         self._make_opponent = make_opponent or self._default_opponent
         self.record_root = record_root
@@ -536,6 +544,7 @@ class Server:
             "difficulty": str(p.get("difficulty", "medium")),
             "goal": str(p.get("goal", "")),
             "n_plays": int(p.get("n_plays", p.get("n_moves", 0))),
+            "seat": int(p.get("seat", 0)),  # the human plays decks[seat]
         }
 
     def get_primers(self) -> dict:
@@ -987,7 +996,11 @@ class Server:
         else:
             await self._error(f"unknown first {first!r} (rps|me|bot)")
             return
-        seed = random.Random().getrandbits(63)
+        if self.fixed_seed is not None:
+            seed = self.fixed_seed + self.games_started
+        else:
+            seed = random.Random().getrandbits(63)
+        self.games_started += 1
         cfg = DuelConfig(_DeckLike(first_deck), _DeckLike(second_deck), seed=seed)
         try:
             opp = await self._build_opponent(mode, model_entry)
@@ -1064,7 +1077,7 @@ class Server:
 
     async def on_choose(self, msg: dict) -> None:
         s = self.session
-        if s is None or (s.done and self.finished):
+        if s is None or self.finished:  # a surrendered game is finished but its env is not done
             await self._error("no active game (send new_game first)")
             return
         if not s.need_human or self.advancing:
@@ -1099,7 +1112,7 @@ class Server:
 
     async def on_surrender(self) -> None:
         s = self.session
-        if s is None or (s.done and self.finished):
+        if s is None or self.finished:  # a surrendered game is finished but its env is not done
             await self._error("no active game (send new_game first)")
             return
         self.gen += 1  # stops a running advance; a bot step in flight is abandoned
@@ -2237,6 +2250,7 @@ def create_app(
     value=None,
     models_dirs=None,
     card_art_default: bool = False,
+    fixed_seed: int | None = None,
 ) -> Starlette:
     _register_stack_dump()
     try:
@@ -2262,6 +2276,7 @@ def create_app(
         value=value,
         models_dirs=models_dirs,
         card_art_default=card_art_default,
+        fixed_seed=fixed_seed,
     )
 
     def need_token(req) -> bool:

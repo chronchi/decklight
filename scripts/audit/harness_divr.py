@@ -1,4 +1,4 @@
-# Audit from docs/reviews/2026-10-09-search-plan-opus.md (Opus 5.5 subagent, 2026-10-09). Run from ygo-zero/: python3 scripts/audit/harness_divr.py
+# Audit from docs/lab/reviews/2026-10-09-search-plan-opus.md (Opus 5.5 subagent, 2026-10-09). Run from ygo-zero/: python3 scripts/audit/harness_divr.py
 import json,glob,collections,os,sys
 sys.path.insert(0,'scripts'); sys.path.insert(0,'scripts/audit')
 from render_games import _opts, option_desc, H

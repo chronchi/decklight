@@ -244,3 +244,48 @@ def test_vecenv_ga_mixed(engine):
     w.set_ga_share(0.5, ga_start, ga_count)
     w.reset()
     assert set(np.unique(np.asarray(w.buf["ga"])).tolist()) <= {0, 1}
+
+
+def test_deck_bound_opponent_pilots_its_own_decks():
+    """--deck-opps: a bound deck on the opponent seat is piloted by its net (share 1.0); other decks are not."""
+    pool, ga = _deck_lists()
+    decks = pool[:6]
+    codes = sorted({c for d in decks for c in list(d.main) + list(d.extra)} - {0})
+    spec = _tiny(len(decks), codes, False)
+    league = League(0.4, 0.0, 0, np.random.default_rng(5), bound={"spec": spec})
+    vec = FakeVec(N_ENVS, len(decks), 0.0, len(decks), 0, 11)
+    store = SlotStore(512, gather(vec.buf, np.arange(1), 0, False))
+    col = Collector(vec, _tiny(len(decks), codes, True), _tiny(len(decks), codes, False),
+                    store, 0, False, torch.device("cpu"), 0.3, -0.5, 2, np.random.default_rng(1), "fp32",
+                    league, StubYgo(), greedy=None, fail=None, deck_opp={2: "spec", 4: "spec"}, deck_opp_share=1.0)
+    seen = 0
+    for _ in range(ROUNDS):
+        for i in range(N_ENVS):
+            vec.next_episode(i)
+            col._draw_episode(i)
+            opp_deck = int(vec.buf["deck1" if int(col.lseat[i]) == 0 else "deck0"][i])
+            if opp_deck in (2, 4):
+                assert col.opp[i] == "spec" and col.vs_bc[i]
+                seen += 1
+            else:
+                assert col.opp[i] != "spec"
+    assert seen > 100
+    assert league.get("spec") is spec and "spec" in col._net_cache
+    assert "spec" not in league.names()  # never drawn by sample()
+
+
+def test_deck_bound_opponent_validation():
+    import pytest
+
+    pool, _ = _deck_lists()
+    decks = pool[:3]
+    codes = sorted({c for d in decks for c in list(d.main) + list(d.extra)} - {0})
+    league = League(0.4, 0.0, 0, np.random.default_rng(5), bound={"spec": _tiny(3, codes, False)})
+    vec = FakeVec(2, 3, 0.0, 3, 0, 1)
+    store = SlotStore(64, gather(vec.buf, np.arange(1), 0, False))
+    with pytest.raises(ValueError, match="not in league.bound"):
+        Collector(vec, _tiny(3, codes, True), _tiny(3, codes, False), store, 0, False, torch.device("cpu"),
+                  0.3, -0.5, 2, np.random.default_rng(1), "fp32", league, StubYgo(), greedy=None, fail=None,
+                  deck_opp={1: "other"}, deck_opp_share=1.0)
+    with pytest.raises(ValueError, match="collides"):
+        League(0.4, 0.0, 0, np.random.default_rng(5), bound={"base": object()})

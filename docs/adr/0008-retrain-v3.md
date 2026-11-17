@@ -1,7 +1,7 @@
 # ADR 0008 — Retrain from scratch on clean data, a v3 encoder and honest search labels
 
 Date: 2026-10-11. Status: accepted. The user gave the go: "yeah, go ahead, keep working on it and ping me when you
-have results and keep working in general". The full plan is in `docs/retrain/plan-v3.md`, which builds on plan-v2,
+have results and keep working in general". The full plan is in `docs/lab/retrain/plan-v3.md`, which builds on plan-v2,
 plan-v1 and the critic's review in `critique-v1.md`. The reasoning is in NOTEBOOK 2026-10-11 07:30, 08:00 and 21:20.
 
 ## Context

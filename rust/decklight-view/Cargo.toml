@@ -1,0 +1,12 @@
+[package]
+name = "decklight-view"
+description = "Web state frame (view, prompt, events, cues, stats) over the Rust env (port of decklight.web.view/cues/stats)"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[dependencies]
+ygoenv-sys = { path = "../ygoenv-sys" }
+decklight-core = { path = "../decklight-core" }
+decklight-cards = { path = "../decklight-cards" }
+serde_json = "1"

@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Android 11 (API 30) backup: the Ask API keys file stays on the device (src/ask/keys.rs). Its Keystore key never
+     leaves the device, so a restored copy could not be decrypted anyway. -->
+<full-backup-content>
+    <exclude domain="sharedpref" path="keyring-decklight-ask.xml" />
+</full-backup-content>

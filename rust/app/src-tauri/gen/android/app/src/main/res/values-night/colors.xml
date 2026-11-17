@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- The System appearance's splash with the phone in dark mode. -->
+    <color name="splash_system">#FF141310</color>
+</resources>

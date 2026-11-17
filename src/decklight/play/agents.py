@@ -158,3 +158,62 @@ class RawPolicyAgent:
             raise RuntimeError("raw agent: NaN logits over legal options")
         z[~legal] = -np.inf
         return int(np.argmax(z))
+
+
+@register
+class RemoteAgent:
+    """The PPO learner over a PolicyServer socket (decklight.rl.remote): samples, logs, writes one episode file.
+
+    Config from the environment (the arbiter starts the client per game): DL_POLICY_SOCK (the server's unix
+    socket), DL_EPISODE_DIR (where `finalize` writes the episode). Imports no torch."""
+
+    name = "remote"
+    needs: frozenset[str] = frozenset()
+
+    def __init__(self, sock=None, episode_dir=None, **_) -> None:
+        import os
+
+        from decklight.rl.remote import EpisodeLog, PolicyClient
+
+        sock = sock or os.environ.get("DL_POLICY_SOCK")
+        self.episode_dir = episode_dir or os.environ.get("DL_EPISODE_DIR")
+        if not sock or not self.episode_dir:
+            raise ValueError("remote agent needs DL_POLICY_SOCK and DL_EPISODE_DIR")
+        if not (os.path.isabs(sock) and os.path.isabs(self.episode_dir)):  # the client runs in its own directory
+            raise ValueError(f"remote agent needs absolute paths: {sock}, {self.episode_dir}")
+        self.client = PolicyClient(sock)
+        self.log = EpisodeLog()
+        self.seat: int | None = None
+        self.path = None
+
+    def rps(self) -> int:
+        return random.randint(1, 3)
+
+    def go_first(self) -> bool:
+        return True
+
+    def act(self, view: SeatView) -> int:
+        import numpy as np
+
+        obs = view.obs()
+        legal = np.asarray(obs["action_mask"])[: len(view.opts)].astype(bool)
+        if not legal.any():
+            raise RuntimeError("remote agent: no legal option")
+        a, lp, v, ver = self.client.act(obs)
+        if not (0 <= a < len(view.opts) and legal[a]):
+            raise RuntimeError(f"remote agent: server picked illegal option {a} of {len(view.opts)}")
+        self.log.add(obs, a, lp, v, ver)
+        self.seat = getattr(view, "seat", self.seat)
+        return a
+
+    def finalize(self, record, deck: str = "") -> None:
+        """Write the episode (+1 win, -1 loss, 0 draw/unknown winner); idempotent; no file for 0 decisions."""
+        if self.path is not None or not len(self.log):
+            return
+        winner = getattr(record, "winner", None)
+        w = winner[0] if isinstance(winner, (tuple, list)) else winner
+        reward = 0.0 if w not in (0, 1) or self.seat is None else (1.0 if w == self.seat else -1.0)
+        meta = {"deck": deck, "seat": self.seat, "winner": w, "turns": int(getattr(record, "turns", 0) or 0),
+                "n": len(self.log)}
+        self.path = self.log.write(self.episode_dir, reward, meta)
+        self.client.close()

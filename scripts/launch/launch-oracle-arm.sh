@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Hidden-information bound, part (a) (PLAN §0a "Hidden-information bound", user 2026-10-09: "Can you write step 2 into a
-# plan and implement it and start now?"; review docs/reviews/2026-10-09-history-arch-opus.md Stage 1a): hppo's search
+# plan and implement it and start now?"; review docs/lab/reviews/2026-10-09-history-arch-opus.md Stage 1a): hppo's search
 # (k4 s4 h1, value_ppo3, conf-skip 0.9) with the TRUE hidden state (--honest 0 = oracle rollouts) on P1's 744 deals vs
 # ygo-agent. Paired: `paired_gate.py runs/p1-20261009-0922/hppo runs/<N>/oppo`. Gate oracle − honest ≥ +3 pp, p < 0.1.
 # --claim 1: dynamic game queue (no straggler tail).

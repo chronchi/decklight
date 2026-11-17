@@ -15,6 +15,8 @@ struct Reader {
   size_t p = 1;  // skip the type byte
   template <typename T>
   T get() {
+    // Client mode (A2b) builds decisions from a remote server's bytes: a short message must throw, not over-read.
+    if (b.size() < p + sizeof(T)) throw std::out_of_range("select message truncated");
     T v;
     std::memcpy(&v, b.data() + p, sizeof(T));
     p += sizeof(T);

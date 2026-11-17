@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+  <!-- Ask: a speech bubble holding the line of play (a line of thought); the last node lights up when selected. -->
+  <title>Ask</title>
+  <path d="M5 4.5h14a1.5 1.5 0 0 1 1.5 1.5v9a1.5 1.5 0 0 1-1.5 1.5h-7l-4.5 3.5v-3.5H5a1.5 1.5 0 0 1-1.5-1.5V6A1.5 1.5 0 0 1 5 4.5z"/>
+  <polyline points="7.6,12.4 11,9.6 15.9,9.6"/>
+  <circle cx="7.6" cy="12.4" r="1" style="fill:var(--icon-fill,#141310)"/>
+  <circle cx="11" cy="9.6" r="1" style="fill:var(--icon-fill,#141310)"/>
+  <circle class="node" cx="15.9" cy="9.6" r="1.65" fill="currentColor" stroke="none"/>
+</svg>

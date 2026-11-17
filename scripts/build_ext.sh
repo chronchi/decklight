@@ -2,6 +2,9 @@
 # Build the C++ env extension -> src/decklight/_ygoenv*.so (needs build/core from build_core.sh).
 # With YGO_CORE=rust: decklight/_ygoenv_rs*.so against the Rust shim (scripts/build_rust_core.sh).
 set -euo pipefail
+# Install by rename, never cp over the old file: a running bot has it mmapped, and overwriting the same inode
+# segfaults it when it first touches a replaced page (two long jobs exited -11, NOTEBOOK 2026-11-10 14:23).
+install_so() { local f; for f in "$@"; do cp "$f" "src/decklight/.$(basename "$f").tmp" && mv -f "src/decklight/.$(basename "$f").tmp" "src/decklight/$(basename "$f")"; done; }
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 if [ "${YGO_CORE:-cpp}" = rust ]; then
@@ -11,7 +14,7 @@ if [ "${YGO_CORE:-cpp}" = rust ]; then
         uv run --group dev meson setup "$OUT" cpp/ygoenv -Dcore=rust || { rm -rf "$OUT"; exit 1; }
     fi
     uv run --group dev ninja -C "$OUT"
-    cp "$OUT"/_ygoenv_rs*.so src/decklight/
+    install_so "$OUT"/_ygoenv_rs*.so
     ls -l src/decklight/_ygoenv_rs*.so
 else
     OUT="$ROOT/build/ygoenv"
@@ -20,6 +23,6 @@ else
         uv run --group dev meson setup "$OUT" cpp/ygoenv || { rm -rf "$OUT"; exit 1; }
     fi
     uv run --group dev ninja -C "$OUT"
-    cp "$OUT"/_ygoenv*.so src/decklight/
+    install_so "$OUT"/_ygoenv*.so
     ls -l src/decklight/_ygoenv*.so
 fi

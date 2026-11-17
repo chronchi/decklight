@@ -3,7 +3,7 @@
 # Env: HOURS (2), MAX_DPH (0.40), MIN_CPUS (32), Q, PILOT/OPP, NOPP (10), SEEDS (100),
 # SEED (0), SEED_BLOCK (25), VAR_CAP (50m), PROBE_SEEDS (5).
 cd "$(dirname "$0")/../.."
-for f in data/cache/P/best.pt data/cards/emb/qwen3-0.6b-d512.npz docs/techcards/questions-2026-10-16.json; do
+for f in data/cache/P/best.pt data/cards/emb/qwen3-0.6b-d512.npz docs/lab/techcards/questions-2026-10-16.json; do
   [ -f "$f" ] || { echo "missing $f"; exit 3; }
 done
 N=tech-ab-$(date +%Y%m%d-%H%M); echo $N

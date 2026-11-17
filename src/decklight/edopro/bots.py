@@ -1,7 +1,7 @@
 """Bot catalog: thin re-export of `decklight.play.bundle` plus WindBot argument parsing.
 
 Adding a bot = adding a file: `bots/<name>/bot.toml` (user bundles) or
-`config/bots/<name>.toml` (shipped examples); see `docs/bots.md` for the schema.
+`config/bots/<name>.toml` (shipped examples); see `docs/guide/bots.md` for the schema.
 
 The WindBot `Key=Value` launch arguments (`Program.cs`) and the `--serve`
 query parameters (`/?name=&deck=&...`) are parsed here so both the launcher

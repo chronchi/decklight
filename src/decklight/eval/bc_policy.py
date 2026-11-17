@@ -13,7 +13,7 @@ import numpy as np
 import torch
 
 from decklight.eval.loopguard import LoopGuard
-from decklight.model.bc_data import KNOWN_KEYS, OBS_KEYS
+from decklight.model.bc_data import KNOWN_KEYS, OBS_HISTORY_KEYS, OBS_KEYS
 from decklight.model.ckpt import load_state
 from decklight.model.policy_v3 import make_policy
 
@@ -72,6 +72,7 @@ class BCPolicy:
                     t[k] = torch.from_numpy(np.ascontiguousarray(obs[k])).to(self.device)
         else:
             keys = tuple(OBS_KEYS) + (tuple(KNOWN_KEYS) if self.known else ())
+            keys += OBS_HISTORY_KEYS if getattr(self.model, "observable", False) else ()
             t = {k: torch.from_numpy(np.ascontiguousarray(obs[k])).to(self.device) for k in keys}
         return self.model(t).float().cpu().numpy()
 
@@ -82,6 +83,7 @@ class BCPolicy:
         index, right for VecEnv buffers whose rows are fixed env slots)."""
         keys = tuple(OBS_KEYS) + (("hist_long", "hist_long_mask") if self.hist > 0 else ())
         keys += tuple(KNOWN_KEYS) if self.known else ()
+        keys += OBS_HISTORY_KEYS if getattr(self.model, "observable", False) else ()
         slots = rows if slots is None else slots
         out = np.zeros(len(rows), np.int32)
         for i in range(0, len(rows), self.batch):

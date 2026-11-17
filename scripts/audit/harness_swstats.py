@@ -1,4 +1,4 @@
-# Audit from docs/reviews/2026-10-09-search-plan-opus.md (Opus 5.5 subagent, 2026-10-09). Run from ygo-zero/: python3 scripts/audit/harness_swstats.py
+# Audit from docs/lab/reviews/2026-10-09-search-plan-opus.md (Opus 5.5 subagent, 2026-10-09). Run from ygo-zero/: python3 scripts/audit/harness_swstats.py
 import json,glob,collections,statistics as st
 gaps=[];ov=[];n=0;games=0;decks=collections.Counter();turnov=collections.Counter();turnall=collections.Counter()
 top2=[]

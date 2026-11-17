@@ -143,6 +143,47 @@ def relative_day(s: str, today: date) -> str:
     return (today - timedelta(days=n * days)).isoformat()
 
 
+# YGOPRODeck lists a newly released card under its official passcode while EDOPro's BabelCDB may still carry it under
+# a pre-release code (101402093 = "Angelechy Brilliant Move" = 59062857 on YGOPRODeck). Map such codes by exact name
+# (user 2026-11-10: "include any card that's missing in the database"); names come from YGOPRODeck's cardinfo API,
+# cached in data/cache/passcode_names.json. A code with no name match is left as is (validation then rejects the list).
+_REMAP: dict | None = None
+
+
+def _cdb_names() -> tuple[set[int], dict[str, int]]:
+    import glob
+    import sqlite3
+    codes, by_name = set(), {}
+    for f in sorted(glob.glob(str(ROOT / "third_party/BabelCDB/*.cdb"))):
+        for i, n in sqlite3.connect(f).execute("select id, name from texts"):
+            codes.add(i)
+            by_name.setdefault(n.lower(), i)
+    return codes, by_name
+
+
+def remap_codes(codes: list[int]) -> list[int]:
+    global _REMAP
+    if _REMAP is None:
+        known, by_name = _cdb_names()
+        _REMAP = {"known": known, "by_name": by_name, "cache_path": ROOT / "data/cache/passcode_names.json"}
+        cp = _REMAP["cache_path"]
+        _REMAP["names"] = json.loads(cp.read_text()) if cp.exists() else {}
+    known, names = _REMAP["known"], _REMAP["names"]
+    unknown = sorted({c for c in codes if c not in known and str(c) not in names})
+    if unknown:
+        url = "https://db.ygoprodeck.com/api/v7/cardinfo.php?id=" + ",".join(map(str, unknown))
+        try:
+            with urllib.request.urlopen(urllib.request.Request(url, headers={"User-Agent": UA}), timeout=30) as r:
+                got = {str(c["id"]): c["name"] for c in json.load(r).get("data", [])}
+        except Exception as e:  # noqa: BLE001 - offline: leave the codes, validation rejects the list loudly
+            print(f"remap_codes: cardinfo lookup failed for {len(unknown)} codes: {e}", flush=True)
+            got = {}
+        for c in unknown:
+            names[str(c)] = got.get(str(c), "")
+        _REMAP["cache_path"].write_text(json.dumps(names, indent=0, sort_keys=True))
+    return [c if c in known else _REMAP["by_name"].get(names.get(str(c), "").lower(), c) for c in codes]
+
+
 def normalise(entry: dict, today: date) -> dict | None:
     """Raw API deck -> normalised record; None when unparseable."""
     name = str(entry.get("deck_name") or "").strip()
@@ -154,6 +195,7 @@ def normalise(entry: dict, today: date) -> dict | None:
     side = parse_passcodes(entry.get("side_deck") or "[]")
     if main is None or extra is None or side is None:
         return None
+    main, extra, side = remap_codes(main), remap_codes(extra), remap_codes(side)
     tournament, placement, iso = parse_desc(str(entry.get("deck_description") or ""))
     tournament = str(entry.get("tournamentName") or tournament or "").strip()
     placement = str(entry.get("tournamentPlacement") or placement or "").strip()

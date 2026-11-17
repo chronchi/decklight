@@ -92,7 +92,7 @@ class EngineView:
     def obs(self) -> dict[str, np.ndarray]:
         env = self.env
         board = O.Board(O.DuelSource(env.duel), env.player)
-        return O.build_obs(board, env.dec, env.opts, env.history, O.DuelSource(env.duel))
+        return O.build_obs(board, env.dec, env.opts, env.history, O.DuelSource(env.duel), env.obs_history(board.me))
 
     def take(self, index: int) -> bytes | None:
         self.env.step(index)

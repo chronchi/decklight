@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Plan-v4 pilot, tranche 1 (docs/retrain/plan-v4-draft.md §6; user 2026-10-15: "Let's go with the test, just added some
+# Plan-v4 pilot, tranche 1 (docs/lab/retrain/plan-v4-draft.md §6; user 2026-10-15: "Let's go with the test, just added some
 # credits"): can a fresh BC student distilled from P (P's sampled games on all train decks, CE on P's move + KL to P's
 # full distribution) play at P's level?
 #   1. G: GAMES P games (temp 1.0) with gen_selfplay, our side on train pool decks only; league self (P argmax) 0.5,

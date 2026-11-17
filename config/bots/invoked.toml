@@ -1,0 +1,4 @@
+name = "invoked"
+description = "Product default policy (no search) on the Invoked list invoked-meta2 (Catskill WCQ Regional winner 2026-09-26) made legal under EDOPro 0TCG 2026.10."
+agent = "raw"
+deck = "decks/custom/invoked-tcg2026-10.ydk"

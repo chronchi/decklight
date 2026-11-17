@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Retrain stage D (docs/retrain/plan-v1.md §Stage D, plan-v2/v3; user green light 2026-10-11): strict re-verification
+# Retrain stage D (docs/lab/retrain/plan-v1.md §Stage D, plan-v2/v3; user green light 2026-10-11): strict re-verification
 # (YGO_STRICT_VERIFY=1: the verifier never tries unnamed chain activations) of every stored LLM plan, then hand-variant
 # expansion of the strict records. No LLM calls: the plans are in data/demos/<src>/lines/.
 # Eval-only decks (decks/pool/HOLDOUT, kewl-tune, decks/newcards) are removed before verification (plan v2 stage D).

@@ -41,8 +41,10 @@ import time
 import numpy as np
 import torch
 
-from decklight.rl.league import BASE, GREEDY, SELF, YGO, League
+from decklight.engine.actions import Kind
 from decklight.rl.critic import critic_obs
+from decklight.rl.league import BASE, GREEDY, SELF, YGO, League
+from decklight.rl.lines import LineTracker
 from decklight.rl.ppo import gather, masked_log_softmax, to_torch
 
 TRUNCATED = 3  # VecEnv.TRUNCATED: game cut by set_max_decisions
@@ -54,6 +56,59 @@ def _sample_from_lp(lp: torch.Tensor, legal: torch.Tensor) -> tuple[np.ndarray, 
     a = torch.multinomial(p, 1).squeeze(1)
     return (a.cpu().numpy().astype(np.int32),
             lp.gather(1, a[:, None]).squeeze(1).cpu().numpy())
+
+
+def target_window_mask(glob: np.ndarray, actions: np.ndarray, legal: np.ndarray) -> np.ndarray:
+    """Learner rows that are opponent-turn, chain-0 windows with a legal activation.
+
+    Observation columns (learner's view): global[5] = own turn, global[20] = chain
+    length; actions[row, option, 0] = option kind (engine Kind). Returns bool [B].
+    """
+    own_turn = np.asarray(glob)[:, 5] != 0
+    chain = np.asarray(glob)[:, 20] != 0
+    acts = np.asarray(actions)
+    legal = np.asarray(legal, dtype=bool)
+    activate = (acts[:, : legal.shape[1], 0] == int(Kind.ACTIVATE)) & legal
+    return ~own_turn & ~chain & activate.any(1)
+
+
+def sample_target_mixture(lp: torch.Tensor, legal: torch.Tensor, activate: torch.Tensor,
+                          eps: float) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Sample from mu = (1-eps)*pi + eps*uniform(legal activations) on target rows.
+
+    `lp` is the masked log-softmax of the learner's policy (pi = exp(lp) on legal
+    options); `activate` marks the legal ACTIVATE options (must have >= 1 on every
+    row). Returns (action, log pi(action), isw = min(1, pi(a)/mu(a))). `eps <= 0`
+    is exactly `_sample_from_lp` with isw = 1 (today's path, bit-identical).
+    """
+    if eps <= 0.0:
+        a, lp_a = _sample_from_lp(lp, legal)
+        return a, lp_a, np.ones_like(lp_a, dtype=np.float32)
+    p = lp.exp() * legal
+    u = (activate & legal).to(p.dtype)
+    u = u / u.sum(1, keepdim=True).clamp_min(1)
+    mu = (1.0 - eps) * p + eps * u
+    a = torch.multinomial(mu, 1).squeeze(1)
+    pi_a = p.gather(1, a[:, None]).squeeze(1)
+    mu_a = mu.gather(1, a[:, None]).squeeze(1)
+    lp_a = lp.gather(1, a[:, None]).squeeze(1)
+    isw = torch.clamp(pi_a / mu_a.clamp_min(1e-30), max=1.0)
+    return (a.cpu().numpy().astype(np.int32), lp_a.cpu().numpy(),
+            isw.cpu().numpy().astype(np.float32))
+
+
+def apply_isw_floor(isw, floor: float) -> tuple[np.ndarray, np.ndarray]:
+    """Floor the stored IS weight on target rows: w = max(isw, floor).
+
+    `floor == 0` returns `isw` unchanged (bit-identical to the no-floor path) and
+    an all-False applied mask. Otherwise isw is already <= 1 and floor <= 1
+    (validated by the callers), so the result never exceeds 1. The mask marks
+    rows where the floor actually applied (isw < floor).
+    """
+    w = np.asarray(isw, dtype=np.float32)
+    if floor <= 0.0:
+        return w, np.zeros(w.shape, dtype=bool)
+    return (np.maximum(w, np.float32(floor)).astype(np.float32), w < np.float32(floor))
 
 
 def value_to_prob(v) -> np.ndarray:
@@ -111,13 +166,16 @@ class Collector:
                  critic=None, priv_critic: bool = False, adv: str = "gae",
                  greedy=None, ga_share: float = 0.0, ga_range: tuple[int, int] | None = None,
                  ga_mixed: bool = False, fail=None, focus_idx: set[int] | None = None,
-                 log_games: bool = False) -> None:
+                 log_games: bool = False, line_meta: list | None = None,
+                 win_explore: float = 0.0, isw_floor: float = 0.0, win_explore_lines_only: bool = False,
+                 deck_opp: dict[int, str] | None = None, deck_opp_share: float = 0.0) -> None:
         self.vec = vec
         self.model = model
         self.ref = ref
         self.store = store
         self.hist = hist
         self.known = known
+        self.observable = "obs_history" in store.obs  # the store holds what the learner reads (train_rl builds it)
         self.device = torch.device(device)
         self.p_bc = float(p_bc)
         self.trunc_reward = float(trunc_reward)
@@ -138,6 +196,33 @@ class Collector:
         # finished episodes are logged as replayable records (decks, seed, choices, ...).
         # False keeps behaviour bit-identical (no per-decision recording).
         self.log_games = bool(log_games)
+        # Target-window exploration (`--win-explore EPS`): on opponent-turn, chain-0
+        # learner decisions with a legal activation, sample from (1-EPS)*pi + EPS*U.
+        # 0.0 keeps the sampling path bit-identical to today.
+        self.win_explore = float(win_explore)
+        self.win_explore_lines_only = bool(win_explore_lines_only)
+        if not 0.0 <= self.win_explore <= 1.0:
+            raise ValueError(f"win_explore={win_explore} not in [0, 1]")
+        # IS floor (`--isw-floor F`): store max(min(1, pi/mu), F) on target-window rows
+        # so explored activations keep a minimum advantage weight. 0.0 is bit-identical.
+        # Deck-bound opponents (`--deck-opps`): deck index -> league.bound name. At an episode draw, when the
+        # opponent seat holds such a deck, that opponent pilots it with probability deck_opp_share (self-play
+        # draws included). None keeps the draws bit-identical.
+        self.deck_opp = dict(deck_opp) if deck_opp else None
+        self.deck_opp_share = float(deck_opp_share)
+        if self.deck_opp is not None:
+            if league is None or ga_share > 0 or line_meta:
+                raise ValueError("deck_opp needs --league 1 without --ga-episode-share / --line-starts")
+            if not 0.0 < self.deck_opp_share <= 1.0:
+                raise ValueError(f"deck_opp_share={deck_opp_share} not in (0, 1]")
+            missing = sorted(set(self.deck_opp.values()) - set(league.bound))
+            if missing:
+                raise ValueError(f"deck_opp names not in league.bound: {missing}")
+        self.isw_floor = float(isw_floor)
+        if not 0.0 <= self.isw_floor <= 1.0:
+            raise ValueError(f"isw_floor={isw_floor} not in [0, 1]")
+        if self.isw_floor > 0.0 and self.win_explore <= 0.0:
+            raise ValueError("isw_floor > 0 requires win_explore > 0")
         if self.ga_share < 0.0 or self.ga_share > 1.0:
             raise ValueError(f"ga_share={ga_share} not in [0, 1]")
         # Privileged critic (RL v2 part B): values come from `critic` on the privileged
@@ -181,6 +266,14 @@ class Collector:
         self.ep_start = np.full(n, -2, dtype=np.int64)
         self.ep_f0 = np.zeros(n, dtype=bool)
         self.ep_f1 = np.zeros(n, dtype=bool)
+        # Combo-line opponents (rl/lines.py): line_meta[start index] = {our_seat, script, ...} for line starts, None
+        # for plain DAGS starts. A line episode's learner is our_seat, its opponent the base (P) whose action is
+        # replaced by the script while the opponent's options match it. None keeps behaviour bit-identical.
+        self.line_meta = line_meta
+        self.line_tr = LineTracker(n) if line_meta else None
+        self.line_ep = np.zeros(n, dtype=bool)
+        if line_meta and "start" not in vec.buf:
+            raise ValueError("line starts need buf['start'] (rebuild the C++ env)")
         if league is None:
             if self.ga_share > 0:
                 raise ValueError("ga_share > 0 needs a league (deck-aware draws condition on buf['ga'])")
@@ -243,6 +336,16 @@ class Collector:
         """
         if self._has_start:
             self.ep_start[i] = int(self.buf["start"][i])
+        if self.line_tr is not None:
+            s = int(self.ep_start[i])
+            meta = self.line_meta[s] if 0 <= s < len(self.line_meta) else None
+            self.line_ep[i] = meta is not None
+            self.line_tr.begin(i, meta)
+            if meta is not None:
+                self.lseat[i] = int(meta["our_seat"])
+                self.vs_bc[i] = True
+                if self.league is not None:
+                    self.opp[i] = BASE
         if self.focus_idx is not None and "deck0" in self.buf and "deck1" in self.buf:
             self.ep_f0[i] = int(self.buf["deck0"][i]) in self.focus_idx
             self.ep_f1[i] = int(self.buf["deck1"][i]) in self.focus_idx
@@ -280,6 +383,11 @@ class Collector:
         if self.ga_share <= 0:
             self.opp[i] = self.league.sample()
             self.lseat[i] = self.rng.integers(0, 2)
+            if self.deck_opp is not None:
+                d = int(self.buf["deck1" if int(self.lseat[i]) == 0 else "deck0"][i])
+                bound = self.deck_opp.get(d)
+                if bound is not None and self.rng.random() < self.deck_opp_share:
+                    self.opp[i] = bound
             self.vs_bc[i] = self.opp[i] != SELF
             self.ep_id[i] = self._ep_next
             self._ep_next += 1
@@ -392,8 +500,14 @@ class Collector:
         games_log: list[dict] = []
         dags_games = 0
         dags_wins = 0.0
+        line_games = 0
+        line_wins = 0.0
         decisions = 0
         lengths: list[int] = []
+        win_rows = win_explored = win_act_argmax = 0
+        isw_sum = 0.0
+        isw_floor_sum = 0.0
+        isw_floor_hits = 0
         t_env = t_fwd = t_ga = 0.0
         lg = self.league is not None
         lg_games: dict[str, int] = {}
@@ -422,6 +536,10 @@ class Collector:
                 games += 1
                 trunc += w == TRUNCATED
                 is_dags = bool(dags_last[i]) if dags_last is not None else False
+                line = bool(self.line_ep[i]) if self.line_tr is not None else False
+                if line:
+                    line_games += 1
+                    line_wins += 0.5 if w not in (0, 1) else float(w == int(self.lseat[i]))
                 lengths.append(len(self.traj[i][0]) + len(self.traj[i][1]))
                 n_ls = len(self.traj[i][int(self.lseat[i])]) if lg else 0
                 fst = int(self.ep_start[i]) if self.ep_start[i] >= -1 else -1
@@ -481,7 +599,7 @@ class Collector:
                 self.ep_actors[i] = []
                 self.ep_kinds[i] = [[], []]
                 if not lg:
-                    if self.vs_bc[i]:
+                    if self.vs_bc[i] and not line:
                         bc_games += 1
                         bc_wins += 0.5 if w not in (0, 1) else float(w == ls)
                         if self.focus_idx is not None and (f0 if ls == 0 else f1):
@@ -510,7 +628,7 @@ class Collector:
                     if self.ga_share > 0 and hasattr(self, "ep_ga") and int(self.ep_ga[i]) != 0:
                         ga_games += 1
                     name = str(self.opp[i])
-                    if name != SELF:
+                    if name != SELF and not line:  # line episodes keep out of the base's PFSP record
                         self.league.record(name, res)
                         lg_games[name] = lg_games.get(name, 0) + 1
                         lg_wins[name] = lg_wins.get(name, 0.0) + res
@@ -546,8 +664,10 @@ class Collector:
                                     self.ygo_bad += 1
                         elif name == GREEDY:
                             pass  # stateless buf policy: nothing to reset
-                    else:
-                        lg_games[SELF] = lg_games.get(SELF, 0) + 1
+                    else:  # self-play, or a combo-line episode (its own key, with its result, for the log only)
+                        key = "line" if line else SELF
+                        lg_games[key] = lg_games.get(key, 0) + 1
+                        lg_wins[key] = lg_wins.get(key, 0.0) + (res if line else 0.0)
                     self._draw_episode(i)
             if lg and self._net_cache:
                 live = set(self.opp.tolist())
@@ -587,7 +707,7 @@ class Collector:
             b_ids = ids[~is_learner]
             t1 = time.perf_counter()
             with torch.inference_mode(), self._autocast():
-                ob_all = gather(buf, ids, self.hist, self.known, priv=self.priv_critic)
+                ob_all = gather(buf, ids, self.hist, self.known, priv=self.priv_critic, observable=self.observable)
                 tob_all = to_torch(ob_all, self.device)
                 ref_logits = self.ref(tob_all)
                 ref_lp_all = masked_log_softmax(ref_logits)
@@ -604,6 +724,11 @@ class Collector:
                     act_b, _ = _sample_from_lp(b_lp, b_legal)
                     for i, a in zip(bb_ids, act_b):
                         actions[pos[int(i)]] = int(a)
+                    if self.line_tr is not None:  # a line opponent plays its script while it still fits
+                        for i in bb_ids[self.line_ep[bb_ids]]:
+                            a = self.line_tr.next(int(i), buf["actions"][int(i)], buf["action_mask"][int(i)])
+                            if a is not None:
+                                actions[pos[int(i)]] = int(a)
                 if lg and len(b_ids):
                     o_ids = b_ids[(self.opp[b_ids] != BASE) & (self.opp[b_ids] != SELF)]
                     snap_rows = o_ids[(self.opp[o_ids] != YGO) & (self.opp[o_ids] != GREEDY)]
@@ -677,13 +802,47 @@ class Collector:
                     _n_l = len(l_ids)
                     act_l, lp_l = act_m[:_n_l], lp_m[:_n_l]
                     act_self = act_m[_n_l:]
+                    isw_l = None
+                    if self.win_explore > 0.0 and _n_l:
+                        _glob_l = np.asarray(buf["global"])[np.asarray(l_ids)]
+                        _acts_l = np.asarray(buf["actions"])[np.asarray(l_ids)]
+                        _legal_l = torch.isfinite(logits)[:_n_l]
+                        _target = target_window_mask(_glob_l, _acts_l,
+                                                     _legal_l.detach().cpu().numpy())
+                        if self.win_explore_lines_only:  # plain games: on-policy (random activations lose there)
+                            _target = _target & self.line_ep[np.asarray(l_ids)]
+                        isw_l = np.ones(_n_l, dtype=np.float32)
+                        if _target.any():
+                            sel = np.nonzero(_target)[0]
+                            sel_t = torch.from_numpy(sel).to(self.device)
+                            lp_t = lp[sel_t]
+                            legal_t = torch.isfinite(logits)[sel_t]
+                            activate_np = (_acts_l[sel, : legal_t.shape[1], 0]
+                                           == int(Kind.ACTIVATE))
+                            activate_t = torch.from_numpy(activate_np).to(self.device) & legal_t
+                            act_t, lp_taken, isw_t = sample_target_mixture(
+                                lp_t, legal_t, activate_t, self.win_explore)
+                            isw_stored, isw_floored = apply_isw_floor(isw_t, self.isw_floor)
+                            act_l = act_l.copy()
+                            lp_l = lp_l.copy()
+                            act_l[sel], lp_l[sel], isw_l[sel] = act_t, lp_taken, isw_stored
+                            win_rows += len(sel)
+                            win_explored += int((isw_t < 0.5).sum())
+                            argmax_t = lp_t.masked_fill(~legal_t, float("-inf")).argmax(1)
+                            kinds_t = _acts_l[sel, argmax_t.detach().cpu().numpy(), 0]
+                            win_act_argmax += int((kinds_t == int(Kind.ACTIVATE)).sum())
+                            isw_sum += float(isw_t.sum())
+                            if self.isw_floor > 0.0:
+                                isw_floor_sum += float(isw_stored.sum())
+                                isw_floor_hits += int(isw_floored.sum())
                     if _n_l:
                         slots = self.store.put(
                             {k: v[:_n_l] for k, v in ob_l.items()}, act_l, lp_l,
                             v.float().cpu().numpy()[:_n_l],
                             ref_lp_cpu[[pos[int(i)] for i in l_ids]],
                             pi=pi_cpu[:_n_l] if pi_cpu is not None else None,
-                            q=q_cpu[:_n_l] if q_cpu is not None else None)
+                            q=q_cpu[:_n_l] if q_cpu is not None else None,
+                            isw=isw_l)
                     if self.priv_critic:
                         priv_rows += len(l_ids)
                         priv_nonzero += int((ob_l["priv_code"][:_n_l] > 0).sum()) if _n_l else 0
@@ -738,8 +897,19 @@ class Collector:
                  "dags_games": dags_games,
                  "dags_wr": round(dags_wins / max(dags_games, 1), 3),
                  "dags_bad": int(getattr(self.vec, "dags_bad", 0)),
+                 **({"line_games": line_games, "line_wr": round(line_wins / max(line_games, 1), 3),
+                     "line_followed": self.line_tr.followed, "line_broken": self.line_tr.broken,
+                     "line_broken0": self.line_tr.broken0,
+                     "line_completed": self.line_tr.completed} if self.line_tr is not None else {}),
                  "fin_starts": fin_starts,
                  "ga_games": ga_games, "learner_ga": learner_ga}  # fmt: skip
+        if self.win_explore > 0.0:
+            stats.update(win_rows=win_rows, win_explored=win_explored,
+                         win_act_argmax=round(win_act_argmax / max(win_rows, 1), 4),
+                         isw_mean=round(isw_sum / max(win_rows, 1), 6))
+            if self.isw_floor > 0.0:
+                stats.update(isw_floored_mean=round(isw_floor_sum / max(win_rows, 1), 6),
+                             isw_floored_share=round(isw_floor_hits / max(win_rows, 1), 6))
         if self.focus_idx is not None:
             _line_distinct, _line_top_share = summarize_lines(focus_line_counts)
             stats.update(focus_traj=focus_traj, focus_traj_n=focus_traj_n,
@@ -774,6 +944,10 @@ class Collector:
                     "pfsp_w": round(probs[name], 4),
                 }
             stats["league"] = league_stats
+            if self.deck_opp:  # bound specialists are never in sampling_probs: report them as one group
+                bg = sum(lg_games.get(n, 0) for n in self.league.bound)
+                stats["deck_opp_games"] = bg
+                stats["deck_opp_wr"] = round(sum(lg_wins.get(n, 0.0) for n in self.league.bound) / max(bg, 1), 3)
             stats["t_ga"] = t_ga
             stats["opp_games"] = opp_games
             stats["opp_learner_samples"] = opp_learner_samples

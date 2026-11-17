@@ -1,4 +1,4 @@
-"""Turn each core decision into a sequence of single choices (docs/action_spec.md).
+"""Turn each core decision into a sequence of single choices (docs/design/action_spec.md).
 
     dec = make_decision(msg, cards, announce_pool)
     while (resp := dec.choose(pick(dec.options()))) is None:

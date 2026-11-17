@@ -27,7 +27,7 @@ import torch
 from torch import nn
 
 from decklight.engine.actions import Kind
-from decklight.model.policy import PolicyNet, trim_obs
+from decklight.model.policy import PolicyNet, observable_history, trim_obs
 
 ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_STRINGS = ROOT / "data" / "cards" / "emb" / "strings-qwen3-0.6b-d512.npz"
@@ -215,6 +215,8 @@ class PolicyNetV3(PolicyNet):
     # ---- encoder -------------------------------------------------------------------------------------------
     def encode(self, obs: dict[str, torch.Tensor]):
         n_opt = 0
+        if self.observable:
+            obs = observable_history(obs)
         if self.trim:
             obs, n_opt = trim_obs(obs)
         cards, glob = obs["cards"], obs["global"].long()
@@ -300,7 +302,7 @@ class PolicyNetV3(PolicyNet):
         return logits, resid, enc, n_opt, legal
 
 
-ARCH_KEYS = ("d", "layers", "heads", "hist", "known", "v3", "desc_strings", "desc_lua")  # copied into derived runs' args
+ARCH_KEYS = ("d", "layers", "heads", "hist", "known", "v3", "desc_strings", "desc_lua", "observable_history")  # copied into derived runs' args
 
 
 def make_policy(emb: dict[str, np.ndarray] | str | Path, a: dict, **kw) -> PolicyNet:
@@ -309,7 +311,8 @@ def make_policy(emb: dict[str, np.ndarray] | str | Path, a: dict, **kw) -> Polic
     Every constructor site goes through here so a v3 checkpoint loads wherever a v1 one does."""
     emb = dict(np.load(emb)) if isinstance(emb, (str, Path)) else dict(emb)
     base = {"d": a.get("d", 256), "layers": a.get("layers", 4), "heads": a.get("heads", 4),
-            "hist": int(a.get("hist", 0) or 0), "known": bool(a.get("known", False))}  # fmt: skip
+            "hist": int(a.get("hist", 0) or 0), "known": bool(a.get("known", False)),
+            "observable": bool(a.get("observable_history", False))}  # fmt: skip
     base.update(kw)
     if a.get("v3"):
         emb.update(load_desc_tables(a.get("desc_strings") or None, a.get("desc_lua") or None))

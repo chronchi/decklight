@@ -24,7 +24,7 @@ from decklight.engine.duel import DuelConfig, Engine
 from decklight.eval.loopguard import LoopGuard
 
 LogitsFn = Callable[[dict[str, np.ndarray]], np.ndarray]
-FIELD_LOCS = (3, 4)  # obs card column 1: 3 mzone, 4 szone (docs/obs_spec.md)
+FIELD_LOCS = (3, 4)  # obs card column 1: 3 mzone, 4 szone (docs/design/obs_spec.md)
 HAND_LOC = 2
 _PASSIVE = (Kind.PASS, Kind.NO, Kind.FINISH, Kind.CANCEL, Kind.TO_END)
 

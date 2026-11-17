@@ -1,0 +1,14 @@
+# decklight's Rust core (ADR 0009, docs/plans/2026-11-01-offline-app.md): the play-time logic shared by the phone
+# app, the laptop server and (through bindings) the Python research code. The duel engine stays EDOPro's C++
+# ygopro-core with Lua card scripts; `ygoenv-sys` builds it together with our C++ env for every target.
+[workspace]
+resolver = "2"
+members = ["decklight-core", "ygoenv-sys", "decklight-cards", "decklight-view", "decklight-record", "decklight-onnx", "decklight-server", "duel-cli", "decklight-edopro", "decklight-search"]
+
+[workspace.package]
+edition = "2024"
+license = "AGPL-3.0-or-later"
+version = "0.1.0"
+
+[profile.release]
+debug = 1

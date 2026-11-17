@@ -36,12 +36,19 @@ function matchQuery(d, meta, names, q) {
   return {ok: false};
 }
 
+// The two sources (user 2026-11-13): decks the user built (deck builder "saved", or pasted this session "user"), and
+// the prebuilt set (the curated bundle, fine-tuned models' decks).
+export const isYours = (d) => d.group === "saved" || d.group === "user";
+export const srcOf = (decks, st) => st.src || (decks.some(isYours) ? "yours" : "prebuilt");
+
 export function filterDecks(decks, index, st) {
   const q = (st.q || "").trim().toLowerCase();
   const names = index && index.names;
+  const yours = srcOf(decks, st) === "yours";
   const out = [];
   for (const d of decks) {
-    const meta = index && index.decks[d.id];
+    if (isYours(d) !== yours) continue;
+    const meta = (index && index.decks[d.id]) || d.meta || null;
     const f = facets(d, meta);
     let ok = true;
     for (const [key] of DECK_FILTERS) {
@@ -55,7 +62,7 @@ export function filterDecks(decks, index, st) {
     if (m.ok) out.push({d, meta, hit: m.hit, n: m.n});
   }
   // Fine-tuned models' decks and this session's pasted decks first: they were chosen on purpose.
-  const pin = (r) => (r.d.group === "user" || r.d.group === "tuned" ? 0 : 1);
+  const pin = (r) => (r.d.group === "saved" ? 0 : r.d.group === "user" || r.d.group === "tuned" ? 1 : 2);
   out.sort((a, b) => pin(a) - pin(b));
   if (st.sort === "new") out.sort((a, b) => pin(a) - pin(b) || ((b.meta && b.meta.year) || 0) - ((a.meta && a.meta.year) || 0));
   return out;
@@ -81,14 +88,17 @@ function rowHTML(r, side, cur, names, art) {
   const plain = (x) => String(x || "").toLowerCase().replace(/[^a-z0-9]/g, "");
   const event = meta && /\d{4}-\d\d-\d\d$/.test(meta.origin) ? meta.origin.split(",")[0] : "";
   const runtime = d.group === "tuned" ? "Fine-tuned model's deck" : d.group === "user" ? "Pasted this session" : "";
-  const first = meta && (runtime || (plain(meta.arch) === plain(d.name) && event ? event : meta.arch));
-  const line = meta ? [first, meta.year, meta.mech.join(", ")].filter(Boolean).join(" · ")
+  // A deck from the deck builder: legal, or its first problem (user 2026-11-13: same rows as Prebuilt).
+  const bad = d.group === "saved" && d.legal === false;
+  const first = meta && (d.group === "saved" ? "Your deck" : runtime || (plain(meta.arch) === plain(d.name) && event ? event : meta.arch));
+  const line = bad ? "Not legal: " + ((d.problems && d.problems[0]) || "check it in Decks")
+    : meta ? [first, meta.year, meta.mech.join(", ")].filter(Boolean).join(" · ")
     : d.group === "tuned" ? "The deck a fine-tuned model was trained for" : d.group === "user" ? "Pasted this session" : "";
   const sel = d.id === cur;
   return '<li class="dkrow' + (sel ? " sel" : "") + '">' +
     '<button class="dkpick" data-' + side + 'deck="' + esc(d.id) + '" aria-current="' + sel + '"><span class="dktext">' +
     '<span class="dktop"><span class="dkname">' + esc(d.name) + "</span>" + (side === "bot" ? tagHTML(d) : "") + "</span>" +
-    (line ? '<span class="dksub">' + esc(line) + "</span>" : "") +
+    (line ? '<span class="dksub' + (bad ? " bad" : "") + '">' + esc(line) + "</span>" : "") +
     (r.hit ? '<span class="dkhit">Has ' + esc(r.hit) + (r.n > 1 ? " ×" + r.n : "") + "</span>" : art ? "" : sigHTML(meta, names, false)) +
     "</span>" + (art ? sigHTML(meta, names, true) : "") + "</button>" +
     '<button class="dkinfo" data-act="decklist" data-deck="' + esc(d.id) + '" aria-label="' + esc("Deck list: " + d.name) + '">' +
@@ -138,7 +148,7 @@ export function deckSheetHTML(st, decks, index, cur, opts) {
   let head, body;
   if (st.view) {
     const d = decks.find((x) => x.id === st.view) || {id: st.view, name: st.view};
-    const meta = index && index.decks[st.view];
+    const meta = (index && index.decks[st.view]) || d.meta || null;
     head = '<button class="iconbtn" data-act="deckback" aria-label="Back to all decks">' +
       '<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M12 4 6 10l6 6"/></svg></button>' +
       '<span class="mtitle">' + esc(d.name) + "</span>";
@@ -147,7 +157,13 @@ export function deckSheetHTML(st, decks, index, cur, opts) {
       (d.id === cur ? "Keep this deck" : "Choose this deck") + "</button></div>";
   } else {
     const rows = filterDecks(decks, index, st);
+    const src = srcOf(decks, st);
+    const nYours = decks.filter(isYours).length;
     head = '<span class="mtitle">' + esc(title) + "</span>";
+    const tabs = '<div class="seg dksrc" role="tablist" aria-label="Deck source">' +
+      [["yours", "Yours", nYours], ["prebuilt", "Prebuilt", decks.length - nYours]].map(([k, t, n]) =>
+        '<button role="tab" aria-selected="' + (src === k) + '" class="' + (src === k ? "sel" : "") + '" data-dsrc="' + k + '">' +
+        t + ' <span class="dkn">' + n + "</span></button>").join("") + "</div>";
     let chips = "";
     for (const [key, label, items, only] of DECK_FILTERS) {
       if (only && only !== st.side) continue;
@@ -158,19 +174,20 @@ export function deckSheetHTML(st, decks, index, cur, opts) {
       }).join("") + "</div>";
     }
     const anyF = Object.values(st.f).some((v) => v.length);
-    body = '<div class="dktools">' +
+    body = '<div class="dktools">' + tabs +
       '<input class="dksearch" type="search" placeholder="Search decks or cards" aria-label="Search decks or cards" value="' +
       esc(st.q || "") + '"><div class="dkchiprow">' + chips + "</div>" +
       '<div class="dkmeta"><span role="status">' + rows.length + (rows.length === 1 ? " deck" : " decks") + "</span>" +
       (anyF ? '<button class="linkbtn" data-act="dclear">Clear filters</button>' : "") +
-      '<span class="dksort" role="group" aria-label="Sort">' +
+      ('<span class="dksort" role="group" aria-label="Sort">' +
       ["name", "new"].map((k) => '<button class="dkchip small' + (st.sort === k ? " on" : "") + '" aria-pressed="' + (st.sort === k) +
-        '" data-dsort="' + k + '">' + (k === "name" ? "A–Z" : "Newest") + "</button>").join("") + "</span></div></div>" +
+        '" data-dsort="' + k + '">' + (k === "name" ? "A–Z" : "Newest") + "</button>").join("") + "</span>") + "</div></div>" +
       '<div class="mbody dklist">' +
-      (st.side === "you" ? '<button class="deckrow paste" data-act="pasteydk"><span class="nm">Paste a deck list (.ydk)…</span></button>' : "") +
+      (st.side === "you" && src === "yours" ? '<button class="deckrow paste" data-act="pasteydk"><span class="nm">Paste a deck list (.ydk)…</span></button>' : "") +
       (index === null ? '<p class="prnote">Loading deck details…</p>' : "") +
       (rows.length ? '<ul class="dkrows">' + rows.map((r) => rowHTML(r, st.side, cur, names, art)).join("") + "</ul>"
-        : '<p class="emptytx">No deck matches. Try fewer filters.</p>') + "</div>";
+        : '<p class="emptytx">' + (src === "yours" && !nYours ? "No decks of your own yet. Build one in Decks."
+          : "No deck matches. Try fewer filters.") + "</p>") + "</div>";
   }
   return '<div id="dkscrim" data-key="dkscrim" data-act="closedecks"></div>' +
     '<div id="decksheet" data-key="decksheet" role="dialog" aria-modal="true" tabindex="-1" aria-label="' + esc(title) + '">' +

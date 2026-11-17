@@ -1,0 +1,451 @@
+{
+ "archs": [
+  "ars-magna-elfnote",
+  "diabellstar-rescue-ace",
+  "branded-dracotail",
+  "ryzeal-mitsurugi",
+  "k9-vanquish-soul",
+  "primite-blue-eyes",
+  "dracotail",
+  "memento",
+  "doomz",
+  "azamina-white-forest",
+  "d-d-d",
+  "hero",
+  "diabellstar-snake-eye-fire-king",
+  "kashtira",
+  "tenpai-dragon",
+  "labrynth",
+  "floowandereeze",
+  "purrely",
+  "unchained",
+  "fiendsmith-yubel",
+  "tenyi-swordsoul",
+  "bystial-ishizu-tearlaments",
+  "melffy-spright",
+  "scareclaw-mannadium",
+  "sky-striker",
+  "invoked"
+ ],
+ "train": {
+  "ars-magna-elfnote": [
+   "ars-magna-elfnote-f70",
+   "ars-magna-elfnote-f71",
+   "ars-magna-elfnote-f72"
+  ],
+  "diabellstar-rescue-ace": [
+   "diabellstar-rescue-ace-f153",
+   "diabellstar-rescue-ace-f154",
+   "diabellstar-rescue-ace-f155"
+  ],
+  "branded-dracotail": [
+   "branded-dracotail-f366",
+   "branded-dracotail-f369",
+   "branded-dracotail-f370"
+  ],
+  "ryzeal-mitsurugi": [
+   "ryzeal-mitsurugi-f388",
+   "ryzeal-mitsurugi-f389",
+   "ryzeal-mitsurugi-f390"
+  ],
+  "k9-vanquish-soul": [
+   "k9-vanquish-soul-f338",
+   "k9-vanquish-soul-f339",
+   "k9-vanquish-soul-f340"
+  ],
+  "primite-blue-eyes": [
+   "primite-blue-eyes-f160",
+   "primite-blue-eyes-f161",
+   "primite-blue-eyes-f162"
+  ],
+  "dracotail": [
+   "dracotail-f111",
+   "dracotail-f112",
+   "dracotail-f113"
+  ],
+  "memento": [
+   "memento-f88",
+   "memento-meta2",
+   "memento-meta1"
+  ],
+  "doomz": [
+   "doomz-f70",
+   "doomz-f71",
+   "doomz-f72"
+  ],
+  "azamina-white-forest": [
+   "azamina-white-forest-f50",
+   "azamina-white-forest-f51",
+   "azamina-white-forest-f52"
+  ],
+  "d-d-d": [
+   "d-d-d-f25",
+   "d-d-d-f26",
+   "d-d-d-f27"
+  ],
+  "hero": [
+   "hero-f32",
+   "hero-f33",
+   "hero-f34"
+  ],
+  "diabellstar-snake-eye-fire-king": [
+   "diabellstar-snake-eye-fire-king-f281",
+   "diabellstar-snake-eye-fire-king-f282",
+   "diabellstar-snake-eye-fire-king-f283"
+  ],
+  "kashtira": [
+   "kashtira-f491",
+   "kashtira-f492",
+   "kashtira-f493"
+  ],
+  "tenpai-dragon": [
+   "tenpai-dragon-f375",
+   "tenpai-dragon-f376",
+   "tenpai-dragon-f377"
+  ],
+  "labrynth": [
+   "labrynth-f256",
+   "labrynth-f257",
+   "labrynth-f258"
+  ],
+  "floowandereeze": [
+   "floowandereeze-f225",
+   "floowandereeze-f226",
+   "floowandereeze-f227"
+  ],
+  "purrely": [
+   "purrely-f178",
+   "purrely-f179",
+   "purrely-f180"
+  ],
+  "unchained": [
+   "unchained-f183",
+   "unchained-f184",
+   "unchained-f185"
+  ],
+  "fiendsmith-yubel": [
+   "fiendsmith-yubel-f167",
+   "fiendsmith-yubel-f168",
+   "fiendsmith-yubel-f169"
+  ],
+  "tenyi-swordsoul": [
+   "tenyi-swordsoul-f114",
+   "tenyi-swordsoul-f115",
+   "tenyi-swordsoul-f116"
+  ],
+  "bystial-ishizu-tearlaments": [
+   "bystial-ishizu-tearlaments-f143",
+   "bystial-ishizu-tearlaments-f144",
+   "bystial-ishizu-tearlaments-f145"
+  ],
+  "melffy-spright": [
+   "melffy-spright-f77",
+   "melffy-spright-f78",
+   "melffy-spright-f79"
+  ],
+  "scareclaw-mannadium": [
+   "scareclaw-mannadium-f82",
+   "scareclaw-mannadium-f84",
+   "scareclaw-mannadium-f85"
+  ],
+  "sky-striker": [
+   "sky-striker-f136",
+   "sky-striker-f138",
+   "sky-striker-f139"
+  ],
+  "invoked": [
+   "invoked-f40",
+   "invoked-f41",
+   "invoked-f42"
+  ]
+ },
+ "heldout": {
+  "ars-magna-elfnote": "ars-magna-elfnote-f73",
+  "diabellstar-rescue-ace": "diabellstar-rescue-ace-f156",
+  "branded-dracotail": "branded-dracotail-f371",
+  "ryzeal-mitsurugi": "ryzeal-mitsurugi-meta1",
+  "k9-vanquish-soul": "k9-vanquish-soul-f341",
+  "primite-blue-eyes": "primite-blue-eyes-f163",
+  "dracotail": "dracotail-f114",
+  "memento": "memento-f91",
+  "doomz": "doomz-f73",
+  "azamina-white-forest": "azamina-white-forest-meta1",
+  "d-d-d": "d-d-d-f28",
+  "hero": "hero-f35",
+  "diabellstar-snake-eye-fire-king": "diabellstar-snake-eye-fire-king-f284",
+  "kashtira": "kashtira-f494",
+  "tenpai-dragon": "tenpai-dragon-f378",
+  "labrynth": "labrynth-f259",
+  "floowandereeze": "floowandereeze-f228",
+  "purrely": "purrely-f181",
+  "unchained": "unchained-f186",
+  "fiendsmith-yubel": "fiendsmith-yubel-f170",
+  "tenyi-swordsoul": "tenyi-swordsoul-f117",
+  "bystial-ishizu-tearlaments": "bystial-ishizu-tearlaments-f146",
+  "melffy-spright": "melffy-spright-f80",
+  "scareclaw-mannadium": "scareclaw-mannadium-f86",
+  "sky-striker": "sky-striker-f140",
+  "invoked": "invoked-f43"
+ },
+ "opponents": {
+  "ars-magna-elfnote": [
+   "angelechy-elfnote-meta1",
+   "elfnote-mitsurugi-synchron-meta1",
+   "kewl-tune-meta1",
+   "onomat-constellar-tellarknights-meta1",
+   "power-patron-meta1",
+   "sky-striker-meta2",
+   "synchron-elfnote-meta2",
+   "trains-meta2"
+  ],
+  "diabellstar-rescue-ace": [
+   "angelechy-elfnote-meta1",
+   "elfnote-mitsurugi-synchron-meta1",
+   "kewl-tune-meta1",
+   "onomat-constellar-tellarknights-meta1",
+   "power-patron-meta1",
+   "sky-striker-meta2",
+   "synchron-elfnote-meta2",
+   "trains-meta2"
+  ],
+  "branded-dracotail": [
+   "angelechy-elfnote-meta1",
+   "elfnote-mitsurugi-synchron-meta1",
+   "kewl-tune-meta1",
+   "onomat-constellar-tellarknights-meta1",
+   "power-patron-meta1",
+   "sky-striker-meta2",
+   "synchron-elfnote-meta2",
+   "trains-meta2"
+  ],
+  "ryzeal-mitsurugi": [
+   "angelechy-elfnote-meta1",
+   "elfnote-mitsurugi-synchron-meta1",
+   "kewl-tune-meta1",
+   "onomat-constellar-tellarknights-meta1",
+   "power-patron-meta1",
+   "sky-striker-meta2",
+   "synchron-elfnote-meta2",
+   "trains-meta2"
+  ],
+  "k9-vanquish-soul": [
+   "angelechy-elfnote-meta1",
+   "elfnote-mitsurugi-synchron-meta1",
+   "kewl-tune-meta1",
+   "onomat-constellar-tellarknights-meta1",
+   "power-patron-meta1",
+   "sky-striker-meta2",
+   "synchron-elfnote-meta2",
+   "trains-meta2"
+  ],
+  "primite-blue-eyes": [
+   "angelechy-elfnote-meta1",
+   "elfnote-mitsurugi-synchron-meta1",
+   "kewl-tune-meta1",
+   "onomat-constellar-tellarknights-meta1",
+   "power-patron-meta1",
+   "sky-striker-meta2",
+   "synchron-elfnote-meta2",
+   "trains-meta2"
+  ],
+  "dracotail": [
+   "angelechy-elfnote-meta1",
+   "elfnote-mitsurugi-synchron-meta1",
+   "kewl-tune-meta1",
+   "onomat-constellar-tellarknights-meta1",
+   "power-patron-meta1",
+   "sky-striker-meta2",
+   "synchron-elfnote-meta2",
+   "trains-meta2"
+  ],
+  "memento": [
+   "angelechy-elfnote-meta1",
+   "elfnote-mitsurugi-synchron-meta1",
+   "kewl-tune-meta1",
+   "onomat-constellar-tellarknights-meta1",
+   "power-patron-meta1",
+   "sky-striker-meta2",
+   "synchron-elfnote-meta2",
+   "trains-meta2"
+  ],
+  "doomz": [
+   "angelechy-elfnote-meta1",
+   "elfnote-mitsurugi-synchron-meta1",
+   "kewl-tune-meta1",
+   "onomat-constellar-tellarknights-meta1",
+   "power-patron-meta1",
+   "sky-striker-meta2",
+   "synchron-elfnote-meta2",
+   "trains-meta2"
+  ],
+  "azamina-white-forest": [
+   "angelechy-elfnote-meta1",
+   "elfnote-mitsurugi-synchron-meta1",
+   "kewl-tune-meta1",
+   "onomat-constellar-tellarknights-meta1",
+   "power-patron-meta1",
+   "sky-striker-meta2",
+   "synchron-elfnote-meta2",
+   "trains-meta2"
+  ],
+  "d-d-d": [
+   "angelechy-elfnote-meta1",
+   "elfnote-mitsurugi-synchron-meta1",
+   "kewl-tune-meta1",
+   "onomat-constellar-tellarknights-meta1",
+   "power-patron-meta1",
+   "sky-striker-meta2",
+   "synchron-elfnote-meta2",
+   "trains-meta2"
+  ],
+  "hero": [
+   "angelechy-elfnote-meta1",
+   "elfnote-mitsurugi-synchron-meta1",
+   "kewl-tune-meta1",
+   "onomat-constellar-tellarknights-meta1",
+   "power-patron-meta1",
+   "sky-striker-meta2",
+   "synchron-elfnote-meta2",
+   "trains-meta2"
+  ],
+  "diabellstar-snake-eye-fire-king": [
+   "angelechy-elfnote-meta1",
+   "elfnote-mitsurugi-synchron-meta1",
+   "kewl-tune-meta1",
+   "onomat-constellar-tellarknights-meta1",
+   "power-patron-meta1",
+   "sky-striker-meta2",
+   "synchron-elfnote-meta2",
+   "trains-meta2"
+  ],
+  "kashtira": [
+   "angelechy-elfnote-meta1",
+   "elfnote-mitsurugi-synchron-meta1",
+   "kewl-tune-meta1",
+   "onomat-constellar-tellarknights-meta1",
+   "power-patron-meta1",
+   "sky-striker-meta2",
+   "synchron-elfnote-meta2",
+   "trains-meta2"
+  ],
+  "tenpai-dragon": [
+   "angelechy-elfnote-meta1",
+   "elfnote-mitsurugi-synchron-meta1",
+   "kewl-tune-meta1",
+   "onomat-constellar-tellarknights-meta1",
+   "power-patron-meta1",
+   "sky-striker-meta2",
+   "synchron-elfnote-meta2",
+   "trains-meta2"
+  ],
+  "labrynth": [
+   "angelechy-elfnote-meta1",
+   "elfnote-mitsurugi-synchron-meta1",
+   "kewl-tune-meta1",
+   "onomat-constellar-tellarknights-meta1",
+   "power-patron-meta1",
+   "sky-striker-meta2",
+   "synchron-elfnote-meta2",
+   "trains-meta2"
+  ],
+  "floowandereeze": [
+   "angelechy-elfnote-meta1",
+   "elfnote-mitsurugi-synchron-meta1",
+   "kewl-tune-meta1",
+   "onomat-constellar-tellarknights-meta1",
+   "power-patron-meta1",
+   "sky-striker-meta2",
+   "synchron-elfnote-meta2",
+   "trains-meta2"
+  ],
+  "purrely": [
+   "angelechy-elfnote-meta1",
+   "elfnote-mitsurugi-synchron-meta1",
+   "kewl-tune-meta1",
+   "onomat-constellar-tellarknights-meta1",
+   "power-patron-meta1",
+   "sky-striker-meta2",
+   "synchron-elfnote-meta2",
+   "trains-meta2"
+  ],
+  "unchained": [
+   "angelechy-elfnote-meta1",
+   "elfnote-mitsurugi-synchron-meta1",
+   "kewl-tune-meta1",
+   "onomat-constellar-tellarknights-meta1",
+   "power-patron-meta1",
+   "sky-striker-meta2",
+   "synchron-elfnote-meta2",
+   "trains-meta2"
+  ],
+  "fiendsmith-yubel": [
+   "angelechy-elfnote-meta1",
+   "elfnote-mitsurugi-synchron-meta1",
+   "kewl-tune-meta1",
+   "onomat-constellar-tellarknights-meta1",
+   "power-patron-meta1",
+   "sky-striker-meta2",
+   "synchron-elfnote-meta2",
+   "trains-meta2"
+  ],
+  "tenyi-swordsoul": [
+   "angelechy-elfnote-meta1",
+   "elfnote-mitsurugi-synchron-meta1",
+   "kewl-tune-meta1",
+   "onomat-constellar-tellarknights-meta1",
+   "power-patron-meta1",
+   "sky-striker-meta2",
+   "synchron-elfnote-meta2",
+   "trains-meta2"
+  ],
+  "bystial-ishizu-tearlaments": [
+   "angelechy-elfnote-meta1",
+   "elfnote-mitsurugi-synchron-meta1",
+   "kewl-tune-meta1",
+   "onomat-constellar-tellarknights-meta1",
+   "power-patron-meta1",
+   "sky-striker-meta2",
+   "synchron-elfnote-meta2",
+   "trains-meta2"
+  ],
+  "melffy-spright": [
+   "angelechy-elfnote-meta1",
+   "elfnote-mitsurugi-synchron-meta1",
+   "kewl-tune-meta1",
+   "onomat-constellar-tellarknights-meta1",
+   "power-patron-meta1",
+   "sky-striker-meta2",
+   "synchron-elfnote-meta2",
+   "trains-meta2"
+  ],
+  "scareclaw-mannadium": [
+   "angelechy-elfnote-meta1",
+   "elfnote-mitsurugi-synchron-meta1",
+   "kewl-tune-meta1",
+   "onomat-constellar-tellarknights-meta1",
+   "power-patron-meta1",
+   "sky-striker-meta2",
+   "synchron-elfnote-meta2",
+   "trains-meta2"
+  ],
+  "sky-striker": [
+   "angelechy-elfnote-meta1",
+   "elfnote-mitsurugi-synchron-meta1",
+   "kewl-tune-meta1",
+   "onomat-constellar-tellarknights-meta1",
+   "power-patron-meta1",
+   "synchron-elfnote-meta2",
+   "trains-meta2"
+  ],
+  "invoked": [
+   "angelechy-elfnote-meta1",
+   "elfnote-mitsurugi-synchron-meta1",
+   "kewl-tune-meta1",
+   "onomat-constellar-tellarknights-meta1",
+   "power-patron-meta1",
+   "sky-striker-meta2",
+   "synchron-elfnote-meta2",
+   "trains-meta2"
+  ]
+ }
+}

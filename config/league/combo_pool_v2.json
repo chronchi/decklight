@@ -1,0 +1,6810 @@
+{
+ "made": "2026-11-03",
+ "inputs": [
+  "runs/combo-pool-20261103-2151/s0.json",
+  "runs/combo-pool-20261103-2151/s10.json",
+  "runs/combo-pool-20261103-2151/s11.json",
+  "runs/combo-pool-20261103-2151/s12.json",
+  "runs/combo-pool-20261103-2151/s13.json",
+  "runs/combo-pool-20261103-2151/s14.json",
+  "runs/combo-pool-20261103-2151/s15.json",
+  "runs/combo-pool-20261103-2151/s16.json",
+  "runs/combo-pool-20261103-2151/s17.json",
+  "runs/combo-pool-20261103-2151/s18.json",
+  "runs/combo-pool-20261103-2151/s19.json",
+  "runs/combo-pool-20261103-2151/s1.json",
+  "runs/combo-pool-20261103-2151/s20.json",
+  "runs/combo-pool-20261103-2151/s21.json",
+  "runs/combo-pool-20261103-2151/s22.json",
+  "runs/combo-pool-20261103-2151/s23.json",
+  "runs/combo-pool-20261103-2151/s24.json",
+  "runs/combo-pool-20261103-2151/s25.json",
+  "runs/combo-pool-20261103-2151/s26.json",
+  "runs/combo-pool-20261103-2151/s27.json",
+  "runs/combo-pool-20261103-2151/s28.json",
+  "runs/combo-pool-20261103-2151/s29.json",
+  "runs/combo-pool-20261103-2151/s2.json",
+  "runs/combo-pool-20261103-2151/s30.json",
+  "runs/combo-pool-20261103-2151/s31.json",
+  "runs/combo-pool-20261103-2151/s3.json",
+  "runs/combo-pool-20261103-2151/s4.json",
+  "runs/combo-pool-20261103-2151/s5.json",
+  "runs/combo-pool-20261103-2151/s6.json",
+  "runs/combo-pool-20261103-2151/s7.json",
+  "runs/combo-pool-20261103-2151/s8.json",
+  "runs/combo-pool-20261103-2151/s9.json",
+  "runs/combo-pool-20261103-2223/s0.json",
+  "runs/combo-pool-20261103-2223/s10.json",
+  "runs/combo-pool-20261103-2223/s11.json",
+  "runs/combo-pool-20261103-2223/s12.json",
+  "runs/combo-pool-20261103-2223/s13.json",
+  "runs/combo-pool-20261103-2223/s14.json",
+  "runs/combo-pool-20261103-2223/s15.json",
+  "runs/combo-pool-20261103-2223/s16.json",
+  "runs/combo-pool-20261103-2223/s17.json",
+  "runs/combo-pool-20261103-2223/s18.json",
+  "runs/combo-pool-20261103-2223/s19.json",
+  "runs/combo-pool-20261103-2223/s1.json",
+  "runs/combo-pool-20261103-2223/s20.json",
+  "runs/combo-pool-20261103-2223/s21.json",
+  "runs/combo-pool-20261103-2223/s22.json",
+  "runs/combo-pool-20261103-2223/s23.json",
+  "runs/combo-pool-20261103-2223/s24.json",
+  "runs/combo-pool-20261103-2223/s25.json",
+  "runs/combo-pool-20261103-2223/s26.json",
+  "runs/combo-pool-20261103-2223/s27.json",
+  "runs/combo-pool-20261103-2223/s28.json",
+  "runs/combo-pool-20261103-2223/s29.json",
+  "runs/combo-pool-20261103-2223/s2.json",
+  "runs/combo-pool-20261103-2223/s30.json",
+  "runs/combo-pool-20261103-2223/s31.json",
+  "runs/combo-pool-20261103-2223/s3.json",
+  "runs/combo-pool-20261103-2223/s4.json",
+  "runs/combo-pool-20261103-2223/s5.json",
+  "runs/combo-pool-20261103-2223/s6.json",
+  "runs/combo-pool-20261103-2223/s7.json",
+  "runs/combo-pool-20261103-2223/s8.json",
+  "runs/combo-pool-20261103-2223/s9.json",
+  "runs/combo-pool-20261103-laptop2/s0.json",
+  "runs/combo-pool-20261103-laptop2/s1.json",
+  "data/cache/combo_lines/ranked.jsonl"
+ ],
+ "rules": {
+  "admit_turn1_lines": "combo_pool going-first replayed, >= 5 hands with lines, best-line acts >= 4.0",
+  "going_second_candidate": "per-sample or P kill >= 25% going second (candidates for step-1b line generation, not opponents)"
+ },
+ "unmeasured": [
+  "blue-eyes-s1",
+  "blue-eyes-s2",
+  "branded-retry",
+  "elfnote-s1",
+  "mikanko-s1",
+  "mitsurugi-retry",
+  "mitsurugi-s1",
+  "salamangreat-s1",
+  "sky-striker-retry",
+  "sky-striker-s1"
+ ],
+ "decks": [
+  {
+   "deck": "abc-dragon",
+   "hands_with_lines": 31,
+   "best_line_acts": 4.45,
+   "best_line_field_interruptions": 1.26,
+   "first": {
+    "deck": "abc-dragon",
+    "hands": 6,
+    "policy_end_board": 1.17,
+    "expert_end_board": 5.17,
+    "policy_decisions": 25.8,
+    "ge_expert": 0.17,
+    "best_of_k_end_board": 2.5,
+    "best_of_k_ge_expert": 0.5,
+    "expert_lines": 6,
+    "stuck": 0.0
+   },
+   "second_p": {
+    "lp_lost": 992,
+    "lp_gained": 0,
+    "kill": 0.0,
+    "field": 3.75,
+    "our_field_left": 2.58,
+    "cut": 0
+   },
+   "second_sample_kill": 0.0,
+   "second_best_of_k": {
+    "lp_lost": 2167,
+    "lp_gained": 0,
+    "kill": 0.0,
+    "field": 3.83,
+    "our_field_left": 2.42,
+    "cut": 0
+   },
+   "alerts": [],
+   "admit_turn1_lines": true,
+   "going_second_candidate": false
+  },
+  {
+   "deck": "adamancipator",
+   "hands_with_lines": 30,
+   "best_line_acts": 2.7,
+   "best_line_field_interruptions": 1.33,
+   "first": {
+    "deck": "adamancipator",
+    "hands": 6,
+    "policy_end_board": 3.17,
+    "expert_end_board": 3.83,
+    "policy_decisions": 10.5,
+    "ge_expert": 0.5,
+    "best_of_k_end_board": 3.83,
+    "best_of_k_ge_expert": 0.83,
+    "expert_lines": 6,
+    "stuck": 0.0
+   },
+   "second_p": {
+    "lp_lost": 4550,
+    "lp_gained": 0,
+    "kill": 0.25,
+    "field": 3.42,
+    "our_field_left": 1.08,
+    "cut": 0
+   },
+   "second_sample_kill": 0.042,
+   "second_best_of_k": {
+    "lp_lost": 4408,
+    "lp_gained": 0,
+    "kill": 0.167,
+    "field": 3.33,
+    "our_field_left": 1.17,
+    "cut": 0
+   },
+   "alerts": [],
+   "admit_turn1_lines": false,
+   "going_second_candidate": true
+  },
+  {
+   "deck": "agents",
+   "hands_with_lines": 20,
+   "best_line_acts": 1.2,
+   "best_line_field_interruptions": 1.2,
+   "first": {
+    "deck": "agents",
+    "hands": 6,
+    "policy_end_board": 2.33,
+    "expert_end_board": 3.33,
+    "policy_decisions": 8.7,
+    "ge_expert": 0.5,
+    "best_of_k_end_board": 3.17,
+    "best_of_k_ge_expert": 0.83,
+    "expert_lines": 6,
+    "stuck": 0.0
+   },
+   "second_p": {
+    "lp_lost": 617,
+    "lp_gained": 0,
+    "kill": 0.0,
+    "field": 3.25,
+    "our_field_left": 2.58,
+    "cut": 0
+   },
+   "second_sample_kill": 0.0,
+   "second_best_of_k": {
+    "lp_lost": 883,
+    "lp_gained": 0,
+    "kill": 0.0,
+    "field": 3,
+    "our_field_left": 2.33,
+    "cut": 0
+   },
+   "alerts": [],
+   "admit_turn1_lines": false,
+   "going_second_candidate": false
+  },
+  {
+   "deck": "altergeist",
+   "hands_with_lines": 39,
+   "best_line_acts": 1.08,
+   "best_line_field_interruptions": 1.92,
+   "first": {
+    "deck": "altergeist",
+    "hands": 6,
+    "policy_end_board": 0,
+    "expert_end_board": 5.33,
+    "policy_decisions": 10.7,
+    "ge_expert": 0.0,
+    "best_of_k_end_board": 1.33,
+    "best_of_k_ge_expert": 0.0,
+    "expert_lines": 6,
+    "stuck": 0.0
+   },
+   "second_p": {
+    "lp_lost": 0,
+    "lp_gained": 83,
+    "kill": 0.0,
+    "field": 4.42,
+    "our_field_left": 3.42,
+    "cut": 0
+   },
+   "second_sample_kill": 0.0,
+   "second_best_of_k": {
+    "lp_lost": 58,
+    "lp_gained": 83,
+    "kill": 0.0,
+    "field": 4.08,
+    "our_field_left": 3.25,
+    "cut": 0
+   },
+   "alerts": [],
+   "admit_turn1_lines": false,
+   "going_second_candidate": false
+  },
+  {
+   "deck": "angelechy-elfnote-meta1",
+   "hands_with_lines": 17,
+   "best_line_acts": 5.76,
+   "best_line_field_interruptions": 0.94,
+   "first": {
+    "deck": "angelechy-elfnote-meta1",
+    "hands": 6,
+    "policy_end_board": 0,
+    "expert_end_board": 5.83,
+    "policy_decisions": 47,
+    "ge_expert": 0.0,
+    "best_of_k_end_board": 2.83,
+    "best_of_k_ge_expert": 0.33,
+    "expert_lines": 6,
+    "stuck": 0.0
+   },
+   "second_p": {
+    "lp_lost": 3850,
+    "lp_gained": 0,
+    "kill": 0.167,
+    "field": 5.33,
+    "our_field_left": 2.42,
+    "cut": 0
+   },
+   "second_sample_kill": 0.083,
+   "second_best_of_k": {
+    "lp_lost": 5033,
+    "lp_gained": 0,
+    "kill": 0.25,
+    "field": 5.42,
+    "our_field_left": 2.08,
+    "cut": 0
+   },
+   "alerts": [],
+   "admit_turn1_lines": true,
+   "going_second_candidate": false
+  },
+  {
+   "deck": "angelechy-elfnote-meta2",
+   "hands_with_lines": 19,
+   "best_line_acts": 4.84,
+   "best_line_field_interruptions": 0.47,
+   "first": {
+    "deck": "angelechy-elfnote-meta2",
+    "hands": 6,
+    "policy_end_board": 1.33,
+    "expert_end_board": 4.33,
+    "policy_decisions": 34.7,
+    "ge_expert": 0.0,
+    "best_of_k_end_board": 1.5,
+    "best_of_k_ge_expert": 0.17,
+    "expert_lines": 6,
+    "stuck": 0.0
+   },
+   "second_p": {
+    "lp_lost": 4742,
+    "lp_gained": 0,
+    "kill": 0.0,
+    "field": 5.83,
+    "our_field_left": 1.92,
+    "cut": 0
+   },
+   "second_sample_kill": 0.083,
+   "second_best_of_k": {
+    "lp_lost": 5900,
+    "lp_gained": 0,
+    "kill": 0.25,
+    "field": 5.92,
+    "our_field_left": 1.67,
+    "cut": 0
+   },
+   "alerts": [],
+   "admit_turn1_lines": true,
+   "going_second_candidate": false
+  },
+  {
+   "deck": "angelechy-meta1",
+   "hands_with_lines": 13,
+   "best_line_acts": 1.46,
+   "best_line_field_interruptions": 2.85,
+   "first": {
+    "deck": "angelechy-meta1",
+    "hands": 6,
+    "policy_end_board": 3.33,
+    "expert_end_board": 4.5,
+    "policy_decisions": 12.3,
+    "ge_expert": 0.67,
+    "best_of_k_end_board": 5.33,
+    "best_of_k_ge_expert": 1.0,
+    "expert_lines": 6,
+    "stuck": 0.0
+   },
+   "second_p": {
+    "lp_lost": 3492,
+    "lp_gained": 0,
+    "kill": 0.0,
+    "field": 5.75,
+    "our_field_left": 3.08,
+    "cut": 0
+   },
+   "second_sample_kill": 0.0,
+   "second_best_of_k": {
+    "lp_lost": 4183,
+    "lp_gained": 0,
+    "kill": 0.0,
+    "field": 6.17,
+    "our_field_left": 2.83,
+    "cut": 0
+   },
+   "alerts": [],
+   "admit_turn1_lines": false,
+   "going_second_candidate": false
+  },
+  {
+   "deck": "angelechy-meta2",
+   "hands_with_lines": 17,
+   "best_line_acts": 1.35,
+   "best_line_field_interruptions": 2.82,
+   "first": {
+    "deck": "angelechy-meta2",
+    "hands": 6,
+    "policy_end_board": 3.67,
+    "expert_end_board": 5.17,
+    "policy_decisions": 18.5,
+    "ge_expert": 0.67,
+    "best_of_k_end_board": 5.67,
+    "best_of_k_ge_expert": 0.83,
+    "expert_lines": 6,
+    "stuck": 0.0
+   },
+   "second_p": {
+    "lp_lost": 4425,
+    "lp_gained": 0,
+    "kill": 0.0,
+    "field": 6.58,
+    "our_field_left": 2.92,
+    "cut": 0
+   },
+   "second_sample_kill": 0.0,
+   "second_best_of_k": {
+    "lp_lost": 4975,
+    "lp_gained": 0,
+    "kill": 0.0,
+    "field": 6.08,
+    "our_field_left": 2.83,
+    "cut": 0
+   },
+   "alerts": [],
+   "admit_turn1_lines": false,
+   "going_second_candidate": false
+  },
+  {
+   "deck": "atlantean-mermail-meta1",
+   "hands_with_lines": 17,
+   "best_line_acts": 4.94,
+   "best_line_field_interruptions": 0.88,
+   "first": {
+    "deck": "atlantean-mermail-meta1",
+    "hands": 6,
+    "policy_end_board": 2.5,
+    "expert_end_board": 3.17,
+    "policy_decisions": 16.8,
+    "ge_expert": 0.67,
+    "best_of_k_end_board": 3.67,
+    "best_of_k_ge_expert": 0.83,
+    "expert_lines": 6,
+    "stuck": 0.0
+   },
+   "second_p": {
+    "lp_lost": 6117,
+    "lp_gained": 0,
+    "kill": 0.417,
+    "field": 4.08,
+    "our_field_left": 1.75,
+    "cut": 0
+   },
+   "second_sample_kill": 0.25,
+   "second_best_of_k": {
+    "lp_lost": 5725,
+    "lp_gained": 0,
+    "kill": 0.417,
+    "field": 3.5,
+    "our_field_left": 1.75,
+    "cut": 0
+   },
+   "alerts": [],
+   "admit_turn1_lines": true,
+   "going_second_candidate": true
+  },
+  {
+   "deck": "atlantean-mermail-meta2",
+   "hands_with_lines": 13,
+   "best_line_acts": 5.31,
+   "best_line_field_interruptions": 1.23,
+   "first": {
+    "deck": "atlantean-mermail-meta2",
+    "hands": 6,
+    "policy_end_board": 1.67,
+    "expert_end_board": 4.33,
+    "policy_decisions": 13.7,
+    "ge_expert": 0.33,
+    "best_of_k_end_board": 1.83,
+    "best_of_k_ge_expert": 0.33,
+    "expert_lines": 6,
+    "stuck": 0.0
+   },
+   "second_p": {
+    "lp_lost": 6442,
+    "lp_gained": 0,
+    "kill": 0.583,
+    "field": 4.33,
+    "our_field_left": 1.75,
+    "cut": 0
+   },
+   "second_sample_kill": 0.167,
+   "second_best_of_k": {
+    "lp_lost": 6817,
+    "lp_gained": 0,
+    "kill": 0.5,
+    "field": 4.5,
+    "our_field_left": 1.33,
+    "cut": 0
+   },
+   "alerts": [],
+   "admit_turn1_lines": true,
+   "going_second_candidate": true
+  },
+  {
+   "deck": "azamina-light-and-darkness-ritual-meta1",
+   "hands_with_lines": 20,
+   "best_line_acts": 5.2,
+   "best_line_field_interruptions": 1.55,
+   "first": {
+    "deck": "azamina-light-and-darkness-ritual-meta1",
+    "hands": 6,
+    "policy_end_board": 0.67,
+    "expert_end_board": 4,
+    "policy_decisions": 30,
+    "ge_expert": 0.0,
+    "best_of_k_end_board": 2.5,
+    "best_of_k_ge_expert": 0.17,
+    "expert_lines": 6,
+    "stuck": 0.0
+   },
+   "second_p": {
+    "lp_lost": 4133,
+    "lp_gained": 0,
+    "kill": 0.167,
+    "field": 5.08,
+    "our_field_left": 1.58,
+    "cut": 0
+   },
+   "second_sample_kill": 0.188,
+   "second_best_of_k": {
+    "lp_lost": 5533,
+    "lp_gained": 0,
+    "kill": 0.417,
+    "field": 4.75,
+    "our_field_left": 1.25,
+    "cut": 0
+   },
+   "alerts": [],
+   "admit_turn1_lines": true,
+   "going_second_candidate": false
+  },
+  {
+   "deck": "azamina-light-and-darkness-ritual-meta2",
+   "hands_with_lines": 18,
+   "best_line_acts": 3,
+   "best_line_field_interruptions": 1.28,
+   "first": {
+    "deck": "azamina-light-and-darkness-ritual-meta2",
+    "hands": 6,
+    "policy_end_board": 1.5,
+    "expert_end_board": 4.17,
+    "policy_decisions": 39,
+    "ge_expert": 0.33,
+    "best_of_k_end_board": 4.33,
+    "best_of_k_ge_expert": 0.83,
+    "expert_lines": 6,
+    "stuck": 0.0
+   },
+   "second_p": {
+    "lp_lost": 5883,
+    "lp_gained": 0,
+    "kill": 0.5,
+    "field": 5.17,
+    "our_field_left": 1.42,
+    "cut": 0
+   },
+   "second_sample_kill": 0.271,
+   "second_best_of_k": {
+    "lp_lost": 7192,
+    "lp_gained": 0,
+    "kill": 0.583,
+    "field": 5.58,
+    "our_field_left": 1.33,
+    "cut": 0
+   },
+   "alerts": [],
+   "admit_turn1_lines": false,
+   "going_second_candidate": true
+  },
+  {
+   "deck": "azamina-mitsurugi-orcust-meta1",
+   "hands_with_lines": 20,
+   "best_line_acts": 5.8,
+   "best_line_field_interruptions": 1.35,
+   "first": {
+    "deck": "azamina-mitsurugi-orcust-meta1",
+    "hands": 6,
+    "policy_end_board": 1.5,
+    "expert_end_board": 5.5,
+    "policy_decisions": 39.3,
+    "ge_expert": 0.17,
+    "best_of_k_end_board": 3.67,
+    "best_of_k_ge_expert": 0.33,
+    "expert_lines": 6,
+    "stuck": 0.0
+   },
+   "second_p": {
+    "lp_lost": 5875,
+    "lp_gained": 0,
+    "kill": 0.417,
+    "field": 4.67,
+    "our_field_left": 2.25,
+    "cut": 0
+   },
+   "second_sample_kill": 0.104,
+   "second_best_of_k": {
+    "lp_lost": 5692,
+    "lp_gained": 0,
+    "kill": 0.25,
+    "field": 4.75,
+    "our_field_left": 2,
+    "cut": 0
+   },
+   "alerts": [],
+   "admit_turn1_lines": true,
+   "going_second_candidate": true
+  },
+  {
+   "deck": "azamina-shining-sarcophagus-mitsurugi-orcust-meta1",
+   "hands_with_lines": 16,
+   "best_line_acts": 5.81,
+   "best_line_field_interruptions": 1.69,
+   "first": {
+    "deck": "azamina-shining-sarcophagus-mitsurugi-orcust-meta1",
+    "hands": 6,
+    "policy_end_board": 1.83,
+    "expert_end_board": 5.33,
+    "policy_decisions": 27.2,
+    "ge_expert": 0.0,
+    "best_of_k_end_board": 4.67,
+    "best_of_k_ge_expert": 0.33,
+    "expert_lines": 6,
+    "stuck": 0.0
+   },
+   "second_p": {
+    "lp_lost": 5717,
+    "lp_gained": 0,
+    "kill": 0.25,
+    "field": 4.42,
+    "our_field_left": 1.5,
+    "cut": 0
+   },
+   "second_sample_kill": 0.188,
+   "second_best_of_k": {
+    "lp_lost": 7550,
+    "lp_gained": 0,
+    "kill": 0.583,
+    "field": 4.83,
+    "our_field_left": 2,
+    "cut": 0
+   },
+   "alerts": [],
+   "admit_turn1_lines": true,
+   "going_second_candidate": true
+  },
+  {
+   "deck": "azamina-white-forest-meta1",
+   "hands_with_lines": 16,
+   "best_line_acts": 5.75,
+   "best_line_field_interruptions": 1.94,
+   "first": {
+    "deck": "azamina-white-forest-meta1",
+    "hands": 6,
+    "policy_end_board": 1.33,
+    "expert_end_board": 4.67,
+    "policy_decisions": 24.3,
+    "ge_expert": 0.17,
+    "best_of_k_end_board": 4.5,
+    "best_of_k_ge_expert": 0.83,
+    "expert_lines": 6,
+    "stuck": 0.0
+   },
+   "second_p": {
+    "lp_lost": 7292,
+    "lp_gained": 0,
+    "kill": 0.583,
+    "field": 4,
+    "our_field_left": 1.92,
+    "cut": 0
+   },
+   "second_sample_kill": 0.312,
+   "second_best_of_k": {
+    "lp_lost": 7933,
+    "lp_gained": 0,
+    "kill": 0.667,
+    "field": 4.58,
+    "our_field_left": 1.92,
+    "cut": 0
+   },
+   "alerts": [],
+   "admit_turn1_lines": true,
+   "going_second_candidate": true
+  },
+  {
+   "deck": "blackwing",
+   "hands_with_lines": 40,
+   "best_line_acts": 1.73,
+   "best_line_field_interruptions": 2.08,
+   "first": {
+    "deck": "blackwing",
+    "hands": 6,
+    "policy_end_board": 3,
+    "expert_end_board": 5,
+    "policy_decisions": 13,
+    "ge_expert": 0.5,
+    "best_of_k_end_board": 4.17,
+    "best_of_k_ge_expert": 0.5,
+    "expert_lines": 6,
+    "stuck": 0.0
+   },
+   "second_p": {
+    "lp_lost": 938,
+    "lp_gained": 0,
+    "kill": 0.0,
+    "field": 3.25,
+    "our_field_left": 2.75,
+    "cut": 0
+   },
+   "second_sample_kill": 0.0,
+   "second_best_of_k": {
+    "lp_lost": 1246,
+    "lp_gained": 0,
+    "kill": 0.0,
+    "field": 3,
+    "our_field_left": 2.83,
+    "cut": 0
+   },
+   "alerts": [],
+   "admit_turn1_lines": false,
+   "going_second_candidate": false
+  },
+  {
+   "deck": "blitzclique-meta1",
+   "hands_with_lines": 21,
+   "best_line_acts": 3.76,
+   "best_line_field_interruptions": 0.81,
+   "first": {
+    "deck": "blitzclique-meta1",
+    "hands": 6,
+    "policy_end_board": 0.83,
+    "expert_end_board": 3.17,
+    "policy_decisions": 21.2,
+    "ge_expert": 0.17,
+    "best_of_k_end_board": 1.83,
+    "best_of_k_ge_expert": 0.33,
+    "expert_lines": 6,
+    "stuck": 0.0
+   },
+   "second_p": {
+    "lp_lost": 5075,
+    "lp_gained": 0,
+    "kill": 0.25,
+    "field": 4.25,
+    "our_field_left": 1.42,
+    "cut": 0
+   },
+   "second_sample_kill": 0.292,
+   "second_best_of_k": {
+    "lp_lost": 6488,
+    "lp_gained": 0,
+    "kill": 0.5,
+    "field": 5.17,
+    "our_field_left": 1,
+    "cut": 0
+   },
+   "alerts": [],
+   "admit_turn1_lines": false,
+   "going_second_candidate": true
+  },
+  {
+   "deck": "blitzclique-meta2",
+   "hands_with_lines": 15,
+   "best_line_acts": 3.93,
+   "best_line_field_interruptions": 1.4,
+   "first": {
+    "deck": "blitzclique-meta2",
+    "hands": 6,
+    "policy_end_board": 0.33,
+    "expert_end_board": 4.17,
+    "policy_decisions": 21,
+    "ge_expert": 0.0,
+    "best_of_k_end_board": 2,
+    "best_of_k_ge_expert": 0.33,
+    "expert_lines": 6,
+    "stuck": 0.0
+   },
+   "second_p": {
+    "lp_lost": 5862,
+    "lp_gained": 0,
+    "kill": 0.167,
+    "field": 5.67,
+    "our_field_left": 1.33,
+    "cut": 0
+   },
+   "second_sample_kill": 0.25,
+   "second_best_of_k": {
+    "lp_lost": 6971,
+    "lp_gained": 0,
+    "kill": 0.333,
+    "field": 5.83,
+    "our_field_left": 0.83,
+    "cut": 0
+   },
+   "alerts": [],
+   "admit_turn1_lines": false,
+   "going_second_candidate": true
+  },
+  {
+   "deck": "blue-eyes",
+   "hands_with_lines": 37,
+   "best_line_acts": 7.7,
+   "best_line_field_interruptions": 2.38,
+   "first": {
+    "deck": "blue-eyes",
+    "hands": 6,
+    "policy_end_board": 4.17,
+    "expert_end_board": 5.83,
+    "policy_decisions": 31.8,
+    "ge_expert": 0.0,
+    "best_of_k_end_board": 5,
+    "best_of_k_ge_expert": 0.33,
+    "expert_lines": 6,
+    "stuck": 0.0
+   },
+   "second_p": {
+    "lp_lost": 4700,
+    "lp_gained": 0,
+    "kill": 0.0,
+    "field": 4.75,
+    "our_field_left": 1.67,
+    "cut": 0
+   },
+   "second_sample_kill": 0.042,
+   "second_best_of_k": {
+    "lp_lost": 5725,
+    "lp_gained": 0,
+    "kill": 0.167,
+    "field": 4.92,
+    "our_field_left": 1.83,
+    "cut": 0
+   },
+   "alerts": [],
+   "admit_turn1_lines": true,
+   "going_second_candidate": false
+  },
+  {
+   "deck": "branded",
+   "hands_with_lines": 27,
+   "best_line_acts": 4.52,
+   "best_line_field_interruptions": 2.07,
+   "first": {
+    "deck": "branded",
+    "hands": 6,
+    "policy_end_board": 1,
+    "expert_end_board": 5.33,
+    "policy_decisions": 25.2,
+    "ge_expert": 0.0,
+    "best_of_k_end_board": 3,
+    "best_of_k_ge_expert": 0.33,
+    "expert_lines": 6,
+    "stuck": 0.0
+   },
+   "second_p": {
+    "lp_lost": 6592,
+    "lp_gained": 0,
+    "kill": 0.417,
+    "field": 4.67,
+    "our_field_left": 1.25,
+    "cut": 0
+   },
+   "second_sample_kill": 0.208,
+   "second_best_of_k": {
+    "lp_lost": 7125,
+    "lp_gained": 0,
+    "kill": 0.417,
+    "field": 4.67,
+    "our_field_left": 1.42,
+    "cut": 0
+   },
+   "alerts": [],
+   "admit_turn1_lines": true,
+   "going_second_candidate": true
+  },
+  {
+   "deck": "branded-angelechy-light-and-darkness-ritual-meta1",
+   "hands_with_lines": 15,
+   "best_line_acts": 4.33,
+   "best_line_field_interruptions": 1.6,
+   "first": {
+    "deck": "branded-angelechy-light-and-darkness-ritual-meta1",
+    "hands": 6,
+    "policy_end_board": 1.17,
+    "expert_end_board": 4.83,
+    "policy_decisions": 32.3,
+    "ge_expert": 0.17,
+    "best_of_k_end_board": 1.5,
+    "best_of_k_ge_expert": 0.17,
+    "expert_lines": 6,
+    "stuck": 0.0
+   },
+   "second_p": {
+    "lp_lost": 6200,
+    "lp_gained": 0,
+    "kill": 0.25,
+    "field": 5.5,
+    "our_field_left": 1.5,
+    "cut": 0
+   },
+   "second_sample_kill": 0.25,
+   "second_best_of_k": {
+    "lp_lost": 7900,
+    "lp_gained": 0,
+    "kill": 0.667,
+    "field": 6.08,
+    "our_field_left": 1,
+    "cut": 0
+   },
+   "alerts": [],
+   "admit_turn1_lines": true,
+   "going_second_candidate": true
+  },
+  {
+   "deck": "branded-blitzclique-meta1",
+   "hands_with_lines": 14,
+   "best_line_acts": 4,
+   "best_line_field_interruptions": 0.57,
+   "first": {
+    "deck": "branded-blitzclique-meta1",
+    "hands": 6,
+    "policy_end_board": 0.67,
+    "expert_end_board": 3.33,
+    "policy_decisions": 33.5,
+    "ge_expert": 0.17,
+    "best_of_k_end_board": 1.33,
+    "best_of_k_ge_expert": 0.17,
+    "expert_lines": 6,
+    "stuck": 0.0
+   },
+   "second_p": {
+    "lp_lost": 5125,
+    "lp_gained": 0,
+    "kill": 0.167,
+    "field": 5.5,
+    "our_field_left": 1.75,
+    "cut": 0
+   },
+   "second_sample_kill": 0.104,
+   "second_best_of_k": {
+    "lp_lost": 6550,
+    "lp_gained": 0,
+    "kill": 0.333,
+    "field": 5.75,
+    "our_field_left": 1.5,
+    "cut": 0
+   },
+   "alerts": [],
+   "admit_turn1_lines": true,
+   "going_second_candidate": false
+  },
+  {
+   "deck": "branded-dracotail-meta1",
+   "hands_with_lines": 13,
+   "best_line_acts": 4.69,
+   "best_line_field_interruptions": 1.08,
+   "first": {
+    "deck": "branded-dracotail-meta1",
+    "hands": 6,
+    "policy_end_board": 3.33,
+    "expert_end_board": 3.83,
+    "policy_decisions": 29.2,
+    "ge_expert": 0.5,
+    "best_of_k_end_board": 4.5,
+    "best_of_k_ge_expert": 1.0,
+    "expert_lines": 6,
+    "stuck": 0.0
+   },
+   "second_p": {
+    "lp_lost": 7200,
+    "lp_gained": 0,
+    "kill": 0.417,
+    "field": 4.75,
+    "our_field_left": 1.83,
+    "cut": 0
+   },
+   "second_sample_kill": 0.229,
+   "second_best_of_k": {
+    "lp_lost": 7333,
+    "lp_gained": 0,
+    "kill": 0.5,
+    "field": 4.67,
+    "our_field_left": 1.83,
+    "cut": 0
+   },
+   "alerts": [],
+   "admit_turn1_lines": true,
+   "going_second_candidate": true
+  },
+  {
+   "deck": "branded-dracotail-meta2",
+   "hands_with_lines": 18,
+   "best_line_acts": 3.78,
+   "best_line_field_interruptions": 0.72,
+   "first": {
+    "deck": "branded-dracotail-meta2",
+    "hands": 6,
+    "policy_end_board": 3.17,
+    "expert_end_board": 3.67,
+    "policy_decisions": 23.7,
+    "ge_expert": 0.5,
+    "best_of_k_end_board": 4.5,
+    "best_of_k_ge_expert": 0.83,
+    "expert_lines": 6,
+    "stuck": 0.0
+   },
+   "second_p": {
+    "lp_lost": 5642,
+    "lp_gained": 0,
+    "kill": 0.25,
+    "field": 4.08,
+    "our_field_left": 1.67,
+    "cut": 0
+   },
+   "second_sample_kill": 0.229,
+   "second_best_of_k": {
+    "lp_lost": 7008,
+    "lp_gained": 0,
+    "kill": 0.5,
+    "field": 4.58,
+    "our_field_left": 1.67,
+    "cut": 0
+   },
+   "alerts": [],
+   "admit_turn1_lines": false,
+   "going_second_candidate": true
+  },
+  {
+   "deck": "branded-light-and-darkness-ritual-meta1",
+   "hands_with_lines": 18,
+   "best_line_acts": 4.44,
+   "best_line_field_interruptions": 1.61,
+   "first": {
+    "deck": "branded-light-and-darkness-ritual-meta1",
+    "hands": 6,
+    "policy_end_board": 1,
+    "expert_end_board": 3.5,
+    "policy_decisions": 25.5,
+    "ge_expert": 0.0,
+    "best_of_k_end_board": 2.33,
+    "best_of_k_ge_expert": 0.17,
+    "expert_lines": 6,
+    "stuck": 0.0
+   },
+   "second_p": {
+    "lp_lost": 6583,
+    "lp_gained": 0,
+    "kill": 0.333,
+    "field": 4.33,
+    "our_field_left": 1.25,
+    "cut": 0
+   },
+   "second_sample_kill": 0.25,
+   "second_best_of_k": {
+    "lp_lost": 7200,
+    "lp_gained": 0,
+    "kill": 0.583,
+    "field": 4.42,
+    "our_field_left": 1,
+    "cut": 0
+   },
+   "alerts": [],
+   "admit_turn1_lines": true,
+   "going_second_candidate": true
+  },
+  {
+   "deck": "branded-light-and-darkness-ritual-meta2",
+   "hands_with_lines": 14,
+   "best_line_acts": 4,
+   "best_line_field_interruptions": 0.93,
+   "first": {
+    "deck": "branded-light-and-darkness-ritual-meta2",
+    "hands": 6,
+    "policy_end_board": 1,
+    "expert_end_board": 4,
+    "policy_decisions": 23.7,
+    "ge_expert": 0.17,
+    "best_of_k_end_board": 2.5,
+    "best_of_k_ge_expert": 0.17,
+    "expert_lines": 6,
+    "stuck": 0.0
+   },
+   "second_p": {
+    "lp_lost": 6608,
+    "lp_gained": 0,
+    "kill": 0.5,
+    "field": 4.33,
+    "our_field_left": 1.33,
+    "cut": 0
+   },
+   "second_sample_kill": 0.354,
+   "second_best_of_k": {
+    "lp_lost": 8192,
+    "lp_gained": 0,
+    "kill": 0.75,
+    "field": 5.33,
+    "our_field_left": 1.17,
+    "cut": 0
+   },
+   "alerts": [],
+   "admit_turn1_lines": true,
+   "going_second_candidate": true
+  },
+  {
+   "deck": "burn",
+   "hands_with_lines": 20,
+   "best_line_acts": 1.35,
+   "best_line_field_interruptions": 0.4,
+   "first": {
+    "deck": "burn",
+    "hands": 6,
+    "policy_end_board": 0.83,
+    "expert_end_board": 4,
+    "policy_decisions": 10.5,
+    "ge_expert": 0.17,
+    "best_of_k_end_board": 2.17,
+    "best_of_k_ge_expert": 0.17,
+    "expert_lines": 6,
+    "stuck": 0.0
+   },
+   "second_p": {
+    "lp_lost": 83,
+    "lp_gained": 250,
+    "kill": 0.0,
+    "field": 3.58,
+    "our_field_left": 3,
+    "cut": 0
+   },
+   "second_sample_kill": 0.0,
+   "second_best_of_k": {
+    "lp_lost": 83,
+    "lp_gained": 250,
+    "kill": 0.0,
+    "field": 3.17,
+    "our_field_left": 3.08,
+    "cut": 0
+   },
+   "alerts": [],
+   "admit_turn1_lines": false,
+   "going_second_candidate": false
+  },
+  {
+   "deck": "burning-abyss",
+   "hands_with_lines": 31,
+   "best_line_acts": 3.03,
+   "best_line_field_interruptions": 1.61,
+   "first": {
+    "deck": "burning-abyss",
+    "hands": 6,
+    "policy_end_board": 2,
+    "expert_end_board": 4.33,
+    "policy_decisions": 15.7,
+    "ge_expert": 0.17,
+    "best_of_k_end_board": 3.17,
+    "best_of_k_ge_expert": 0.17,
+    "expert_lines": 6,
+    "stuck": 0.0
+   },
+   "second_p": {
+    "lp_lost": 2067,
+    "lp_gained": 0,
+    "kill": 0.0,
+    "field": 3.42,
+    "our_field_left": 2.5,
+    "cut": 0
+   },
+   "second_sample_kill": 0.0,
+   "second_best_of_k": {
+    "lp_lost": 2008,
+    "lp_gained": 0,
+    "kill": 0.0,
+    "field": 3.25,
+    "our_field_left": 2.33,
+    "cut": 0
+   },
+   "alerts": [],
+   "admit_turn1_lines": false,
+   "going_second_candidate": false
+  },
+  {
+   "deck": "centur-ion",
+   "hands_with_lines": 44,
+   "best_line_acts": 6.93,
+   "best_line_field_interruptions": 1.45,
+   "first": {
+    "deck": "centur-ion",
+    "hands": 6,
+    "policy_end_board": 0.67,
+    "expert_end_board": 6.5,
+    "policy_decisions": 35.2,
+    "ge_expert": 0.0,
+    "best_of_k_end_board": 5.33,
+    "best_of_k_ge_expert": 0.17,
+    "expert_lines": 6,
+    "stuck": 0.0
+   },
+   "second_p": {
+    "lp_lost": 3450,
+    "lp_gained": 0,
+    "kill": 0.0,
+    "field": 3.75,
+    "our_field_left": 2.17,
+    "cut": 0
+   },
+   "second_sample_kill": 0.0,
+   "second_best_of_k": {
+    "lp_lost": 3933,
+    "lp_gained": 0,
+    "kill": 0.0,
+    "field": 3.42,
+    "our_field_left": 2,
+    "cut": 0
+   },
+   "alerts": [],
+   "admit_turn1_lines": true,
+   "going_second_candidate": false
+  },
+  {
+   "deck": "chaos-turbo",
+   "hands_with_lines": 19,
+   "best_line_acts": 0.84,
+   "best_line_field_interruptions": 1,
+   "first": {
+    "deck": "chaos-turbo",
+    "hands": 6,
+    "policy_end_board": 4.83,
+    "expert_end_board": 5,
+    "policy_decisions": 10.7,
+    "ge_expert": 0.5,
+    "best_of_k_end_board": 5.67,
+    "best_of_k_ge_expert": 0.5,
+    "expert_lines": 6,
+    "stuck": 0.0
+   },
+   "second_p": {
+    "lp_lost": 542,
+    "lp_gained": 0,
+    "kill": 0.0,
+    "field": 3.83,
+    "our_field_left": 2,
+    "cut": 0
+   },
+   "second_sample_kill": 0.0,
+   "second_best_of_k": {
+    "lp_lost": 542,
+    "lp_gained": 0,
+    "kill": 0.0,
+    "field": 3.42,
+    "our_field_left": 2,
+    "cut": 0
+   },
+   "alerts": [],
+   "admit_turn1_lines": false,
+   "going_second_candidate": false
+  },
+  {
+   "deck": "crystron-trains-meta1",
+   "hands_with_lines": 13,
+   "best_line_acts": 8.69,
+   "best_line_field_interruptions": 2,
+   "first": {
+    "deck": "crystron-trains-meta1",
+    "hands": 6,
+    "policy_end_board": 3.5,
+    "expert_end_board": 5.67,
+    "policy_decisions": 29.3,
+    "ge_expert": 0.5,
+    "best_of_k_end_board": 6,
+    "best_of_k_ge_expert": 0.83,
+    "expert_lines": 6,
+    "stuck": 0.0
+   },
+   "second_p": {
+    "lp_lost": 3283,
+    "lp_gained": 0,
+    "kill": 0.083,
+    "field": 5.17,
+    "our_field_left": 1.83,
+    "cut": 0
+   },
+   "second_sample_kill": 0.104,
+   "second_best_of_k": {
+    "lp_lost": 5492,
+    "lp_gained": 0,
+    "kill": 0.167,
+    "field": 4.25,
+    "our_field_left": 2,
+    "cut": 0
+   },
+   "alerts": [],
+   "admit_turn1_lines": true,
+   "going_second_candidate": false
+  },
+  {
+   "deck": "cyberdark-ygopd",
+   "hands_with_lines": 0,
+   "best_line_acts": null,
+   "best_line_field_interruptions": null,
+   "first": null,
+   "second_p": {
+    "lp_lost": 3942,
+    "lp_gained": 0,
+    "kill": 0.167,
+    "field": 4.25,
+    "our_field_left": 0.92,
+    "cut": 0
+   },
+   "second_sample_kill": 0.083,
+   "second_best_of_k": {
+    "lp_lost": 6150,
+    "lp_gained": 0,
+    "kill": 0.333,
+    "field": 4.67,
+    "our_field_left": 1.58,
+    "cut": 0
+   },
+   "alerts": [],
+   "admit_turn1_lines": false,
+   "going_second_candidate": true
+  },
+  {
+   "deck": "danger",
+   "hands_with_lines": 12,
+   "best_line_acts": 4.08,
+   "best_line_field_interruptions": 1.08,
+   "first": {
+    "deck": "danger",
+    "hands": 6,
+    "policy_end_board": 2.17,
+    "expert_end_board": 3,
+    "policy_decisions": 12.8,
+    "ge_expert": 0.33,
+    "best_of_k_end_board": 3.5,
+    "best_of_k_ge_expert": 1.0,
+    "expert_lines": 6,
+    "stuck": 0.0
+   },
+   "second_p": {
+    "lp_lost": 942,
+    "lp_gained": 0,
+    "kill": 0.0,
+    "field": 2.83,
+    "our_field_left": 1.92,
+    "cut": 0
+   },
+   "second_sample_kill": 0.0,
+   "second_best_of_k": {
+    "lp_lost": 3050,
+    "lp_gained": 0,
+    "kill": 0.0,
+    "field": 3.25,
+    "our_field_left": 1.67,
+    "cut": 0
+   },
+   "alerts": [],
+   "admit_turn1_lines": true,
+   "going_second_candidate": false
+  },
+  {
+   "deck": "dark-magician",
+   "hands_with_lines": 43,
+   "best_line_acts": 2.74,
+   "best_line_field_interruptions": 1.35,
+   "first": {
+    "deck": "dark-magician",
+    "hands": 6,
+    "policy_end_board": 5,
+    "expert_end_board": 5.33,
+    "policy_decisions": 17.2,
+    "ge_expert": 0.5,
+    "best_of_k_end_board": 5.17,
+    "best_of_k_ge_expert": 0.67,
+    "expert_lines": 6,
+    "stuck": 0.0
+   },
+   "second_p": {
+    "lp_lost": 771,
+    "lp_gained": 0,
+    "kill": 0.0,
+    "field": 4.25,
+    "our_field_left": 2.83,
+    "cut": 0
+   },
+   "second_sample_kill": 0.0,
+   "second_best_of_k": {
+    "lp_lost": 1575,
+    "lp_gained": 0,
+    "kill": 0.0,
+    "field": 3.67,
+    "our_field_left": 2.5,
+    "cut": 0
+   },
+   "alerts": [],
+   "admit_turn1_lines": false,
+   "going_second_candidate": false
+  },
+  {
+   "deck": "dark-magician-azamina-snake-eye-meta1",
+   "hands_with_lines": 11,
+   "best_line_acts": 4.91,
+   "best_line_field_interruptions": 1.36,
+   "first": {
+    "deck": "dark-magician-azamina-snake-eye-meta1",
+    "hands": 6,
+    "policy_end_board": 2.83,
+    "expert_end_board": 4.5,
+    "policy_decisions": 30.2,
+    "ge_expert": 0.33,
+    "best_of_k_end_board": 3.83,
+    "best_of_k_ge_expert": 0.67,
+    "expert_lines": 6,
+    "stuck": 0.0
+   },
+   "second_p": {
+    "lp_lost": 8650,
+    "lp_gained": 0,
+    "kill": 0.917,
+    "field": 6.33,
+    "our_field_left": 3.33,
+    "cut": 0
+   },
+   "second_sample_kill": 0.354,
+   "second_best_of_k": {
+    "lp_lost": 7946,
+    "lp_gained": 0,
+    "kill": 0.75,
+    "field": 6.08,
+    "our_field_left": 3.17,
+    "cut": 0
+   },
+   "alerts": [],
+   "admit_turn1_lines": true,
+   "going_second_candidate": true
+  },
+  {
+   "deck": "dark-magician-mitsurugi-yummy-meta1",
+   "hands_with_lines": 12,
+   "best_line_acts": 5.25,
+   "best_line_field_interruptions": 2,
+   "first": {
+    "deck": "dark-magician-mitsurugi-yummy-meta1",
+    "hands": 6,
+    "policy_end_board": 5.67,
+    "expert_end_board": 5.17,
+    "policy_decisions": 36,
+    "ge_expert": 0.67,
+    "best_of_k_end_board": 5.83,
+    "best_of_k_ge_expert": 0.67,
+    "expert_lines": 6,
+    "stuck": 0.0
+   },
+   "second_p": {
+    "lp_lost": 6467,
+    "lp_gained": 0,
+    "kill": 0.417,
+    "field": 5.25,
+    "our_field_left": 2,
+    "cut": 0
+   },
+   "second_sample_kill": 0.125,
+   "second_best_of_k": {
+    "lp_lost": 7008,
+    "lp_gained": 0,
+    "kill": 0.5,
+    "field": 5.42,
+    "our_field_left": 2.08,
+    "cut": 0
+   },
+   "alerts": [],
+   "admit_turn1_lines": true,
+   "going_second_candidate": true
+  },
+  {
+   "deck": "dark-world",
+   "hands_with_lines": 14,
+   "best_line_acts": 2.36,
+   "best_line_field_interruptions": 0.93,
+   "first": {
+    "deck": "dark-world",
+    "hands": 6,
+    "policy_end_board": 1.67,
+    "expert_end_board": 4.33,
+    "policy_decisions": 10.5,
+    "ge_expert": 0.0,
+    "best_of_k_end_board": 3.5,
+    "best_of_k_ge_expert": 0.5,
+    "expert_lines": 6,
+    "stuck": 0.0
+   },
+   "second_p": {
+    "lp_lost": 1417,
+    "lp_gained": 0,
+    "kill": 0.0,
+    "field": 3.17,
+    "our_field_left": 2.5,
+    "cut": 0
+   },
+   "second_sample_kill": 0.0,
+   "second_best_of_k": {
+    "lp_lost": 1733,
+    "lp_gained": 0,
+    "kill": 0.0,
+    "field": 3.08,
+    "our_field_left": 2.5,
+    "cut": 0
+   },
+   "alerts": [],
+   "admit_turn1_lines": false,
+   "going_second_candidate": false
+  },
+  {
+   "deck": "despia-branded-meta1",
+   "hands_with_lines": 18,
+   "best_line_acts": 3.72,
+   "best_line_field_interruptions": 1.28,
+   "first": {
+    "deck": "despia-branded-meta1",
+    "hands": 6,
+    "policy_end_board": 2,
+    "expert_end_board": 4.33,
+    "policy_decisions": 29.3,
+    "ge_expert": 0.17,
+    "best_of_k_end_board": 4.67,
+    "best_of_k_ge_expert": 0.83,
+    "expert_lines": 6,
+    "stuck": 0.0
+   },
+   "second_p": {
+    "lp_lost": 4117,
+    "lp_gained": 0,
+    "kill": 0.083,
+    "field": 4.5,
+    "our_field_left": 2.42,
+    "cut": 0
+   },
+   "second_sample_kill": 0.208,
+   "second_best_of_k": {
+    "lp_lost": 6696,
+    "lp_gained": 0,
+    "kill": 0.583,
+    "field": 4.42,
+    "our_field_left": 2.08,
+    "cut": 0
+   },
+   "alerts": [],
+   "admit_turn1_lines": false,
+   "going_second_candidate": false
+  },
+  {
+   "deck": "despia-branded-meta2",
+   "hands_with_lines": 15,
+   "best_line_acts": 3.73,
+   "best_line_field_interruptions": 1,
+   "first": {
+    "deck": "despia-branded-meta2",
+    "hands": 6,
+    "policy_end_board": 1.83,
+    "expert_end_board": 3.5,
+    "policy_decisions": 15.7,
+    "ge_expert": 0.17,
+    "best_of_k_end_board": 2,
+    "best_of_k_ge_expert": 0.33,
+    "expert_lines": 6,
+    "stuck": 0.0
+   },
+   "second_p": {
+    "lp_lost": 6675,
+    "lp_gained": 0,
+    "kill": 0.25,
+    "field": 5.25,
+    "our_field_left": 1.75,
+    "cut": 0
+   },
+   "second_sample_kill": 0.312,
+   "second_best_of_k": {
+    "lp_lost": 8075,
+    "lp_gained": 0,
+    "kill": 0.583,
+    "field": 5.42,
+    "our_field_left": 1.67,
+    "cut": 0
+   },
+   "alerts": [],
+   "admit_turn1_lines": false,
+   "going_second_candidate": true
+  },
+  {
+   "deck": "dinosaur",
+   "hands_with_lines": 42,
+   "best_line_acts": 4.74,
+   "best_line_field_interruptions": 0.71,
+   "first": {
+    "deck": "dinosaur",
+    "hands": 6,
+    "policy_end_board": 2.5,
+    "expert_end_board": 4.33,
+    "policy_decisions": 13.3,
+    "ge_expert": 0.0,
+    "best_of_k_end_board": 3,
+    "best_of_k_ge_expert": 0.17,
+    "expert_lines": 6,
+    "stuck": 0.0
+   },
+   "second_p": {
+    "lp_lost": 625,
+    "lp_gained": 0,
+    "kill": 0.0,
+    "field": 2.33,
+    "our_field_left": 2.08,
+    "cut": 0
+   },
+   "second_sample_kill": 0.0,
+   "second_best_of_k": {
+    "lp_lost": 1333,
+    "lp_gained": 0,
+    "kill": 0.0,
+    "field": 2.92,
+    "our_field_left": 1.83,
+    "cut": 0
+   },
+   "alerts": [],
+   "admit_turn1_lines": true,
+   "going_second_candidate": false
+  },
+  {
+   "deck": "dogmatika-branded-light-and-darkness-ritual-meta1",
+   "hands_with_lines": 20,
+   "best_line_acts": 3.3,
+   "best_line_field_interruptions": 1.35,
+   "first": {
+    "deck": "dogmatika-branded-light-and-darkness-ritual-meta1",
+    "hands": 6,
+    "policy_end_board": 0.67,
+    "expert_end_board": 4,
+    "policy_decisions": 24.3,
+    "ge_expert": 0.17,
+    "best_of_k_end_board": 1.5,
+    "best_of_k_ge_expert": 0.17,
+    "expert_lines": 6,
+    "stuck": 0.0
+   },
+   "second_p": {
+    "lp_lost": 5583,
+    "lp_gained": 0,
+    "kill": 0.417,
+    "field": 4.17,
+    "our_field_left": 1.58,
+    "cut": 0
+   },
+   "second_sample_kill": 0.396,
+   "second_best_of_k": {
+    "lp_lost": 7842,
+    "lp_gained": 0,
+    "kill": 0.667,
+    "field": 5.17,
+    "our_field_left": 1.33,
+    "cut": 0
+   },
+   "alerts": [],
+   "admit_turn1_lines": false,
+   "going_second_candidate": true
+  },
+  {
+   "deck": "dogmatika-invoked",
+   "hands_with_lines": 32,
+   "best_line_acts": 3.72,
+   "best_line_field_interruptions": 1.84,
+   "first": {
+    "deck": "dogmatika-invoked",
+    "hands": 6,
+    "policy_end_board": 4.17,
+    "expert_end_board": 5.67,
+    "policy_decisions": 21,
+    "ge_expert": 0.0,
+    "best_of_k_end_board": 5.33,
+    "best_of_k_ge_expert": 0.67,
+    "expert_lines": 6,
+    "stuck": 0.0
+   },
+   "second_p": {
+    "lp_lost": 4017,
+    "lp_gained": 0,
+    "kill": 0.083,
+    "field": 5.67,
+    "our_field_left": 2.17,
+    "cut": 0
+   },
+   "second_sample_kill": 0.0,
+   "second_best_of_k": {
+    "lp_lost": 3854,
+    "lp_gained": 0,
+    "kill": 0.0,
+    "field": 5.17,
+    "our_field_left": 2,
+    "cut": 0
+   },
+   "alerts": [],
+   "admit_turn1_lines": false,
+   "going_second_candidate": false
+  },
+  {
+   "deck": "doomz-meta1",
+   "hands_with_lines": 18,
+   "best_line_acts": 4.17,
+   "best_line_field_interruptions": 0.83,
+   "first": {
+    "deck": "doomz-meta1",
+    "hands": 6,
+    "policy_end_board": 1.83,
+    "expert_end_board": 3.5,
+    "policy_decisions": 24,
+    "ge_expert": 0.17,
+    "best_of_k_end_board": 3.33,
+    "best_of_k_ge_expert": 0.5,
+    "expert_lines": 6,
+    "stuck": 0.0
+   },
+   "second_p": {
+    "lp_lost": 4042,
+    "lp_gained": 0,
+    "kill": 0.0,
+    "field": 4.17,
+    "our_field_left": 1.33,
+    "cut": 0
+   },
+   "second_sample_kill": 0.021,
+   "second_best_of_k": {
+    "lp_lost": 4117,
+    "lp_gained": 0,
+    "kill": 0.083,
+    "field": 4,
+    "our_field_left": 1.5,
+    "cut": 0
+   },
+   "alerts": [],
+   "admit_turn1_lines": true,
+   "going_second_candidate": false
+  },
+  {
+   "deck": "doomz-meta2",
+   "hands_with_lines": 13,
+   "best_line_acts": 3,
+   "best_line_field_interruptions": 1,
+   "first": {
+    "deck": "doomz-meta2",
+    "hands": 6,
+    "policy_end_board": 2,
+    "expert_end_board": 3.17,
+    "policy_decisions": 25.7,
+    "ge_expert": 0.17,
+    "best_of_k_end_board": 2.67,
+    "best_of_k_ge_expert": 0.33,
+    "expert_lines": 6,
+    "stuck": 0.0
+   },
+   "second_p": {
+    "lp_lost": 3167,
+    "lp_gained": 0,
+    "kill": 0.083,
+    "field": 4.25,
+    "our_field_left": 1.42,
+    "cut": 0
+   },
+   "second_sample_kill": 0.042,
+   "second_best_of_k": {
+    "lp_lost": 5042,
+    "lp_gained": 0,
+    "kill": 0.167,
+    "field": 4.67,
+    "our_field_left": 1.25,
+    "cut": 0
+   },
+   "alerts": [],
+   "admit_turn1_lines": false,
+   "going_second_candidate": false
+  },
+  {
+   "deck": "dracotail",
+   "hands_with_lines": 31,
+   "best_line_acts": 4.84,
+   "best_line_field_interruptions": 2.19,
+   "first": {
+    "deck": "dracotail",
+    "hands": 6,
+    "policy_end_board": 1.67,
+    "expert_end_board": 5.83,
+    "policy_decisions": 24.3,
+    "ge_expert": 0.17,
+    "best_of_k_end_board": 2.67,
+    "best_of_k_ge_expert": 0.33,
+    "expert_lines": 6,
+    "stuck": 0.0
+   },
+   "second_p": {
+    "lp_lost": 3883,
+    "lp_gained": 0,
+    "kill": 0.0,
+    "field": 5.17,
+    "our_field_left": 1.83,
+    "cut": 0
+   },
+   "second_sample_kill": 0.0,
+   "second_best_of_k": {
+    "lp_lost": 4700,
+    "lp_gained": 0,
+    "kill": 0.0,
+    "field": 5,
+    "our_field_left": 1.83,
+    "cut": 0
+   },
+   "alerts": [],
+   "admit_turn1_lines": true,
+   "going_second_candidate": false
+  },
+  {
+   "deck": "dracotail-despia-branded-meta1",
+   "hands_with_lines": 11,
+   "best_line_acts": 3.55,
+   "best_line_field_interruptions": 1,
+   "first": {
+    "deck": "dracotail-despia-branded-meta1",
+    "hands": 6,
+    "policy_end_board": 1.5,
+    "expert_end_board": 3.67,
+    "policy_decisions": 31.7,
+    "ge_expert": 0.33,
+    "best_of_k_end_board": 3.67,
+    "best_of_k_ge_expert": 0.67,
+    "expert_lines": 6,
+    "stuck": 0.0
+   },
+   "second_p": {
+    "lp_lost": 5150,
+    "lp_gained": 0,
+    "kill": 0.167,
+    "field": 4.67,
+    "our_field_left": 2,
+    "cut": 0
+   },
+   "second_sample_kill": 0.188,
+   "second_best_of_k": {
+    "lp_lost": 7433,
+    "lp_gained": 0,
+    "kill": 0.5,
+    "field": 4.75,
+    "our_field_left": 2,
+    "cut": 0
+   },
+   "alerts": [],
+   "admit_turn1_lines": false,
+   "going_second_candidate": false
+  },
+  {
+   "deck": "dragon-link",
+   "hands_with_lines": 36,
+   "best_line_acts": 5.06,
+   "best_line_field_interruptions": 1.64,
+   "first": {
+    "deck": "dragon-link",
+    "hands": 6,
+    "policy_end_board": 4.17,
+    "expert_end_board": 5.17,
+    "policy_decisions": 27.7,
+    "ge_expert": 0.5,
+    "best_of_k_end_board": 5.33,
+    "best_of_k_ge_expert": 0.83,
+    "expert_lines": 6,
+    "stuck": 0.0
+   },
+   "second_p": {
+    "lp_lost": 1496,
+    "lp_gained": 0,
+    "kill": 0.0,
+    "field": 3.67,
+    "our_field_left": 2.83,
+    "cut": 0
+   },
+   "second_sample_kill": 0.0,
+   "second_best_of_k": {
+    "lp_lost": 2646,
+    "lp_gained": 0,
+    "kill": 0.0,
+    "field": 2.92,
+    "our_field_left": 2.5,
+    "cut": 0
+   },
+   "alerts": [],
+   "admit_turn1_lines": true,
+   "going_second_candidate": false
+  },
+  {
+   "deck": "dragon-rulers",
+   "hands_with_lines": 17,
+   "best_line_acts": 4,
+   "best_line_field_interruptions": 0.06,
+   "first": {
+    "deck": "dragon-rulers",
+    "hands": 6,
+    "policy_end_board": 1.83,
+    "expert_end_board": 3.33,
+    "policy_decisions": 28,
+    "ge_expert": 0.33,
+    "best_of_k_end_board": 2.17,
+    "best_of_k_ge_expert": 0.33,
+    "expert_lines": 6,
+    "stuck": 0.0
+   },
+   "second_p": {
+    "lp_lost": 2158,
+    "lp_gained": 0,
+    "kill": 0.0,
+    "field": 2.83,
+    "our_field_left": 2.25,
+    "cut": 0
+   },
+   "second_sample_kill": 0.0,
+   "second_best_of_k": {
+    "lp_lost": 3025,
+    "lp_gained": 0,
+    "kill": 0.0,
+    "field": 3.17,
+    "our_field_left": 2.25,
+    "cut": 0
+   },
+   "alerts": [],
+   "admit_turn1_lines": true,
+   "going_second_candidate": false
+  },
+  {
+   "deck": "drytron",
+   "hands_with_lines": 33,
+   "best_line_acts": 6.36,
+   "best_line_field_interruptions": 1.64,
+   "first": {
+    "deck": "drytron",
+    "hands": 6,
+    "policy_end_board": 2.83,
+    "expert_end_board": 3.33,
+    "policy_decisions": 32.5,
+    "ge_expert": 0.33,
+    "best_of_k_end_board": 4.5,
+    "best_of_k_ge_expert": 1.0,
+    "expert_lines": 6,
+    "stuck": 0.0
+   },
+   "second_p": {
+    "lp_lost": 1442,
+    "lp_gained": 0,
+    "kill": 0.0,
+    "field": 1.75,
+    "our_field_left": 1.92,
+    "cut": 0
+   },
+   "second_sample_kill": 0.0,
+   "second_best_of_k": {
+    "lp_lost": 1642,
+    "lp_gained": 0,
+    "kill": 0.0,
+    "field": 2.33,
+    "our_field_left": 2.33,
+    "cut": 0
+   },
+   "alerts": [],
+   "admit_turn1_lines": true,
+   "going_second_candidate": false
+  },
+  {
+   "deck": "earthbound",
+   "hands_with_lines": 20,
+   "best_line_acts": 2.4,
+   "best_line_field_interruptions": 0.8,
+   "first": {
+    "deck": "earthbound",
+    "hands": 6,
+    "policy_end_board": 3,
+    "expert_end_board": 4.83,
+    "policy_decisions": 21.5,
+    "ge_expert": 0.33,
+    "best_of_k_end_board": 3.5,
+    "best_of_k_ge_expert": 0.67,
+    "expert_lines": 6,
+    "stuck": 0.0
+   },
+   "second_p": {
+    "lp_lost": 754,
+    "lp_gained": 0,
+    "kill": 0.0,
+    "field": 3.17,
+    "our_field_left": 3,
+    "cut": 0
+   },
+   "second_sample_kill": 0.0,
+   "second_best_of_k": {
+    "lp_lost": 1929,
+    "lp_gained": 0,
+    "kill": 0.0,
+    "field": 3.25,
+    "our_field_left": 2.58,
+    "cut": 0
+   },
+   "alerts": [],
+   "admit_turn1_lines": false,
+   "going_second_candidate": false
+  },
+  {
+   "deck": "eldlich",
+   "hands_with_lines": 39,
+   "best_line_acts": 0.85,
+   "best_line_field_interruptions": 2.15,
+   "first": {
+    "deck": "eldlich",
+    "hands": 6,
+    "policy_end_board": 1.67,
+    "expert_end_board": 5.67,
+    "policy_decisions": 15.7,
+    "ge_expert": 0.0,
+    "best_of_k_end_board": 1.67,
+    "best_of_k_ge_expert": 0.0,
+    "expert_lines": 6,
+    "stuck": 0.0
+   },
+   "second_p": {
+    "lp_lost": 2375,
+    "lp_gained": 0,
+    "kill": 0.083,
+    "field": 4.33,
+    "our_field_left": 2.25,
+    "cut": 0
+   },
+   "second_sample_kill": 0.0,
+   "second_best_of_k": {
+    "lp_lost": 2008,
+    "lp_gained": 0,
+    "kill": 0.0,
+    "field": 4.5,
+    "our_field_left": 2.17,
+    "cut": 0
+   },
+   "alerts": [],
+   "admit_turn1_lines": false,
+   "going_second_candidate": false
+  },
+  {
+   "deck": "elfnote",
+   "hands_with_lines": 28,
+   "best_line_acts": 6.79,
+   "best_line_field_interruptions": 0.86,
+   "first": {
+    "deck": "elfnote",
+    "hands": 6,
+    "policy_end_board": 0.83,
+    "expert_end_board": 5.33,
+    "policy_decisions": 37.3,
+    "ge_expert": 0.17,
+    "best_of_k_end_board": 4,
+    "best_of_k_ge_expert": 0.5,
+    "expert_lines": 6,
+    "stuck": 0.0
+   },
+   "second_p": {
+    "lp_lost": 3708,
+    "lp_gained": 0,
+    "kill": 0.083,
+    "field": 4.42,
+    "our_field_left": 1.33,
+    "cut": 0
+   },
+   "second_sample_kill": 0.125,
+   "second_best_of_k": {
+    "lp_lost": 5725,
+    "lp_gained": 0,
+    "kill": 0.25,
+    "field": 5,
+    "our_field_left": 2.08,
+    "cut": 0
+   },
+   "alerts": [],
+   "admit_turn1_lines": true,
+   "going_second_candidate": false
+  },
+  {
+   "deck": "elfnote-meta1",
+   "hands_with_lines": 22,
+   "best_line_acts": 5.55,
+   "best_line_field_interruptions": 1.05,
+   "first": {
+    "deck": "elfnote-meta1",
+    "hands": 6,
+    "policy_end_board": 1.33,
+    "expert_end_board": 4.33,
+    "policy_decisions": 29.5,
+    "ge_expert": 0.17,
+    "best_of_k_end_board": 3.33,
+    "best_of_k_ge_expert": 0.33,
+    "expert_lines": 6,
+    "stuck": 0.0
+   },
+   "second_p": {
+    "lp_lost": 3708,
+    "lp_gained": 0,
+    "kill": 0.083,
+    "field": 4.42,
+    "our_field_left": 1.33,
+    "cut": 0
+   },
+   "second_sample_kill": 0.146,
+   "second_best_of_k": {
+    "lp_lost": 6092,
+    "lp_gained": 0,
+    "kill": 0.333,
+    "field": 5.17,
+    "our_field_left": 1.75,
+    "cut": 0
+   },
+   "alerts": [],
+   "admit_turn1_lines": true,
+   "going_second_candidate": false
+  },
+  {
+   "deck": "elfnote-meta2",
+   "hands_with_lines": 17,
+   "best_line_acts": 4.53,
+   "best_line_field_interruptions": 0.65,
+   "first": {
+    "deck": "elfnote-meta2",
+    "hands": 6,
+    "policy_end_board": 0,
+    "expert_end_board": 4.33,
+    "policy_decisions": 35.2,
+    "ge_expert": 0.0,
+    "best_of_k_end_board": 1.5,
+    "best_of_k_ge_expert": 0.0,
+    "expert_lines": 6,
+    "stuck": 0.0
+   },
+   "second_p": {
+    "lp_lost": 5208,
+    "lp_gained": 0,
+    "kill": 0.167,
+    "field": 4.25,
+    "our_field_left": 1.92,
+    "cut": 0
+   },
+   "second_sample_kill": 0.208,
+   "second_best_of_k": {
+    "lp_lost": 6375,
+    "lp_gained": 0,
+    "kill": 0.5,
+    "field": 4.92,
+    "our_field_left": 2,
+    "cut": 0
+   },
+   "alerts": [],
+   "admit_turn1_lines": true,
+   "going_second_candidate": false
+  },
+  {
+   "deck": "elfnote-mitsurugi-synchron-meta1",
+   "hands_with_lines": 27,
+   "best_line_acts": 4.15,
+   "best_line_field_interruptions": 1.15,
+   "first": {
+    "deck": "elfnote-mitsurugi-synchron-meta1",
+    "hands": 6,
+    "policy_end_board": 1.67,
+    "expert_end_board": 3.83,
+    "policy_decisions": 33,
+    "ge_expert": 0.33,
+    "best_of_k_end_board": 2.83,
+    "best_of_k_ge_expert": 0.5,
+    "expert_lines": 6,
+    "stuck": 0.0
+   },
+   "second_p": {
+    "lp_lost": 4600,
+    "lp_gained": 0,
+    "kill": 0.25,
+    "field": 4.42,
+    "our_field_left": 2.17,
+    "cut": 0
+   },
+   "second_sample_kill": 0.042,
+   "second_best_of_k": {
+    "lp_lost": 4796,
+    "lp_gained": 0,
+    "kill": 0.083,
+    "field": 4.25,
+    "our_field_left": 2,
+    "cut": 0
+   },
+   "alerts": [],
+   "admit_turn1_lines": true,
+   "going_second_candidate": true
+  },
+  {
+   "deck": "evilswarm",
+   "hands_with_lines": 20,
+   "best_line_acts": 2.9,
+   "best_line_field_interruptions": 1.4,
+   "first": {
+    "deck": "evilswarm",
+    "hands": 6,
+    "policy_end_board": 0.67,
+    "expert_end_board": 4.33,
+    "policy_decisions": 14.2,
+    "ge_expert": 0.0,
+    "best_of_k_end_board": 1.67,
+    "best_of_k_ge_expert": 0.0,
+    "expert_lines": 6,
+    "stuck": 0.0
+   },
+   "second_p": {
+    "lp_lost": 233,
+    "lp_gained": 0,
+    "kill": 0.0,
+    "field": 3.92,
+    "our_field_left": 2.75,
+    "cut": 0
+   },
+   "second_sample_kill": 0.0,
+   "second_best_of_k": {
+    "lp_lost": 496,
+    "lp_gained": 0,
+    "kill": 0.0,
+    "field": 3.5,
+    "our_field_left": 2.25,
+    "cut": 0
+   },
+   "alerts": [],
+   "admit_turn1_lines": false,
+   "going_second_candidate": false
+  },
+  {
+   "deck": "exodia",
+   "hands_with_lines": 40,
+   "best_line_acts": 2.62,
+   "best_line_field_interruptions": 0.2,
+   "first": {
+    "deck": "exodia",
+    "hands": 6,
+    "policy_end_board": 1.5,
+    "expert_end_board": 3.67,
+    "policy_decisions": 10.5,
+    "ge_expert": 0.33,
+    "best_of_k_end_board": 3,
+    "best_of_k_ge_expert": 0.33,
+    "expert_lines": 6,
+    "stuck": 0.0
+   },
+   "second_p": {
+    "lp_lost": 33,
+    "lp_gained": 0,
+    "kill": 0.0,
+    "field": 1.83,
+    "our_field_left": 3.42,
+    "cut": 0
+   },
+   "second_sample_kill": 0.0,
+   "second_best_of_k": {
+    "lp_lost": 0,
+    "lp_gained": 83,
+    "kill": 0.0,
+    "field": 2.42,
+    "our_field_left": 3.5,
+    "cut": 0
+   },
+   "alerts": [],
+   "admit_turn1_lines": false,
+   "going_second_candidate": false
+  },
+  {
+   "deck": "exosister-meta1",
+   "hands_with_lines": 18,
+   "best_line_acts": 6.39,
+   "best_line_field_interruptions": 1.89,
+   "first": {
+    "deck": "exosister-meta1",
+    "hands": 6,
+    "policy_end_board": 0.83,
+    "expert_end_board": 4.33,
+    "policy_decisions": 31.2,
+    "ge_expert": 0.17,
+    "best_of_k_end_board": 4.67,
+    "best_of_k_ge_expert": 0.83,
+    "expert_lines": 6,
+    "stuck": 0.0
+   },
+   "second_p": {
+    "lp_lost": 3817,
+    "lp_gained": 0,
+    "kill": 0.083,
+    "field": 3.17,
+    "our_field_left": 1.75,
+    "cut": 0
+   },
+   "second_sample_kill": 0.021,
+   "second_best_of_k": {
+    "lp_lost": 4242,
+    "lp_gained": 0,
+    "kill": 0.083,
+    "field": 3.42,
+    "our_field_left": 1.33,
+    "cut": 0
+   },
+   "alerts": [],
+   "admit_turn1_lines": true,
+   "going_second_candidate": false
+  },
+  {
+   "deck": "fiendsmith-elfnote-meta1",
+   "hands_with_lines": 14,
+   "best_line_acts": 8.64,
+   "best_line_field_interruptions": 0.71,
+   "first": {
+    "deck": "fiendsmith-elfnote-meta1",
+    "hands": 6,
+    "policy_end_board": 0.33,
+    "expert_end_board": 5.17,
+    "policy_decisions": 29.7,
+    "ge_expert": 0.0,
+    "best_of_k_end_board": 1.67,
+    "best_of_k_ge_expert": 0.0,
+    "expert_lines": 6,
+    "stuck": 0.0
+   },
+   "second_p": {
+    "lp_lost": 3842,
+    "lp_gained": 0,
+    "kill": 0.25,
+    "field": 3.5,
+    "our_field_left": 2.17,
+    "cut": 0
+   },
+   "second_sample_kill": 0.083,
+   "second_best_of_k": {
+    "lp_lost": 4875,
+    "lp_gained": 0,
+    "kill": 0.25,
+    "field": 3.5,
+    "our_field_left": 2.08,
+    "cut": 0
+   },
+   "alerts": [],
+   "admit_turn1_lines": true,
+   "going_second_candidate": true
+  },
+  {
+   "deck": "fiendsmith-elfnote-meta2",
+   "hands_with_lines": 16,
+   "best_line_acts": 7.5,
+   "best_line_field_interruptions": 1.25,
+   "first": {
+    "deck": "fiendsmith-elfnote-meta2",
+    "hands": 6,
+    "policy_end_board": 0.83,
+    "expert_end_board": 5.33,
+    "policy_decisions": 45.2,
+    "ge_expert": 0.0,
+    "best_of_k_end_board": 2.17,
+    "best_of_k_ge_expert": 0.17,
+    "expert_lines": 6,
+    "stuck": 0.0
+   },
+   "second_p": {
+    "lp_lost": 4675,
+    "lp_gained": 0,
+    "kill": 0.25,
+    "field": 5.08,
+    "our_field_left": 2.25,
+    "cut": 0
+   },
+   "second_sample_kill": 0.083,
+   "second_best_of_k": {
+    "lp_lost": 5208,
+    "lp_gained": 0,
+    "kill": 0.25,
+    "field": 5,
+    "our_field_left": 2.42,
+    "cut": 0
+   },
+   "alerts": [],
+   "admit_turn1_lines": true,
+   "going_second_candidate": true
+  },
+  {
+   "deck": "fiendsmith-light-and-darkness-ritual-meta1",
+   "hands_with_lines": 23,
+   "best_line_acts": 8.26,
+   "best_line_field_interruptions": 1.22,
+   "first": {
+    "deck": "fiendsmith-light-and-darkness-ritual-meta1",
+    "hands": 6,
+    "policy_end_board": 0.67,
+    "expert_end_board": 4.83,
+    "policy_decisions": 36.7,
+    "ge_expert": 0.0,
+    "best_of_k_end_board": 1.67,
+    "best_of_k_ge_expert": 0.0,
+    "expert_lines": 6,
+    "stuck": 0.0
+   },
+   "second_p": {
+    "lp_lost": 4758,
+    "lp_gained": 0,
+    "kill": 0.083,
+    "field": 3.75,
+    "our_field_left": 1.42,
+    "cut": 0
+   },
+   "second_sample_kill": 0.125,
+   "second_best_of_k": {
+    "lp_lost": 6558,
+    "lp_gained": 0,
+    "kill": 0.333,
+    "field": 4.83,
+    "our_field_left": 1.25,
+    "cut": 0
+   },
+   "alerts": [],
+   "admit_turn1_lines": true,
+   "going_second_candidate": false
+  },
+  {
+   "deck": "fiendsmith-sacred-beasts-meta1",
+   "hands_with_lines": 21,
+   "best_line_acts": 7.81,
+   "best_line_field_interruptions": 1.43,
+   "first": {
+    "deck": "fiendsmith-sacred-beasts-meta1",
+    "hands": 6,
+    "policy_end_board": 3.83,
+    "expert_end_board": 5.17,
+    "policy_decisions": 28.5,
+    "ge_expert": 0.33,
+    "best_of_k_end_board": 5.67,
+    "best_of_k_ge_expert": 0.67,
+    "expert_lines": 6,
+    "stuck": 0.0
+   },
+   "second_p": {
+    "lp_lost": 6600,
+    "lp_gained": 0,
+    "kill": 0.5,
+    "field": 4.25,
+    "our_field_left": 2.17,
+    "cut": 0
+   },
+   "second_sample_kill": 0.271,
+   "second_best_of_k": {
+    "lp_lost": 8292,
+    "lp_gained": 0,
+    "kill": 0.833,
+    "field": 4.58,
+    "our_field_left": 2.08,
+    "cut": 0
+   },
+   "alerts": [],
+   "admit_turn1_lines": true,
+   "going_second_candidate": true
+  },
+  {
+   "deck": "fire-fist",
+   "hands_with_lines": 20,
+   "best_line_acts": 1.8,
+   "best_line_field_interruptions": 1.75,
+   "first": {
+    "deck": "fire-fist",
+    "hands": 6,
+    "policy_end_board": 0.67,
+    "expert_end_board": 4.67,
+    "policy_decisions": 14.2,
+    "ge_expert": 0.17,
+    "best_of_k_end_board": 3.5,
+    "best_of_k_ge_expert": 0.33,
+    "expert_lines": 6,
+    "stuck": 0.0
+   },
+   "second_p": {
+    "lp_lost": 508,
+    "lp_gained": 0,
+    "kill": 0.0,
+    "field": 3.83,
+    "our_field_left": 2.75,
+    "cut": 0
+   },
+   "second_sample_kill": 0.0,
+   "second_best_of_k": {
+    "lp_lost": 975,
+    "lp_gained": 0,
+    "kill": 0.0,
+    "field": 3.58,
+    "our_field_left": 2.67,
+    "cut": 0
+   },
+   "alerts": [],
+   "admit_turn1_lines": false,
+   "going_second_candidate": false
+  },
+  {
+   "deck": "fire-king",
+   "hands_with_lines": 41,
+   "best_line_acts": 3.17,
+   "best_line_field_interruptions": 0.98,
+   "first": {
+    "deck": "fire-king",
+    "hands": 6,
+    "policy_end_board": 6.17,
+    "expert_end_board": 6.33,
+    "policy_decisions": 28.8,
+    "ge_expert": 0.83,
+    "best_of_k_end_board": 6.67,
+    "best_of_k_ge_expert": 1.0,
+    "expert_lines": 6,
+    "stuck": 0.0
+   },
+   "second_p": {
+    "lp_lost": 1129,
+    "lp_gained": 0,
+    "kill": 0.0,
+    "field": 4.42,
+    "our_field_left": 2.58,
+    "cut": 0
+   },
+   "second_sample_kill": 0.0,
+   "second_best_of_k": {
+    "lp_lost": 1675,
+    "lp_gained": 0,
+    "kill": 0.0,
+    "field": 4.17,
+    "our_field_left": 2.33,
+    "cut": 0
+   },
+   "alerts": [],
+   "admit_turn1_lines": true,
+   "going_second_candidate": true
+  },
+  {
+   "deck": "firewall-cyberse-ygopd",
+   "hands_with_lines": 0,
+   "best_line_acts": null,
+   "best_line_field_interruptions": null,
+   "first": null,
+   "second_p": {
+    "lp_lost": 1100,
+    "lp_gained": 0,
+    "kill": 0.0,
+    "field": 3.75,
+    "our_field_left": 2.25,
+    "cut": 0
+   },
+   "second_sample_kill": 0.0,
+   "second_best_of_k": {
+    "lp_lost": 1817,
+    "lp_gained": 0,
+    "kill": 0.0,
+    "field": 3.42,
+    "our_field_left": 1.92,
+    "cut": 0
+   },
+   "alerts": [],
+   "admit_turn1_lines": false,
+   "going_second_candidate": true
+  },
+  {
+   "deck": "floowandereeze",
+   "hands_with_lines": 32,
+   "best_line_acts": 3.62,
+   "best_line_field_interruptions": 1.81,
+   "first": {
+    "deck": "floowandereeze",
+    "hands": 6,
+    "policy_end_board": 4.17,
+    "expert_end_board": 4.33,
+    "policy_decisions": 20.2,
+    "ge_expert": 0.67,
+    "best_of_k_end_board": 4.67,
+    "best_of_k_ge_expert": 1.0,
+    "expert_lines": 6,
+    "stuck": 0.0
+   },
+   "second_p": {
+    "lp_lost": 1715,
+    "lp_gained": 0,
+    "kill": 0.0,
+    "field": 5.08,
+    "our_field_left": 2.83,
+    "cut": 0
+   },
+   "second_sample_kill": 0.0,
+   "second_best_of_k": {
+    "lp_lost": 2223,
+    "lp_gained": 0,
+    "kill": 0.0,
+    "field": 5.17,
+    "our_field_left": 2.58,
+    "cut": 0
+   },
+   "alerts": [],
+   "admit_turn1_lines": false,
+   "going_second_candidate": false
+  },
+  {
+   "deck": "frog-ftk",
+   "hands_with_lines": 19,
+   "best_line_acts": 2.68,
+   "best_line_field_interruptions": 0.21,
+   "first": {
+    "deck": "frog-ftk",
+    "hands": 6,
+    "policy_end_board": 0,
+    "expert_end_board": 3.5,
+    "policy_decisions": 12.5,
+    "ge_expert": 0.0,
+    "best_of_k_end_board": 1.5,
+    "best_of_k_ge_expert": 0.17,
+    "expert_lines": 6,
+    "stuck": 0.0
+   },
+   "second_p": {
+    "lp_lost": 0,
+    "lp_gained": 833,
+    "kill": 0.0,
+    "field": 1.92,
+    "our_field_left": 2.92,
+    "cut": 0
+   },
+   "second_sample_kill": 0.0,
+   "second_best_of_k": {
+    "lp_lost": 0,
+    "lp_gained": 667,
+    "kill": 0.0,
+    "field": 1.92,
+    "our_field_left": 3,
+    "cut": 0
+   },
+   "alerts": [],
+   "admit_turn1_lines": false,
+   "going_second_candidate": false
+  },
+  {
+   "deck": "galaxy-eyes",
+   "hands_with_lines": 16,
+   "best_line_acts": 3.38,
+   "best_line_field_interruptions": 1.81,
+   "first": {
+    "deck": "galaxy-eyes",
+    "hands": 6,
+    "policy_end_board": 4.33,
+    "expert_end_board": 4.83,
+    "policy_decisions": 16.3,
+    "ge_expert": 0.67,
+    "best_of_k_end_board": 5.17,
+    "best_of_k_ge_expert": 0.67,
+    "expert_lines": 6,
+    "stuck": 0.0
+   },
+   "second_p": {
+    "lp_lost": 1150,
+    "lp_gained": 0,
+    "kill": 0.0,
+    "field": 3.67,
+    "our_field_left": 2.67,
+    "cut": 0
+   },
+   "second_sample_kill": 0.0,
+   "second_best_of_k": {
+    "lp_lost": 2183,
+    "lp_gained": 0,
+    "kill": 0.0,
+    "field": 3.33,
+    "our_field_left": 2.08,
+    "cut": 0
+   },
+   "alerts": [],
+   "admit_turn1_lines": true,
+   "going_second_candidate": true
+  },
+  {
+   "deck": "geargia",
+   "hands_with_lines": 17,
+   "best_line_acts": 1.71,
+   "best_line_field_interruptions": 1.41,
+   "first": {
+    "deck": "geargia",
+    "hands": 6,
+    "policy_end_board": 0.5,
+    "expert_end_board": 4.5,
+    "policy_decisions": 11.7,
+    "ge_expert": 0.0,
+    "best_of_k_end_board": 1.67,
+    "best_of_k_ge_expert": 0.0,
+    "expert_lines": 6,
+    "stuck": 0.0
+   },
+   "second_p": {
+    "lp_lost": 517,
+    "lp_gained": 0,
+    "kill": 0.0,
+    "field": 3,
+    "our_field_left": 2.42,
+    "cut": 0
+   },
+   "second_sample_kill": 0.0,
+   "second_best_of_k": {
+    "lp_lost": 925,
+    "lp_gained": 0,
+    "kill": 0.0,
+    "field": 3,
+    "our_field_left": 2.17,
+    "cut": 0
+   },
+   "alerts": [],
+   "admit_turn1_lines": false,
+   "going_second_candidate": false
+  },
+  {
+   "deck": "ghoti",
+   "hands_with_lines": 14,
+   "best_line_acts": 2.93,
+   "best_line_field_interruptions": 1.07,
+   "first": {
+    "deck": "ghoti",
+    "hands": 6,
+    "policy_end_board": 2.67,
+    "expert_end_board": 3,
+    "policy_decisions": 16,
+    "ge_expert": 0.67,
+    "best_of_k_end_board": 2.83,
+    "best_of_k_ge_expert": 0.83,
+    "expert_lines": 6,
+    "stuck": 0.0
+   },
+   "second_p": {
+    "lp_lost": 1433,
+    "lp_gained": 0,
+    "kill": 0.0,
+    "field": 2.92,
+    "our_field_left": 2.75,
+    "cut": 0
+   },
+   "second_sample_kill": 0.0,
+   "second_best_of_k": {
+    "lp_lost": 2062,
+    "lp_gained": 0,
+    "kill": 0.0,
+    "field": 3,
+    "our_field_left": 2.42,
+    "cut": 0
+   },
+   "alerts": [],
+   "admit_turn1_lines": false,
+   "going_second_candidate": false
+  },
+  {
+   "deck": "gimmick-puppet",
+   "hands_with_lines": 19,
+   "best_line_acts": 2.37,
+   "best_line_field_interruptions": 0.63,
+   "first": {
+    "deck": "gimmick-puppet",
+    "hands": 6,
+    "policy_end_board": 2.83,
+    "expert_end_board": 4.83,
+    "policy_decisions": 24.3,
+    "ge_expert": 0.33,
+    "best_of_k_end_board": 3.67,
+    "best_of_k_ge_expert": 0.5,
+    "expert_lines": 6,
+    "stuck": 0.0
+   },
+   "second_p": {
+    "lp_lost": 875,
+    "lp_gained": 0,
+    "kill": 0.0,
+    "field": 2.58,
+    "our_field_left": 3,
+    "cut": 0
+   },
+   "second_sample_kill": 0.0,
+   "second_best_of_k": {
+    "lp_lost": 1388,
+    "lp_gained": 0,
+    "kill": 0.0,
+    "field": 2.67,
+    "our_field_left": 3,
+    "cut": 0
+   },
+   "alerts": [],
+   "admit_turn1_lines": false,
+   "going_second_candidate": false
+  },
+  {
+   "deck": "gladiator-beast",
+   "hands_with_lines": 38,
+   "best_line_acts": 1.87,
+   "best_line_field_interruptions": 1.87,
+   "first": {
+    "deck": "gladiator-beast",
+    "hands": 6,
+    "policy_end_board": 1,
+    "expert_end_board": 4.67,
+    "policy_decisions": 9.5,
+    "ge_expert": 0.0,
+    "best_of_k_end_board": 2.5,
+    "best_of_k_ge_expert": 0.17,
+    "expert_lines": 6,
+    "stuck": 0.0
+   },
+   "second_p": {
+    "lp_lost": 0,
+    "lp_gained": 0,
+    "kill": 0.0,
+    "field": 2.33,
+    "our_field_left": 2.58,
+    "cut": 0
+   },
+   "second_sample_kill": 0.0,
+   "second_best_of_k": {
+    "lp_lost": 133,
+    "lp_gained": 0,
+    "kill": 0.0,
+    "field": 2.42,
+    "our_field_left": 2.5,
+    "cut": 0
+   },
+   "alerts": [],
+   "admit_turn1_lines": false,
+   "going_second_candidate": false
+  },
+  {
+   "deck": "goat-control",
+   "hands_with_lines": 20,
+   "best_line_acts": 0.75,
+   "best_line_field_interruptions": 1,
+   "first": {
+    "deck": "goat-control",
+    "hands": 6,
+    "policy_end_board": 4.33,
+    "expert_end_board": 4.5,
+    "policy_decisions": 9.7,
+    "ge_expert": 0.5,
+    "best_of_k_end_board": 5,
+    "best_of_k_ge_expert": 0.5,
+    "expert_lines": 6,
+    "stuck": 0.0
+   },
+   "second_p": {
+    "lp_lost": 1042,
+    "lp_gained": 0,
+    "kill": 0.0,
+    "field": 3.58,
+    "our_field_left": 2.42,
+    "cut": 0
+   },
+   "second_sample_kill": 0.0,
+   "second_best_of_k": {
+    "lp_lost": 1117,
+    "lp_gained": 0,
+    "kill": 0.0,
+    "field": 3.83,
+    "our_field_left": 2.58,
+    "cut": 0
+   },
+   "alerts": [],
+   "admit_turn1_lines": false,
+   "going_second_candidate": false
+  },
+  {
+   "deck": "hero",
+   "hands_with_lines": 30,
+   "best_line_acts": 4.83,
+   "best_line_field_interruptions": 0.63,
+   "first": {
+    "deck": "hero",
+    "hands": 6,
+    "policy_end_board": 2.67,
+    "expert_end_board": 4.33,
+    "policy_decisions": 23.3,
+    "ge_expert": 0.33,
+    "best_of_k_end_board": 4.67,
+    "best_of_k_ge_expert": 0.83,
+    "expert_lines": 6,
+    "stuck": 0.0
+   },
+   "second_p": {
+    "lp_lost": 5629,
+    "lp_gained": 0,
+    "kill": 0.417,
+    "field": 3.17,
+    "our_field_left": 2.25,
+    "cut": 0
+   },
+   "second_sample_kill": 0.062,
+   "second_best_of_k": {
+    "lp_lost": 4850,
+    "lp_gained": 0,
+    "kill": 0.167,
+    "field": 3.42,
+    "our_field_left": 2,
+    "cut": 0
+   },
+   "alerts": [],
+   "admit_turn1_lines": true,
+   "going_second_candidate": true
+  },
+  {
+   "deck": "ignister-maliss-meta1",
+   "hands_with_lines": 13,
+   "best_line_acts": 5.23,
+   "best_line_field_interruptions": 2.69,
+   "first": {
+    "deck": "ignister-maliss-meta1",
+    "hands": 6,
+    "policy_end_board": 5.17,
+    "expert_end_board": 6,
+    "policy_decisions": 28.2,
+    "ge_expert": 0.33,
+    "best_of_k_end_board": 5.67,
+    "best_of_k_ge_expert": 0.5,
+    "expert_lines": 6,
+    "stuck": 0.0
+   },
+   "second_p": {
+    "lp_lost": 4575,
+    "lp_gained": 0,
+    "kill": 0.083,
+    "field": 4.42,
+    "our_field_left": 2.08,
+    "cut": 0
+   },
+   "second_sample_kill": 0.167,
+   "second_best_of_k": {
+    "lp_lost": 6025,
+    "lp_gained": 0,
+    "kill": 0.417,
+    "field": 4.42,
+    "our_field_left": 1.75,
+    "cut": 0
+   },
+   "alerts": [],
+   "admit_turn1_lines": true,
+   "going_second_candidate": false
+  },
+  {
+   "deck": "ignister-maliss-meta2",
+   "hands_with_lines": 13,
+   "best_line_acts": 5.38,
+   "best_line_field_interruptions": 3,
+   "first": {
+    "deck": "ignister-maliss-meta2",
+    "hands": 6,
+    "policy_end_board": 2.83,
+    "expert_end_board": 6.33,
+    "policy_decisions": 22,
+    "ge_expert": 0.17,
+    "best_of_k_end_board": 4.33,
+    "best_of_k_ge_expert": 0.17,
+    "expert_lines": 6,
+    "stuck": 0.0
+   },
+   "second_p": {
+    "lp_lost": 3717,
+    "lp_gained": 0,
+    "kill": 0.083,
+    "field": 5.5,
+    "our_field_left": 2,
+    "cut": 0
+   },
+   "second_sample_kill": 0.125,
+   "second_best_of_k": {
+    "lp_lost": 6742,
+    "lp_gained": 0,
+    "kill": 0.333,
+    "field": 4.83,
+    "our_field_left": 1.67,
+    "cut": 0
+   },
+   "alerts": [],
+   "admit_turn1_lines": true,
+   "going_second_candidate": false
+  },
+  {
+   "deck": "infernoid",
+   "hands_with_lines": 37,
+   "best_line_acts": 2.89,
+   "best_line_field_interruptions": 0.57,
+   "first": {
+    "deck": "infernoid",
+    "hands": 6,
+    "policy_end_board": 1.17,
+    "expert_end_board": 3.33,
+    "policy_decisions": 14.8,
+    "ge_expert": 0.0,
+    "best_of_k_end_board": 2.33,
+    "best_of_k_ge_expert": 0.67,
+    "expert_lines": 6,
+    "stuck": 0.0
+   },
+   "second_p": {
+    "lp_lost": 1550,
+    "lp_gained": 0,
+    "kill": 0.0,
+    "field": 2.5,
+    "our_field_left": 2.42,
+    "cut": 0
+   },
+   "second_sample_kill": 0.0,
+   "second_best_of_k": {
+    "lp_lost": 1933,
+    "lp_gained": 0,
+    "kill": 0.0,
+    "field": 2.42,
+    "our_field_left": 2,
+    "cut": 0
+   },
+   "alerts": [],
+   "admit_turn1_lines": false,
+   "going_second_candidate": false
+  },
+  {
+   "deck": "invoked-dracotail-meta1",
+   "hands_with_lines": 13,
+   "best_line_acts": 5.62,
+   "best_line_field_interruptions": 1.54,
+   "first": {
+    "deck": "invoked-dracotail-meta1",
+    "hands": 6,
+    "policy_end_board": 2.67,
+    "expert_end_board": 4,
+    "policy_decisions": 28,
+    "ge_expert": 0.67,
+    "best_of_k_end_board": 3.5,
+    "best_of_k_ge_expert": 0.67,
+    "expert_lines": 6,
+    "stuck": 0.0
+   },
+   "second_p": {
+    "lp_lost": 6621,
+    "lp_gained": 0,
+    "kill": 0.583,
+    "field": 5.08,
+    "our_field_left": 1.25,
+    "cut": 0
+   },
+   "second_sample_kill": 0.312,
+   "second_best_of_k": {
+    "lp_lost": 8000,
+    "lp_gained": 0,
+    "kill": 0.75,
+    "field": 5.17,
+    "our_field_left": 1.17,
+    "cut": 0
+   },
+   "alerts": [],
+   "admit_turn1_lines": true,
+   "going_second_candidate": true
+  },
+  {
+   "deck": "invoked-meta1",
+   "hands_with_lines": 13,
+   "best_line_acts": 6.92,
+   "best_line_field_interruptions": 1.62,
+   "first": {
+    "deck": "invoked-meta1",
+    "hands": 6,
+    "policy_end_board": 1.5,
+    "expert_end_board": 4.5,
+    "policy_decisions": 35.5,
+    "ge_expert": 0.0,
+    "best_of_k_end_board": 4.17,
+    "best_of_k_ge_expert": 0.5,
+    "expert_lines": 6,
+    "stuck": 0.0
+   },
+   "second_p": {
+    "lp_lost": 5338,
+    "lp_gained": 0,
+    "kill": 0.167,
+    "field": 4.83,
+    "our_field_left": 1.83,
+    "cut": 0
+   },
+   "second_sample_kill": 0.146,
+   "second_best_of_k": {
+    "lp_lost": 6129,
+    "lp_gained": 0,
+    "kill": 0.333,
+    "field": 4.5,
+    "our_field_left": 1.5,
+    "cut": 0
+   },
+   "alerts": [],
+   "admit_turn1_lines": true,
+   "going_second_candidate": false
+  },
+  {
+   "deck": "invoked-meta2",
+   "hands_with_lines": 14,
+   "best_line_acts": 4.57,
+   "best_line_field_interruptions": 1.14,
+   "first": {
+    "deck": "invoked-meta2",
+    "hands": 6,
+    "policy_end_board": 1.83,
+    "expert_end_board": 4.33,
+    "policy_decisions": 31.2,
+    "ge_expert": 0.17,
+    "best_of_k_end_board": 3.67,
+    "best_of_k_ge_expert": 0.5,
+    "expert_lines": 6,
+    "stuck": 0.0
+   },
+   "second_p": {
+    "lp_lost": 6129,
+    "lp_gained": 0,
+    "kill": 0.167,
+    "field": 3.75,
+    "our_field_left": 1.42,
+    "cut": 0
+   },
+   "second_sample_kill": 0.292,
+   "second_best_of_k": {
+    "lp_lost": 8683,
+    "lp_gained": 0,
+    "kill": 0.75,
+    "field": 4.75,
+    "our_field_left": 1.08,
+    "cut": 0
+   },
+   "alerts": [],
+   "admit_turn1_lines": true,
+   "going_second_candidate": true
+  },
+  {
+   "deck": "inzektor",
+   "hands_with_lines": 20,
+   "best_line_acts": 2.6,
+   "best_line_field_interruptions": 1.65,
+   "first": {
+    "deck": "inzektor",
+    "hands": 6,
+    "policy_end_board": 1.33,
+    "expert_end_board": 3.83,
+    "policy_decisions": 15,
+    "ge_expert": 0.17,
+    "best_of_k_end_board": 3.17,
+    "best_of_k_ge_expert": 0.5,
+    "expert_lines": 6,
+    "stuck": 0.0
+   },
+   "second_p": {
+    "lp_lost": 67,
+    "lp_gained": 0,
+    "kill": 0.0,
+    "field": 2.92,
+    "our_field_left": 2.17,
+    "cut": 0
+   },
+   "second_sample_kill": 0.0,
+   "second_best_of_k": {
+    "lp_lost": 500,
+    "lp_gained": 0,
+    "kill": 0.0,
+    "field": 3.08,
+    "our_field_left": 2,
+    "cut": 0
+   },
+   "alerts": [],
+   "admit_turn1_lines": false,
+   "going_second_candidate": false
+  },
+  {
+   "deck": "kashtira",
+   "hands_with_lines": 31,
+   "best_line_acts": 7.58,
+   "best_line_field_interruptions": 1.29,
+   "first": {
+    "deck": "kashtira",
+    "hands": 6,
+    "policy_end_board": 1,
+    "expert_end_board": 5.83,
+    "policy_decisions": 27.8,
+    "ge_expert": 0.17,
+    "best_of_k_end_board": 4.67,
+    "best_of_k_ge_expert": 0.5,
+    "expert_lines": 6,
+    "stuck": 0.0
+   },
+   "second_p": {
+    "lp_lost": 1425,
+    "lp_gained": 0,
+    "kill": 0.083,
+    "field": 4.25,
+    "our_field_left": 1.92,
+    "cut": 0
+   },
+   "second_sample_kill": 0.042,
+   "second_best_of_k": {
+    "lp_lost": 3738,
+    "lp_gained": 0,
+    "kill": 0.167,
+    "field": 4.42,
+    "our_field_left": 1.67,
+    "cut": 0
+   },
+   "alerts": [],
+   "admit_turn1_lines": true,
+   "going_second_candidate": true
+  },
+  {
+   "deck": "kewl-tune",
+   "hands_with_lines": 19,
+   "best_line_acts": 6,
+   "best_line_field_interruptions": 1.58,
+   "first": {
+    "deck": "kewl-tune",
+    "hands": 6,
+    "policy_end_board": 2.67,
+    "expert_end_board": 3.83,
+    "policy_decisions": 36.8,
+    "ge_expert": 0.5,
+    "best_of_k_end_board": 3.17,
+    "best_of_k_ge_expert": 0.67,
+    "expert_lines": 6,
+    "stuck": 0.0
+   },
+   "second_p": {
+    "lp_lost": 3075,
+    "lp_gained": 0,
+    "kill": 0.083,
+    "field": 1.75,
+    "our_field_left": 1.42,
+    "cut": 0
+   },
+   "second_sample_kill": 0.146,
+   "second_best_of_k": {
+    "lp_lost": 6217,
+    "lp_gained": 0,
+    "kill": 0.333,
+    "field": 2.5,
+    "our_field_left": 1.42,
+    "cut": 0
+   },
+   "alerts": [],
+   "admit_turn1_lines": true,
+   "going_second_candidate": false
+  },
+  {
+   "deck": "kewl-tune-meta1",
+   "hands_with_lines": 12,
+   "best_line_acts": 6.58,
+   "best_line_field_interruptions": 2,
+   "first": {
+    "deck": "kewl-tune-meta1",
+    "hands": 6,
+    "policy_end_board": 2.83,
+    "expert_end_board": 4,
+    "policy_decisions": 29.2,
+    "ge_expert": 0.33,
+    "best_of_k_end_board": 3.67,
+    "best_of_k_ge_expert": 0.67,
+    "expert_lines": 6,
+    "stuck": 0.0
+   },
+   "second_p": {
+    "lp_lost": 5333,
+    "lp_gained": 0,
+    "kill": 0.167,
+    "field": 2.75,
+    "our_field_left": 0.67,
+    "cut": 0
+   },
+   "second_sample_kill": 0.083,
+   "second_best_of_k": {
+    "lp_lost": 6817,
+    "lp_gained": 0,
+    "kill": 0.167,
+    "field": 2.83,
+    "our_field_left": 0.67,
+    "cut": 0
+   },
+   "alerts": [],
+   "admit_turn1_lines": true,
+   "going_second_candidate": false
+  },
+  {
+   "deck": "kozmo",
+   "hands_with_lines": 26,
+   "best_line_acts": 3.58,
+   "best_line_field_interruptions": 1.46,
+   "first": {
+    "deck": "kozmo",
+    "hands": 6,
+    "policy_end_board": 3.33,
+    "expert_end_board": 4.17,
+    "policy_decisions": 14.2,
+    "ge_expert": 0.33,
+    "best_of_k_end_board": 3.67,
+    "best_of_k_ge_expert": 0.5,
+    "expert_lines": 6,
+    "stuck": 0.0
+   },
+   "second_p": {
+    "lp_lost": 1075,
+    "lp_gained": 0,
+    "kill": 0.0,
+    "field": 2.83,
+    "our_field_left": 2.17,
+    "cut": 0
+   },
+   "second_sample_kill": 0.0,
+   "second_best_of_k": {
+    "lp_lost": 1592,
+    "lp_gained": 0,
+    "kill": 0.0,
+    "field": 2.58,
+    "our_field_left": 2,
+    "cut": 0
+   },
+   "alerts": [],
+   "admit_turn1_lines": false,
+   "going_second_candidate": false
+  },
+  {
+   "deck": "labrynth",
+   "hands_with_lines": 30,
+   "best_line_acts": 1.33,
+   "best_line_field_interruptions": 2,
+   "first": {
+    "deck": "labrynth",
+    "hands": 6,
+    "policy_end_board": 0,
+    "expert_end_board": 4.67,
+    "policy_decisions": 12.3,
+    "ge_expert": 0.0,
+    "best_of_k_end_board": 0,
+    "best_of_k_ge_expert": 0.0,
+    "expert_lines": 6,
+    "stuck": 0.0
+   },
+   "second_p": {
+    "lp_lost": 108,
+    "lp_gained": 0,
+    "kill": 0.0,
+    "field": 4.42,
+    "our_field_left": 2.75,
+    "cut": 0
+   },
+   "second_sample_kill": 0.0,
+   "second_best_of_k": {
+    "lp_lost": 975,
+    "lp_gained": 0,
+    "kill": 0.0,
+    "field": 4.42,
+    "our_field_left": 2.42,
+    "cut": 0
+   },
+   "alerts": [],
+   "admit_turn1_lines": false,
+   "going_second_candidate": false
+  },
+  {
+   "deck": "light-and-darkness-ritual-sacred-beasts-meta1",
+   "hands_with_lines": 21,
+   "best_line_acts": 4.76,
+   "best_line_field_interruptions": 1.14,
+   "first": {
+    "deck": "light-and-darkness-ritual-sacred-beasts-meta1",
+    "hands": 6,
+    "policy_end_board": 0.83,
+    "expert_end_board": 4.33,
+    "policy_decisions": 30.3,
+    "ge_expert": 0.17,
+    "best_of_k_end_board": 2.17,
+    "best_of_k_ge_expert": 0.5,
+    "expert_lines": 6,
+    "stuck": 0.0
+   },
+   "second_p": {
+    "lp_lost": 5083,
+    "lp_gained": 0,
+    "kill": 0.5,
+    "field": 4.33,
+    "our_field_left": 1.92,
+    "cut": 0
+   },
+   "second_sample_kill": 0.312,
+   "second_best_of_k": {
+    "lp_lost": 7383,
+    "lp_gained": 0,
+    "kill": 0.5,
+    "field": 5,
+    "our_field_left": 1.75,
+    "cut": 0
+   },
+   "alerts": [],
+   "admit_turn1_lines": true,
+   "going_second_candidate": true
+  },
+  {
+   "deck": "lightsworn",
+   "hands_with_lines": 40,
+   "best_line_acts": 2,
+   "best_line_field_interruptions": 0.75,
+   "first": {
+    "deck": "lightsworn",
+    "hands": 6,
+    "policy_end_board": 1.33,
+    "expert_end_board": 3.17,
+    "policy_decisions": 10.3,
+    "ge_expert": 0.0,
+    "best_of_k_end_board": 2.5,
+    "best_of_k_ge_expert": 0.5,
+    "expert_lines": 6,
+    "stuck": 0.0
+   },
+   "second_p": {
+    "lp_lost": 225,
+    "lp_gained": 0,
+    "kill": 0.0,
+    "field": 2.08,
+    "our_field_left": 1.83,
+    "cut": 0
+   },
+   "second_sample_kill": 0.0,
+   "second_best_of_k": {
+    "lp_lost": 654,
+    "lp_gained": 0,
+    "kill": 0.0,
+    "field": 2.25,
+    "our_field_left": 1.75,
+    "cut": 0
+   },
+   "alerts": [],
+   "admit_turn1_lines": false,
+   "going_second_candidate": false
+  },
+  {
+   "deck": "live-twin",
+   "hands_with_lines": 20,
+   "best_line_acts": 5.8,
+   "best_line_field_interruptions": 1.55,
+   "first": {
+    "deck": "live-twin",
+    "hands": 6,
+    "policy_end_board": 2,
+    "expert_end_board": 4.17,
+    "policy_decisions": 31.7,
+    "ge_expert": 0.33,
+    "best_of_k_end_board": 3.17,
+    "best_of_k_ge_expert": 0.33,
+    "expert_lines": 6,
+    "stuck": 0.0
+   },
+   "second_p": {
+    "lp_lost": 3675,
+    "lp_gained": 0,
+    "kill": 0.0,
+    "field": 2.25,
+    "our_field_left": 1.33,
+    "cut": 0
+   },
+   "second_sample_kill": 0.0,
+   "second_best_of_k": {
+    "lp_lost": 3400,
+    "lp_gained": 0,
+    "kill": 0.0,
+    "field": 2.58,
+    "our_field_left": 1.33,
+    "cut": 0
+   },
+   "alerts": [],
+   "admit_turn1_lines": true,
+   "going_second_candidate": false
+  },
+  {
+   "deck": "lunalight",
+   "hands_with_lines": 39,
+   "best_line_acts": 6.1,
+   "best_line_field_interruptions": 0.56,
+   "first": {
+    "deck": "lunalight",
+    "hands": 6,
+    "policy_end_board": 1.83,
+    "expert_end_board": 3.33,
+    "policy_decisions": 24.8,
+    "ge_expert": 0.33,
+    "best_of_k_end_board": 3.67,
+    "best_of_k_ge_expert": 0.67,
+    "expert_lines": 6,
+    "stuck": 0.0
+   },
+   "second_p": {
+    "lp_lost": 3592,
+    "lp_gained": 167,
+    "kill": 0.0,
+    "field": 3.5,
+    "our_field_left": 2.42,
+    "cut": 0
+   },
+   "second_sample_kill": 0.021,
+   "second_best_of_k": {
+    "lp_lost": 3217,
+    "lp_gained": 0,
+    "kill": 0.083,
+    "field": 3.42,
+    "our_field_left": 2.25,
+    "cut": 0
+   },
+   "alerts": [],
+   "admit_turn1_lines": true,
+   "going_second_candidate": false
+  },
+  {
+   "deck": "lunalight-meta1",
+   "hands_with_lines": 14,
+   "best_line_acts": 9.43,
+   "best_line_field_interruptions": 0.79,
+   "first": {
+    "deck": "lunalight-meta1",
+    "hands": 6,
+    "policy_end_board": 4,
+    "expert_end_board": 4.83,
+    "policy_decisions": 44.5,
+    "ge_expert": 0.67,
+    "best_of_k_end_board": 4.83,
+    "best_of_k_ge_expert": 0.83,
+    "expert_lines": 6,
+    "stuck": 0.0
+   },
+   "second_p": {
+    "lp_lost": 9067,
+    "lp_gained": 0,
+    "kill": 0.833,
+    "field": 4.42,
+    "our_field_left": 2.25,
+    "cut": 0
+   },
+   "second_sample_kill": 0.688,
+   "second_best_of_k": {
+    "lp_lost": 10275,
+    "lp_gained": 0,
+    "kill": 1.0,
+    "field": 4.25,
+    "our_field_left": 2.25,
+    "cut": 0
+   },
+   "alerts": [],
+   "admit_turn1_lines": true,
+   "going_second_candidate": true
+  },
+  {
+   "deck": "lunalight-meta2",
+   "hands_with_lines": 23,
+   "best_line_acts": 7.91,
+   "best_line_field_interruptions": 0.87,
+   "first": {
+    "deck": "lunalight-meta2",
+    "hands": 6,
+    "policy_end_board": 2.67,
+    "expert_end_board": 5.17,
+    "policy_decisions": 42,
+    "ge_expert": 0.5,
+    "best_of_k_end_board": 4.17,
+    "best_of_k_ge_expert": 0.67,
+    "expert_lines": 6,
+    "stuck": 0.0
+   },
+   "second_p": {
+    "lp_lost": 6700,
+    "lp_gained": 0,
+    "kill": 0.5,
+    "field": 4.42,
+    "our_field_left": 2.25,
+    "cut": 0
+   },
+   "second_sample_kill": 0.438,
+   "second_best_of_k": {
+    "lp_lost": 8717,
+    "lp_gained": 0,
+    "kill": 0.583,
+    "field": 4.42,
+    "our_field_left": 2,
+    "cut": 0
+   },
+   "alerts": [],
+   "admit_turn1_lines": true,
+   "going_second_candidate": true
+  },
+  {
+   "deck": "madolche",
+   "hands_with_lines": 19,
+   "best_line_acts": 3.42,
+   "best_line_field_interruptions": 1.26,
+   "first": {
+    "deck": "madolche",
+    "hands": 6,
+    "policy_end_board": 1,
+    "expert_end_board": 5.17,
+    "policy_decisions": 11.5,
+    "ge_expert": 0.0,
+    "best_of_k_end_board": 2.67,
+    "best_of_k_ge_expert": 0.17,
+    "expert_lines": 6,
+    "stuck": 0.0
+   },
+   "second_p": {
+    "lp_lost": 0,
+    "lp_gained": 0,
+    "kill": 0.0,
+    "field": 3,
+    "our_field_left": 3.33,
+    "cut": 0
+   },
+   "second_sample_kill": 0.0,
+   "second_best_of_k": {
+    "lp_lost": 317,
+    "lp_gained": 0,
+    "kill": 0.0,
+    "field": 3.17,
+    "our_field_left": 3.25,
+    "cut": 0
+   },
+   "alerts": [],
+   "admit_turn1_lines": false,
+   "going_second_candidate": false
+  },
+  {
+   "deck": "magistus-fairy-tail-meta1",
+   "hands_with_lines": 11,
+   "best_line_acts": 5,
+   "best_line_field_interruptions": 0.73,
+   "first": {
+    "deck": "magistus-fairy-tail-meta1",
+    "hands": 6,
+    "policy_end_board": 3.67,
+    "expert_end_board": 3.5,
+    "policy_decisions": 23.8,
+    "ge_expert": 0.67,
+    "best_of_k_end_board": 4,
+    "best_of_k_ge_expert": 0.67,
+    "expert_lines": 6,
+    "stuck": 0.0
+   },
+   "second_p": {
+    "lp_lost": 3888,
+    "lp_gained": 0,
+    "kill": 0.25,
+    "field": 3.5,
+    "our_field_left": 2.42,
+    "cut": 0
+   },
+   "second_sample_kill": 0.021,
+   "second_best_of_k": {
+    "lp_lost": 4512,
+    "lp_gained": 0,
+    "kill": 0.083,
+    "field": 3.5,
+    "our_field_left": 2.33,
+    "cut": 0
+   },
+   "alerts": [],
+   "admit_turn1_lines": true,
+   "going_second_candidate": true
+  },
+  {
+   "deck": "magistus-invoked-fairy-tail-meta1",
+   "hands_with_lines": 10,
+   "best_line_acts": 5.1,
+   "best_line_field_interruptions": 1,
+   "first": {
+    "deck": "magistus-invoked-fairy-tail-meta1",
+    "hands": 6,
+    "policy_end_board": 2,
+    "expert_end_board": 3.67,
+    "policy_decisions": 26.2,
+    "ge_expert": 0.17,
+    "best_of_k_end_board": 3.33,
+    "best_of_k_ge_expert": 0.67,
+    "expert_lines": 6,
+    "stuck": 0.0
+   },
+   "second_p": {
+    "lp_lost": 3725,
+    "lp_gained": 0,
+    "kill": 0.167,
+    "field": 4,
+    "our_field_left": 2.67,
+    "cut": 0
+   },
+   "second_sample_kill": 0.188,
+   "second_best_of_k": {
+    "lp_lost": 5133,
+    "lp_gained": 0,
+    "kill": 0.333,
+    "field": 4.25,
+    "our_field_left": 2.42,
+    "cut": 0
+   },
+   "alerts": [],
+   "admit_turn1_lines": true,
+   "going_second_candidate": false
+  },
+  {
+   "deck": "magistus-invoked-fairy-tail-meta2",
+   "hands_with_lines": 8,
+   "best_line_acts": 5.62,
+   "best_line_field_interruptions": 1.12,
+   "first": {
+    "deck": "magistus-invoked-fairy-tail-meta2",
+    "hands": 6,
+    "policy_end_board": 3.83,
+    "expert_end_board": 5.33,
+    "policy_decisions": 28.8,
+    "ge_expert": 0.17,
+    "best_of_k_end_board": 5.67,
+    "best_of_k_ge_expert": 0.83,
+    "expert_lines": 6,
+    "stuck": 0.0
+   },
+   "second_p": {
+    "lp_lost": 6012,
+    "lp_gained": 0,
+    "kill": 0.333,
+    "field": 5.25,
+    "our_field_left": 2.17,
+    "cut": 0
+   },
+   "second_sample_kill": 0.271,
+   "second_best_of_k": {
+    "lp_lost": 6717,
+    "lp_gained": 0,
+    "kill": 0.5,
+    "field": 5.33,
+    "our_field_left": 2.17,
+    "cut": 0
+   },
+   "alerts": [],
+   "admit_turn1_lines": true,
+   "going_second_candidate": true
+  },
+  {
+   "deck": "maliss",
+   "hands_with_lines": 37,
+   "best_line_acts": 3.51,
+   "best_line_field_interruptions": 2.92,
+   "first": {
+    "deck": "maliss",
+    "hands": 6,
+    "policy_end_board": 3.5,
+    "expert_end_board": 6.33,
+    "policy_decisions": 25.2,
+    "ge_expert": 0.17,
+    "best_of_k_end_board": 4.83,
+    "best_of_k_ge_expert": 0.17,
+    "expert_lines": 6,
+    "stuck": 0.0
+   },
+   "second_p": {
+    "lp_lost": 2833,
+    "lp_gained": 0,
+    "kill": 0.0,
+    "field": 4.08,
+    "our_field_left": 2.25,
+    "cut": 0
+   },
+   "second_sample_kill": 0.042,
+   "second_best_of_k": {
+    "lp_lost": 3400,
+    "lp_gained": 0,
+    "kill": 0.083,
+    "field": 4.17,
+    "our_field_left": 2,
+    "cut": 0
+   },
+   "alerts": [],
+   "admit_turn1_lines": false,
+   "going_second_candidate": false
+  },
+  {
+   "deck": "mannadium",
+   "hands_with_lines": 16,
+   "best_line_acts": 4.94,
+   "best_line_field_interruptions": 1.5,
+   "first": {
+    "deck": "mannadium",
+    "hands": 6,
+    "policy_end_board": 3,
+    "expert_end_board": 5.33,
+    "policy_decisions": 21.2,
+    "ge_expert": 0.33,
+    "best_of_k_end_board": 5.33,
+    "best_of_k_ge_expert": 0.83,
+    "expert_lines": 6,
+    "stuck": 0.0
+   },
+   "second_p": {
+    "lp_lost": 2875,
+    "lp_gained": 0,
+    "kill": 0.083,
+    "field": 3.17,
+    "our_field_left": 2.42,
+    "cut": 0
+   },
+   "second_sample_kill": 0.0,
+   "second_best_of_k": {
+    "lp_lost": 3233,
+    "lp_gained": 0,
+    "kill": 0.0,
+    "field": 3.17,
+    "our_field_left": 2.08,
+    "cut": 0
+   },
+   "alerts": [],
+   "admit_turn1_lines": true,
+   "going_second_candidate": false
+  },
+  {
+   "deck": "megalith-ryzeal-mitsurugi-meta1",
+   "hands_with_lines": 15,
+   "best_line_acts": 3.8,
+   "best_line_field_interruptions": 0.93,
+   "first": {
+    "deck": "megalith-ryzeal-mitsurugi-meta1",
+    "hands": 6,
+    "policy_end_board": 3.83,
+    "expert_end_board": 3.33,
+    "policy_decisions": 34,
+    "ge_expert": 1.0,
+    "best_of_k_end_board": 4.5,
+    "best_of_k_ge_expert": 1.0,
+    "expert_lines": 6,
+    "stuck": 0.0
+   },
+   "second_p": {
+    "lp_lost": 6317,
+    "lp_gained": 0,
+    "kill": 0.25,
+    "field": 4.58,
+    "our_field_left": 2.17,
+    "cut": 0
+   },
+   "second_sample_kill": 0.146,
+   "second_best_of_k": {
+    "lp_lost": 6842,
+    "lp_gained": 0,
+    "kill": 0.333,
+    "field": 4.67,
+    "our_field_left": 2.08,
+    "cut": 0
+   },
+   "alerts": [],
+   "admit_turn1_lines": false,
+   "going_second_candidate": true
+  },
+  {
+   "deck": "melodious-meta1",
+   "hands_with_lines": 14,
+   "best_line_acts": 3.36,
+   "best_line_field_interruptions": 0.79,
+   "first": {
+    "deck": "melodious-meta1",
+    "hands": 6,
+    "policy_end_board": 3.5,
+    "expert_end_board": 4.5,
+    "policy_decisions": 15,
+    "ge_expert": 0.33,
+    "best_of_k_end_board": 5.33,
+    "best_of_k_ge_expert": 0.83,
+    "expert_lines": 6,
+    "stuck": 0.0
+   },
+   "second_p": {
+    "lp_lost": 4558,
+    "lp_gained": 0,
+    "kill": 0.167,
+    "field": 5,
+    "our_field_left": 1.92,
+    "cut": 0
+   },
+   "second_sample_kill": 0.021,
+   "second_best_of_k": {
+    "lp_lost": 5050,
+    "lp_gained": 0,
+    "kill": 0.083,
+    "field": 5,
+    "our_field_left": 2,
+    "cut": 0
+   },
+   "alerts": [],
+   "admit_turn1_lines": false,
+   "going_second_candidate": false
+  },
+  {
+   "deck": "memento-meta1",
+   "hands_with_lines": 22,
+   "best_line_acts": 4.45,
+   "best_line_field_interruptions": 0.82,
+   "first": {
+    "deck": "memento-meta1",
+    "hands": 6,
+    "policy_end_board": 2.17,
+    "expert_end_board": 3.67,
+    "policy_decisions": 13.8,
+    "ge_expert": 0.33,
+    "best_of_k_end_board": 3,
+    "best_of_k_ge_expert": 0.5,
+    "expert_lines": 6,
+    "stuck": 0.0
+   },
+   "second_p": {
+    "lp_lost": 2088,
+    "lp_gained": 0,
+    "kill": 0.0,
+    "field": 3.17,
+    "our_field_left": 2.33,
+    "cut": 0
+   },
+   "second_sample_kill": 0.021,
+   "second_best_of_k": {
+    "lp_lost": 3421,
+    "lp_gained": 0,
+    "kill": 0.083,
+    "field": 2.75,
+    "our_field_left": 1.92,
+    "cut": 0
+   },
+   "alerts": [],
+   "admit_turn1_lines": true,
+   "going_second_candidate": false
+  },
+  {
+   "deck": "memento-meta2",
+   "hands_with_lines": 8,
+   "best_line_acts": 3.38,
+   "best_line_field_interruptions": 0.62,
+   "first": {
+    "deck": "memento-meta2",
+    "hands": 6,
+    "policy_end_board": 1.83,
+    "expert_end_board": 3.17,
+    "policy_decisions": 9.5,
+    "ge_expert": 0.17,
+    "best_of_k_end_board": 3,
+    "best_of_k_ge_expert": 0.67,
+    "expert_lines": 6,
+    "stuck": 0.0
+   },
+   "second_p": {
+    "lp_lost": 2550,
+    "lp_gained": 0,
+    "kill": 0.083,
+    "field": 2.25,
+    "our_field_left": 2.08,
+    "cut": 0
+   },
+   "second_sample_kill": 0.042,
+   "second_best_of_k": {
+    "lp_lost": 4288,
+    "lp_gained": 0,
+    "kill": 0.167,
+    "field": 2.92,
+    "our_field_left": 1.42,
+    "cut": 0
+   },
+   "alerts": [],
+   "admit_turn1_lines": false,
+   "going_second_candidate": false
+  },
+  {
+   "deck": "mermail",
+   "hands_with_lines": 14,
+   "best_line_acts": 2.07,
+   "best_line_field_interruptions": 1.57,
+   "first": {
+    "deck": "mermail",
+    "hands": 6,
+    "policy_end_board": 1.67,
+    "expert_end_board": 4.33,
+    "policy_decisions": 14,
+    "ge_expert": 0.0,
+    "best_of_k_end_board": 2,
+    "best_of_k_ge_expert": 0.0,
+    "expert_lines": 6,
+    "stuck": 0.0
+   },
+   "second_p": {
+    "lp_lost": 1642,
+    "lp_gained": 0,
+    "kill": 0.0,
+    "field": 2.92,
+    "our_field_left": 2.33,
+    "cut": 0
+   },
+   "second_sample_kill": 0.0,
+   "second_best_of_k": {
+    "lp_lost": 2358,
+    "lp_gained": 0,
+    "kill": 0.0,
+    "field": 3.08,
+    "our_field_left": 2.08,
+    "cut": 0
+   },
+   "alerts": [],
+   "admit_turn1_lines": false,
+   "going_second_candidate": false
+  },
+  {
+   "deck": "mikanko",
+   "hands_with_lines": 18,
+   "best_line_acts": 5.17,
+   "best_line_field_interruptions": 0.56,
+   "first": {
+    "deck": "mikanko",
+    "hands": 6,
+    "policy_end_board": 1,
+    "expert_end_board": 6,
+    "policy_decisions": 22,
+    "ge_expert": 0.0,
+    "best_of_k_end_board": 1.83,
+    "best_of_k_ge_expert": 0.0,
+    "expert_lines": 6,
+    "stuck": 0.0
+   },
+   "second_p": {
+    "lp_lost": 2292,
+    "lp_gained": 0,
+    "kill": 0.0,
+    "field": 4.58,
+    "our_field_left": 2.42,
+    "cut": 0
+   },
+   "second_sample_kill": 0.0,
+   "second_best_of_k": {
+    "lp_lost": 2308,
+    "lp_gained": 0,
+    "kill": 0.0,
+    "field": 3.92,
+    "our_field_left": 2.25,
+    "cut": 0
+   },
+   "alerts": [],
+   "admit_turn1_lines": true,
+   "going_second_candidate": false
+  },
+  {
+   "deck": "mitsurugi",
+   "hands_with_lines": 15,
+   "best_line_acts": 6.13,
+   "best_line_field_interruptions": 1.6,
+   "first": {
+    "deck": "mitsurugi",
+    "hands": 6,
+    "policy_end_board": 3,
+    "expert_end_board": 4,
+    "policy_decisions": 29.3,
+    "ge_expert": 0.5,
+    "best_of_k_end_board": 4.33,
+    "best_of_k_ge_expert": 0.67,
+    "expert_lines": 6,
+    "stuck": 0.0
+   },
+   "second_p": {
+    "lp_lost": 5142,
+    "lp_gained": 0,
+    "kill": 0.25,
+    "field": 4.33,
+    "our_field_left": 2.08,
+    "cut": 0
+   },
+   "second_sample_kill": 0.167,
+   "second_best_of_k": {
+    "lp_lost": 7800,
+    "lp_gained": 0,
+    "kill": 0.583,
+    "field": 5.17,
+    "our_field_left": 2.08,
+    "cut": 0
+   },
+   "alerts": [],
+   "admit_turn1_lines": true,
+   "going_second_candidate": true
+  },
+  {
+   "deck": "mitsurugi-clown-crew-meta1",
+   "hands_with_lines": 12,
+   "best_line_acts": 3.83,
+   "best_line_field_interruptions": 0.83,
+   "first": {
+    "deck": "mitsurugi-clown-crew-meta1",
+    "hands": 6,
+    "policy_end_board": 2.17,
+    "expert_end_board": 4,
+    "policy_decisions": 23.7,
+    "ge_expert": 0.33,
+    "best_of_k_end_board": 3.17,
+    "best_of_k_ge_expert": 0.5,
+    "expert_lines": 6,
+    "stuck": 0.0
+   },
+   "second_p": {
+    "lp_lost": 2550,
+    "lp_gained": 0,
+    "kill": 0.0,
+    "field": 4.17,
+    "our_field_left": 2.92,
+    "cut": 0
+   },
+   "second_sample_kill": 0.042,
+   "second_best_of_k": {
+    "lp_lost": 4175,
+    "lp_gained": 0,
+    "kill": 0.083,
+    "field": 4.92,
+    "our_field_left": 2.67,
+    "cut": 0
+   },
+   "alerts": [],
+   "admit_turn1_lines": false,
+   "going_second_candidate": false
+  },
+  {
+   "deck": "mitsurugi-light-and-darkness-ritual-orcust-meta1",
+   "hands_with_lines": 12,
+   "best_line_acts": 5.67,
+   "best_line_field_interruptions": 1.33,
+   "first": {
+    "deck": "mitsurugi-light-and-darkness-ritual-orcust-meta1",
+    "hands": 6,
+    "policy_end_board": 0.67,
+    "expert_end_board": 3.5,
+    "policy_decisions": 30.8,
+    "ge_expert": 0.17,
+    "best_of_k_end_board": 2,
+    "best_of_k_ge_expert": 0.5,
+    "expert_lines": 6,
+    "stuck": 0.0
+   },
+   "second_p": {
+    "lp_lost": 4625,
+    "lp_gained": 0,
+    "kill": 0.083,
+    "field": 4.25,
+    "our_field_left": 2,
+    "cut": 0
+   },
+   "second_sample_kill": 0.083,
+   "second_best_of_k": {
+    "lp_lost": 6756,
+    "lp_gained": 0,
+    "kill": 0.333,
+    "field": 5.33,
+    "our_field_left": 1.92,
+    "cut": 0
+   },
+   "alerts": [],
+   "admit_turn1_lines": true,
+   "going_second_candidate": false
+  },
+  {
+   "deck": "mitsurugi-magnet-warrior-meta1",
+   "hands_with_lines": 13,
+   "best_line_acts": 3.62,
+   "best_line_field_interruptions": 0.38,
+   "first": {
+    "deck": "mitsurugi-magnet-warrior-meta1",
+    "hands": 6,
+    "policy_end_board": 3.5,
+    "expert_end_board": 2.5,
+    "policy_decisions": 30,
+    "ge_expert": 0.83,
+    "best_of_k_end_board": 3.83,
+    "best_of_k_ge_expert": 0.83,
+    "expert_lines": 6,
+    "stuck": 0.0
+   },
+   "second_p": {
+    "lp_lost": 5850,
+    "lp_gained": 0,
+    "kill": 0.25,
+    "field": 3.42,
+    "our_field_left": 2,
+    "cut": 0
+   },
+   "second_sample_kill": 0.146,
+   "second_best_of_k": {
+    "lp_lost": 6979,
+    "lp_gained": 0,
+    "kill": 0.333,
+    "field": 4.17,
+    "our_field_left": 1.92,
+    "cut": 0
+   },
+   "alerts": [],
+   "admit_turn1_lines": false,
+   "going_second_candidate": true
+  },
+  {
+   "deck": "mitsurugi-meta1",
+   "hands_with_lines": 15,
+   "best_line_acts": 3.47,
+   "best_line_field_interruptions": 1.27,
+   "first": {
+    "deck": "mitsurugi-meta1",
+    "hands": 6,
+    "policy_end_board": 3.17,
+    "expert_end_board": 3,
+    "policy_decisions": 35.7,
+    "ge_expert": 0.67,
+    "best_of_k_end_board": 3.83,
+    "best_of_k_ge_expert": 0.83,
+    "expert_lines": 6,
+    "stuck": 0.0
+   },
+   "second_p": {
+    "lp_lost": 7033,
+    "lp_gained": 0,
+    "kill": 0.417,
+    "field": 5.17,
+    "our_field_left": 2.42,
+    "cut": 0
+   },
+   "second_sample_kill": 0.208,
+   "second_best_of_k": {
+    "lp_lost": 7650,
+    "lp_gained": 0,
+    "kill": 0.5,
+    "field": 3.92,
+    "our_field_left": 2.42,
+    "cut": 0
+   },
+   "alerts": [],
+   "admit_turn1_lines": false,
+   "going_second_candidate": true
+  },
+  {
+   "deck": "mitsurugi-meta2",
+   "hands_with_lines": 10,
+   "best_line_acts": 3,
+   "best_line_field_interruptions": 1.4,
+   "first": {
+    "deck": "mitsurugi-meta2",
+    "hands": 6,
+    "policy_end_board": 2.5,
+    "expert_end_board": 3.17,
+    "policy_decisions": 25.2,
+    "ge_expert": 0.67,
+    "best_of_k_end_board": 4.17,
+    "best_of_k_ge_expert": 0.83,
+    "expert_lines": 6,
+    "stuck": 0.0
+   },
+   "second_p": {
+    "lp_lost": 7100,
+    "lp_gained": 0,
+    "kill": 0.5,
+    "field": 4.83,
+    "our_field_left": 2.17,
+    "cut": 0
+   },
+   "second_sample_kill": 0.271,
+   "second_best_of_k": {
+    "lp_lost": 7433,
+    "lp_gained": 0,
+    "kill": 0.583,
+    "field": 3.83,
+    "our_field_left": 2.17,
+    "cut": 0
+   },
+   "alerts": [],
+   "admit_turn1_lines": false,
+   "going_second_candidate": true
+  },
+  {
+   "deck": "mitsurugi-orcust-phantom-knights-meta1",
+   "hands_with_lines": 15,
+   "best_line_acts": 4.2,
+   "best_line_field_interruptions": 2.2,
+   "first": {
+    "deck": "mitsurugi-orcust-phantom-knights-meta1",
+    "hands": 6,
+    "policy_end_board": 4.17,
+    "expert_end_board": 4.33,
+    "policy_decisions": 33.5,
+    "ge_expert": 0.5,
+    "best_of_k_end_board": 5,
+    "best_of_k_ge_expert": 0.67,
+    "expert_lines": 6,
+    "stuck": 0.0
+   },
+   "second_p": {
+    "lp_lost": 3542,
+    "lp_gained": 0,
+    "kill": 0.167,
+    "field": 3.75,
+    "our_field_left": 2.58,
+    "cut": 0
+   },
+   "second_sample_kill": 0.042,
+   "second_best_of_k": {
+    "lp_lost": 4100,
+    "lp_gained": 0,
+    "kill": 0.167,
+    "field": 4,
+    "our_field_left": 2.58,
+    "cut": 0
+   },
+   "alerts": [],
+   "admit_turn1_lines": true,
+   "going_second_candidate": false
+  },
+  {
+   "deck": "mitsurugi-yummy-light-and-darkness-ritual-meta1",
+   "hands_with_lines": 20,
+   "best_line_acts": 4.6,
+   "best_line_field_interruptions": 1.2,
+   "first": {
+    "deck": "mitsurugi-yummy-light-and-darkness-ritual-meta1",
+    "hands": 6,
+    "policy_end_board": 0,
+    "expert_end_board": 3.33,
+    "policy_decisions": 44,
+    "ge_expert": 0.0,
+    "best_of_k_end_board": 1.83,
+    "best_of_k_ge_expert": 0.17,
+    "expert_lines": 6,
+    "stuck": 0.0
+   },
+   "second_p": {
+    "lp_lost": 5267,
+    "lp_gained": 0,
+    "kill": 0.5,
+    "field": 4.17,
+    "our_field_left": 2,
+    "cut": 0
+   },
+   "second_sample_kill": 0.167,
+   "second_best_of_k": {
+    "lp_lost": 6500,
+    "lp_gained": 0,
+    "kill": 0.5,
+    "field": 4.67,
+    "our_field_left": 1.92,
+    "cut": 0
+   },
+   "alerts": [],
+   "admit_turn1_lines": true,
+   "going_second_candidate": true
+  },
+  {
+   "deck": "monarch",
+   "hands_with_lines": 33,
+   "best_line_acts": 3.7,
+   "best_line_field_interruptions": 0.09,
+   "first": {
+    "deck": "monarch",
+    "hands": 6,
+    "policy_end_board": 2,
+    "expert_end_board": 5,
+    "policy_decisions": 19,
+    "ge_expert": 0.0,
+    "best_of_k_end_board": 3.67,
+    "best_of_k_ge_expert": 0.33,
+    "expert_lines": 6,
+    "stuck": 0.0
+   },
+   "second_p": {
+    "lp_lost": 1458,
+    "lp_gained": 0,
+    "kill": 0.0,
+    "field": 3.42,
+    "our_field_left": 2.25,
+    "cut": 0
+   },
+   "second_sample_kill": 0.0,
+   "second_best_of_k": {
+    "lp_lost": 2633,
+    "lp_gained": 0,
+    "kill": 0.0,
+    "field": 3.5,
+    "our_field_left": 2.08,
+    "cut": 0
+   },
+   "alerts": [],
+   "admit_turn1_lines": false,
+   "going_second_candidate": false
+  },
+  {
+   "deck": "nekroz",
+   "hands_with_lines": 39,
+   "best_line_acts": 4.51,
+   "best_line_field_interruptions": 0.64,
+   "first": {
+    "deck": "nekroz",
+    "hands": 6,
+    "policy_end_board": 2.83,
+    "expert_end_board": 3.33,
+    "policy_decisions": 13.3,
+    "ge_expert": 0.67,
+    "best_of_k_end_board": 3.33,
+    "best_of_k_ge_expert": 0.83,
+    "expert_lines": 6,
+    "stuck": 0.0
+   },
+   "second_p": {
+    "lp_lost": 1425,
+    "lp_gained": 0,
+    "kill": 0.0,
+    "field": 2.42,
+    "our_field_left": 2.08,
+    "cut": 0
+   },
+   "second_sample_kill": 0.0,
+   "second_best_of_k": {
+    "lp_lost": 3358,
+    "lp_gained": 0,
+    "kill": 0.0,
+    "field": 2.17,
+    "our_field_left": 1.83,
+    "cut": 0
+   },
+   "alerts": [],
+   "admit_turn1_lines": true,
+   "going_second_candidate": false
+  },
+  {
+   "deck": "odion-meta1",
+   "hands_with_lines": 20,
+   "best_line_acts": 1.75,
+   "best_line_field_interruptions": 3.65,
+   "first": {
+    "deck": "odion-meta1",
+    "hands": 6,
+    "policy_end_board": 0,
+    "expert_end_board": 7,
+    "policy_decisions": 18,
+    "ge_expert": 0.0,
+    "best_of_k_end_board": 1.5,
+    "best_of_k_ge_expert": 0.0,
+    "expert_lines": 6,
+    "stuck": 0.0
+   },
+   "second_p": {
+    "lp_lost": 1083,
+    "lp_gained": 0,
+    "kill": 0.0,
+    "field": 6,
+    "our_field_left": 2.92,
+    "cut": 0
+   },
+   "second_sample_kill": 0.0,
+   "second_best_of_k": {
+    "lp_lost": 1692,
+    "lp_gained": 0,
+    "kill": 0.0,
+    "field": 6.08,
+    "our_field_left": 2.58,
+    "cut": 0
+   },
+   "alerts": [],
+   "admit_turn1_lines": false,
+   "going_second_candidate": false
+  },
+  {
+   "deck": "onomat-constellar-tellarknights-meta1",
+   "hands_with_lines": 25,
+   "best_line_acts": 6.88,
+   "best_line_field_interruptions": 0.92,
+   "first": {
+    "deck": "onomat-constellar-tellarknights-meta1",
+    "hands": 6,
+    "policy_end_board": 2.17,
+    "expert_end_board": 5.5,
+    "policy_decisions": 30,
+    "ge_expert": 0.0,
+    "best_of_k_end_board": 4.33,
+    "best_of_k_ge_expert": 0.17,
+    "expert_lines": 6,
+    "stuck": 0.0
+   },
+   "second_p": {
+    "lp_lost": 4117,
+    "lp_gained": 0,
+    "kill": 0.0,
+    "field": 4,
+    "our_field_left": 2.08,
+    "cut": 0
+   },
+   "second_sample_kill": 0.042,
+   "second_best_of_k": {
+    "lp_lost": 5842,
+    "lp_gained": 0,
+    "kill": 0.167,
+    "field": 4.08,
+    "our_field_left": 1.75,
+    "cut": 0
+   },
+   "alerts": [],
+   "admit_turn1_lines": true,
+   "going_second_candidate": false
+  },
+  {
+   "deck": "onomat-ryzeal-meta1",
+   "hands_with_lines": 14,
+   "best_line_acts": 9.93,
+   "best_line_field_interruptions": 0.79,
+   "first": {
+    "deck": "onomat-ryzeal-meta1",
+    "hands": 6,
+    "policy_end_board": 4.83,
+    "expert_end_board": 5.17,
+    "policy_decisions": 51.2,
+    "ge_expert": 0.67,
+    "best_of_k_end_board": 4.83,
+    "best_of_k_ge_expert": 0.67,
+    "expert_lines": 6,
+    "stuck": 0.0
+   },
+   "second_p": {
+    "lp_lost": 5958,
+    "lp_gained": 0,
+    "kill": 0.083,
+    "field": 4.17,
+    "our_field_left": 2.25,
+    "cut": 0
+   },
+   "second_sample_kill": 0.083,
+   "second_best_of_k": {
+    "lp_lost": 6883,
+    "lp_gained": 0,
+    "kill": 0.25,
+    "field": 4.42,
+    "our_field_left": 2.25,
+    "cut": 0
+   },
+   "alerts": [],
+   "admit_turn1_lines": true,
+   "going_second_candidate": false
+  },
+  {
+   "deck": "orcust",
+   "hands_with_lines": 37,
+   "best_line_acts": 5.32,
+   "best_line_field_interruptions": 1.57,
+   "first": {
+    "deck": "orcust",
+    "hands": 6,
+    "policy_end_board": 4.17,
+    "expert_end_board": 5.17,
+    "policy_decisions": 23.5,
+    "ge_expert": 0.5,
+    "best_of_k_end_board": 4.67,
+    "best_of_k_ge_expert": 0.5,
+    "expert_lines": 6,
+    "stuck": 0.0
+   },
+   "second_p": {
+    "lp_lost": 550,
+    "lp_gained": 0,
+    "kill": 0.0,
+    "field": 2.83,
+    "our_field_left": 3,
+    "cut": 0
+   },
+   "second_sample_kill": 0.0,
+   "second_best_of_k": {
+    "lp_lost": 1225,
+    "lp_gained": 0,
+    "kill": 0.0,
+    "field": 2.83,
+    "our_field_left": 2.58,
+    "cut": 0
+   },
+   "alerts": [],
+   "admit_turn1_lines": true,
+   "going_second_candidate": false
+  },
+  {
+   "deck": "orcust-meta1",
+   "hands_with_lines": 8,
+   "best_line_acts": 9.75,
+   "best_line_field_interruptions": 2.62,
+   "first": {
+    "deck": "orcust-meta1",
+    "hands": 6,
+    "policy_end_board": 0.17,
+    "expert_end_board": 5.67,
+    "policy_decisions": 36.8,
+    "ge_expert": 0.0,
+    "best_of_k_end_board": 4.33,
+    "best_of_k_ge_expert": 0.17,
+    "expert_lines": 6,
+    "stuck": 0.0
+   },
+   "second_p": {
+    "lp_lost": 2588,
+    "lp_gained": 0,
+    "kill": 0.0,
+    "field": 5.42,
+    "our_field_left": 1.92,
+    "cut": 0
+   },
+   "second_sample_kill": 0.0,
+   "second_best_of_k": {
+    "lp_lost": 3112,
+    "lp_gained": 0,
+    "kill": 0.0,
+    "field": 4.5,
+    "our_field_left": 2.08,
+    "cut": 0
+   },
+   "alerts": [],
+   "admit_turn1_lines": true,
+   "going_second_candidate": false
+  },
+  {
+   "deck": "orcust-meta2",
+   "hands_with_lines": 22,
+   "best_line_acts": 7.36,
+   "best_line_field_interruptions": 2.32,
+   "first": {
+    "deck": "orcust-meta2",
+    "hands": 6,
+    "policy_end_board": 1.17,
+    "expert_end_board": 5.5,
+    "policy_decisions": 31.8,
+    "ge_expert": 0.0,
+    "best_of_k_end_board": 4,
+    "best_of_k_ge_expert": 0.17,
+    "expert_lines": 6,
+    "stuck": 0.0
+   },
+   "second_p": {
+    "lp_lost": 3700,
+    "lp_gained": 0,
+    "kill": 0.0,
+    "field": 5,
+    "our_field_left": 2,
+    "cut": 0
+   },
+   "second_sample_kill": 0.0,
+   "second_best_of_k": {
+    "lp_lost": 3746,
+    "lp_gained": 0,
+    "kill": 0.0,
+    "field": 4.33,
+    "our_field_left": 1.83,
+    "cut": 0
+   },
+   "alerts": [],
+   "admit_turn1_lines": true,
+   "going_second_candidate": false
+  },
+  {
+   "deck": "paleozoic-frog",
+   "hands_with_lines": 20,
+   "best_line_acts": 1.5,
+   "best_line_field_interruptions": 1.9,
+   "first": {
+    "deck": "paleozoic-frog",
+    "hands": 6,
+    "policy_end_board": 0,
+    "expert_end_board": 4.67,
+    "policy_decisions": 13.8,
+    "ge_expert": 0.0,
+    "best_of_k_end_board": 1.17,
+    "best_of_k_ge_expert": 0.17,
+    "expert_lines": 6,
+    "stuck": 0.0
+   },
+   "second_p": {
+    "lp_lost": 325,
+    "lp_gained": 167,
+    "kill": 0.0,
+    "field": 4,
+    "our_field_left": 2.83,
+    "cut": 0
+   },
+   "second_sample_kill": 0.0,
+   "second_best_of_k": {
+    "lp_lost": 258,
+    "lp_gained": 167,
+    "kill": 0.0,
+    "field": 3.75,
+    "our_field_left": 2.83,
+    "cut": 0
+   },
+   "alerts": [],
+   "admit_turn1_lines": false,
+   "going_second_candidate": false
+  },
+  {
+   "deck": "phantom-knights",
+   "hands_with_lines": 10,
+   "best_line_acts": 6.6,
+   "best_line_field_interruptions": 2.3,
+   "first": {
+    "deck": "phantom-knights",
+    "hands": 6,
+    "policy_end_board": 3.5,
+    "expert_end_board": 4.67,
+    "policy_decisions": 21.3,
+    "ge_expert": 0.33,
+    "best_of_k_end_board": 4.33,
+    "best_of_k_ge_expert": 0.67,
+    "expert_lines": 6,
+    "stuck": 0.0
+   },
+   "second_p": {
+    "lp_lost": 600,
+    "lp_gained": 0,
+    "kill": 0.0,
+    "field": 4.25,
+    "our_field_left": 3.25,
+    "cut": 0
+   },
+   "second_sample_kill": 0.0,
+   "second_best_of_k": {
+    "lp_lost": 833,
+    "lp_gained": 0,
+    "kill": 0.0,
+    "field": 3.08,
+    "our_field_left": 2.92,
+    "cut": 0
+   },
+   "alerts": [],
+   "admit_turn1_lines": true,
+   "going_second_candidate": false
+  },
+  {
+   "deck": "plant-synchro",
+   "hands_with_lines": 19,
+   "best_line_acts": 1.53,
+   "best_line_field_interruptions": 2.11,
+   "first": {
+    "deck": "plant-synchro",
+    "hands": 6,
+    "policy_end_board": 2.83,
+    "expert_end_board": 4.5,
+    "policy_decisions": 15.7,
+    "ge_expert": 0.17,
+    "best_of_k_end_board": 3.17,
+    "best_of_k_ge_expert": 0.33,
+    "expert_lines": 6,
+    "stuck": 0.0
+   },
+   "second_p": {
+    "lp_lost": 342,
+    "lp_gained": 0,
+    "kill": 0.0,
+    "field": 3.5,
+    "our_field_left": 2.67,
+    "cut": 0
+   },
+   "second_sample_kill": 0.0,
+   "second_best_of_k": {
+    "lp_lost": 475,
+    "lp_gained": 0,
+    "kill": 0.0,
+    "field": 3.42,
+    "our_field_left": 2.75,
+    "cut": 0
+   },
+   "alerts": [],
+   "admit_turn1_lines": false,
+   "going_second_candidate": false
+  },
+  {
+   "deck": "power-patron-artmage-meta1",
+   "hands_with_lines": 11,
+   "best_line_acts": 6.27,
+   "best_line_field_interruptions": 2.36,
+   "first": {
+    "deck": "power-patron-artmage-meta1",
+    "hands": 6,
+    "policy_end_board": 0.5,
+    "expert_end_board": 5.83,
+    "policy_decisions": 39.7,
+    "ge_expert": 0.0,
+    "best_of_k_end_board": 2.17,
+    "best_of_k_ge_expert": 0.17,
+    "expert_lines": 6,
+    "stuck": 0.0
+   },
+   "second_p": {
+    "lp_lost": 3933,
+    "lp_gained": 0,
+    "kill": 0.167,
+    "field": 6.17,
+    "our_field_left": 1,
+    "cut": 0
+   },
+   "second_sample_kill": 0.188,
+   "second_best_of_k": {
+    "lp_lost": 6846,
+    "lp_gained": 0,
+    "kill": 0.417,
+    "field": 6.25,
+    "our_field_left": 0.75,
+    "cut": 0
+   },
+   "alerts": [],
+   "admit_turn1_lines": true,
+   "going_second_candidate": false
+  },
+  {
+   "deck": "power-patron-artmage-meta2",
+   "hands_with_lines": 17,
+   "best_line_acts": 6.76,
+   "best_line_field_interruptions": 1.29,
+   "first": {
+    "deck": "power-patron-artmage-meta2",
+    "hands": 6,
+    "policy_end_board": 0.5,
+    "expert_end_board": 6,
+    "policy_decisions": 34.7,
+    "ge_expert": 0.0,
+    "best_of_k_end_board": 4.67,
+    "best_of_k_ge_expert": 0.33,
+    "expert_lines": 6,
+    "stuck": 0.0
+   },
+   "second_p": {
+    "lp_lost": 6062,
+    "lp_gained": 0,
+    "kill": 0.333,
+    "field": 6.08,
+    "our_field_left": 0.92,
+    "cut": 0
+   },
+   "second_sample_kill": 0.333,
+   "second_best_of_k": {
+    "lp_lost": 6483,
+    "lp_gained": 0,
+    "kill": 0.667,
+    "field": 5.83,
+    "our_field_left": 1.75,
+    "cut": 0
+   },
+   "alerts": [],
+   "admit_turn1_lines": true,
+   "going_second_candidate": true
+  },
+  {
+   "deck": "power-patron-meta1",
+   "hands_with_lines": 10,
+   "best_line_acts": 3.5,
+   "best_line_field_interruptions": 1.3,
+   "first": {
+    "deck": "power-patron-meta1",
+    "hands": 6,
+    "policy_end_board": 2,
+    "expert_end_board": 4.17,
+    "policy_decisions": 21.8,
+    "ge_expert": 0.33,
+    "best_of_k_end_board": 4.83,
+    "best_of_k_ge_expert": 1.0,
+    "expert_lines": 6,
+    "stuck": 0.0
+   },
+   "second_p": {
+    "lp_lost": 6308,
+    "lp_gained": 0,
+    "kill": 0.083,
+    "field": 4.75,
+    "our_field_left": 0.67,
+    "cut": 0
+   },
+   "second_sample_kill": 0.104,
+   "second_best_of_k": {
+    "lp_lost": 7550,
+    "lp_gained": 0,
+    "kill": 0.25,
+    "field": 5.08,
+    "our_field_left": 0.25,
+    "cut": 0
+   },
+   "alerts": [],
+   "admit_turn1_lines": false,
+   "going_second_candidate": false
+  },
+  {
+   "deck": "prank-kids",
+   "hands_with_lines": 12,
+   "best_line_acts": 6.33,
+   "best_line_field_interruptions": 1.67,
+   "first": {
+    "deck": "prank-kids",
+    "hands": 6,
+    "policy_end_board": 1.5,
+    "expert_end_board": 4,
+    "policy_decisions": 28.7,
+    "ge_expert": 0.17,
+    "best_of_k_end_board": 3.33,
+    "best_of_k_ge_expert": 0.33,
+    "expert_lines": 6,
+    "stuck": 0.0
+   },
+   "second_p": {
+    "lp_lost": 2125,
+    "lp_gained": 0,
+    "kill": 0.0,
+    "field": 3.25,
+    "our_field_left": 1.92,
+    "cut": 0
+   },
+   "second_sample_kill": 0.0,
+   "second_best_of_k": {
+    "lp_lost": 2283,
+    "lp_gained": 0,
+    "kill": 0.0,
+    "field": 3.25,
+    "our_field_left": 1.5,
+    "cut": 0
+   },
+   "alerts": [],
+   "admit_turn1_lines": true,
+   "going_second_candidate": false
+  },
+  {
+   "deck": "purrely",
+   "hands_with_lines": 33,
+   "best_line_acts": 3.82,
+   "best_line_field_interruptions": 0.97,
+   "first": {
+    "deck": "purrely",
+    "hands": 6,
+    "policy_end_board": 2.17,
+    "expert_end_board": 4.67,
+    "policy_decisions": 28.8,
+    "ge_expert": 0.33,
+    "best_of_k_end_board": 3.67,
+    "best_of_k_ge_expert": 0.67,
+    "expert_lines": 6,
+    "stuck": 0.0
+   },
+   "second_p": {
+    "lp_lost": 1702,
+    "lp_gained": 0,
+    "kill": 0.0,
+    "field": 4.42,
+    "our_field_left": 1.83,
+    "cut": 0
+   },
+   "second_sample_kill": 0.021,
+   "second_best_of_k": {
+    "lp_lost": 2110,
+    "lp_gained": 83,
+    "kill": 0.083,
+    "field": 3.92,
+    "our_field_left": 1.33,
+    "cut": 0
+   },
+   "alerts": [],
+   "admit_turn1_lines": false,
+   "going_second_candidate": false
+  },
+  {
+   "deck": "qliphort",
+   "hands_with_lines": 35,
+   "best_line_acts": 4.09,
+   "best_line_field_interruptions": 1.29,
+   "first": {
+    "deck": "qliphort",
+    "hands": 6,
+    "policy_end_board": 0,
+    "expert_end_board": 5.17,
+    "policy_decisions": 12,
+    "ge_expert": 0.0,
+    "best_of_k_end_board": 1.83,
+    "best_of_k_ge_expert": 0.33,
+    "expert_lines": 6,
+    "stuck": 0.0
+   },
+   "second_p": {
+    "lp_lost": 692,
+    "lp_gained": 0,
+    "kill": 0.0,
+    "field": 5.17,
+    "our_field_left": 2.67,
+    "cut": 0
+   },
+   "second_sample_kill": 0.0,
+   "second_best_of_k": {
+    "lp_lost": 2042,
+    "lp_gained": 0,
+    "kill": 0.0,
+    "field": 5.67,
+    "our_field_left": 2.5,
+    "cut": 0
+   },
+   "alerts": [],
+   "admit_turn1_lines": true,
+   "going_second_candidate": false
+  },
+  {
+   "deck": "r-b-meta1",
+   "hands_with_lines": 12,
+   "best_line_acts": 8.83,
+   "best_line_field_interruptions": 2.67,
+   "first": {
+    "deck": "r-b-meta1",
+    "hands": 6,
+    "policy_end_board": 5.67,
+    "expert_end_board": 6.17,
+    "policy_decisions": 24.3,
+    "ge_expert": 0.5,
+    "best_of_k_end_board": 6.67,
+    "best_of_k_ge_expert": 0.83,
+    "expert_lines": 6,
+    "stuck": 0.0
+   },
+   "second_p": {
+    "lp_lost": 6558,
+    "lp_gained": 0,
+    "kill": 0.5,
+    "field": 5.17,
+    "our_field_left": 1.75,
+    "cut": 0
+   },
+   "second_sample_kill": 0.333,
+   "second_best_of_k": {
+    "lp_lost": 8017,
+    "lp_gained": 0,
+    "kill": 0.667,
+    "field": 5.33,
+    "our_field_left": 1.58,
+    "cut": 0
+   },
+   "alerts": [],
+   "admit_turn1_lines": true,
+   "going_second_candidate": true
+  },
+  {
+   "deck": "radiant-typhoon-meta1",
+   "hands_with_lines": 13,
+   "best_line_acts": 2.31,
+   "best_line_field_interruptions": 1.92,
+   "first": {
+    "deck": "radiant-typhoon-meta1",
+    "hands": 6,
+    "policy_end_board": 0,
+    "expert_end_board": 4.33,
+    "policy_decisions": 23.7,
+    "ge_expert": 0.0,
+    "best_of_k_end_board": 0.5,
+    "best_of_k_ge_expert": 0.0,
+    "expert_lines": 6,
+    "stuck": 0.0
+   },
+   "second_p": {
+    "lp_lost": 2958,
+    "lp_gained": 0,
+    "kill": 0.083,
+    "field": 4.5,
+    "our_field_left": 1.33,
+    "cut": 0
+   },
+   "second_sample_kill": 0.021,
+   "second_best_of_k": {
+    "lp_lost": 3800,
+    "lp_gained": 0,
+    "kill": 0.083,
+    "field": 4.5,
+    "our_field_left": 1,
+    "cut": 0
+   },
+   "alerts": [],
+   "admit_turn1_lines": false,
+   "going_second_candidate": false
+  },
+  {
+   "deck": "radiant-typhoon-meta2",
+   "hands_with_lines": 19,
+   "best_line_acts": 6.53,
+   "best_line_field_interruptions": 1.74,
+   "first": {
+    "deck": "radiant-typhoon-meta2",
+    "hands": 6,
+    "policy_end_board": 0.5,
+    "expert_end_board": 3.67,
+    "policy_decisions": 22.2,
+    "ge_expert": 0.0,
+    "best_of_k_end_board": 2,
+    "best_of_k_ge_expert": 0.17,
+    "expert_lines": 6,
+    "stuck": 0.0
+   },
+   "second_p": {
+    "lp_lost": 4908,
+    "lp_gained": 0,
+    "kill": 0.167,
+    "field": 4.08,
+    "our_field_left": 1.42,
+    "cut": 0
+   },
+   "second_sample_kill": 0.083,
+   "second_best_of_k": {
+    "lp_lost": 6104,
+    "lp_gained": 0,
+    "kill": 0.167,
+    "field": 4.67,
+    "our_field_left": 1.08,
+    "cut": 0
+   },
+   "alerts": [],
+   "admit_turn1_lines": true,
+   "going_second_candidate": false
+  },
+  {
+   "deck": "raise-moon-ygopd",
+   "hands_with_lines": 0,
+   "best_line_acts": null,
+   "best_line_field_interruptions": null,
+   "first": null,
+   "second_p": {
+    "lp_lost": 1467,
+    "lp_gained": 0,
+    "kill": 0.0,
+    "field": 3.33,
+    "our_field_left": 2.17,
+    "cut": 0
+   },
+   "second_sample_kill": 0.0,
+   "second_best_of_k": {
+    "lp_lost": 2854,
+    "lp_gained": 0,
+    "kill": 0.0,
+    "field": 4,
+    "our_field_left": 1.58,
+    "cut": 0
+   },
+   "alerts": [],
+   "admit_turn1_lines": false,
+   "going_second_candidate": true
+  },
+  {
+   "deck": "regenesis-meta1",
+   "hands_with_lines": 17,
+   "best_line_acts": 4.47,
+   "best_line_field_interruptions": 2.18,
+   "first": {
+    "deck": "regenesis-meta1",
+    "hands": 6,
+    "policy_end_board": 1.67,
+    "expert_end_board": 4.83,
+    "policy_decisions": 25.7,
+    "ge_expert": 0.17,
+    "best_of_k_end_board": 3.33,
+    "best_of_k_ge_expert": 0.33,
+    "expert_lines": 6,
+    "stuck": 0.0
+   },
+   "second_p": {
+    "lp_lost": 3142,
+    "lp_gained": 0,
+    "kill": 0.0,
+    "field": 3.08,
+    "our_field_left": 2.08,
+    "cut": 0
+   },
+   "second_sample_kill": 0.0,
+   "second_best_of_k": {
+    "lp_lost": 4450,
+    "lp_gained": 0,
+    "kill": 0.0,
+    "field": 3.17,
+    "our_field_left": 1.92,
+    "cut": 0
+   },
+   "alerts": [],
+   "admit_turn1_lines": true,
+   "going_second_candidate": false
+  },
+  {
+   "deck": "rescue-ace",
+   "hands_with_lines": 13,
+   "best_line_acts": 4.23,
+   "best_line_field_interruptions": 0.31,
+   "first": {
+    "deck": "rescue-ace",
+    "hands": 6,
+    "policy_end_board": 3.67,
+    "expert_end_board": 4.33,
+    "policy_decisions": 20.3,
+    "ge_expert": 0.5,
+    "best_of_k_end_board": 4.17,
+    "best_of_k_ge_expert": 0.67,
+    "expert_lines": 6,
+    "stuck": 0.0
+   },
+   "second_p": {
+    "lp_lost": 2896,
+    "lp_gained": 0,
+    "kill": 0.0,
+    "field": 3.42,
+    "our_field_left": 1.92,
+    "cut": 0
+   },
+   "second_sample_kill": 0.0,
+   "second_best_of_k": {
+    "lp_lost": 3271,
+    "lp_gained": 0,
+    "kill": 0.0,
+    "field": 4.25,
+    "our_field_left": 2,
+    "cut": 0
+   },
+   "alerts": [],
+   "admit_turn1_lines": true,
+   "going_second_candidate": false
+  },
+  {
+   "deck": "ritual-beast",
+   "hands_with_lines": 20,
+   "best_line_acts": 2.7,
+   "best_line_field_interruptions": 1.45,
+   "first": {
+    "deck": "ritual-beast",
+    "hands": 6,
+    "policy_end_board": 1,
+    "expert_end_board": 4.67,
+    "policy_decisions": 14.7,
+    "ge_expert": 0.0,
+    "best_of_k_end_board": 1.67,
+    "best_of_k_ge_expert": 0.0,
+    "expert_lines": 6,
+    "stuck": 0.0
+   },
+   "second_p": {
+    "lp_lost": 125,
+    "lp_gained": 0,
+    "kill": 0.0,
+    "field": 3.33,
+    "our_field_left": 2.92,
+    "cut": 0
+   },
+   "second_sample_kill": 0.0,
+   "second_best_of_k": {
+    "lp_lost": 383,
+    "lp_gained": 0,
+    "kill": 0.0,
+    "field": 2.92,
+    "our_field_left": 2.67,
+    "cut": 0
+   },
+   "alerts": [],
+   "admit_turn1_lines": false,
+   "going_second_candidate": false
+  },
+  {
+   "deck": "rocket-warrior-ygopd",
+   "hands_with_lines": 0,
+   "best_line_acts": null,
+   "best_line_field_interruptions": null,
+   "first": null,
+   "second_p": {
+    "lp_lost": 7462,
+    "lp_gained": 167,
+    "kill": 0.417,
+    "field": 5.67,
+    "our_field_left": 2.17,
+    "cut": 0
+   },
+   "second_sample_kill": 0.562,
+   "second_best_of_k": {
+    "lp_lost": 9467,
+    "lp_gained": 0,
+    "kill": 0.833,
+    "field": 5.67,
+    "our_field_left": 2.25,
+    "cut": 0
+   },
+   "alerts": [],
+   "admit_turn1_lines": false,
+   "going_second_candidate": true
+  },
+  {
+   "deck": "runick",
+   "hands_with_lines": 42,
+   "best_line_acts": 3.62,
+   "best_line_field_interruptions": 1.24,
+   "first": {
+    "deck": "runick",
+    "hands": 6,
+    "policy_end_board": 0,
+    "expert_end_board": 5.83,
+    "policy_decisions": 18.3,
+    "ge_expert": 0.0,
+    "best_of_k_end_board": 0.5,
+    "best_of_k_ge_expert": 0.0,
+    "expert_lines": 6,
+    "stuck": 0.0
+   },
+   "second_p": {
+    "lp_lost": 0,
+    "lp_gained": 0,
+    "kill": 0.0,
+    "field": 4.08,
+    "our_field_left": 2.67,
+    "cut": 0
+   },
+   "second_sample_kill": 0.0,
+   "second_best_of_k": {
+    "lp_lost": 0,
+    "lp_gained": 0,
+    "kill": 0.0,
+    "field": 3.5,
+    "our_field_left": 3.17,
+    "cut": 0
+   },
+   "alerts": [],
+   "admit_turn1_lines": false,
+   "going_second_candidate": false
+  },
+  {
+   "deck": "ryzeal",
+   "hands_with_lines": 35,
+   "best_line_acts": 8.2,
+   "best_line_field_interruptions": 1.71,
+   "first": {
+    "deck": "ryzeal",
+    "hands": 6,
+    "policy_end_board": 4.83,
+    "expert_end_board": 7.17,
+    "policy_decisions": 51.7,
+    "ge_expert": 0.0,
+    "best_of_k_end_board": 5.5,
+    "best_of_k_ge_expert": 0.0,
+    "expert_lines": 6,
+    "stuck": 0.0
+   },
+   "second_p": {
+    "lp_lost": 5733,
+    "lp_gained": 0,
+    "kill": 0.0,
+    "field": 5.08,
+    "our_field_left": 1.92,
+    "cut": 0
+   },
+   "second_sample_kill": 0.125,
+   "second_best_of_k": {
+    "lp_lost": 7617,
+    "lp_gained": 0,
+    "kill": 0.417,
+    "field": 4.58,
+    "our_field_left": 1.92,
+    "cut": 0
+   },
+   "alerts": [],
+   "admit_turn1_lines": true,
+   "going_second_candidate": false
+  },
+  {
+   "deck": "ryzeal-mitsurugi-meta1",
+   "hands_with_lines": 9,
+   "best_line_acts": 3.89,
+   "best_line_field_interruptions": 0.89,
+   "first": {
+    "deck": "ryzeal-mitsurugi-meta1",
+    "hands": 6,
+    "policy_end_board": 4,
+    "expert_end_board": 2.67,
+    "policy_decisions": 42.3,
+    "ge_expert": 1.0,
+    "best_of_k_end_board": 4.67,
+    "best_of_k_ge_expert": 1.0,
+    "expert_lines": 6,
+    "stuck": 0.0
+   },
+   "second_p": {
+    "lp_lost": 6708,
+    "lp_gained": 0,
+    "kill": 0.417,
+    "field": 3.92,
+    "our_field_left": 2.17,
+    "cut": 0
+   },
+   "second_sample_kill": 0.146,
+   "second_best_of_k": {
+    "lp_lost": 7083,
+    "lp_gained": 0,
+    "kill": 0.5,
+    "field": 3.92,
+    "our_field_left": 2.17,
+    "cut": 0
+   },
+   "alerts": [],
+   "admit_turn1_lines": false,
+   "going_second_candidate": true
+  },
+  {
+   "deck": "sacred-beasts-meta1",
+   "hands_with_lines": 14,
+   "best_line_acts": 6.14,
+   "best_line_field_interruptions": 1.07,
+   "first": {
+    "deck": "sacred-beasts-meta1",
+    "hands": 6,
+    "policy_end_board": 2.5,
+    "expert_end_board": 4.33,
+    "policy_decisions": 47.7,
+    "ge_expert": 0.5,
+    "best_of_k_end_board": 3.83,
+    "best_of_k_ge_expert": 0.5,
+    "expert_lines": 6,
+    "stuck": 0.0
+   },
+   "second_p": {
+    "lp_lost": 6608,
+    "lp_gained": 0,
+    "kill": 0.583,
+    "field": 4.42,
+    "our_field_left": 2.33,
+    "cut": 0
+   },
+   "second_sample_kill": 0.417,
+   "second_best_of_k": {
+    "lp_lost": 7692,
+    "lp_gained": 0,
+    "kill": 0.667,
+    "field": 4.17,
+    "our_field_left": 2.08,
+    "cut": 0
+   },
+   "alerts": [],
+   "admit_turn1_lines": true,
+   "going_second_candidate": true
+  },
+  {
+   "deck": "sacred-beasts-meta2",
+   "hands_with_lines": 13,
+   "best_line_acts": 5.54,
+   "best_line_field_interruptions": 1,
+   "first": {
+    "deck": "sacred-beasts-meta2",
+    "hands": 6,
+    "policy_end_board": 0.5,
+    "expert_end_board": 4.17,
+    "policy_decisions": 40.8,
+    "ge_expert": 0.17,
+    "best_of_k_end_board": 4,
+    "best_of_k_ge_expert": 0.67,
+    "expert_lines": 6,
+    "stuck": 0.0
+   },
+   "second_p": {
+    "lp_lost": 6242,
+    "lp_gained": 0,
+    "kill": 0.417,
+    "field": 4.25,
+    "our_field_left": 1.75,
+    "cut": 0
+   },
+   "second_sample_kill": 0.292,
+   "second_best_of_k": {
+    "lp_lost": 8375,
+    "lp_gained": 0,
+    "kill": 0.667,
+    "field": 4.5,
+    "our_field_left": 1.75,
+    "cut": 0
+   },
+   "alerts": [],
+   "admit_turn1_lines": true,
+   "going_second_candidate": true
+  },
+  {
+   "deck": "salamangreat",
+   "hands_with_lines": 20,
+   "best_line_acts": 8.1,
+   "best_line_field_interruptions": 1.2,
+   "first": {
+    "deck": "salamangreat",
+    "hands": 6,
+    "policy_end_board": 3.67,
+    "expert_end_board": 4.83,
+    "policy_decisions": 32.7,
+    "ge_expert": 0.5,
+    "best_of_k_end_board": 4.83,
+    "best_of_k_ge_expert": 0.67,
+    "expert_lines": 6,
+    "stuck": 0.0
+   },
+   "second_p": {
+    "lp_lost": 100,
+    "lp_gained": 0,
+    "kill": 0.0,
+    "field": 2.67,
+    "our_field_left": 2.58,
+    "cut": 0
+   },
+   "second_sample_kill": 0.0,
+   "second_best_of_k": {
+    "lp_lost": 625,
+    "lp_gained": 0,
+    "kill": 0.0,
+    "field": 2.67,
+    "our_field_left": 2.58,
+    "cut": 0
+   },
+   "alerts": [],
+   "admit_turn1_lines": true,
+   "going_second_candidate": false
+  },
+  {
+   "deck": "shaddoll",
+   "hands_with_lines": 35,
+   "best_line_acts": 1.86,
+   "best_line_field_interruptions": 1.37,
+   "first": {
+    "deck": "shaddoll",
+    "hands": 6,
+    "policy_end_board": 1.17,
+    "expert_end_board": 5,
+    "policy_decisions": 8.7,
+    "ge_expert": 0.0,
+    "best_of_k_end_board": 1.17,
+    "best_of_k_ge_expert": 0.0,
+    "expert_lines": 6,
+    "stuck": 0.0
+   },
+   "second_p": {
+    "lp_lost": 1767,
+    "lp_gained": 0,
+    "kill": 0.0,
+    "field": 3.58,
+    "our_field_left": 2.58,
+    "cut": 0
+   },
+   "second_sample_kill": 0.0,
+   "second_best_of_k": {
+    "lp_lost": 2408,
+    "lp_gained": 0,
+    "kill": 0.0,
+    "field": 3.67,
+    "our_field_left": 2.5,
+    "cut": 0
+   },
+   "alerts": [],
+   "admit_turn1_lines": false,
+   "going_second_candidate": false
+  },
+  {
+   "deck": "six-samurai",
+   "hands_with_lines": 38,
+   "best_line_acts": 2.95,
+   "best_line_field_interruptions": 1.74,
+   "first": {
+    "deck": "six-samurai",
+    "hands": 6,
+    "policy_end_board": 1.67,
+    "expert_end_board": 5,
+    "policy_decisions": 15.8,
+    "ge_expert": 0.33,
+    "best_of_k_end_board": 3.33,
+    "best_of_k_ge_expert": 0.33,
+    "expert_lines": 6,
+    "stuck": 0.0
+   },
+   "second_p": {
+    "lp_lost": 2008,
+    "lp_gained": 0,
+    "kill": 0.0,
+    "field": 3.83,
+    "our_field_left": 2.33,
+    "cut": 0
+   },
+   "second_sample_kill": 0.0,
+   "second_best_of_k": {
+    "lp_lost": 2750,
+    "lp_gained": 0,
+    "kill": 0.0,
+    "field": 4,
+    "our_field_left": 2.42,
+    "cut": 0
+   },
+   "alerts": [],
+   "admit_turn1_lines": false,
+   "going_second_candidate": false
+  },
+  {
+   "deck": "sky-striker",
+   "hands_with_lines": 36,
+   "best_line_acts": 4.72,
+   "best_line_field_interruptions": 1.56,
+   "first": {
+    "deck": "sky-striker",
+    "hands": 6,
+    "policy_end_board": 4.5,
+    "expert_end_board": 5.5,
+    "policy_decisions": 19.2,
+    "ge_expert": 0.17,
+    "best_of_k_end_board": 4.67,
+    "best_of_k_ge_expert": 0.33,
+    "expert_lines": 6,
+    "stuck": 0.0
+   },
+   "second_p": {
+    "lp_lost": 1417,
+    "lp_gained": 250,
+    "kill": 0.0,
+    "field": 3.5,
+    "our_field_left": 1.67,
+    "cut": 0
+   },
+   "second_sample_kill": 0.0,
+   "second_best_of_k": {
+    "lp_lost": 2904,
+    "lp_gained": 250,
+    "kill": 0.0,
+    "field": 3.33,
+    "our_field_left": 1.25,
+    "cut": 0
+   },
+   "alerts": [],
+   "admit_turn1_lines": true,
+   "going_second_candidate": false
+  },
+  {
+   "deck": "sky-striker-meta1",
+   "hands_with_lines": 25,
+   "best_line_acts": 4.72,
+   "best_line_field_interruptions": 1.76,
+   "first": {
+    "deck": "sky-striker-meta1",
+    "hands": 6,
+    "policy_end_board": 4,
+    "expert_end_board": 4.5,
+    "policy_decisions": 29.7,
+    "ge_expert": 0.5,
+    "best_of_k_end_board": 4.5,
+    "best_of_k_ge_expert": 0.5,
+    "expert_lines": 6,
+    "stuck": 0.0
+   },
+   "second_p": {
+    "lp_lost": 3433,
+    "lp_gained": 750,
+    "kill": 0.0,
+    "field": 4.17,
+    "our_field_left": 2.33,
+    "cut": 0
+   },
+   "second_sample_kill": 0.0,
+   "second_best_of_k": {
+    "lp_lost": 5383,
+    "lp_gained": 750,
+    "kill": 0.0,
+    "field": 4.92,
+    "our_field_left": 2.33,
+    "cut": 0
+   },
+   "alerts": [],
+   "admit_turn1_lines": true,
+   "going_second_candidate": false
+  },
+  {
+   "deck": "sky-striker-meta2",
+   "hands_with_lines": 13,
+   "best_line_acts": 3.69,
+   "best_line_field_interruptions": 1.77,
+   "first": {
+    "deck": "sky-striker-meta2",
+    "hands": 6,
+    "policy_end_board": 1.17,
+    "expert_end_board": 3.17,
+    "policy_decisions": 23,
+    "ge_expert": 0.17,
+    "best_of_k_end_board": 2.33,
+    "best_of_k_ge_expert": 0.33,
+    "expert_lines": 6,
+    "stuck": 0.0
+   },
+   "second_p": {
+    "lp_lost": 2008,
+    "lp_gained": 0,
+    "kill": 0.0,
+    "field": 4.67,
+    "our_field_left": 2.5,
+    "cut": 0
+   },
+   "second_sample_kill": 0.0,
+   "second_best_of_k": {
+    "lp_lost": 3483,
+    "lp_gained": 0,
+    "kill": 0.0,
+    "field": 4.25,
+    "our_field_left": 2.33,
+    "cut": 0
+   },
+   "alerts": [],
+   "admit_turn1_lines": false,
+   "going_second_candidate": false
+  },
+  {
+   "deck": "sky-striker-r-b-meta1",
+   "hands_with_lines": 13,
+   "best_line_acts": 5.85,
+   "best_line_field_interruptions": 0.69,
+   "first": {
+    "deck": "sky-striker-r-b-meta1",
+    "hands": 6,
+    "policy_end_board": 4.5,
+    "expert_end_board": 3.33,
+    "policy_decisions": 24.5,
+    "ge_expert": 1.0,
+    "best_of_k_end_board": 5.17,
+    "best_of_k_ge_expert": 1.0,
+    "expert_lines": 6,
+    "stuck": 0.0
+   },
+   "second_p": {
+    "lp_lost": 7108,
+    "lp_gained": 0,
+    "kill": 0.333,
+    "field": 5.42,
+    "our_field_left": 1.75,
+    "cut": 0
+   },
+   "second_sample_kill": 0.292,
+   "second_best_of_k": {
+    "lp_lost": 7775,
+    "lp_gained": 0,
+    "kill": 0.583,
+    "field": 5.33,
+    "our_field_left": 1.67,
+    "cut": 0
+   },
+   "alerts": [],
+   "admit_turn1_lines": true,
+   "going_second_candidate": true
+  },
+  {
+   "deck": "snake-eye",
+   "hands_with_lines": 37,
+   "best_line_acts": 7.54,
+   "best_line_field_interruptions": 0.59,
+   "first": {
+    "deck": "snake-eye",
+    "hands": 6,
+    "policy_end_board": 5.33,
+    "expert_end_board": 5.83,
+    "policy_decisions": 49.7,
+    "ge_expert": 0.5,
+    "best_of_k_end_board": 6.33,
+    "best_of_k_ge_expert": 0.83,
+    "expert_lines": 6,
+    "stuck": 0.0
+   },
+   "second_p": {
+    "lp_lost": 3433,
+    "lp_gained": 0,
+    "kill": 0.0,
+    "field": 6.17,
+    "our_field_left": 2.33,
+    "cut": 0
+   },
+   "second_sample_kill": 0.021,
+   "second_best_of_k": {
+    "lp_lost": 5579,
+    "lp_gained": 0,
+    "kill": 0.083,
+    "field": 4.83,
+    "our_field_left": 2.58,
+    "cut": 0
+   },
+   "alerts": [],
+   "admit_turn1_lines": true,
+   "going_second_candidate": false
+  },
+  {
+   "deck": "spellbook",
+   "hands_with_lines": 15,
+   "best_line_acts": 3.2,
+   "best_line_field_interruptions": 0.93,
+   "first": {
+    "deck": "spellbook",
+    "hands": 6,
+    "policy_end_board": 3.5,
+    "expert_end_board": 3.83,
+    "policy_decisions": 15.2,
+    "ge_expert": 0.5,
+    "best_of_k_end_board": 4,
+    "best_of_k_ge_expert": 0.67,
+    "expert_lines": 6,
+    "stuck": 0.0
+   },
+   "second_p": {
+    "lp_lost": 1425,
+    "lp_gained": 0,
+    "kill": 0.0,
+    "field": 3.42,
+    "our_field_left": 2.25,
+    "cut": 0
+   },
+   "second_sample_kill": 0.0,
+   "second_best_of_k": {
+    "lp_lost": 1817,
+    "lp_gained": 0,
+    "kill": 0.0,
+    "field": 2.58,
+    "our_field_left": 2.25,
+    "cut": 0
+   },
+   "alerts": [],
+   "admit_turn1_lines": false,
+   "going_second_candidate": false
+  },
+  {
+   "deck": "spright",
+   "hands_with_lines": 41,
+   "best_line_acts": 7.37,
+   "best_line_field_interruptions": 3.1,
+   "first": {
+    "deck": "spright",
+    "hands": 6,
+    "policy_end_board": 4.17,
+    "expert_end_board": 7,
+    "policy_decisions": 45.5,
+    "ge_expert": 0.0,
+    "best_of_k_end_board": 5.33,
+    "best_of_k_ge_expert": 0.33,
+    "expert_lines": 6,
+    "stuck": 0.0
+   },
+   "second_p": {
+    "lp_lost": 1383,
+    "lp_gained": 0,
+    "kill": 0.0,
+    "field": 3.75,
+    "our_field_left": 2.17,
+    "cut": 0
+   },
+   "second_sample_kill": 0.0,
+   "second_best_of_k": {
+    "lp_lost": 3271,
+    "lp_gained": 0,
+    "kill": 0.0,
+    "field": 4,
+    "our_field_left": 1.92,
+    "cut": 0
+   },
+   "alerts": [],
+   "admit_turn1_lines": true,
+   "going_second_candidate": false
+  },
+  {
+   "deck": "spyral",
+   "hands_with_lines": 14,
+   "best_line_acts": 7.43,
+   "best_line_field_interruptions": 0.21,
+   "first": {
+    "deck": "spyral",
+    "hands": 6,
+    "policy_end_board": 1.33,
+    "expert_end_board": 5.83,
+    "policy_decisions": 31.3,
+    "ge_expert": 0.0,
+    "best_of_k_end_board": 2.67,
+    "best_of_k_ge_expert": 0.17,
+    "expert_lines": 6,
+    "stuck": 0.0
+   },
+   "second_p": {
+    "lp_lost": 1117,
+    "lp_gained": 83,
+    "kill": 0.0,
+    "field": 3.67,
+    "our_field_left": 2.33,
+    "cut": 0
+   },
+   "second_sample_kill": 0.0,
+   "second_best_of_k": {
+    "lp_lost": 1267,
+    "lp_gained": 83,
+    "kill": 0.0,
+    "field": 3.33,
+    "our_field_left": 2.33,
+    "cut": 0
+   },
+   "alerts": [],
+   "admit_turn1_lines": true,
+   "going_second_candidate": false
+  },
+  {
+   "deck": "stun",
+   "hands_with_lines": 20,
+   "best_line_acts": 1.8,
+   "best_line_field_interruptions": 0.9,
+   "first": {
+    "deck": "stun",
+    "hands": 6,
+    "policy_end_board": 0.67,
+    "expert_end_board": 4.67,
+    "policy_decisions": 9.2,
+    "ge_expert": 0.0,
+    "best_of_k_end_board": 0.67,
+    "best_of_k_ge_expert": 0.0,
+    "expert_lines": 6,
+    "stuck": 0.0
+   },
+   "second_p": {
+    "lp_lost": 0,
+    "lp_gained": 0,
+    "kill": 0.0,
+    "field": 4.5,
+    "our_field_left": 2.83,
+    "cut": 0
+   },
+   "second_sample_kill": 0.0,
+   "second_best_of_k": {
+    "lp_lost": 58,
+    "lp_gained": 0,
+    "kill": 0.0,
+    "field": 3.83,
+    "our_field_left": 2.5,
+    "cut": 0
+   },
+   "alerts": [],
+   "admit_turn1_lines": false,
+   "going_second_candidate": false
+  },
+  {
+   "deck": "swordsoul",
+   "hands_with_lines": 35,
+   "best_line_acts": 7.4,
+   "best_line_field_interruptions": 2.06,
+   "first": {
+    "deck": "swordsoul",
+    "hands": 6,
+    "policy_end_board": 4.17,
+    "expert_end_board": 4.5,
+    "policy_decisions": 24.8,
+    "ge_expert": 0.5,
+    "best_of_k_end_board": 5,
+    "best_of_k_ge_expert": 0.67,
+    "expert_lines": 6,
+    "stuck": 0.0
+   },
+   "second_p": {
+    "lp_lost": 3608,
+    "lp_gained": 0,
+    "kill": 0.0,
+    "field": 3.42,
+    "our_field_left": 1.58,
+    "cut": 0
+   },
+   "second_sample_kill": 0.062,
+   "second_best_of_k": {
+    "lp_lost": 5167,
+    "lp_gained": 0,
+    "kill": 0.25,
+    "field": 2.42,
+    "our_field_left": 1.33,
+    "cut": 0
+   },
+   "alerts": [],
+   "admit_turn1_lines": true,
+   "going_second_candidate": false
+  },
+  {
+   "deck": "synchron-elfnote-meta1",
+   "hands_with_lines": 8,
+   "best_line_acts": 4,
+   "best_line_field_interruptions": 0.62,
+   "first": {
+    "deck": "synchron-elfnote-meta1",
+    "hands": 6,
+    "policy_end_board": 0.67,
+    "expert_end_board": 3.17,
+    "policy_decisions": 28.2,
+    "ge_expert": 0.17,
+    "best_of_k_end_board": 3.17,
+    "best_of_k_ge_expert": 0.5,
+    "expert_lines": 6,
+    "stuck": 0.0
+   },
+   "second_p": {
+    "lp_lost": 6400,
+    "lp_gained": 0,
+    "kill": 0.417,
+    "field": 4.67,
+    "our_field_left": 1.92,
+    "cut": 0
+   },
+   "second_sample_kill": 0.208,
+   "second_best_of_k": {
+    "lp_lost": 7317,
+    "lp_gained": 0,
+    "kill": 0.583,
+    "field": 5.33,
+    "our_field_left": 1.67,
+    "cut": 0
+   },
+   "alerts": [],
+   "admit_turn1_lines": true,
+   "going_second_candidate": true
+  },
+  {
+   "deck": "synchron-elfnote-meta2",
+   "hands_with_lines": 10,
+   "best_line_acts": 7.4,
+   "best_line_field_interruptions": 1.2,
+   "first": {
+    "deck": "synchron-elfnote-meta2",
+    "hands": 6,
+    "policy_end_board": 0,
+    "expert_end_board": 4.5,
+    "policy_decisions": 36,
+    "ge_expert": 0.0,
+    "best_of_k_end_board": 1.5,
+    "best_of_k_ge_expert": 0.0,
+    "expert_lines": 6,
+    "stuck": 0.0
+   },
+   "second_p": {
+    "lp_lost": 4358,
+    "lp_gained": 0,
+    "kill": 0.167,
+    "field": 4.75,
+    "our_field_left": 2.08,
+    "cut": 0
+   },
+   "second_sample_kill": 0.062,
+   "second_best_of_k": {
+    "lp_lost": 5542,
+    "lp_gained": 0,
+    "kill": 0.25,
+    "field": 4.33,
+    "our_field_left": 1.83,
+    "cut": 0
+   },
+   "alerts": [],
+   "admit_turn1_lines": true,
+   "going_second_candidate": false
+  },
+  {
+   "deck": "synchron-kewl-tune-meta1",
+   "hands_with_lines": 11,
+   "best_line_acts": 4.09,
+   "best_line_field_interruptions": 1.09,
+   "first": {
+    "deck": "synchron-kewl-tune-meta1",
+    "hands": 6,
+    "policy_end_board": 0.33,
+    "expert_end_board": 2.5,
+    "policy_decisions": 19.5,
+    "ge_expert": 0.0,
+    "best_of_k_end_board": 1.33,
+    "best_of_k_ge_expert": 0.33,
+    "expert_lines": 6,
+    "stuck": 0.0
+   },
+   "second_p": {
+    "lp_lost": 5308,
+    "lp_gained": 0,
+    "kill": 0.25,
+    "field": 2.58,
+    "our_field_left": 0.83,
+    "cut": 0
+   },
+   "second_sample_kill": 0.229,
+   "second_best_of_k": {
+    "lp_lost": 7317,
+    "lp_gained": 0,
+    "kill": 0.583,
+    "field": 2.83,
+    "our_field_left": 0.75,
+    "cut": 0
+   },
+   "alerts": [],
+   "admit_turn1_lines": true,
+   "going_second_candidate": true
+  },
+  {
+   "deck": "tearlaments",
+   "hands_with_lines": 30,
+   "best_line_acts": 6.7,
+   "best_line_field_interruptions": 1.23,
+   "first": {
+    "deck": "tearlaments",
+    "hands": 6,
+    "policy_end_board": 3.33,
+    "expert_end_board": 4.67,
+    "policy_decisions": 42.2,
+    "ge_expert": 0.67,
+    "best_of_k_end_board": 3.83,
+    "best_of_k_ge_expert": 0.67,
+    "expert_lines": 6,
+    "stuck": 0.0
+   },
+   "second_p": {
+    "lp_lost": 6467,
+    "lp_gained": 0,
+    "kill": 0.417,
+    "field": 4.5,
+    "our_field_left": 2.17,
+    "cut": 0
+   },
+   "second_sample_kill": 0.25,
+   "second_best_of_k": {
+    "lp_lost": 7042,
+    "lp_gained": 0,
+    "kill": 0.583,
+    "field": 4.58,
+    "our_field_left": 2.25,
+    "cut": 0
+   },
+   "alerts": [],
+   "admit_turn1_lines": true,
+   "going_second_candidate": true
+  },
+  {
+   "deck": "tele-dad",
+   "hands_with_lines": 18,
+   "best_line_acts": 2.28,
+   "best_line_field_interruptions": 1.22,
+   "first": {
+    "deck": "tele-dad",
+    "hands": 6,
+    "policy_end_board": 2.33,
+    "expert_end_board": 3.17,
+    "policy_decisions": 11,
+    "ge_expert": 0.33,
+    "best_of_k_end_board": 3,
+    "best_of_k_ge_expert": 0.83,
+    "expert_lines": 6,
+    "stuck": 0.0
+   },
+   "second_p": {
+    "lp_lost": 1250,
+    "lp_gained": 0,
+    "kill": 0.0,
+    "field": 2.33,
+    "our_field_left": 1.92,
+    "cut": 0
+   },
+   "second_sample_kill": 0.0,
+   "second_best_of_k": {
+    "lp_lost": 1608,
+    "lp_gained": 0,
+    "kill": 0.0,
+    "field": 2.25,
+    "our_field_left": 1.92,
+    "cut": 0
+   },
+   "alerts": [],
+   "admit_turn1_lines": false,
+   "going_second_candidate": false
+  },
+  {
+   "deck": "tenpai-dragon",
+   "hands_with_lines": 34,
+   "best_line_acts": 4.85,
+   "best_line_field_interruptions": 1.53,
+   "first": {
+    "deck": "tenpai-dragon",
+    "hands": 6,
+    "policy_end_board": 4,
+    "expert_end_board": 4.83,
+    "policy_decisions": 20.7,
+    "ge_expert": 0.17,
+    "best_of_k_end_board": 4.17,
+    "best_of_k_ge_expert": 0.33,
+    "expert_lines": 6,
+    "stuck": 0.0
+   },
+   "second_p": {
+    "lp_lost": 8392,
+    "lp_gained": 0,
+    "kill": 0.917,
+    "field": 1.75,
+    "our_field_left": 2,
+    "cut": 0
+   },
+   "second_sample_kill": 0.396,
+   "second_best_of_k": {
+    "lp_lost": 8292,
+    "lp_gained": 0,
+    "kill": 0.833,
+    "field": 1.83,
+    "our_field_left": 1.83,
+    "cut": 0
+   },
+   "alerts": [],
+   "admit_turn1_lines": true,
+   "going_second_candidate": true
+  },
+  {
+   "deck": "thunder-dragon",
+   "hands_with_lines": 26,
+   "best_line_acts": 5,
+   "best_line_field_interruptions": 0.5,
+   "first": {
+    "deck": "thunder-dragon",
+    "hands": 6,
+    "policy_end_board": 2.83,
+    "expert_end_board": 3.67,
+    "policy_decisions": 20.8,
+    "ge_expert": 0.33,
+    "best_of_k_end_board": 4.17,
+    "best_of_k_ge_expert": 0.83,
+    "expert_lines": 6,
+    "stuck": 0.0
+   },
+   "second_p": {
+    "lp_lost": 4192,
+    "lp_gained": 0,
+    "kill": 0.083,
+    "field": 3.33,
+    "our_field_left": 2.17,
+    "cut": 0
+   },
+   "second_sample_kill": 0.062,
+   "second_best_of_k": {
+    "lp_lost": 4850,
+    "lp_gained": 0,
+    "kill": 0.167,
+    "field": 3.58,
+    "our_field_left": 2.25,
+    "cut": 0
+   },
+   "alerts": [],
+   "admit_turn1_lines": true,
+   "going_second_candidate": false
+  },
+  {
+   "deck": "trains-meta1",
+   "hands_with_lines": 18,
+   "best_line_acts": 3.67,
+   "best_line_field_interruptions": 1.28,
+   "first": {
+    "deck": "trains-meta1",
+    "hands": 6,
+    "policy_end_board": 2.5,
+    "expert_end_board": 4.67,
+    "policy_decisions": 15.8,
+    "ge_expert": 0.0,
+    "best_of_k_end_board": 4.33,
+    "best_of_k_ge_expert": 0.83,
+    "expert_lines": 6,
+    "stuck": 0.0
+   },
+   "second_p": {
+    "lp_lost": 6300,
+    "lp_gained": 0,
+    "kill": 0.417,
+    "field": 4.42,
+    "our_field_left": 1.75,
+    "cut": 0
+   },
+   "second_sample_kill": 0.167,
+   "second_best_of_k": {
+    "lp_lost": 7358,
+    "lp_gained": 0,
+    "kill": 0.333,
+    "field": 4.17,
+    "our_field_left": 1.5,
+    "cut": 0
+   },
+   "alerts": [],
+   "admit_turn1_lines": false,
+   "going_second_candidate": true
+  },
+  {
+   "deck": "trains-meta2",
+   "hands_with_lines": 19,
+   "best_line_acts": 3.42,
+   "best_line_field_interruptions": 1.63,
+   "first": {
+    "deck": "trains-meta2",
+    "hands": 6,
+    "policy_end_board": 3.83,
+    "expert_end_board": 4.67,
+    "policy_decisions": 19.5,
+    "ge_expert": 0.5,
+    "best_of_k_end_board": 4.67,
+    "best_of_k_ge_expert": 0.67,
+    "expert_lines": 6,
+    "stuck": 0.0
+   },
+   "second_p": {
+    "lp_lost": 4800,
+    "lp_gained": 0,
+    "kill": 0.25,
+    "field": 4.58,
+    "our_field_left": 1.92,
+    "cut": 0
+   },
+   "second_sample_kill": 0.146,
+   "second_best_of_k": {
+    "lp_lost": 6979,
+    "lp_gained": 0,
+    "kill": 0.417,
+    "field": 4,
+    "our_field_left": 1.58,
+    "cut": 0
+   },
+   "alerts": [],
+   "admit_turn1_lines": false,
+   "going_second_candidate": true
+  },
+  {
+   "deck": "tri-brigade",
+   "hands_with_lines": 41,
+   "best_line_acts": 7.22,
+   "best_line_field_interruptions": 1.98,
+   "first": {
+    "deck": "tri-brigade",
+    "hands": 6,
+    "policy_end_board": 0,
+    "expert_end_board": 5.33,
+    "policy_decisions": 54.3,
+    "ge_expert": 0.0,
+    "best_of_k_end_board": 1.5,
+    "best_of_k_ge_expert": 0.0,
+    "expert_lines": 6,
+    "stuck": 0.0
+   },
+   "second_p": {
+    "lp_lost": 2229,
+    "lp_gained": 0,
+    "kill": 0.0,
+    "field": 3.75,
+    "our_field_left": 2,
+    "cut": 0
+   },
+   "second_sample_kill": 0.0,
+   "second_best_of_k": {
+    "lp_lost": 3446,
+    "lp_gained": 0,
+    "kill": 0.0,
+    "field": 4.08,
+    "our_field_left": 1.92,
+    "cut": 0
+   },
+   "alerts": [],
+   "admit_turn1_lines": true,
+   "going_second_candidate": false
+  },
+  {
+   "deck": "trickstar",
+   "hands_with_lines": 18,
+   "best_line_acts": 2.11,
+   "best_line_field_interruptions": 1.78,
+   "first": {
+    "deck": "trickstar",
+    "hands": 6,
+    "policy_end_board": 2.33,
+    "expert_end_board": 4.5,
+    "policy_decisions": 16.3,
+    "ge_expert": 0.33,
+    "best_of_k_end_board": 2.83,
+    "best_of_k_ge_expert": 0.5,
+    "expert_lines": 6,
+    "stuck": 0.0
+   },
+   "second_p": {
+    "lp_lost": 225,
+    "lp_gained": 0,
+    "kill": 0.0,
+    "field": 3.92,
+    "our_field_left": 1.92,
+    "cut": 0
+   },
+   "second_sample_kill": 0.0,
+   "second_best_of_k": {
+    "lp_lost": 192,
+    "lp_gained": 0,
+    "kill": 0.0,
+    "field": 4.58,
+    "our_field_left": 2.17,
+    "cut": 0
+   },
+   "alerts": [],
+   "admit_turn1_lines": false,
+   "going_second_candidate": false
+  },
+  {
+   "deck": "true-draco",
+   "hands_with_lines": 19,
+   "best_line_acts": 3.95,
+   "best_line_field_interruptions": 0.89,
+   "first": {
+    "deck": "true-draco",
+    "hands": 6,
+    "policy_end_board": 0.83,
+    "expert_end_board": 3,
+    "policy_decisions": 17,
+    "ge_expert": 0.0,
+    "best_of_k_end_board": 2,
+    "best_of_k_ge_expert": 0.5,
+    "expert_lines": 6,
+    "stuck": 0.0
+   },
+   "second_p": {
+    "lp_lost": 1342,
+    "lp_gained": 0,
+    "kill": 0.0,
+    "field": 3.08,
+    "our_field_left": 2.25,
+    "cut": 0
+   },
+   "second_sample_kill": 0.0,
+   "second_best_of_k": {
+    "lp_lost": 3275,
+    "lp_gained": 0,
+    "kill": 0.0,
+    "field": 2.75,
+    "our_field_left": 1.83,
+    "cut": 0
+   },
+   "alerts": [],
+   "admit_turn1_lines": false,
+   "going_second_candidate": false
+  },
+  {
+   "deck": "unchained",
+   "hands_with_lines": 12,
+   "best_line_acts": 4.25,
+   "best_line_field_interruptions": 1.08,
+   "first": {
+    "deck": "unchained",
+    "hands": 6,
+    "policy_end_board": 1.83,
+    "expert_end_board": 3.5,
+    "policy_decisions": 24.3,
+    "ge_expert": 0.17,
+    "best_of_k_end_board": 3.17,
+    "best_of_k_ge_expert": 0.5,
+    "expert_lines": 6,
+    "stuck": 0.0
+   },
+   "second_p": {
+    "lp_lost": 2542,
+    "lp_gained": 0,
+    "kill": 0.0,
+    "field": 3.25,
+    "our_field_left": 2.58,
+    "cut": 0
+   },
+   "second_sample_kill": 0.0,
+   "second_best_of_k": {
+    "lp_lost": 3379,
+    "lp_gained": 0,
+    "kill": 0.0,
+    "field": 3.25,
+    "our_field_left": 2.25,
+    "cut": 0
+   },
+   "alerts": [],
+   "admit_turn1_lines": true,
+   "going_second_candidate": false
+  },
+  {
+   "deck": "vanquish-soul",
+   "hands_with_lines": 32,
+   "best_line_acts": 3.09,
+   "best_line_field_interruptions": 2.22,
+   "first": {
+    "deck": "vanquish-soul",
+    "hands": 6,
+    "policy_end_board": 1.17,
+    "expert_end_board": 4.33,
+    "policy_decisions": 16,
+    "ge_expert": 0.0,
+    "best_of_k_end_board": 2.83,
+    "best_of_k_ge_expert": 0.17,
+    "expert_lines": 6,
+    "stuck": 0.0
+   },
+   "second_p": {
+    "lp_lost": 1904,
+    "lp_gained": 0,
+    "kill": 0.0,
+    "field": 2.42,
+    "our_field_left": 1.83,
+    "cut": 0
+   },
+   "second_sample_kill": 0.021,
+   "second_best_of_k": {
+    "lp_lost": 3758,
+    "lp_gained": 0,
+    "kill": 0.083,
+    "field": 3.17,
+    "our_field_left": 1.83,
+    "cut": 0
+   },
+   "alerts": [],
+   "admit_turn1_lines": false,
+   "going_second_candidate": false
+  },
+  {
+   "deck": "vendread",
+   "hands_with_lines": 12,
+   "best_line_acts": 4.42,
+   "best_line_field_interruptions": 1.08,
+   "first": {
+    "deck": "vendread",
+    "hands": 6,
+    "policy_end_board": 2.67,
+    "expert_end_board": 2.83,
+    "policy_decisions": 11,
+    "ge_expert": 0.67,
+    "best_of_k_end_board": 3,
+    "best_of_k_ge_expert": 0.83,
+    "expert_lines": 6,
+    "stuck": 0.0
+   },
+   "second_p": {
+    "lp_lost": 783,
+    "lp_gained": 0,
+    "kill": 0.0,
+    "field": 2.33,
+    "our_field_left": 2.58,
+    "cut": 0
+   },
+   "second_sample_kill": 0.0,
+   "second_best_of_k": {
+    "lp_lost": 850,
+    "lp_gained": 0,
+    "kill": 0.0,
+    "field": 2.42,
+    "our_field_left": 2.92,
+    "cut": 0
+   },
+   "alerts": [],
+   "admit_turn1_lines": true,
+   "going_second_candidate": false
+  },
+  {
+   "deck": "virtual-world",
+   "hands_with_lines": 29,
+   "best_line_acts": 3.69,
+   "best_line_field_interruptions": 1.24,
+   "first": {
+    "deck": "virtual-world",
+    "hands": 6,
+    "policy_end_board": 2.33,
+    "expert_end_board": 4.5,
+    "policy_decisions": 20.3,
+    "ge_expert": 0.17,
+    "best_of_k_end_board": 3.17,
+    "best_of_k_ge_expert": 0.5,
+    "expert_lines": 6,
+    "stuck": 0.0
+   },
+   "second_p": {
+    "lp_lost": 2125,
+    "lp_gained": 0,
+    "kill": 0.0,
+    "field": 3.33,
+    "our_field_left": 2.5,
+    "cut": 0
+   },
+   "second_sample_kill": 0.0,
+   "second_best_of_k": {
+    "lp_lost": 3633,
+    "lp_gained": 0,
+    "kill": 0.0,
+    "field": 3.67,
+    "our_field_left": 2.42,
+    "cut": 0
+   },
+   "alerts": [],
+   "admit_turn1_lines": false,
+   "going_second_candidate": false
+  },
+  {
+   "deck": "voiceless-voice",
+   "hands_with_lines": 31,
+   "best_line_acts": 5.52,
+   "best_line_field_interruptions": 1.58,
+   "first": {
+    "deck": "voiceless-voice",
+    "hands": 6,
+    "policy_end_board": 0.83,
+    "expert_end_board": 5.33,
+    "policy_decisions": 30.2,
+    "ge_expert": 0.0,
+    "best_of_k_end_board": 1.5,
+    "best_of_k_ge_expert": 0.0,
+    "expert_lines": 6,
+    "stuck": 0.0
+   },
+   "second_p": {
+    "lp_lost": 3779,
+    "lp_gained": 0,
+    "kill": 0.167,
+    "field": 4.08,
+    "our_field_left": 2.08,
+    "cut": 0
+   },
+   "second_sample_kill": 0.021,
+   "second_best_of_k": {
+    "lp_lost": 3994,
+    "lp_gained": 0,
+    "kill": 0.083,
+    "field": 3.42,
+    "our_field_left": 2.17,
+    "cut": 0
+   },
+   "alerts": [],
+   "admit_turn1_lines": true,
+   "going_second_candidate": false
+  },
+  {
+   "deck": "white-forest",
+   "hands_with_lines": 36,
+   "best_line_acts": 7.14,
+   "best_line_field_interruptions": 1.47,
+   "first": {
+    "deck": "white-forest",
+    "hands": 6,
+    "policy_end_board": 2.33,
+    "expert_end_board": 5.67,
+    "policy_decisions": 26.5,
+    "ge_expert": 0.33,
+    "best_of_k_end_board": 4.33,
+    "best_of_k_ge_expert": 0.5,
+    "expert_lines": 6,
+    "stuck": 0.0
+   },
+   "second_p": {
+    "lp_lost": 4758,
+    "lp_gained": 0,
+    "kill": 0.0,
+    "field": 4.33,
+    "our_field_left": 2.25,
+    "cut": 0
+   },
+   "second_sample_kill": 0.021,
+   "second_best_of_k": {
+    "lp_lost": 5633,
+    "lp_gained": 0,
+    "kill": 0.083,
+    "field": 4,
+    "our_field_left": 2.08,
+    "cut": 0
+   },
+   "alerts": [],
+   "admit_turn1_lines": true,
+   "going_second_candidate": false
+  },
+  {
+   "deck": "wind-up",
+   "hands_with_lines": 18,
+   "best_line_acts": 2.33,
+   "best_line_field_interruptions": 1.28,
+   "first": {
+    "deck": "wind-up",
+    "hands": 6,
+    "policy_end_board": 2,
+    "expert_end_board": 4,
+    "policy_decisions": 16.3,
+    "ge_expert": 0.17,
+    "best_of_k_end_board": 3.33,
+    "best_of_k_ge_expert": 0.67,
+    "expert_lines": 6,
+    "stuck": 0.0
+   },
+   "second_p": {
+    "lp_lost": 558,
+    "lp_gained": 0,
+    "kill": 0.0,
+    "field": 2.42,
+    "our_field_left": 2.33,
+    "cut": 0
+   },
+   "second_sample_kill": 0.0,
+   "second_best_of_k": {
+    "lp_lost": 625,
+    "lp_gained": 0,
+    "kill": 0.0,
+    "field": 2.42,
+    "our_field_left": 2.42,
+    "cut": 0
+   },
+   "alerts": [],
+   "admit_turn1_lines": false,
+   "going_second_candidate": false
+  },
+  {
+   "deck": "witchcrafter",
+   "hands_with_lines": 40,
+   "best_line_acts": 3.35,
+   "best_line_field_interruptions": 1.45,
+   "first": {
+    "deck": "witchcrafter",
+    "hands": 6,
+    "policy_end_board": 4,
+    "expert_end_board": 4.5,
+    "policy_decisions": 12.3,
+    "ge_expert": 0.67,
+    "best_of_k_end_board": 4.33,
+    "best_of_k_ge_expert": 0.83,
+    "expert_lines": 6,
+    "stuck": 0.0
+   },
+   "second_p": {
+    "lp_lost": 758,
+    "lp_gained": 0,
+    "kill": 0.0,
+    "field": 2.33,
+    "our_field_left": 2.92,
+    "cut": 0
+   },
+   "second_sample_kill": 0.0,
+   "second_best_of_k": {
+    "lp_lost": 1833,
+    "lp_gained": 0,
+    "kill": 0.0,
+    "field": 2.33,
+    "our_field_left": 2.67,
+    "cut": 0
+   },
+   "alerts": [],
+   "admit_turn1_lines": false,
+   "going_second_candidate": false
+  },
+  {
+   "deck": "yubel",
+   "hands_with_lines": 40,
+   "best_line_acts": 4.88,
+   "best_line_field_interruptions": 0.85,
+   "first": {
+    "deck": "yubel",
+    "hands": 6,
+    "policy_end_board": 4.5,
+    "expert_end_board": 5.33,
+    "policy_decisions": 33.5,
+    "ge_expert": 0.33,
+    "best_of_k_end_board": 5.17,
+    "best_of_k_ge_expert": 0.5,
+    "expert_lines": 6,
+    "stuck": 0.0
+   },
+   "second_p": {
+    "lp_lost": 0,
+    "lp_gained": 0,
+    "kill": 0.0,
+    "field": 4.75,
+    "our_field_left": 3.25,
+    "cut": 0
+   },
+   "second_sample_kill": 0.0,
+   "second_best_of_k": {
+    "lp_lost": 417,
+    "lp_gained": 0,
+    "kill": 0.0,
+    "field": 4.5,
+    "our_field_left": 2.83,
+    "cut": 0
+   },
+   "alerts": [],
+   "admit_turn1_lines": true,
+   "going_second_candidate": false
+  },
+  {
+   "deck": "zombie",
+   "hands_with_lines": 18,
+   "best_line_acts": 2.83,
+   "best_line_field_interruptions": 1.22,
+   "first": {
+    "deck": "zombie",
+    "hands": 6,
+    "policy_end_board": 3.17,
+    "expert_end_board": 4,
+    "policy_decisions": 15.3,
+    "ge_expert": 0.17,
+    "best_of_k_end_board": 3.5,
+    "best_of_k_ge_expert": 0.5,
+    "expert_lines": 6,
+    "stuck": 0.0
+   },
+   "second_p": {
+    "lp_lost": 775,
+    "lp_gained": 0,
+    "kill": 0.0,
+    "field": 2.5,
+    "our_field_left": 3.08,
+    "cut": 0
+   },
+   "second_sample_kill": 0.0,
+   "second_best_of_k": {
+    "lp_lost": 592,
+    "lp_gained": 0,
+    "kill": 0.0,
+    "field": 2.58,
+    "our_field_left": 3.08,
+    "cut": 0
+   },
+   "alerts": [],
+   "admit_turn1_lines": false,
+   "going_second_candidate": false
+  },
+  {
+   "deck": "zoodiac",
+   "hands_with_lines": 29,
+   "best_line_acts": 11.79,
+   "best_line_field_interruptions": 2.45,
+   "first": {
+    "deck": "zoodiac",
+    "hands": 6,
+    "policy_end_board": 0.83,
+    "expert_end_board": 5.5,
+    "policy_decisions": 69.3,
+    "ge_expert": 0.0,
+    "best_of_k_end_board": 2.17,
+    "best_of_k_ge_expert": 0.0,
+    "expert_lines": 6,
+    "stuck": 0.0
+   },
+   "second_p": {
+    "lp_lost": 2175,
+    "lp_gained": 0,
+    "kill": 0.0,
+    "field": 4.58,
+    "our_field_left": 1.92,
+    "cut": 0
+   },
+   "second_sample_kill": 0.0,
+   "second_best_of_k": {
+    "lp_lost": 2458,
+    "lp_gained": 0,
+    "kill": 0.0,
+    "field": 4.33,
+    "our_field_left": 1.83,
+    "cut": 0
+   },
+   "alerts": [],
+   "admit_turn1_lines": true,
+   "going_second_candidate": false
+  }
+ ]
+}

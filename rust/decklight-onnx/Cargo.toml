@@ -1,0 +1,19 @@
+[package]
+name = "decklight-onnx"
+description = "ONNX Runtime inference for the product policy/value graphs (shared by the server and the search)"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[lib]
+name = "decklight_onnx"
+path = "src/lib.rs"
+
+[dependencies]
+decklight-cards = { path = "../decklight-cards" }
+ygoenv-sys = { path = "../ygoenv-sys" }
+serde_json = "1"
+sha2 = "0.10"
+ort = { version = "=2.0.0-rc.15", default-features = false, features = ["load-dynamic", "ndarray", "api-31"] }
+ndarray = "0.17"
+ndarray-npy = { version = "0.10", default-features = false } # .npy only: the npz feature pulls zip 6 (RUSTSEC-2026-0367..0429)

@@ -54,8 +54,9 @@ def test_protocol_round_trip():
     assert struct.unpack_from("<B3xI3II", err) == (P.ERR_DECKERROR, P.DERR_MAINCOUNT, 39, 40, 60, 0)
     assert len(P.build_start(8000, 40, 15, 40, 15, 0)) == 18
 
-    assert P.rps_beats(1, 2) and P.rps_beats(2, 3) and P.rps_beats(3, 1)
-    assert not P.rps_beats(2, 1) and not P.rps_beats(1, 1)
+    # EDOPro: 1 scissors, 2 rock, 3 paper; (1, 2) is a win for the second throw (generic_duel.cpp HandResult)
+    assert P.rps_beats(2, 1) and P.rps_beats(3, 2) and P.rps_beats(1, 3)
+    assert not P.rps_beats(1, 2) and not P.rps_beats(1, 1)
 
     # framing: one frame per byte (split) and three frames at once (merged)
     frames = [(P.CTOS_PLAYER_INFO, P.encode_name("a")), (P.STOC_DUEL_START, b""),

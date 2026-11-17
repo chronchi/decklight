@@ -52,6 +52,7 @@ from decklight.decks import load_ydk
 from decklight.engine.cpp_env import VecEnv
 from decklight.engine.duel import Engine
 from decklight.eval.bc_policy import _run_args
+from decklight.model.ckpt import load_state
 from decklight.model.policy import PolicyNet
 from decklight.model.policy_v3 import ARCH_KEYS, make_policy
 from decklight.rl import dist as distmod
@@ -64,10 +65,12 @@ from decklight.rl.ppo import (
     gae,
     gather,
     masked_log_softmax,
+    opp_shape_potential,
     ppo_loss,
     ppo_loss_priv,
     to_torch,
 )
+from decklight.rl.remote import ExtFeed, publish_weights
 from decklight.rl.rollout import Collector
 from decklight.rl.vrpo import ppo_loss_vrpo, ppo_loss_vrpo_priv
 from decklight.rl.vrpo import vrpo_batch as _vrpo_batch
@@ -106,6 +109,19 @@ def load_net(ckpt: Path, emb: dict, a: dict, value: bool, q: bool = False) -> Po
                                               strict=False)  # fmt: skip
     ok = all(k.startswith("value_head.") or (q and k.startswith("q_head.")) for k in missing)
     assert not unexpected and ok, (missing, unexpected)
+    return net
+
+
+def load_opp(ckpt: Path, emb: dict, a: dict) -> PolicyNet:
+    """A frozen opponent (--league-fixed, --deck-opps; .pt or a forge pack's .safetensors) with the --init
+    architecture, except its own history kind: full-history specialists next to an observable-history learner (X2).
+    The kind comes from the metrics.jsonl next to the checkpoint (none: full history); strict load catches a wrong one."""
+    oa = {**a, "observable_history": bool(_run_args(ckpt).get("observable_history", False))}
+    net = make_policy(emb, oa, dropout=0.0, value=False)
+    state = load_state(ckpt)
+    missing, unexpected = net.load_state_dict({k: v.float() if v.is_floating_point() else v for k, v in state.items()},
+                                              strict=False)  # fmt: skip
+    assert not unexpected and all(k.startswith("value_head.") for k in missing), (missing, unexpected)
     return net
 
 
@@ -367,6 +383,17 @@ def dags_fail_checks(it: int, st: dict, dags_p: float, vec, fail) -> None:
     bad, used = int(vec.dags_bad), int(vec.dags_used) + int(vec.dags_bad)
     if used > 0 and bad / used > 0.2:
         fail(f"iteration {it}: DAGS prefix failure rate {bad}/{used} > 0.2")
+    # combo-line starts: episodes must happen and their scripts must be played (a script whose first fingerprint never
+    # matches the rollout rows would leave P driving every "line" episode: the noise the plan avoids)
+    if "line_games" in st and it >= 2:
+        if st["line_games"] == 0:
+            fail(f"iteration {it}: --line-starts but 0 combo-line episodes finished")
+        elif st["line_followed"] == 0:
+            fail(f"iteration {it}: {st['line_games']} combo-line episodes but 0 scripted opponent decisions played")
+        ended = st.get("line_completed", 0) + st.get("line_broken", 0)  # cumulative, like line_broken0
+        if ended >= 20 and st.get("line_broken0", 0) > 0.05 * ended:
+            fail(f"iteration {it}: {st['line_broken0']}/{ended} combo-line scripts mismatched at their first decision "
+                 f"(before our bot acted): fingerprint/replay bug")
 
 
 def ga_fail_checks(it: int, st: dict, learner_gauntlet: int, ga_share: float, fail) -> None:
@@ -380,16 +407,34 @@ def ga_fail_checks(it: int, st: dict, learner_gauntlet: int, ga_share: float, fa
         fail(f"iteration {it}: --ga-episode-share {ga_share} but 0 gauntlet episodes finished")
 
 
-def gae_batch(store: SlotStore, finished: list, lam: float):
-    """GAE per finished seat trajectory. Returns (slots, adv, ret, adv_n)."""
+def gae_batch(store: SlotStore, finished: list, lam: float, shape_opp: float = 0.0,
+              stats: dict | None = None):
+    """GAE per finished seat trajectory. Returns (slots, adv, ret, adv_n).
+
+    `shape_opp > 0` adds potential-based shaping rewards from Phi(obs) (columns
+    14/15/16 of the stored global obs) and puts `shape_mean_abs` into `stats`.
+    """
     slots = np.concatenate([np.array(s, np.int64) for s, _ in finished])
     advs, rets = [], []
+    shape_abs = shape_n = 0
     for s, rew in finished:
-        ad, rt = gae(store.value[np.array(s)], rew, lam)
+        s_arr = np.array(s, np.int64)
+        step_rewards = None
+        if shape_opp > 0.0:
+            phi = opp_shape_potential(store.obs["global"][s_arr], shape_opp)
+            step_rewards = np.empty_like(phi)
+            if len(phi) > 1:
+                step_rewards[:-1] = phi[1:] - phi[:-1]
+            step_rewards[-1] = -phi[-1]  # Phi(terminal) = 0
+            shape_abs += float(np.abs(phi).sum())
+            shape_n += len(phi)
+        ad, rt = gae(store.value[s_arr], rew, lam, step_rewards=step_rewards)
         advs.append(ad)
         rets.append(rt)
     adv, ret = np.concatenate(advs), np.concatenate(rets)
     adv_n = (adv - adv.mean()) / (adv.std() + 1e-8)
+    if stats is not None:
+        stats["shape_mean_abs"] = shape_abs / max(shape_n, 1)
     return slots, adv, ret, adv_n
 
 
@@ -407,6 +452,28 @@ def validate_adv_filter(args: argparse.Namespace, ap: argparse.ArgumentParser) -
     if q > 0 and (args.adv == "vrpo" or int(args.priv_critic) == 1):
         ap.error("--adv-filter-q supports the plain GAE path only "
                  "(not with --adv vrpo or --priv-critic 1)")
+
+
+def validate_opp_shaping(args: argparse.Namespace, ap: argparse.ArgumentParser) -> None:
+    """Fail loud on bad --win-explore/--shape-opp combos (argparse error, exit 2)."""
+    if not 0.0 <= float(args.win_explore) <= 1.0:
+        ap.error(f"--win-explore must be in [0, 1], got {args.win_explore}")
+    if not 0.0 <= float(args.isw_floor) <= 1.0:
+        ap.error(f"--isw-floor must be in [0, 1], got {args.isw_floor}")
+    if float(args.isw_floor) > 0.0 and float(args.win_explore) <= 0.0:
+        ap.error("--isw-floor > 0 requires --win-explore > 0")
+    if not np.isfinite(args.shape_opp) or args.shape_opp < 0.0:
+        ap.error(f"--shape-opp must be a finite value >= 0, got {args.shape_opp}")
+    kwm = float(getattr(args, "kl_win_mult", 1.0))
+    if kwm != 1.0 and (int(getattr(args, "priv_critic", 0)) or args.adv != "gae"):
+        ap.error("--kl-win-mult needs the plain PPO loss (--priv-critic 0, --adv gae)")
+    if kwm < 0:
+        ap.error(f"--kl-win-mult must be >= 0, got {kwm}")
+    if getattr(args, "win_explore_lines_only", 0) and (args.win_explore <= 0.0
+                                                       or getattr(args, "line_starts", None) is None):
+        ap.error("--win-explore-lines-only needs --win-explore > 0 and --line-starts")
+    if args.adv != "gae" and (args.win_explore > 0.0 or args.shape_opp > 0.0):
+        ap.error("--win-explore/--shape-opp support the plain GAE path only (not --adv vrpo)")
 
 
 def adv_filter_keep(adv: np.ndarray, q: float, min_thr: float) -> tuple[np.ndarray, float]:
@@ -463,7 +530,8 @@ def ppo_update(model: PolicyNet, upd_model, opt, vopt, store: SlotStore, slots: 
                minibatch: int, warm: bool, precision: str, max_upload_gb: float, compile: bool,
                critic: PolicyNet | None = None, copt=None, priv_critic: bool = False,
                adv: str = "gae", upd_critic=None, hint: dict | None = None,
-               adv_keep: np.ndarray | None = None) -> dict:
+               adv_keep: np.ndarray | None = None, isw: np.ndarray | None = None,
+               kl_win_mult: float = 1.0) -> dict:
     """Upload-once + PPO epochs over one batch. Returns per-iteration mean stats (raises on non-finite).
 
     With `priv_critic`, the value loss trains `critic` (via `copt`) on the privileged
@@ -504,11 +572,11 @@ def ppo_update(model: PolicyNet, upd_model, opt, vopt, store: SlotStore, slots: 
         cobs_np = critic_obs({k: np.ascontiguousarray(store.obs[k][slots]) for k in policy_keys},
                              np.ascontiguousarray(store.obs["priv_code"][slots]))
     per_slot = (sum(int(np.prod(v.shape[1:], dtype=np.int64)) * np.dtype(v.dtype).itemsize
-                    for v in store.obs.values()) + 8 + 4 + 4 + 64 * 2 + 4 + 4)
+                    for v in store.obs.values()) + 8 + 4 + 4 + 4 + 64 * 2 + 4 + 4)
     upload_once = per_slot * len(slots) <= max_upload_gb * 1e9
     obs_dev = act_dev = olp_dev = ref_dev = adv_dev = ret_dev = perm_dev = None
     cobs_dev = None
-    keep_dev = None
+    keep_dev = isw_dev = None
     if upload_once:
         obs_dev = {k: torch.from_numpy(np.ascontiguousarray(store.obs[k][slots])).to(dev)
                    for k in store.obs}
@@ -520,6 +588,8 @@ def ppo_update(model: PolicyNet, upd_model, opt, vopt, store: SlotStore, slots: 
         perm_dev = torch.from_numpy(rng.permutation(len(slots))).to(dev)
         if adv_keep is not None:
             keep_dev = torch.from_numpy(np.ascontiguousarray(adv_keep)).to(dev)
+        if isw is not None:
+            isw_dev = torch.from_numpy(np.ascontiguousarray(isw)).to(dev)
         if priv_critic:
             assert cobs_np is not None
             cobs_dev = to_torch(cobs_np, dev)
@@ -550,6 +620,7 @@ def ppo_update(model: PolicyNet, upd_model, opt, vopt, store: SlotStore, slots: 
                 a_t = adv_dev[idx]
                 r_t = ret_dev[idx]
                 k_t = keep_dev[idx] if keep_dev is not None else None
+                i_t = isw_dev[idx] if isw_dev is not None else None
                 cobs_t = {key: v[idx] for key, v in cobs_dev.items()} if priv_critic else None
             else:
                 mb = perm[k : k + minibatch]
@@ -561,6 +632,7 @@ def ppo_update(model: PolicyNet, upd_model, opt, vopt, store: SlotStore, slots: 
                 a_t = torch.from_numpy(adv_n[mb]).to(dev)
                 r_t = torch.from_numpy(ret[mb]).to(dev)
                 k_t = torch.from_numpy(adv_keep[mb]).to(dev) if adv_keep is not None else None
+                i_t = torch.from_numpy(isw[mb]).to(dev) if isw is not None else None
                 cobs_t = to_torch({key: v[mb] for key, v in cobs_np.items()}, dev) \
                     if priv_critic else None
             fwd = _fwd_of(upd_model)
@@ -627,7 +699,7 @@ def ppo_update(model: PolicyNet, upd_model, opt, vopt, store: SlotStore, slots: 
                     else:
                         loss_pol, loss_crit, s = ppo_loss_priv(fwd, cfwd, rl, obs, cobs_t, act,
                                                                olp, a_t, r_t, clip, vf_coef, kl_coef,
-                                                               ent_coef)  # fmt: skip
+                                                               ent_coef, isw=i_t)  # fmt: skip
                 finite_epoch = finite_epoch & torch.isfinite(loss_pol).detach() \
                     & torch.isfinite(loss_crit).detach()
                 opt.zero_grad(set_to_none=True)
@@ -647,7 +719,8 @@ def ppo_update(model: PolicyNet, upd_model, opt, vopt, store: SlotStore, slots: 
                                                 kl_coef, ent_coef)  # fmt: skip
                     else:
                         loss, s = ppo_loss(fwd, rl, obs, act, olp, a_t, r_t, clip, vf_coef,
-                                           kl_coef, ent_coef, keep=k_t)  # fmt: skip
+                                           kl_coef, ent_coef, keep=k_t, isw=i_t,
+                                           kl_win_mult=kl_win_mult)  # fmt: skip
                 opt.zero_grad(set_to_none=True)
                 loss.backward()
                 distmod.average_grads_(model)
@@ -739,6 +812,9 @@ def main() -> None:
     ap.add_argument("--p-bc", type=float, default=0.3, help="share of episodes vs the frozen BC policy (ignored with --league 1)")
     ap.add_argument("--dags-starts", type=Path, default=None,
                     help="DAGS starts file (scripts/build_dags_starts.py output); unset = no mid-game starts")
+    ap.add_argument("--line-starts", type=Path, default=None,
+                    help="combo-line starts (rl/lines.py; scripts/build_line_starts.py): appended to the DAGS starts; "
+                         "their opponent replays an engine-verified line until our bot changes it, then P continues")
     ap.add_argument("--dags-p", type=float, default=0.0,
                     help="share of episodes starting mid-game from --dags-starts (0 = off, bit-identical)")
     ap.add_argument("--curric", type=int, choices=(0, 1), default=0,
@@ -799,9 +875,26 @@ def main() -> None:
                     "|advantage| (quantile q of the iteration batch, 0 = off, bit-identical)")
     ap.add_argument("--adv-filter-min", type=float, default=0.01,
                     help="X1: floor for the advantage-filter threshold")
+    ap.add_argument("--win-explore", type=float, default=0.0,
+                    help="EPS: on opponent-turn chain-0 learner decisions with a legal activation, "
+                         "sample from (1-EPS)*pi + EPS*uniform(legal activations) and weight the "
+                         "advantage by min(1, pi/mu) (0 = off, bit-identical)")
+    ap.add_argument("--isw-floor", type=float, default=0.0,
+                    help="F: floor the stored --win-explore IS weight on target-window rows at "
+                         "max(min(1, pi/mu), F) so explored activations keep a minimum weight "
+                         "(requires --win-explore > 0; 0 = off, bit-identical)")
+    ap.add_argument("--shape-opp", type=float, default=0.0,
+                    help="LAMBDA: potential-based shaping Phi = -LAMBDA*(opp hand+field)/10 "
+                         "(0 = off, identical returns/advantages)")
     ap.add_argument("--vf-coef", type=float, default=0.5)
     ap.add_argument("--ent-coef", type=float, default=0.003)
     ap.add_argument("--kl-coef", type=float, default=0.1)
+    ap.add_argument("--kl-win-mult", type=float, default=1.0,
+                    help="weight of the KL term on opponent-turn chain-0 rows with a legal activation "
+                         "(0 = no anchor to the reference there; 1 = off, bit-identical)")
+    ap.add_argument("--win-explore-lines-only", type=int, choices=(0, 1), default=0,
+                    help="1: --win-explore only in combo-line episodes (--line-starts), where interrupting the "
+                         "scripted line is the point; plain games keep on-policy sampling (0 = off, bit-identical)")
     ap.add_argument("--value-warmup", type=int, default=2, help="first iterations train the value head only")
     ap.add_argument("--value-lr", type=float, default=3e-4,
                     help="lr of the value head's own optimizer (warm-up iterations); lower to fine-tune a trained head")
@@ -832,6 +925,28 @@ def main() -> None:
     ap.add_argument("--no-ygoagent", action="store_true")
     ap.add_argument("--hours", type=float, default=1.0, help="stop (then final eval) after this much training")
     ap.add_argument("--iters", type=int, default=0, help="stop after this many iterations (0 = by --hours)")
+    ap.add_argument("--deck-opps", type=Path, default=None,
+                    help="deck-bound opponents (JSON list of {name, ckpt, decks}; scripts/tsoj/deck_opps.py): their "
+                    "decks join the train pool, and when the opponent seat holds one, its net pilots it "
+                    "(with --deck-opp-share). Needs --league 1")
+    ap.add_argument("--extra-pool", type=Path, nargs="+", default=None,
+                    help="more .ydk lists for the train pool (master plan cycle 1: the meta lists join the r1 pool); "
+                    "a list already in the pool (same main + extra) is not added twice")
+    ap.add_argument("--drop-pool", nargs="+", default=None,
+                    help="pool deck names (stems) left out of training, e.g. the held-out lists of a Forge split")
+    ap.add_argument("--deck-opp-share", type=float, default=1.0,
+                    help="--deck-opps: probability a bound deck on the opponent seat is piloted by its net")
+    ap.add_argument("--ext-dir", type=Path, default=None,
+                    help="external episodes (decklight.rl.remote; tsoj PPO): read <dir>/ep-*.npz into each batch as "
+                    "finished learner trajectories, publish the weights to <dir>/weights.pt after every update")
+    ap.add_argument("--ext-share", type=float, default=0.3,
+                    help="--ext-dir: target share of external samples in a batch (quota = rollout * s / (1 - s))")
+    ap.add_argument("--ext-max-lag", type=int, default=4,
+                    help="--ext-dir: drop episodes whose oldest decision used weights older than it - LAG")
+    ap.add_argument("--ext-wait-s", type=float, default=600.0,
+                    help="--ext-dir: wait up to this long per iteration for the quota (keeps the share fixed)")
+    ap.add_argument("--ext-zero-iters", type=int, default=3,
+                    help="--ext-dir: fail after this many consecutive iterations with 0 external episodes")
     ap.add_argument("--resume", type=Path, default=None,
                     help="continue a run from its rl/ dir: last.pt (policy, critic, optimizers, iteration), "
                          "curriculum.json and the iter-NNNN.pt league snapshots; --init stays the KL/eval anchor, "
@@ -846,6 +961,9 @@ def main() -> None:
                     help="overlap the next rollout with the PPO update (background collect, one-iteration lag)")
     args = ap.parse_args()
     validate_adv_filter(args, ap)
+    validate_opp_shaping(args, ap)
+    if args.ext_dir is not None and not 0.0 < args.ext_share < 1.0:
+        ap.error(f"--ext-share {args.ext_share} not in (0, 1)")
     t_start = time.time()
     _dev_type = torch.device(args.device).type
     dist_rank, dist_world = distmod.init_from_env(_dev_type)
@@ -958,7 +1076,49 @@ def main() -> None:
     hold = set((ROOT / "decks/pool/HOLDOUT").read_text().split()) | {"kewl-tune"}
     pool = sorted((ROOT / "decks/pool").glob("*.ydk"))
     gfiles = sorted(args.gauntlet_decks.glob("*.ydk"))
-    pool_train = [load_ydk(p) for p in pool if p.stem not in hold]
+    drop = set(args.drop_pool or [])
+    pool_train = [load_ydk(p) for p in pool if p.stem not in hold | drop]
+    if args.extra_pool:
+        _have = {(tuple(sorted(d.main)), tuple(sorted(d.extra))) for d in pool_train}
+        n0 = len(pool_train)
+        for p in args.extra_pool:
+            if p.stem in drop:
+                continue
+            d = load_ydk(p)
+            k = (tuple(sorted(d.main)), tuple(sorted(d.extra)))
+            if k not in _have:
+                _have.add(k)
+                pool_train.append(d)
+        if len(pool_train) == n0:
+            fail(f"--extra-pool added no deck ({len(args.extra_pool)} given, all already in the pool)")
+        print(f"[decks] --extra-pool: +{len(pool_train) - n0} lists, --drop-pool: {len(drop)} names", flush=True)
+    deck_opp_specs: list[dict] = []
+    deck_opp_idx: dict[int, str] = {}
+    if args.deck_opps is not None:
+        # bound decks are pool decks (before the gauntlet slice, so ga_start / the overfitting rule are unchanged);
+        # a list already in the pool is bound where it is, not added twice
+        if not args.league:
+            fail("--deck-opps needs --league 1")
+        try:
+            deck_opp_specs = json.loads(args.deck_opps.read_text())
+        except (OSError, ValueError) as e:
+            fail(f"--deck-opps {args.deck_opps}: {e}")
+        def _dk(d):
+            return (tuple(sorted(d.main)), tuple(sorted(d.extra)))
+        have = {_dk(d): j for j, d in enumerate(pool_train)}
+        for spec in deck_opp_specs:
+            for dp in spec["decks"]:
+                d = load_ydk(ROOT / dp)
+                j = have.get(_dk(d))
+                if j is None:
+                    j = len(pool_train)
+                    pool_train.append(d)
+                    have[_dk(d)] = j
+                if deck_opp_idx.get(j, spec["name"]) != spec["name"]:
+                    fail(f"--deck-opps: {dp} bound to both {deck_opp_idx[j]} and {spec['name']}")
+                deck_opp_idx[j] = spec["name"]
+        print(f"[deck-opps] {len(deck_opp_specs)} nets, {len(deck_opp_idx)} bound decks of {len(pool_train)} pool decks",
+              flush=True)
     train_decks = pool_train + [load_ydk(p) for p in gfiles]
     focus_idx: set[int] | None = None
     if args.focus_deck is not None:
@@ -998,6 +1158,7 @@ def main() -> None:
 
     a = _run_args(args.init)
     hist, known = int(a.get("hist", 0) or 0), bool(a.get("known", False))
+    observable = bool(a.get("observable_history", False))  # X2-style student: reads obs_history (NOTEBOOK 2026-11-10)
     emb = dict(np.load(args.emb))
     use_q_policy = args.adv == "vrpo" and not args.priv_critic
     use_q_critic = args.adv == "vrpo" and bool(args.priv_critic)
@@ -1237,28 +1398,41 @@ def main() -> None:
     N = args.envs
     vec = VecEnv(engine, train_decks, N, args.threads, seed=seed_rank)
     vec.set_max_decisions(args.max_decisions)
-    if args.dags_starts is not None or args.dags_p > 0:
-        if args.dags_starts is None:
-            fail(f"--dags-p {args.dags_p} without --dags-starts")
+    line_meta = None
+    if args.dags_starts is not None or args.line_starts is not None or args.dags_p > 0:
+        if args.dags_starts is None and args.line_starts is None:
+            fail(f"--dags-p {args.dags_p} without --dags-starts or --line-starts")
+        if not args.dags_p > 0:
+            fail("--dags-starts/--line-starts with --dags-p 0 (no episode would use them)")
         from decklight.rl.dags import load_starts
 
+        starts = []
         try:
-            starts = load_starts(args.dags_starts)
+            if args.dags_starts is not None:
+                starts = load_starts(args.dags_starts)
+            if args.line_starts is not None:
+                from decklight.rl.lines import load_line_starts
+
+                l_starts, l_meta = load_line_starts(args.line_starts)
+                line_meta = [None] * len(starts) + l_meta
+                starts = starts + l_starts
         except (OSError, ValueError) as e:
-            fail(f"cannot load --dags-starts {args.dags_starts}: {e}")
+            fail(f"cannot load starts ({args.dags_starts}, {args.line_starts}): {e}")
         if int(args.learner_gauntlet) == 0:
             # overfitting rule: DAGS episodes are not tracked by deck index (learner_ga cannot see them), so a start
             # on a gauntlet deck would train the learner on it silently. data/cache/dags/starts.jsonl (2026-10-07)
             # is 95% gauntlet-vs-gauntlet (ygo-agent teacher games); use starts-train.jsonl (NOTEBOOK 2026-10-08).
             g_mains = {tuple(sorted(d.main)) for d in g_decks}
-            n_bad = sum(1 for l in Path(args.dags_starts).read_text().splitlines() if l.strip()
+            n_bad = sum(1 for f in (args.dags_starts, args.line_starts) if f is not None
+                        for l in Path(f).read_text().splitlines() if l.strip()
                         and any(tuple(sorted(json.loads(l)[k])) in g_mains for k in ("main0", "main1")))
             if n_bad:
-                fail(f"--dags-starts {args.dags_starts}: {n_bad} starts use a gauntlet deck "
+                fail(f"starts {args.dags_starts}, {args.line_starts}: {n_bad} use a gauntlet deck "
                      f"(overfitting rule, --learner-gauntlet 0)")
         vec.set_starts(starts, args.dags_p, seed_rank + 0xDA65)
         if dist_rank == 0:
-            print(f"[dags] {len(starts)} starts p={args.dags_p}", flush=True)
+            print(f"[dags] {len(starts)} starts p={args.dags_p}"
+                  f"{f' ({sum(m is not None for m in line_meta)} combo-line starts)' if line_meta else ''}", flush=True)
     # Hint bank (offline successes found with the search's help): replay now (engine
     # only), so a banked action that is illegal at replay fails the job here, not mid-run.
     # (Flag-compatibility failures already raised before evaluate(0); only loads remain.)
@@ -1267,7 +1441,7 @@ def main() -> None:
         from decklight.rl.ppo import model_keys
 
         try:
-            bank = load_bank(args.hint_bank, engine, hist, known, tuple(model_keys(hist, known)))
+            bank = load_bank(args.hint_bank, engine, hist, known, tuple(model_keys(hist, known, observable)))
         except ValueError as e:
             fail(f"bad hint bank {args.hint_bank}: {e}")
         hint = {"obs": bank["obs"], "act": bank["act"], "coef": float(args.hint_coef),
@@ -1313,8 +1487,57 @@ def main() -> None:
             print(f"[curric] {len(starts)} starts every={args.curric_every} eps={args.curric_eps} "
                   f"min_n={args.curric_min_n} drop_solved={args.curric_drop_solved} "
                   f"hint_bonus_starts={len(bonus)}", flush=True)
-    store = SlotStore(args.store, gather(vec.buf, np.arange(1), hist, known, priv=bool(args.priv_critic)),
+    store = SlotStore(args.store, gather(vec.buf, np.arange(1), hist, known, priv=bool(args.priv_critic), observable=observable),
                       vrpo=(args.adv == "vrpo"))
+    ext_feed = None
+    ext_quota = 0
+    ext_zero = 0
+    ext_last: dict = {}
+    if args.ext_dir is not None:
+        # external episodes carry no VRPO pi/Q, no privileged codes, no hist_long/known (decklight.rl.remote)
+        if args.adv != "gae" or args.priv_critic or hist or known or is_dist:
+            fail2("--ext-dir needs --adv gae, no --priv-critic, a hist=0/known=False net, one process")
+        ext_feed = ExtFeed(args.ext_dir)
+        ext_quota = int(args.rollout * args.ext_share / (1.0 - args.ext_share))
+        publish_weights(model, args.ext_dir / "weights.pt", it0)
+        print(f"[ext] {args.ext_dir}: quota {ext_quota} samples per iteration, max lag {args.ext_max_lag}; "
+              f"weights version {it0} published", flush=True)
+
+    def ext_mix(it: int, finished: list) -> list:
+        """--ext-dir: add up to ext_quota external samples to this batch as finished learner trajectories."""
+        nonlocal ext_zero, ext_last
+        if ext_feed is None:
+            return finished
+        more: list = []
+        est = {"ext_files": 0, "ext_samples": 0, "ext_stale": 0, "ext_wins": 0.0, "ext_backlog": 0}
+        t_wait = time.time()
+        while True:
+            try:
+                got, e_st = ext_feed.take(store, ext_quota - est["ext_samples"], it - 1 - args.ext_max_lag, ref, dev)
+            except (RuntimeError, MemoryError, OSError, ValueError) as e:
+                fail(f"iteration {it}: --ext-dir intake failed: {e}")
+            more += got
+            for k in ("ext_files", "ext_samples", "ext_stale", "ext_wins"):
+                est[k] += e_st[k]
+            est["ext_backlog"] = e_st["ext_backlog"]
+            if est["ext_samples"] >= ext_quota or time.time() - t_wait > args.ext_wait_s:
+                break
+            time.sleep(3.0)
+        est["ext_wait_s"] = round(time.time() - t_wait, 1)
+        ext_zero = ext_zero + 1 if not more else 0
+        n = max(est["ext_files"], 1)
+        ext_last = {"ext_games": est["ext_files"], "ext_samples": est["ext_samples"],
+                    "ext_wr": round(est["ext_wins"] / n, 3), "ext_stale": est["ext_stale"],
+                    "ext_backlog": est["ext_backlog"], "ext_wait_s": est["ext_wait_s"]}
+        print(f"[ext it {it}] {ext_last}", flush=True)
+        if ext_zero >= args.ext_zero_iters:
+            fail(f"iteration {it}: --ext-dir gave 0 external episodes for {ext_zero} iterations "
+                 f"(stale {est['ext_stale']}, backlog {est['ext_backlog']})")
+        return finished + more
+
+    def ext_publish(it: int) -> None:
+        if ext_feed is not None:
+            publish_weights(model, args.ext_dir / "weights.pt", it)
     actor = critic_actor = None
     col_rng = rng
     if args.overlap:
@@ -1376,12 +1599,22 @@ def main() -> None:
             if not spath.is_file():
                 fail(f"--league-fixed {name!r}: {spath} missing")
             try:
-                fnet = load_net(spath, emb, a, value=False).to(dev).eval()  # rollouts feed it cuda batches
+                fnet = load_opp(spath, emb, a).to(dev).eval()  # rollouts feed it cuda batches
             except Exception as e:  # noqa: BLE001 - architecture mismatch must fail the job here
                 fail(f"--league-fixed {name!r}: cannot load {spath} with the --init architecture: {e}")
             for p in fnet.parameters():
                 p.requires_grad_(False)
             fixed_nets[name] = fnet
+        bound_nets: dict[str, PolicyNet] = {}
+        for spec in deck_opp_specs:
+            bpath = ROOT / spec["ckpt"]
+            try:
+                bnet = load_opp(bpath, emb, a).to(dev).eval()
+            except Exception as e:  # noqa: BLE001 - architecture mismatch must fail the job here
+                fail(f"--deck-opps {spec['name']!r}: cannot load {bpath} with the --init architecture: {e}")
+            for p_ in bnet.parameters():
+                p_.requires_grad_(False)
+            bound_nets[spec["name"]] = bnet
         if args.league_greedy_share > 0:
             from decklight.eval.policies import GreedyPolicy
 
@@ -1389,7 +1622,8 @@ def main() -> None:
         try:
             league = League(args.p_self, args.p_ygoagent, args.league_size, col_rng,
                             fixed=fixed_nets, p_fixed=args.league_fixed_share,
-                            p_greedy=args.league_greedy_share, ga_ygo_share=args.ga_ygo_share)
+                            p_greedy=args.league_greedy_share, ga_ygo_share=args.ga_ygo_share,
+                            bound=bound_nets)
         except ValueError as e:
             fail2(str(e))
         if args.resume is not None and args.league_size > 0:
@@ -1426,7 +1660,10 @@ def main() -> None:
                         priv_critic=bool(args.priv_critic), adv=args.adv,
                         greedy=greedy_pol, ga_share=args.ga_episode_share,
                         ga_range=(ga_start, len(g_decks)), ga_mixed=ga_mixed, fail=fail,
-                        focus_idx=focus_idx, log_games=args.log_games > 0)
+                        focus_idx=focus_idx, log_games=args.log_games > 0, line_meta=line_meta,
+                        win_explore=args.win_explore, isw_floor=args.isw_floor,
+                        win_explore_lines_only=bool(args.win_explore_lines_only),
+                        deck_opp=deck_opp_idx or None, deck_opp_share=args.deck_opp_share)
     except ValueError as e:
         fail2(str(e))
     curric_pushed = False
@@ -1508,6 +1745,24 @@ def main() -> None:
                  f"({n_drop}/{len(slots)} samples from solved starts)")
         return slots[keep], adv[keep], ret[keep], adv_n[keep], n_drop
 
+    isw_floor_zero_streak = 0
+
+    def win_explore_check(it: int, st: dict) -> None:
+        """--win-explore fail-loud: target windows exist and the IS weight is sane."""
+        nonlocal isw_floor_zero_streak
+        if args.win_explore <= 0.0 or it < 5:
+            return
+        wr = int(st.get("win_rows", 0))
+        isw = float(st.get("isw_mean", 0.0))
+        dfail_if_any(wr == 0 or not np.isfinite(isw) or isw <= 0.0 or isw > 1.0,
+                     lambda: f"iteration {it}: --win-explore win_rows={wr}, isw_mean={isw:.6g}")
+        if args.isw_floor > 0.0:
+            share = float(st.get("isw_floored_share", 0.0))
+            isw_floor_zero_streak = isw_floor_zero_streak + 1 if share == 0.0 else 0
+            dfail_if_any(isw_floor_zero_streak >= 3,
+                         lambda: f"iteration {it}: --isw-floor never applied "
+                                 f"(isw_floored_share=0 for 3 iterations, win_rows={wr})")
+
     it, t_train = it0, time.time()
     tot = {"games": 0, "trunc": 0, "decisions": 0}
     if args.overlap:
@@ -1519,9 +1774,11 @@ def main() -> None:
             it += 1
             t_it = time.time()
             finished, st = pending
+            finished = ext_mix(it, finished)
             t_roll = pending_roll
             _ddp_league_sync(st)
             _ddp_checks(it, st)
+            win_explore_check(it, st)
             curric_record(finished, st, it)
             curric_push(it, st)
             curric_check_push_seen(it, st)
@@ -1531,12 +1788,14 @@ def main() -> None:
             if not (args.iters and it >= args.iters):
                 task = CollectTask(col, args.rollout).start()
             vrpo_info: dict = {}
+            target_stats: dict = {}
             batch_ok = True
             try:
                 if args.adv == "vrpo":
                     slots, adv, ret, adv_n, vrpo_info = vrpo_targets_batch(store, finished, args.lam)
                 else:
-                    slots, adv, ret, adv_n = gae_batch(store, finished, args.lam)
+                    slots, adv, ret, adv_n = gae_batch(store, finished, args.lam,
+                                                       args.shape_opp, target_stats)
             except RuntimeError:
                 batch_ok = False
                 slots = np.zeros(0, np.int64)
@@ -1562,6 +1821,7 @@ def main() -> None:
                     print(f"ALERT adv_filter: kept {_n_keep} of {len(slots)} samples "
                           f"(thr {adv_thr:.6g})", flush=True)
             warm = it <= args.value_warmup
+            isw_np = store.isw[slots] if args.win_explore > 0 else None
             upd_ok = True
             upd_err = ""
             try:
@@ -1572,7 +1832,8 @@ def main() -> None:
                     warm=warm, precision=args.precision, max_upload_gb=args.max_upload_gb,
                     compile=args.compile, critic=critic, copt=copt,
                     priv_critic=bool(args.priv_critic), adv=args.adv, upd_critic=upd_critic,
-                    hint=hint, adv_keep=adv_keep)
+                    kl_win_mult=args.kl_win_mult,
+                    hint=hint, adv_keep=adv_keep, isw=isw_np)
             except RuntimeError as e:  # includes CUDA OOM: report the real error (stage P3 full run 1 said "non-finite")
                 upd_ok = False
                 upd_err = f"{type(e).__name__}: {str(e)[:300]}"
@@ -1601,6 +1862,7 @@ def main() -> None:
                     fail(f"iteration {it}: collected 0 samples")
             for s, _ in finished:
                 store.release(s)
+            ext_publish(it)
             assert actor is not None
             sync_actor(actor, model)
             if critic_actor is not None:
@@ -1698,7 +1960,10 @@ def main() -> None:
                     "mean_game_decisions": round(_g_sumlen / max(_g_nlen, 1), 1),
                     "train_vs_bc_sampled": round(_g_bcw / max(_g_bcg, 1), 3), "bc_games": _g_bcg,
                     "dags_games": _g_dg, "dags_wr": round(_g_dw / max(_g_dg, 1), 3),
-                    "dags_bad": st["dags_bad"],
+                    "dags_bad": st["dags_bad"], **ext_last,
+                    # rank-local under DDP (combo-line opponents, gauntlet episodes)
+                    **{k: st[k] for k in ("line_games", "line_wr", "line_followed", "line_broken", "line_broken0", "line_completed",
+                                          "ga_games", "deck_opp_games", "deck_opp_wr") if k in st},
                     **(focus_log_fields(_g_ft, _g_ftn, _g_fbcg, _g_fbcw,
                                         _g_fbc1g, _g_fbc1w, _g_fbc2g, _g_fbc2w,
                                         _g_vbrier, _g_vn, _g_vobrier, _g_von,
@@ -1717,6 +1982,10 @@ def main() -> None:
                     **({"vbar_mean": round(vrpo_info["vbar_mean"], 4),
                         "adv_diff": round(vrpo_info["adv_diff"], 4)} if vrpo_info else {}),
                     **({"league": st["league"], "t_ga": round(st["t_ga"], 1)} if league is not None else {}),
+                    **{k: st[k] for k in (
+                        "win_rows", "win_explored", "win_act_argmax", "isw_mean",
+                        "isw_floored_mean", "isw_floored_share") if k in st},
+                    **target_stats,
                     **{k: round(v, 4) for k, v in agg_mean.items()},
                     **({"adv_keep": round(float(adv_keep.mean()), 4),
                         "adv_thr": round(float(adv_thr), 4)} if adv_keep is not None else {}),
@@ -1785,8 +2054,10 @@ def main() -> None:
         finished, st = col.collect(args.rollout)
         t_roll = time.time() - t_it
         dfail_if_any(not finished, lambda: f"iteration {it}: collected 0 samples")
+        finished = ext_mix(it, finished)
         _ddp_league_sync(st)
         _ddp_checks(it, st)
+        win_explore_check(it, st)
         curric_record(finished, st, it)
         curric_push(it, st)
         curric_check_push_seen(it, st)
@@ -1794,12 +2065,14 @@ def main() -> None:
         # GAE per finished seat trajectory, then PPO epochs
         # (VRPO: expected-SARSA(λ) targets from the stored rollout-time π/Q instead)
         vrpo_info2: dict = {}
+        target_stats2: dict = {}
         batch_ok2 = True
         try:
             if args.adv == "vrpo":
                 slots, adv, ret, adv_n, vrpo_info2 = vrpo_targets_batch(store, finished, args.lam)
             else:
-                slots, adv, ret, adv_n = gae_batch(store, finished, args.lam)
+                slots, adv, ret, adv_n = gae_batch(store, finished, args.lam,
+                                                   args.shape_opp, target_stats2)
         except RuntimeError:
             batch_ok2 = False
             slots = np.zeros(0, np.int64)
@@ -1825,6 +2098,7 @@ def main() -> None:
                 print(f"ALERT adv_filter: kept {_n_keep} of {len(slots)} samples "
                       f"(thr {adv_thr:.6g})", flush=True)
         warm = it <= args.value_warmup
+        isw_np = store.isw[slots] if args.win_explore > 0 else None
         upd_ok2 = True
         upd_err2 = ""
         try:
@@ -1835,7 +2109,7 @@ def main() -> None:
                 warm=warm, precision=args.precision, max_upload_gb=args.max_upload_gb,
                 compile=args.compile, critic=critic, copt=copt,
                 priv_critic=bool(args.priv_critic), adv=args.adv, upd_critic=upd_critic,
-                hint=hint, adv_keep=adv_keep)
+                hint=hint, adv_keep=adv_keep, isw=isw_np, kl_win_mult=args.kl_win_mult)
         except RuntimeError as e:  # includes CUDA OOM: report the real error
             upd_ok2 = False
             upd_err2 = f"{type(e).__name__}: {str(e)[:300]}"
@@ -1846,6 +2120,7 @@ def main() -> None:
         note_qev(it, agg_mean, warm)
         for s, _ in finished:
             store.release(s)
+        ext_publish(it)
         if league is not None:
             league_snapshot(model, league, it, args.snap_every, args.league_size)
 
@@ -1933,7 +2208,10 @@ def main() -> None:
                 "mean_game_decisions": round(_g_sumlen / max(_g_nlen, 1), 1),
                 "train_vs_bc_sampled": round(_g_bcw / max(_g_bcg, 1), 3), "bc_games": _g_bcg,
                 "dags_games": _g_dg, "dags_wr": round(_g_dw / max(_g_dg, 1), 3),
-                "dags_bad": st["dags_bad"],
+                "dags_bad": st["dags_bad"], **ext_last,
+                # rank-local under DDP (combo-line opponents, gauntlet episodes)
+                **{k: st[k] for k in ("line_games", "line_wr", "line_followed", "line_broken", "line_broken0", "line_completed",
+                                      "ga_games", "deck_opp_games", "deck_opp_wr") if k in st},
                 **(focus_log_fields(_g_ft, _g_ftn, _g_fbcg, _g_fbcw,
                                    _g_fbc1g, _g_fbc1w, _g_fbc2g, _g_fbc2w,
                                    _g_vbrier, _g_vn, _g_vobrier, _g_von,
@@ -1951,6 +2229,10 @@ def main() -> None:
                     **({"vbar_mean": round(vrpo_info2["vbar_mean"], 4),
                         "adv_diff": round(vrpo_info2["adv_diff"], 4)} if vrpo_info2 else {}),
                     **({"league": st["league"], "t_ga": round(st["t_ga"], 1)} if league is not None else {}),
+                    **{k: st[k] for k in (
+                        "win_rows", "win_explored", "win_act_argmax", "isw_mean",
+                        "isw_floored_mean", "isw_floored_share") if k in st},
+                    **target_stats2,
                     **{k: round(v, 4) for k, v in agg_mean.items()},
                     **({"adv_keep": round(float(adv_keep.mean()), 4),
                         "adv_thr": round(float(adv_thr), 4)} if adv_keep is not None else {}),

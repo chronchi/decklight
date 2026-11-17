@@ -1,0 +1,30 @@
+[package]
+name = "decklight-app"
+version = "0.1.0"
+description = "decklight Android app (A6): the web client served by decklight-server inside the app"
+authors = ["decklight"]
+license = "AGPL-3.0-or-later"
+edition = "2021"
+
+[lib]
+name = "decklight_app_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+serde_json = "1"
+
+[dependencies]
+decklight-server = { path = "../../decklight-server" }
+tauri = { version = "2", features = [] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net"] }
+axum = { version = "0.8", features = ["ws"] }
+tower = { version = "0.5", features = ["util"] }
+serde_json = "1"
+flate2 = "1.1"
+tar = "0.4"
+log = "0.4"
+android_logger = "0.13"
+rand = "0.9"
+base64 = "0.22"
+libc = "0.2"

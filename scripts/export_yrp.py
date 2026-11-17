@@ -1,6 +1,6 @@
 """Export a search_match game record as an EDOPro replay (.yrp) to watch the game in EDOPro (engine only; laptop-safe).
 
-    uv run python scripts/export_yrp.py runs/<job>/<variant>/games-0.jsonl --idx 12 --out docs/showcase/g1.yrp \
+    uv run python scripts/export_yrp.py runs/<job>/<variant>/games-0.jsonl --idx 12 --out docs/model/showcase/g1.yrp \
         --name0 "Our AI" --name1 "ygo-agent"
 
 Replays the record's choices in the Python reference env (PyEnv) to get the raw core responses, writes the .yrp

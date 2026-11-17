@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Tech-card screen N4 (docs/plans/2026-10-16-engine-eval-and-metrics.md §3c, questions
-# docs/techcards/questions-2026-10-16.json): 25 questions (5 decks x pos/neg/2 real/Called),
+# docs/lab/techcards/questions-2026-10-16.json): 25 questions (5 decks x pos/neg/2 real/Called),
 # pilot = opponent = data/cache/P/best.pt raw (no search), each question >= 2,000 pairs
 # (NOPP opp decks x SEEDS seeds x 2 seats, default 10 x 100 x 2).
 #

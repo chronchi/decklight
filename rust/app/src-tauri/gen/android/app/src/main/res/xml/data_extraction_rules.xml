@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Android 12+ (API 31) cloud backup and device-to-device transfer: the Ask API keys file stays on the device
+     (src/ask/keys.rs). -->
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="sharedpref" path="keyring-decklight-ask.xml" />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="sharedpref" path="keyring-decklight-ask.xml" />
+    </device-transfer>
+</data-extraction-rules>

@@ -54,7 +54,7 @@ MOCKS = [
     # prompt bar with Hint + Undo.
     ("58-keywords-detail", "1&detailcode=14558128"),
     ("59-kw-popover", "1&detailcode=14558128&kw=quick-effect"),
-    ("60-rule-notes-menu", "1&gamemenu=1"),
+    ("60-rule-notes-settings", "1&settings=1"),
     ("61-practice-undo", "1&hint=1&canundo=1"),
     # Puzzles (step 5, item 8): the lobby list grouped by difficulty, the in-puzzle
     # banner, the Solved dialog and the Not-solved dialog.
@@ -76,6 +76,34 @@ MOCKS = [
     ("74-primer-partial", "0&primer=partial"),
     # Setting-up status right after Start (the start button disabled, no second new_game).
     ("70-starting", "0&starting=1"),
+    # Context bar: a selected hand card with its options (Set only -> disabled
+    # Activate), a place prompt with Cancel and no sheet, a select prompt with Cancel.
+    ("75-context-actions", "21&menu=yh3"),
+    ("76-place-cancel", "22"),
+    ("77-select-cancel", "23"),
+    # Card-art sync states in Settings (mock 24-26 carry an art_sync frame).
+    ("78-art-running", "24&settings=1"),
+    ("79-art-wifi", "25&settings=1"),
+    ("80-art-done", "26&settings=1"),
+    # The app-wide Settings screen: top (Gameplay), scrolled to Cards with art
+    # running, and opened over a duel from the game menu.
+    ("81-settings", "27&settings=1"),
+    ("82-settings-cards", "28&settings=1"),
+    ("83-settings-ingame", "29&settings=1"),
+    # Card action panel (centred modal), a prompt with its own pass option,
+    # and rock-paper-scissors against the bot before the duel.
+    ("84-card-actions", 30),
+    ("85-card-actions-pass", 31),
+    ("86-rps-pick", 32),
+    ("87-rps-result", 33),
+    # Prompt subject ⓘ + thumbnail, the bot-duel Pause banner, and a cue fully
+    # visible before its prompt sheet (mock 90's state carries cue + prompt).
+    ("88-prompt-subject-info", 34),
+    ("89-paused", 35),
+    ("90-cue-then-prompt", "36&cue=0&t=0.7"),
+    ("91-reveal-over-sheet", 37),
+    # App startup: the client is served while the bot loads (Start off, calm status line).
+    ("92-lobby-loading-bot", "38&loadingbot=1"),
 ]
 
 # Pacing cues frozen mid-scene: ?cue=K&t=F freezes visible scene K at fraction F
@@ -158,6 +186,16 @@ NEG_CONTRAST_JS = """async ([a, b]) => {
           mark_vs_lightest_card: +cr(lm, lbMax).toFixed(2),
           mark_rgb: rgb(A, mark), card_rgb: rgb(B, mark), casing_rgb: rgb(A, casing), pixels: n};
 }"""
+
+
+VISIBLE_JS = """(sel) => { const el = document.querySelector(sel); if (!el) return false;
+  const r = el.getBoundingClientRect(); const st = getComputedStyle(el);
+  return r.width > 1 && r.height > 1 && st.visibility !== 'hidden' &&
+         Number(st.opacity) > 0.02 && !el.closest('[inert]'); }"""
+
+REVEAL_IN_VIEW_JS = """() => { const el = document.querySelector('#reveal .rface'); if (!el) return false;
+  const r = el.getBoundingClientRect();
+  return r.left >= -0.5 && r.top >= -0.5 && r.right <= innerWidth + 0.5 && r.bottom <= innerHeight + 0.5; }"""
 
 
 def neg_contrast(page) -> dict:
@@ -305,7 +343,7 @@ def kw_topmost(page) -> str:
 
 PUZZLE_TOPMOST_JS = """() => {
   // Every puzzle row's centre must land on its own row (never covered).
-  const rows = [...document.querySelectorAll('#puzzlesheet .prow')].filter((b) => {
+  const rows = [...document.querySelectorAll('#lobby .prow')].filter((b) => {
     const r = b.getBoundingClientRect();
     return r.width > 2 && r.height > 2 && r.bottom > 0 && r.top < innerHeight;
   });
@@ -424,6 +462,49 @@ def check_no_dtile_overflow(page, name, errors) -> None:
             )
 
 
+SCRIM_OVER_JS = """() => {
+  // Every open surface must receive its own taps: no scrim (or other surface's backdrop) may lie on top of it.
+  // (2026-11-12: the pile sheet sat under #pscrim, so every tap on a card closed the pile.)
+  const sels = ["#sheet:not(.stage-aside)", "#menu:not(.stage-aside)", "#detail", "#kwpop", "#logdrawer", "#gamemenu",
+    "#settings", "#decksheet", "#primersheet", "#reviewframe", "#rps", "#gameover", "#puzzleresult"];
+  const bad = [];
+  for (const sel of sels) {
+    const el = document.querySelector(sel);
+    if (!el || el.closest("[inert]")) continue;
+    const r = el.getBoundingClientRect();
+    if (r.width < 4 || r.height < 4 || getComputedStyle(el).visibility === "hidden") continue;
+    const x = Math.min(Math.max(r.left + r.width / 2, 1), innerWidth - 1);
+    const y = Math.min(Math.max(r.top + r.height / 2, 1), innerHeight - 1);
+    const hit = document.elementFromPoint(x, y);
+    if (hit && /scrim$/.test(hit.id || "")) bad.push(sel + " under #" + hit.id);
+  }
+  return bad;
+}"""
+
+
+INFO_UNDER_HAND_JS = """() => {
+  // The info panel's lines stay above the hand (2026-11-12: the win-chance row pushed them under it).
+  const hand = document.querySelector('#hand');
+  if (!hand || !hand.getBoundingClientRect().height) return [];
+  const top = hand.getBoundingClientRect().top;
+  return [...document.querySelectorAll('#info .ctxt, #info .ctxlast')]
+    .filter((e) => e.getBoundingClientRect().height && e.getBoundingClientRect().bottom > top + 1)
+    .map((e) => e.className + ' bottom ' + Math.round(e.getBoundingClientRect().bottom) + ' > hand ' + Math.round(top));
+}"""
+
+
+def check_info_above_hand(page, name, errors) -> None:
+    if page.evaluate("document.documentElement.classList.contains('short')"):
+        return  # short viewports scroll by design
+    for b in page.evaluate(INFO_UNDER_HAND_JS):
+        errors.append(f"{name}: an info line is under the hand ({b})")
+
+
+def check_no_scrim_over(page, name, errors) -> None:
+    for b in page.evaluate(SCRIM_OVER_JS):
+        errors.append(f"{name}: a scrim covers an open surface ({b})")
+
+
 def launch_kwargs():
     """Point at the pre-installed Chromium (brief: already in ~/.cache/ms-playwright)."""
     env = os.environ.get("CHROME_EXE")
@@ -472,6 +553,27 @@ MEASURE_JS = """() => {
 }"""
 
 
+MENU_FIT_JS = """() => {
+  const panel = document.querySelector('#menu');
+  if (!panel) return 'no-panel';
+  const pr = panel.getBoundingClientRect();
+  if (pr.left < 0 || pr.right > innerWidth + 0.5 || pr.top < 0 || pr.bottom > innerHeight + 0.5)
+    return 'panel-outside:' + [pr.left, pr.top, pr.right, pr.bottom].map(Math.round).join(',');
+  for (const b of panel.querySelectorAll('.ctxbtn, [data-act=detail]')) {
+    const r = b.getBoundingClientRect();
+    if (r.left < 0 || r.right > innerWidth + 0.5 || r.top < 0 || r.bottom > innerHeight + 0.5)
+      return 'button-outside:' + (b.textContent || '').trim().slice(0, 24);
+    if (b.scrollWidth > b.clientWidth + 1) return 'text-overflow:' + (b.textContent || '').trim().slice(0, 24);
+  }
+  return 'ok';
+}"""
+
+
+def menu_fits(page):
+    """Every action-panel button inside the viewport, with unwrapped (unclipped) text."""
+    return page.evaluate(MENU_FIT_JS)
+
+
 def main() -> int:
     from playwright.sync_api import sync_playwright
 
@@ -496,7 +598,46 @@ def main() -> int:
             for name, i in MOCKS:
                 page.goto(f"{base}?mock=1&i={i}", wait_until="networkidle")
                 page.wait_for_timeout(400)
+                if "-art-" in name or name.endswith("-settings-cards"):
+                    # The sync panel sits in Settings, under the Card art switch.
+                    page.evaluate("document.querySelector('.artsync')?.scrollIntoView({block: 'center'})")
+                    page.wait_for_timeout(200)
+                    if not page.evaluate("!!document.querySelector('.artsync')"):
+                        errors.append(f"{name}: no card-art sync panel")
+                if "settings" in name and not page.evaluate("!!document.querySelector('#settings')"):
+                    errors.append(f"{name}: no Settings screen")
+                if name == "81-settings":
+                    if not page.evaluate(
+                        "/Gameplay/.test(document.querySelector('#settings').textContent)"
+                    ):
+                        errors.append("81-settings: no Gameplay section")
+                    if not page.evaluate("document.activeElement && document.activeElement.id == 'settings-title'"):
+                        errors.append("81-settings: focus did not move to the Settings heading")
+                if name == "83-settings-ingame" and not page.evaluate("!!document.querySelector('#app .field')"):
+                    errors.append("83-settings-ingame: the duel board is not underneath")
+                if name == "88-prompt-subject-info":
+                    if not page.evaluate("!!document.querySelector('#sheet .stitle .askinfo')"):
+                        errors.append("88-prompt-subject-info: no ⓘ on the prompt's subject card")
+                    if not page.evaluate("!!document.querySelector('#sheet .stitle .askbtn[data-detailcard]')"):
+                        errors.append("88-prompt-subject-info: the subject thumbnail is not tappable")
+                if name == "89-paused":
+                    if not page.evaluate("!!document.querySelector('#pausebanner')"):
+                        errors.append("89-paused: no pause banner")
+                    if page.evaluate("document.querySelector('.pausebtn')?.getAttribute('aria-pressed')") != "true":
+                        errors.append("89-paused: the pause button is not pressed")
+                if name == "90-cue-then-prompt":
+                    if not page.evaluate("!!document.querySelector('#ov-cues .cue-act')"):
+                        errors.append("90-cue-then-prompt: no cue on screen")
+                    if page.evaluate("(" + VISIBLE_JS + ")('#sheet')"):
+                        errors.append("90-cue-then-prompt: the prompt sheet covers the cue")
+                if name == "91-reveal-over-sheet":
+                    if not page.evaluate("!!document.querySelector('#reveal')"):
+                        errors.append("91-reveal-over-sheet: no reveal on screen")
+                    if page.evaluate("(" + VISIBLE_JS + ")('#sheet')"):
+                        errors.append("91-reveal-over-sheet: the prompt sheet covers the reveal")
                 page.screenshot(path=str(OUT / f"{name}.png"))
+                check_no_scrim_over(page, name, errors)
+                check_info_above_hand(page, name, errors)
                 print(f"shot {name}.png", flush=True)
                 if page.evaluate("document.documentElement.scrollWidth > window.innerWidth"):
                     errors.append(f"horizontal overflow at 412px in {name}")
@@ -556,13 +697,15 @@ def main() -> int:
                     top = kw_topmost(page)
                     if top != "ok":
                         errors.append(f"59-kw-popover: popover covered ({top})")
-                if name == "60-rule-notes-menu":
+                if name == "60-rule-notes-settings":
                     if not page.evaluate(
-                        "/Rule notes/.test(document.querySelector('#gamemenu').textContent)"
+                        "/Rule notes/.test(document.querySelector('#settings').textContent)"
                     ):
-                        errors.append("60-rule-notes-menu: no Rule notes switch")
-                    if not page.evaluate("!!document.querySelector('[data-act=rulenotes]')"):
-                        errors.append("60-rule-notes-menu: no Rule notes toggle control")
+                        errors.append("60-rule-notes-settings: no Rule notes switch")
+                    if not page.evaluate(
+                        "!!document.querySelector('#settings [data-act=rulenotes]')"
+                    ):
+                        errors.append("60-rule-notes-settings: no Rule notes toggle control")
                 if name == "61-practice-undo":
                     if not page.evaluate("!!document.querySelector('[data-act=undo]')"):
                         errors.append("61-practice-undo: no Undo button on screen")
@@ -578,11 +721,11 @@ def main() -> int:
                     if top != "ok":
                         errors.append(f"61-practice-undo: Undo button covered ({top})")
                 if name == "63-puzzle-list":
-                    if not page.evaluate("!!document.querySelector('#puzzlesheet')"):
-                        errors.append("63-puzzle-list: no puzzles sheet on screen")
-                    if page.evaluate("document.querySelectorAll('#puzzlesheet .prow').length") < 3:
+                    if not page.evaluate("!!document.querySelector('#lobby .plist')"):
+                        errors.append("63-puzzle-list: no puzzles tab on screen")
+                    if page.evaluate("document.querySelectorAll('#lobby .prow').length") < 3:
                         errors.append("63-puzzle-list: fewer than 3 puzzle rows")
-                    if not page.evaluate("/Solved/.test(document.querySelector('#puzzlesheet').textContent)"):
+                    if not page.evaluate("/Solved/.test(document.querySelector('#lobby').textContent)"):
                         errors.append("63-puzzle-list: no Solved mark on screen")
                     top = puzzle_topmost(page)
                     if top != "ok":
@@ -734,6 +877,66 @@ def main() -> int:
                             "!!(document.activeElement && document.activeElement.getAttribute('data-act') === 'primer')"
                         ):
                             errors.append("67-primer-lobby: focus did not return to the About button")
+                if name == "75-context-actions":
+                    ctxtext = page.evaluate("document.querySelector('#menu') ? document.querySelector('#menu').textContent : ''")
+                    if "Mitsurugi Prayers" not in ctxtext:
+                        errors.append("75-context-actions: no selected card name in the action panel")
+                    if not page.evaluate("!!document.querySelector('#menu .ctxbtn[disabled][aria-describedby=menunote]')"):
+                        errors.append("75-context-actions: no disabled Activate button")
+                    if "activation requirements aren't met" not in ctxtext:
+                        errors.append("75-context-actions: no muted activation note")
+                    if not page.evaluate("!!document.querySelector('#menu [data-act=detail]')"):
+                        errors.append("75-context-actions: no Details button")
+                    if page.evaluate("!!document.querySelector('#info .ctxbar.sel')"):
+                        errors.append("75-context-actions: the old in-bar action row is back")
+                if name in ("84-card-actions", "85-card-actions-pass"):
+                    if not page.evaluate("!!document.querySelector('#menu')"):
+                        errors.append(f"{name}: no card action panel")
+                    fit = menu_fits(page)
+                    if fit != "ok":
+                        errors.append(f"{name}: action panel clipped ({fit})")
+                    panel = page.evaluate("document.querySelector('#menu').textContent")
+                    if name == "84-card-actions":
+                        if "Ash Blossom & Joyous Spring" not in panel:
+                            errors.append("84-card-actions: no card name in the panel")
+                        if page.evaluate("document.querySelectorAll('#menu .mactions .ctxbtn').length") < 3:
+                            errors.append("84-card-actions: fewer than 3 action buttons")
+                        if "Activate Ash Blossom" not in panel:
+                            errors.append("84-card-actions: no long activation label")
+                    else:
+                        if "Pass (do not respond)" not in panel:
+                            errors.append("85-card-actions-pass: no pass option")
+                        if page.evaluate("!!document.querySelector('#menu [data-act=closemenu]')"):
+                            errors.append("85-card-actions-pass: a plain Cancel is still shown beside a pass option")
+                if name in ("86-rps-pick", "87-rps-result"):
+                    if not page.evaluate("!!document.querySelector('#rps')"):
+                        errors.append(f"{name}: no rock-paper-scissors dialog")
+                    if name == "86-rps-pick" and page.evaluate("document.querySelectorAll('#rps [data-act=rpspick]').length") != 3:
+                        errors.append("86-rps-pick: need three hand buttons")
+                    if name == "87-rps-result":
+                        text = page.evaluate("document.querySelector('#rps').textContent")
+                        if "You win" not in text or "Go first" not in text or "Go second" not in text:
+                            errors.append("87-rps-result: no win result and first/second choices")
+                if name == "76-place-cancel":
+                    if page.evaluate("!!document.querySelector('#sheet')"):
+                        errors.append("76-place-cancel: a bottom sheet still covers the hand")
+                    if not page.evaluate("/Tap a highlighted zone/.test(document.querySelector('#info').textContent)"):
+                        errors.append("76-place-cancel: no 'Tap a highlighted zone' line")
+                    if not page.evaluate("!!document.querySelector('#info [data-act=cancel]')"):
+                        errors.append("76-place-cancel: no Cancel button")
+                    if not page.evaluate("!!document.querySelector('.field.you .zpick')"):
+                        errors.append("76-place-cancel: no highlighted board zone")
+                    if page.evaluate("document.querySelectorAll('#hand .hcard').length") < 1:
+                        errors.append("76-place-cancel: the hand is not visible")
+                if name == "77-select-cancel":
+                    if not page.evaluate("!!document.querySelector('#sheet')"):
+                        errors.append("77-select-cancel: no selection sheet")
+                    if not page.evaluate("!!document.querySelector('#sheet [data-act=cancel]')"):
+                        errors.append("77-select-cancel: no Cancel button in the sheet footer")
+                    if not page.evaluate("!!document.querySelector('#info [data-act=cancel]')"):
+                        errors.append("77-select-cancel: no Cancel button in the context bar")
+                    if not page.evaluate("/Select the card/.test(document.querySelector('#info').textContent)"):
+                        errors.append("77-select-cancel: the context bar does not show the prompt text")
                 if name == "01-lobby":
                     if page.evaluate("document.body.innerText.includes('ygo-zero')"):
                         errors.append("01-lobby: old name still visible in the lobby text")
@@ -774,10 +977,21 @@ def main() -> int:
                     page.wait_for_timeout(300)
                     if not page.evaluate("!!document.querySelector('#starting')"):
                         errors.append("70-starting: a second Start click left the loading screen")
+                if name == "92-lobby-loading-bot":
+                    if page.evaluate("(document.querySelector('#startnote') || {}).textContent || ''").strip() != "Loading the bot…":
+                        errors.append("92-lobby-loading-bot: no calm 'Loading the bot…' status line")
+                    if not page.evaluate("!!document.querySelector('#startnote[role=status]')"):
+                        errors.append("92-lobby-loading-bot: status line has no role=status")
+                    if not page.evaluate(
+                        "!!document.querySelector('#startbtn[disabled][aria-describedby=startnote]')"
+                    ):
+                        errors.append("92-lobby-loading-bot: Start is not disabled with the loading reason")
             for name, i in CUE_SHOTS:
                 page.goto(f"{base}?mock=1&i={i}", wait_until="networkidle")
                 page.wait_for_timeout(250)
                 page.screenshot(path=str(OUT / f"{name}.png"))
+                check_no_scrim_over(page, name, errors)
+                check_info_above_hand(page, name, errors)
                 print(f"shot {name}.png", flush=True)
                 if not page.evaluate(
                     "window.cueFrozen === true && "
@@ -812,6 +1026,8 @@ def main() -> int:
                     page.evaluate("document.querySelector('#logdrawer .dbody').scrollTop = 1e6")
                     page.wait_for_timeout(200)
                 page.screenshot(path=str(OUT / f"{name}.png"))
+                check_no_scrim_over(page, name, errors)
+                check_info_above_hand(page, name, errors)
                 print(f"shot {name}.png", flush=True)
                 if page.evaluate("document.documentElement.scrollWidth > window.innerWidth"):
                     errors.append(f"horizontal overflow at 412px in {name}")
@@ -875,13 +1091,18 @@ def main() -> int:
             page.wait_for_timeout(500)
             page.screenshot(path=str(OUT / "38-recap.png"))
             print("shot 38-recap.png", flush=True)
-            # Tapping a recap line opens that card's details.
+            # Tapping a recap line opens that card's details; the narration steps
+            # aside (one stage), then comes back with its lines when the detail closes.
             page.locator("#info .recap [data-recap]").first.click()
             page.wait_for_timeout(300)
             if not page.evaluate("!!document.querySelector('#detail')"):
                 errors.append("38-recap: tapping a recap line opened no card detail")
+            page.keyboard.press("Escape")
+            page.wait_for_timeout(300)
+            if page.evaluate("!!document.querySelector('#detail')"):
+                errors.append("38-recap: Escape did not close the card detail")
             if page.evaluate("document.querySelectorAll('#info .recap .rrow').length") < 4:
-                errors.append("38-recap: recap has fewer than 4 lines")
+                errors.append("38-recap: recap did not return with its lines")
             page.goto(f"{base}?mock=1&i=13", wait_until="networkidle")
             page.wait_for_function(
                 "!document.querySelector('#ov-cues').classList.contains('playing')", timeout=15000
@@ -923,9 +1144,33 @@ def main() -> int:
                 ("07-small", 6),
                 ("40-small-stats", "16&log=1&logtab=stats"),
                 ("45-small-review", "7&log=1&logtab=review&review=1"),
+                ("75-small-context-actions", "21&menu=yh3"),
+                ("76-small-place-cancel", "22"),
+                ("77-small-select-cancel", "23"),
+                ("78-small-art-running", "24&settings=1"),
+                ("79-small-art-wifi", "25&settings=1"),
+                ("80-small-art-done", "26&settings=1"),
+                ("81-small-settings", "27&settings=1"),
+                ("82-small-settings-cards", "28&settings=1"),
+                ("84-small-card-actions", 30),
+                ("85-small-card-actions-pass", 31),
+                ("86-small-rps-pick", 32),
+                ("87-small-rps-result", 33),
+                ("88-small-prompt-subject-info", 34),
+                ("89-small-paused", 35),
+                ("90-small-cue-then-prompt", "36&cue=0&t=0.7"),
+                ("91-small-reveal-over-sheet", 37),
+                ("92-small-lobby-loading-bot", "38&loadingbot=1"),
             ]:
                 s.goto(f"{base}?mock=1&i={i}", wait_until="networkidle")
                 s.wait_for_timeout(400)
+                if "-art-" in nm or nm.endswith("-settings-cards"):
+                    s.evaluate("document.querySelector('.artsync')?.scrollIntoView({block: 'center'})")
+                    s.wait_for_timeout(200)
+                    if not s.evaluate("!!document.querySelector('.artsync')"):
+                        errors.append(f"{nm}: no card-art sync panel")
+                if "settings" in nm and not s.evaluate("!!document.querySelector('#settings')"):
+                    errors.append(f"{nm}: no Settings screen")
                 s.screenshot(path=str(OUT / f"{nm}.png"))
                 print(f"shot {nm}.png", flush=True)
                 if nm == "02-small":
@@ -954,6 +1199,34 @@ def main() -> int:
                     top = review_topmost(s)
                     if top not in ("ok", "ok-frame"):
                         errors.append(f"45-small-review: review list not topmost at its centre ({top})")
+                if nm in ("84-small-card-actions", "85-small-card-actions-pass"):
+                    if not s.evaluate("!!document.querySelector('#menu')"):
+                        errors.append(f"{nm}: no card action panel")
+                    fit = menu_fits(s)
+                    if fit != "ok":
+                        errors.append(f"{nm}: action panel clipped ({fit})")
+                if nm in ("86-small-rps-pick", "87-small-rps-result"):
+                    if not s.evaluate("!!document.querySelector('#rps')"):
+                        errors.append(f"{nm}: no rock-paper-scissors dialog")
+                if nm == "90-small-cue-then-prompt":
+                    if not s.evaluate("!!document.querySelector('#ov-cues .cue-act')"):
+                        errors.append("90-small-cue-then-prompt: no cue on screen")
+                    if s.evaluate("(" + VISIBLE_JS + ")  ('#sheet')"):
+                        errors.append("90-small-cue-then-prompt: the prompt sheet covers the cue")
+                if nm == "91-small-reveal-over-sheet":
+                    if not s.evaluate("!!document.querySelector('#reveal')"):
+                        errors.append("91-small-reveal-over-sheet: no reveal on screen")
+                    if s.evaluate("(" + VISIBLE_JS + ")  ('#sheet')"):
+                        errors.append("91-small-reveal-over-sheet: the prompt sheet covers the reveal")
+                    if not s.evaluate(REVEAL_IN_VIEW_JS):
+                        errors.append("91-small-reveal-over-sheet: the revealed card is clipped")
+                if nm == "92-small-lobby-loading-bot":
+                    if s.evaluate("(document.querySelector('#startnote') || {}).textContent || ''").strip() != "Loading the bot…":
+                        errors.append("92-small-lobby-loading-bot: no calm 'Loading the bot…' status line")
+                    if not s.evaluate(
+                        "!!document.querySelector('#startbtn[disabled][aria-describedby=startnote]')"
+                    ):
+                        errors.append("92-small-lobby-loading-bot: Start is not disabled with the loading reason")
                 if s.evaluate("document.documentElement.scrollWidth > window.innerWidth"):
                     errors.append(f"horizontal overflow at 360px in {nm}")
             for nm, i in CUE_SHOTS_360:
@@ -1025,7 +1298,7 @@ def main() -> int:
             print(f"  {e}", flush=True)
         return 1
     print(
-        f"ok: {len(MOCKS) + len(CUE_SHOTS) + len(LOG_SHOTS) + len(CUE_SHOTS_360) + 10} PNGs in {OUT}",
+        f"ok: {len(MOCKS) + len(CUE_SHOTS) + len(LOG_SHOTS) + len(CUE_SHOTS_360) + 15} PNGs in {OUT}",
         flush=True,
     )
     return 0

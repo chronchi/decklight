@@ -1,0 +1,16 @@
+[workspace] # the Android app (A6): Tauri 2 shell + decklight-server in process; own workspace like the S3 spike
+members = ["src-tauri"]
+resolver = "2"
+
+# `tauri android build --debug` builds the dev profile: keep it as fast as release (search speed) and debuggable on
+# the device (run-as, logcat) without a signing key.
+[profile.dev]
+opt-level = 3
+debug = false
+debug-assertions = false
+overflow-checks = false
+incremental = false
+
+[profile.release]
+opt-level = 3
+lto = "thin"

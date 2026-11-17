@@ -216,7 +216,7 @@ function reviewRowHTML(e, winChance) {
   return '<div role="listitem"><button class="rrow" data-reviewk="' + e.k + '" aria-label="' + esc(aria) + '">' +
     '<span class="rmk ' + m.cls + '" aria-hidden="true">' + m.glyph + "</span>" +
     '<span class="rtx"><span class="rt">T' + esc(String(e.turn)) + " · " + esc(you) + "</span>" +
-    '<span class="rsub">Agent: ' + esc(ag) + (winChance ? " · " + esc(pts + " pts") : "") + "</span></span>" +
+    '<span class="rsub">decklight would play: ' + esc(ag) + (winChance ? " · " + esc(pts + " pts") : "") + "</span></span>" +
     '<span class="rm">' + esc(e.mark) + ptsTxt + "</span></button></div>";
 }
 

@@ -124,3 +124,46 @@ def test_named_events_unchanged():
     env = SimpleNamespace(history=[_hist(Kind.SELECT, code), _hist(Kind.ATTACK, code)])
     texts = [e["text"] for e in build_events(env, 0)]
     assert texts == [f"Selects {name}", f"Attacks with {name}"]
+
+
+def _field_with_chain(links: list[tuple[int, int, int, int]]) -> bytes:
+    """A QueryField buffer with empty zones and the given chain links (code, controller, location, sequence)."""
+    buf = struct.pack("<I", 0)
+    for _ in range(2):
+        buf += struct.pack("<I", 8000) + b"\x00" * 15 + b"\x00" * 24
+    buf += struct.pack("<I", len(links))
+    for code, con, loc, seq in links:
+        buf += struct.pack("<IBBIIBBIQ", code, con, loc, seq, C.POS_FACEUP_ATTACK, con, loc, seq, 0)
+    return buf
+
+
+def test_chain_card_is_not_a_same_code_card_in_another_zone():
+    """A2b-3b leak: the chain lookup ignored the location, so the opponent's hidden hand card with the same code
+    and index stood in for the chain card (its zone and stats shown)."""
+    from decklight.engine.query import CardState
+    from decklight.web.view import build_view
+
+    code = 14558127  # any code: only identity matters here
+    in_hand = CardState(1, C.LOCATION_HAND, 2, code=code, attack=1234)
+    q: dict[tuple[int, int], list] = {}
+
+    def query_location(p, loc):
+        return q.get((p, loc), [])
+
+    q[(1, C.LOCATION_HAND)] = [
+        CardState(1, C.LOCATION_HAND, 0, code=1),
+        CardState(1, C.LOCATION_HAND, 1, code=2),
+        in_hand,
+    ]
+    duel = SimpleNamespace(
+        query_location=query_location,
+        turn=3,
+        phase=C.PHASE_MAIN1,
+        turn_player=1,
+        query_field=lambda: _field_with_chain([(code, 1, C.LOCATION_GRAVE, 2)]),
+    )
+    view = build_view(SimpleNamespace(duel=duel), human_seat=0)
+    card = view["chain"][0]["card"]
+    assert card["code"] == code
+    assert C.LOCATION_HAND not in (card.get("loc"),) and "0x2:" not in card["uid"], card
+    assert card.get("atk") != 1234, "the hidden hand card's stats leaked into the chain card"

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Retrain stage B (docs/retrain/plan-v2.md §Stage B, plan-v3): B-v3 (PolicyNetV3 + --hist) from scratch on B1's clean mix
+# Retrain stage B (docs/lab/retrain/plan-v2.md §Stage B, plan-v3): B-v3 (PolicyNetV3 + --hist) from scratch on B1's clean mix
 # + every anchored stage M turn, first milestone (context-behaviour band) after epoch 1, then the card on B1's deals
 # paired with B1's games, holdout/new-card head-to-heads vs ft-swv and the gate B principle audit.
 # Needs: B1 (runs/stage-b1-20261013-0008: B-v1 clean weights + card games) and the stage M anchor over all turns

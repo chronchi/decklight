@@ -1,0 +1,3 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The System appearance's splash mark: the light mark by day (drawable-night has the dark one). -->
+<bitmap xmlns:android="http://schemas.android.com/apk/res/android" android:src="@drawable/splash_mark_light" />

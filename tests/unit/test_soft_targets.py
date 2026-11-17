@@ -223,6 +223,8 @@ def test_soft_fields_survive_record_to_shard(engine, tmp_path):
     z = dict(np.load(shard))
     assert z["soft_idx"].shape == (len(samples), SOFT_K)
     assert z["soft_q"].shape == (len(samples), SOFT_K)
+    for k in ("obs_history", "obs_history_mask"):  # observable history rides along (train_bc --observable-history)
+        assert np.array_equal(z[k], np.stack([o[k] for o, _, _, _ in samples]))
     n_plain = sum(1 for _, _, _, m in samples if "soft" not in m)
     assert (z["soft_idx"] == -1).all(axis=1).sum() == n_plain
     # the highest-scored option wins the improved policy under a flat prior (highest q_hat)

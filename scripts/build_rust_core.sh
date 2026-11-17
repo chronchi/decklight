@@ -18,5 +18,5 @@ fi
 export CARGO_TARGET_DIR="$OUT"
 export CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-3}"
 cargo build --release --manifest-path "$ROOT/rust/ocgshim/Cargo.toml"
-cp "$OUT/release/libocgcore_rs.so" "$OUT/libocgcore_rs.so"
+cp "$OUT/release/libocgcore_rs.so" "$OUT/.libocgcore_rs.so.tmp" && mv -f "$OUT/.libocgcore_rs.so.tmp" "$OUT/libocgcore_rs.so"  # rename: never overwrite a mapped .so
 ls -l "$OUT/libocgcore_rs.so"

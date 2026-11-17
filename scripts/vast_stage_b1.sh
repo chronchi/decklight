@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Retrain stage B1 (docs/retrain/plan-v2.md §Stage B1, plan-v3): the data decision on the OLD architecture. Two B-v1s
+# Retrain stage B1 (docs/lab/retrain/plan-v2.md §Stage B1, plan-v3): the data decision on the OLD architecture. Two B-v1s
 # from scratch with base_r3's architecture (train_bc defaults d256 / 4 layers / 4 heads):
 #   clean = the stage D clean mix (plan-v1 §3.4 with plan-v2 §3 changes) + stage M turns;
 #   hw    = clean + the stage L decisive window labels (data/demos/sw-hw, kinds sw-hw / sw-hw_own, weight 1).
@@ -34,7 +34,7 @@ T0=$SECONDS
 tick() { echo "$(date +%T) $1 $((SECONDS - T0)) s" | tee -a "$OUT/PROGRESS"; }
 EPOCHS=${EPOCHS:-6}; VARIANTS=" ${VARIANTS:-clean hw} "
 
-# 1. shards: strict labels (inferred -> weight 0) + the stage D exclusions (docs/retrain/recipe.md) + anchor drops
+# 1. shards: strict labels (inferred -> weight 0) + the stage D exclusions (docs/lab/retrain/recipe.md) + anchor drops
 A=data/cache/audit; OLD='data/demos/*,!*/strict-d/*,!*/guides-strict-d/*'
 EXCL=("$OLD@$A/strict_junk.json" "data/demos/planned*,!*/strict-d/*@$A/drops-muse.final.jsonl"
       "data/demos/claude/*,!*/strict-d/*@$A/drops-claude.final.jsonl"

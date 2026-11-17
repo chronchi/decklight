@@ -20,6 +20,7 @@ from decklight.engine import constants as C
 from decklight.engine import messages as M
 from decklight.engine import query as Q
 from decklight.engine.actions import Decision, Kind, Option, make_decision
+from decklight.engine.events import public_events
 from decklight.engine.knowledge import HandMemory
 from decklight.engine.messages import CardRef
 from decklight.engine.obs import (
@@ -60,14 +61,27 @@ def deck_card_state(code: int, cards: dict, controller: int, sequence: int) -> C
     monster = bool(d.type & C.TYPE_MONSTER)
     lv = d.level & 0xFFFFFFFF
     return CardState(
-        controller, C.LOCATION_DECK, sequence, code, position=0, type=d.type,
+        controller,
+        C.LOCATION_DECK,
+        sequence,
+        code,
+        position=0,
+        type=d.type,
         level=0 if (d.type & (C.TYPE_XYZ | C.TYPE_LINK)) or not monster else lv,
         rank=lv if d.type & C.TYPE_XYZ else 0,
-        attribute=d.attribute if monster else 0, race=d.race if monster else 0,
-        attack=d.attack if monster else 0, defense=d.defense if monster else 0,
-        base_attack=d.attack if monster else 0, base_defense=d.defense if monster else 0,
-        owner=controller, status=0, public=False, lscale=d.lscale, rscale=d.rscale,
-        link=lv if d.type & C.TYPE_LINK else 0, link_marker=d.link_marker,
+        attribute=d.attribute if monster else 0,
+        race=d.race if monster else 0,
+        attack=d.attack if monster else 0,
+        defense=d.defense if monster else 0,
+        base_attack=d.attack if monster else 0,
+        base_defense=d.defense if monster else 0,
+        owner=controller,
+        status=0,
+        public=False,
+        lscale=d.lscale,
+        rscale=d.rscale,
+        link=lv if d.type & C.TYPE_LINK else 0,
+        link_marker=d.link_marker,
     )
 
 
@@ -82,9 +96,7 @@ class StreamState:
         self.slots: dict[tuple[int, int], list[CardState | None]] = {
             (p, loc): [None] * n for p in (0, 1) for loc, n in _SLOTS.items()
         }
-        self.lists: dict[tuple[int, int], list[CardState]] = {
-            (p, loc): [] for p in (0, 1) for loc in _LISTS
-        }
+        self.lists: dict[tuple[int, int], list[CardState]] = {(p, loc): [] for p in (0, 1) for loc in _LISTS}
         self.deck_count = [0, 0]
         # True sequences of our deck cards, learned from messages that name them
         # (search SELECTs list (code, seq); draws pop the top without naming it).
@@ -114,7 +126,7 @@ class StreamState:
         if location == C.LOCATION_DECK:
             if player == self.seat:
                 return self._own_deck()
-            return [CardState(player, location, i) for i in range(self.deck_count[player])]
+            return [CardState(player, location, i, owner=player) for i in range(self.deck_count[player])]
         raise KeyError(f"untracked location {location:#x}")
 
     def field_state(self) -> tuple[tuple[int, int], list[Q.ChainLink]]:
@@ -136,20 +148,27 @@ class StreamState:
                 if c is not None and c.code:
                     elsewhere[c.code] += 1
                     elsewhere.update(c.overlay)
+        unknown_own = 0  # our cards held by the opponent whose code this seat never saw
         for (p, _), cards in self.lists.items():
             if p == self.seat:
                 continue
             for c in cards:  # our cards held by the opponent with known codes
-                if c.owner == self.seat and c.code:
-                    elsewhere[c.code] += 1
+                if c.owner == self.seat:
+                    if c.code:
+                        elsewhere[c.code] += 1
+                    else:
+                        unknown_own += 1
         for (p, _), cards in self.slots.items():
             if p == self.seat:
                 continue
             for c in cards:
-                if c is not None and c.owner == self.seat and c.code:
-                    elsewhere[c.code] += 1
+                if c is not None and c.owner == self.seat:
+                    if c.code:
+                        elsewhere[c.code] += 1
+                    else:
+                        unknown_own += 1
         rest = self.deck_list - elsewhere
-        size = sum(rest.values())
+        size = max(0, sum(rest.values()) - unknown_own)
         known: dict[int, int] = {}
         stat: dict[int, int] = {}
         for seq, code in self.deck_seqs.items():
@@ -168,7 +187,7 @@ class StreamState:
             if seq in stat:
                 c.status = stat[seq]
             else:
-                for (lcode, lstat) in list(loose):
+                for lcode, lstat in list(loose):
                     if lcode == code:
                         c.status = lstat
                         loose[(lcode, lstat)] -= 1
@@ -253,6 +272,11 @@ class StreamState:
                     rest = status & ~C.STATUS_CHAINING
                     if rest:
                         self.deck_loose[(code, rest)] += n
+            # The resolving handler may be a monster placed as a Continuous Trap
+            # (EFFECT_CHANGE_TYPE): the core reverts it when the activation resolves,
+            # with no message. The engine view already shows its card-DB stats.
+            if self.chain:
+                self._revert_trap_monster(self.chain[-1])
         elif t == C.MSG_CHAIN_SOLVED:
             if self.chain:
                 solved = self.chain.pop()
@@ -263,11 +287,7 @@ class StreamState:
                 # A monster placed as a Continuous Trap (EFFECT_CHANGE_TYPE) reverts to
                 # its card-DB type when its activation resolves, with no refresh naming
                 # it (trap-monster summons leave the zone and are refresh-covered).
-                card = self._entry_at(solved.controller, solved.location, solved.sequence)
-                if (card is not None and card.location == C.LOCATION_SZONE
-                        and card.position & C.POS_FACEUP and card.code in self.cards_db
-                        and card.type != self.cards_db[card.code].type):
-                    card.type = self.cards_db[card.code].type
+                self._revert_trap_monster(solved)
         elif t == C.MSG_CHAIN_END:
             for ch in self.chain:
                 self.set_public(ch.controller, ch.location, ch.sequence, False)
@@ -297,23 +317,73 @@ class StreamState:
         # MSG_WIN is tracked by the view; everything else carries no board state.
 
     def _start(self, raw: bytes) -> None:
-        _, seat, lp0, lp1, n0, _e0, n1, _e1 = struct.unpack("<BBIIHHHH", raw[:18])
+        _, seat, lp0, lp1, n0, e0, n1, e1 = struct.unpack("<BBIIHHHH", raw[:18])
         assert seat == self.seat, f"START for seat {seat}, viewer {self.seat}"
         self.lp = [lp0, lp1]
         self.deck_count = [n0, n1]
+        # The opponent's extra deck is never listed to us: face-down rows, so it counts like the engine's.
+        for p, n in ((0, e0), (1, e1)):
+            if p != self.seat and not self.lists[(p, C.LOCATION_EXTRA)]:
+                self.lists[(p, C.LOCATION_EXTRA)] = [
+                    CardState(p, C.LOCATION_EXTRA, i, owner=p, position=C.POS_FACEDOWN) for i in range(n)
+                ]
 
     def _update_data(self, raw: bytes) -> None:
         player, loc = raw[1], raw[2]
         cards = Q.parse_location(raw[3:], player, loc)
+        for c in cards:  # public servers query the extra deck without QUERY_LINK: the DB has it
+            if c is not None and c.type & C.TYPE_LINK and not c.link and c.code in self.cards_db:
+                d = deck_card_state(c.code, self.cards_db, player, c.sequence)
+                c.link, c.link_marker = d.link, d.link_marker
         if (player, loc) in self.slots:
             self.slots[(player, loc)] = cards
         elif (player, loc) in self.lists:
             self.lists[(player, loc)] = [c for c in cards if c is not None]
+            self._resync_chain_list(player, loc)
         # UPDATE_DATA never covers DECK (counts come from START/DRAW/MOVE).
+
+    def _resync_chain_list(self, player: int, loc: int) -> None:
+        """A refreshed list is authoritative (a shuffle reorders it): chain handlers are
+        live card pointers, so move links with that code to their new index."""
+        cards = self.lists.get((player, loc), [])
+        used: set[int] = set()
+        for i, ch in enumerate(self.chain):
+            if (ch.controller, ch.location) != (player, loc) or not ch.code:
+                continue
+            cur = ch.sequence
+            if 0 <= cur < len(cards) and cur not in used and cards[cur].code == ch.code:
+                used.add(cur)  # duplicate codes: keep the link's live index when it still fits
+                self.chain[i] = Q.ChainLink(
+                    ch.code,
+                    ch.controller,
+                    ch.location,
+                    cur,
+                    cards[cur].position,
+                    ch.triggering_controller,
+                    ch.triggering_location,
+                    ch.triggering_sequence,
+                    ch.description,
+                )
+                continue
+            for j, c in enumerate(cards):
+                if j not in used and c.code == ch.code:
+                    used.add(j)
+                    self.chain[i] = Q.ChainLink(
+                        ch.code,
+                        ch.controller,
+                        ch.location,
+                        j,
+                        c.position,
+                        ch.triggering_controller,
+                        ch.triggering_location,
+                        ch.triggering_sequence,
+                        ch.description,
+                    )
+                    break
 
     def _update_card(self, raw: bytes) -> None:
         player, loc, seq = raw[1], raw[2], raw[3]
-        card = CardState(player, loc, seq)
+        card = CardState(player, loc, seq, owner=player)
         Q.parse_card(raw[4:], 0, card)
         key = (player, loc)
         if key in self.slots:
@@ -324,7 +394,7 @@ class StreamState:
         elif key in self.lists:
             lst = self.lists[key]
             while len(lst) <= seq:
-                lst.append(CardState(player, loc, len(lst)))
+                lst.append(CardState(player, loc, len(lst), owner=player))
             lst[seq] = card
 
     def _take_from(self, con: int, loc: int, seq: int) -> CardState | None:
@@ -342,21 +412,52 @@ class StreamState:
                 card = lst.pop(seq)
                 for i, c in enumerate(lst):
                     c.sequence = i
+                # Chain handlers are live card pointers: the core reports their current
+                # index, so later cards in the same list shift down with it.
+                self._shift_chain(con, loc, seq + 1, -1)
                 return card
             return None
         if loc == C.LOCATION_DECK and con in (0, 1):
             self.deck_count[con] = max(0, self.deck_count[con] - 1)
         return None
 
+    def _fill_stats(self, card: CardState, force: bool = False) -> CardState:
+        """Fill a card we know by code but whose live row we never saw (a place/move from
+        hand or deck names only code and position). Identity fields are preserved; a later
+        refresh replaces the row with the engine's live stats."""
+        if not card.code or (card.type and not force) or card.code not in self.cards_db:
+            return card
+        d = deck_card_state(card.code, self.cards_db, card.controller, card.sequence)
+        for field in (
+            "type",
+            "level",
+            "rank",
+            "attribute",
+            "race",
+            "attack",
+            "defense",
+            "base_attack",
+            "base_defense",
+            "lscale",
+            "rscale",
+            "link",
+            "link_marker",
+        ):
+            setattr(card, field, getattr(d, field))
+        return card
+
     def _put_to(self, card: CardState | None, code: int, con: int, loc: int, seq: int, pos: int) -> None:
         if loc == C.LOCATION_DECK:
             self.deck_count[con] += 1
             return
+        old_loc = None if card is None else card.location
+        old_seq = None if card is None else card.sequence
         if card is None:
-            card = CardState(con, loc & ~C.LOCATION_OVERLAY, seq)
+            card = CardState(con, loc & ~C.LOCATION_OVERLAY, seq, owner=con)
         card.controller, card.location, card.sequence, card.position = con, loc, seq, pos
         if code:
             card.code = code
+        card = self._fill_stats(card)
         key = (con, loc)
         if key in self.slots:
             slots = self.slots[key]
@@ -366,34 +467,52 @@ class StreamState:
             return
         if key in self.lists:
             lst = self.lists[key]
-            lst.insert(min(seq, len(lst)), card)
+            index = min(seq, len(lst))
+            skip = old_seq if old_loc == loc else None
+            self._shift_chain(con, loc, index, 1, skip)
+            lst.insert(index, card)
             for i, c in enumerate(lst):
                 c.sequence = i
+
+    def _shift_chain(self, con: int, loc: int, at: int, delta: int, skip_seq: int | None = None) -> None:
+        """Move chain links that point into a list at index ≥ `at` (a list shift)."""
+        for ch in self.chain:
+            if (ch.controller, ch.location) != (con, loc) or ch.sequence < at:
+                continue
+            if skip_seq is not None and ch.sequence == skip_seq:
+                continue
+            ch.sequence += delta
 
     def _move(self, raw: bytes) -> None:
         if len(raw) != 1 + 4 + 10 + 10 + 4:
             return
         (code,) = struct.unpack_from("<I", raw, 1)
-        from_con, from_loc, from_seq, _from_pos = _loc_info(raw, 5)
+        from_con, from_loc, from_seq, from_pos = _loc_info(raw, 5)
         to_con, to_loc, to_seq, to_pos = _loc_info(raw, 15)
+        # Resolve the chain handler *before* the move: a list shift can move a different
+        # link into (from_con, from_loc, from_seq), which must not be mistaken for the
+        # moved card (hidden moves carry code 0).
+        hit = self._chain_hit(from_con, from_loc, from_seq, code)
         if from_loc & C.LOCATION_OVERLAY:
-            self._detach_overlay(from_con, code)
+            self._detach_overlay(from_con, from_loc, from_seq, from_pos, code)
             if to_loc & C.LOCATION_OVERLAY:
-                self._track_chain(from_con, from_loc, from_seq, code, to_con, to_loc, to_seq, to_pos)
-                return
-            if to_con in (0, 1):
+                self._attach_overlay(to_con, to_loc, to_seq, to_pos, code)
+            elif to_con in (0, 1):
                 # Detached material re-enters a zone (usually the grave): the holder's
                 # refreshed record drops it, and no record carries its status.
                 self._put_to(None, code, to_con, to_loc, to_seq, to_pos)
-                self._track_chain(from_con, from_loc, from_seq, code, to_con, to_loc, to_seq, to_pos)
+            self._track_chain_at(hit, code, to_con, to_loc, to_seq, to_pos)
             return
         if to_loc & C.LOCATION_OVERLAY:
-            # Attached as xyz material: leaves its zone, but the holder's refreshed
-            # record carries the new material list (statuses of materials are dropped).
+            # Attached as xyz material: the holder is `to_con`, in location
+            # `to_loc & ~OVERLAY` at `to_seq`, and `to_pos` is the material index
+            # (core `card::get_info_location`). Track it on the holder; no refresh
+            # carries the new material list until the holder's zone is next refreshed.
             if from_loc == C.LOCATION_DECK and from_con == self.seat:
                 self._deck_remove(from_seq)
             self._take_from(from_con, from_loc, from_seq)
-            self._track_chain(from_con, from_loc, from_seq, code, to_con, to_loc, to_seq, to_pos)
+            self._attach_overlay(to_con, to_loc, to_seq, to_pos, code)
+            self._track_chain_at(hit, code, to_con, to_loc, to_seq, to_pos)
             return
         if from_con not in (0, 1) or to_con not in (0, 1):
             return
@@ -403,7 +522,7 @@ class StreamState:
         if to_loc == C.LOCATION_DECK and to_con == self.seat:
             self._deck_insert(to_seq, code, card.status if card is not None else 0)
         self._put_to(card, code, to_con, to_loc, to_seq, to_pos)
-        self._track_chain(from_con, from_loc, from_seq, code, to_con, to_loc, to_seq, to_pos)
+        self._track_chain_at(hit, code, to_con, to_loc, to_seq, to_pos)
 
     def _demote_deck(self) -> None:
         """Forget positions but keep the (code, status) pairs known to be in our deck."""
@@ -429,17 +548,34 @@ class StreamState:
             if status & STATUS_OBS_MASK:
                 self.deck_stat[seq] = status & STATUS_OBS_MASK
 
-    def _track_chain(self, from_con: int, from_loc: int, from_seq: int, code: int,
-                     to_con: int, to_loc: int, to_seq: int, to_pos: int) -> None:
-        """Chain links name the handler's current position (`query_field` reads it live)."""
+    def _chain_hit(self, con: int, loc: int, seq: int, code: int) -> int | None:
+        """Index of the chain link whose handler is at (con, loc, seq), if any."""
         for i, ch in enumerate(self.chain):
-            if (ch.controller, ch.location, ch.sequence) != (from_con, from_loc, from_seq):
+            if (ch.controller, ch.location, ch.sequence) != (con, loc, seq):
                 continue
             if code and ch.code and code != ch.code:
                 continue
-            self.chain[i] = Q.ChainLink(ch.code or code, to_con, to_loc, to_seq, to_pos,
-                                        ch.triggering_controller, ch.triggering_location,
-                                        ch.triggering_sequence, ch.description)
+            return i
+        return None
+
+    def _track_chain_at(
+        self, index: int | None, code: int, to_con: int, to_loc: int, to_seq: int, to_pos: int
+    ) -> None:
+        """Chain links name the handler's current position (`query_field` reads it live)."""
+        if index is None:
+            return
+        ch = self.chain[index]
+        self.chain[index] = Q.ChainLink(
+            ch.code or code,
+            to_con,
+            to_loc,
+            to_seq,
+            to_pos,
+            ch.triggering_controller,
+            ch.triggering_location,
+            ch.triggering_sequence,
+            ch.description,
+        )
 
     def _entry_at(self, con: int, loc: int, seq: int) -> CardState | None:
         key = (con, loc)
@@ -466,17 +602,34 @@ class StreamState:
         placed monster's EFFECT_CHANGE_TYPE) before the next prompt, with no message.
         Opponent summons need no prompt in that window; ours do (SELECT_POSITION)."""
         card = self._entry_at(ref.controller, ref.location, ref.sequence)
-        if (card is not None and card.code and card.code in db
-                and card.type != db[card.code].type):
+        if card is not None and card.code and card.code in db and card.type != db[card.code].type:
             card.type = db[card.code].type
+            self._fill_stats(card, force=True)
 
-    def _detach_overlay(self, con: int, code: int) -> None:
-        if not code:
+    def _attach_overlay(self, con: int, loc: int, seq: int, index: int, code: int) -> None:
+        """Attach `code` under the holder at (con, loc & ~OVERLAY, seq), material `index`."""
+        holder = self._entry_at(con, loc & ~C.LOCATION_OVERLAY, seq)
+        if holder is None:
             return
-        for c in self.slots.get((con, C.LOCATION_MZONE), []):
-            if c is not None and code in c.overlay:
-                c.overlay = tuple(x for x in c.overlay if x != code)
-                return
+        overlay = list(holder.overlay)
+        while len(overlay) <= index:
+            overlay.append(0)
+        overlay[index] = code
+        holder.overlay = tuple(overlay)
+
+    def _detach_overlay(self, con: int, loc: int, seq: int, index: int, code: int) -> None:
+        """Drop material `index` (by code as a fallback) from the holder at (con, loc, seq)."""
+        holder = self._entry_at(con, loc & ~C.LOCATION_OVERLAY, seq)
+        if holder is None:
+            return
+        overlay = list(holder.overlay)
+        if 0 <= index < len(overlay) and overlay[index] == code:
+            del overlay[index]
+        elif code in overlay:
+            overlay.remove(code)
+        else:
+            return
+        holder.overlay = tuple(overlay)
 
     def _draw(self, raw: bytes) -> None:
         if len(raw) < 6:
@@ -493,7 +646,7 @@ class StreamState:
         for i in range(drawn):
             (code,) = struct.unpack_from("<I", raw, 6 + 8 * i)
             (pos,) = struct.unpack_from("<I", raw, 6 + 8 * i + 4)
-            lst.append(CardState(player, C.LOCATION_HAND, len(lst), code, position=pos))
+            lst.append(CardState(player, C.LOCATION_HAND, len(lst), code, position=pos, owner=player))
 
     def _chain_link(self, raw: bytes) -> Q.ChainLink:
         (code,) = struct.unpack_from("<I", raw, 1)
@@ -502,6 +655,20 @@ class StreamState:
         (tseq,) = struct.unpack_from("<I", raw, 17)
         (desc,) = struct.unpack_from("<Q", raw, 21)
         return Q.ChainLink(code, con, loc, seq, pos, tcon, tloc, tseq, desc)
+
+    def _revert_trap_monster(self, ch: Q.ChainLink) -> None:
+        """Revert a resolving Continuous-Trap monster to its card-DB type and stats."""
+        card = self._entry_at(ch.controller, ch.location, ch.sequence)
+        if (
+            card is None
+            or card.location != C.LOCATION_SZONE
+            or not card.position & C.POS_FACEUP
+            or card.code not in self.cards_db
+            or card.type == self.cards_db[card.code].type
+        ):
+            return
+        card.type = self.cards_db[card.code].type
+        self._fill_stats(card, force=True)
 
     def _pos_change(self, raw: bytes) -> None:
         if len(raw) < 10:
@@ -518,11 +685,20 @@ class StreamState:
             card.position = cp
             if code:
                 card.code = code
+            self._fill_stats(card)
         for i, ch in enumerate(self.chain):
             if (ch.controller, ch.location, ch.sequence) == (cc, cl, cs):
-                self.chain[i] = Q.ChainLink(code or ch.code, cc, cl, cs, cp,
-                                            ch.triggering_controller, ch.triggering_location,
-                                            ch.triggering_sequence, ch.description)
+                self.chain[i] = Q.ChainLink(
+                    code or ch.code,
+                    cc,
+                    cl,
+                    cs,
+                    cp,
+                    ch.triggering_controller,
+                    ch.triggering_location,
+                    ch.triggering_sequence,
+                    ch.description,
+                )
 
     def _swap(self, raw: bytes) -> None:
         if len(raw) != 1 + 14 + 14:
@@ -548,110 +724,33 @@ class StreamState:
             self._take_from(con, loc, seq)
 
 
+def _mzone_code(state: StreamState, con: int, seq: int) -> int:
+    for c in state.slots.get((con, C.LOCATION_MZONE), []):
+        if c is not None and c.sequence == seq:
+            return c.code
+    return 0
+
+
 def history_from_message(state: StreamState, raw: bytes) -> list[HistoryEntry]:
-    """Opponent history entries rebuilt from a public message ([] when unmappable).
-
-    Covers summon / special / flip summon, activation (MSG_CHAINING), attack, set (code
-    hidden), position change, and phase moves (TO_BATTLE / TO_MAIN2 / TO_END on
-    MSG_NEW_PHASE when the opponent is turn player). Opponent PASS / NO / pick steps are
-    invisible to a client and skipped. Rows for summons made while a chain is open are
-    skipped too: those come from effect resolution, which takes no decision (the
-    activation row already covers it).
-
-    Summons and sets emit TWO rows: the engine records the pick (SUMMON/MSET/SSET, always
-    from IDLE) and the placement pick (PLACE, always SELECT_PLACE) separately, and both
-    are deterministic from the event (zone = the summoned/set card's zone). Singleton
-    placements (one zone free) take no decision in the engine and are over-counted here;
-    tribute/material picks are invisible and under-counted. Deciding-player message types
-    are deterministic (IDLE/BATTLE/PLACE); activations (IDLE/BATTLE/CHAIN) and special
-    summons keep the informing message type.
-    """
-    seat = state.seat
-    t = raw[0]
-    out: list[HistoryEntry] = []
-
-    def entry(kind: Kind, ref: CardRef, code: int, desc: int, arg: int,
-              actor: int, public: bool, msg_type: int) -> HistoryEntry:
-        row = [int(kind), -1, code, (desc >> 20) & 0xFFFFFFFF, desc & 0xFFFFF,
-               arg, msg_type, loc_id(ref.location), ref.controller ^ actor, 0]
-        return HistoryEntry(row, actor, state.turn, state.phase, public)
-
-    def place_row(ref: CardRef, actor: int) -> HistoryEntry:
-        zone = ref.sequence if ref.location == C.LOCATION_MZONE else ref.sequence + 8
-        return entry(Kind.PLACE, ref, 0, 0, zone, actor, False, C.MSG_SELECT_PLACE)
-
-    if t == C.MSG_SUMMONING and len(raw) >= 15:
-        (code,) = struct.unpack_from("<I", raw, 1)
-        con, loc, seq, pos = _loc_info(raw, 5)
-        if con == 1 - seat and not state.chain:
-            ref = CardRef(code, con, loc, seq, pos)
-            out += [entry(Kind.SUMMON, ref, code, 0, 0, con, True, C.MSG_SELECT_IDLECMD),
-                    place_row(ref, con)]
-    elif t == C.MSG_SPSUMMONING and len(raw) >= 15:
-        (code,) = struct.unpack_from("<I", raw, 1)
-        con, loc, seq, pos = _loc_info(raw, 5)
-        if con == 1 - seat and not state.chain:
-            ref = CardRef(code, con, loc, seq, pos)
-            out += [entry(Kind.SPSUMMON, ref, code, 0, 0, con, True, C.MSG_SELECT_IDLECMD),
-                    place_row(ref, con)]
-    elif t == C.MSG_FLIPSUMMONING and len(raw) >= 15:
-        (code,) = struct.unpack_from("<I", raw, 1)
-        con, loc, seq, pos = _loc_info(raw, 5)
-        if con == 1 - seat:
-            out.append(entry(Kind.REPOS, CardRef(code, con, loc, seq, pos),
-                             code, 0, 0, con, True, C.MSG_SELECT_IDLECMD))
-    elif t == C.MSG_SET and len(raw) >= 15:
-        con, loc, seq, pos = _loc_info(raw, 5)
-        if con == 1 - seat:
-            kind = Kind.MSET if loc == C.LOCATION_MZONE else Kind.SSET
-            ref = CardRef(0, con, loc, seq, pos)
-            out += [entry(kind, ref, 0, 0, 0, con, False, C.MSG_SELECT_IDLECMD),
-                    place_row(ref, con)]
-    elif t == C.MSG_CHAINING and len(raw) >= 29:
-        (code,) = struct.unpack_from("<I", raw, 1)
-        con, loc, seq, pos = _loc_info(raw, 5)
-        tcon = raw[15]
-        (desc,) = struct.unpack_from("<Q", raw, 21)
-        if tcon == 1 - seat:
-            public = bool(pos & C.POS_FACEUP)
-            out.append(entry(Kind.ACTIVATE, CardRef(code, con, loc, seq, pos),
-                             code, desc, 0, tcon, public, t))
-    elif t == C.MSG_ATTACK and len(raw) >= 21:
-        con, loc, seq, pos = _loc_info(raw, 1)
-        _tcon, _tloc, _tseq, _tpos = _loc_info(raw, 11)
-        if con == 1 - seat:
-            code = 0
-            for c in state.slots.get((con, C.LOCATION_MZONE), []):
-                if c is not None and c.sequence == seq:
-                    code = c.code
-                    break
-            direct = _tloc == 0 and _tcon == 0 and _tseq == 0
-            out.append(entry(Kind.ATTACK, CardRef(code, con, loc, seq, pos),
-                             code, 0, int(direct), con, True, C.MSG_SELECT_BATTLECMD))
-    elif t == C.MSG_POS_CHANGE and len(raw) >= 10:
-        (code,) = struct.unpack_from("<I", raw, 1)
-        cc, cl, cs, _pp, cp = raw[5], raw[6], raw[7], raw[8], raw[9]
-        if cc == 1 - seat and not state.chain:
-            out.append(entry(Kind.REPOS, CardRef(code, cc, cl, cs, cp),
-                             code, 0, 0, cc, bool(cp & C.POS_FACEUP), C.MSG_SELECT_IDLECMD))
-    elif t == C.MSG_NEW_PHASE and len(raw) >= 3:
-        (phase,) = struct.unpack_from("<H", raw, 1)
-        if state.turn_player != seat:
-            kind_msg = {C.PHASE_BATTLE_START: (Kind.TO_BATTLE, C.MSG_SELECT_IDLECMD),
-                        C.PHASE_MAIN2: (Kind.TO_MAIN2, C.MSG_SELECT_BATTLECMD),
-                        C.PHASE_END: (Kind.TO_END, C.MSG_SELECT_BATTLECMD)}.get(phase)
-            if kind_msg is not None:
-                kind, msg_type = kind_msg
-                actor = state.turn_player
-                out.append(entry(kind, CardRef(0, actor, 0, 0), 0, 0, 0, actor, True, msg_type))
-    return out
+    """Opponent history entries rebuilt from a public message ([] when unmappable): the viewer's opponent's
+    `engine.events.public_events` (the engine envs build `obs_history` with the same rule)."""
+    events = public_events(raw, state.turn, state.phase, state.turn_player, bool(state.chain),
+                           lambda con, seq: _mzone_code(state, con, seq))  # fmt: skip
+    return [e for e in events if e.actor != state.seat]
 
 
 def loc_id(location: int) -> int:
     if location & C.LOCATION_OVERLAY:
         return 8
-    return {C.LOCATION_DECK: 1, C.LOCATION_HAND: 2, C.LOCATION_MZONE: 3, C.LOCATION_SZONE: 4,
-            C.LOCATION_GRAVE: 5, C.LOCATION_REMOVED: 6, C.LOCATION_EXTRA: 7}.get(location, 0)
+    return {
+        C.LOCATION_DECK: 1,
+        C.LOCATION_HAND: 2,
+        C.LOCATION_MZONE: 3,
+        C.LOCATION_SZONE: 4,
+        C.LOCATION_GRAVE: 5,
+        C.LOCATION_REMOVED: 6,
+        C.LOCATION_EXTRA: 7,
+    }.get(location, 0)
 
 
 class StreamView:
@@ -702,8 +801,9 @@ class StreamView:
         if opt.kind in (Kind.SUMMON, Kind.SPSUMMON):
             self.state.summon_revert(opt.card, self._cards)
         if opt.kind == Kind.ACTIVATE:
-            self.state.set_status(opt.card.controller, opt.card.location, opt.card.sequence,
-                                  C.STATUS_CHAINING, True)
+            self.state.set_status(
+                opt.card.controller, opt.card.location, opt.card.sequence, C.STATUS_CHAINING, True
+            )
 
     def take(self, index: int) -> bytes | None:
         """Record our pick and advance; the core response once the decision is complete."""
@@ -727,7 +827,7 @@ class StreamView:
         self._resp = resp
         if self._clear_deck_after:
             # A deck SORT's response reorders the top: drop positions, keep statuses.
-            self._demote_deck()
+            self.state._demote_deck()
             self._clear_deck_after = False
         return resp
 
@@ -806,8 +906,7 @@ class StreamView:
             # The refs name the current order (valid for this decision); the response
             # reorders the deck top, so drop positions (keeping statuses) once done.
             self.state.learn_deck_seqs(msg.cards)
-            if any(r.controller == self.state.seat and r.location == C.LOCATION_DECK
-                   for r in msg.cards):
+            if any(r.controller == self.state.seat and r.location == C.LOCATION_DECK for r in msg.cards):
                 self._clear_deck_after = True
             return
         refs: list = []
@@ -835,6 +934,5 @@ class StreamView:
         board = Board(self.state, self.state.seat)
         assert self._dec is not None
         self._history.append(
-            history_entry(board, opt, self._dec.msg.type, self._dec.step,
-                          self.state.turn, self.state.phase)
+            history_entry(board, opt, self._dec.msg.type, self._dec.step, self.state.turn, self.state.phase)
         )

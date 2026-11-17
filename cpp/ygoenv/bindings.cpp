@@ -35,6 +35,8 @@ py::object to_dict(const Obs& o) {
   d["history_mask"] = arr(o.history_mask, {HISTORY}).attr("astype")("bool");
   d["hist_long"] = arr(o.hist_long, {HISTORY_MAX, HISTORY_COLS});
   d["hist_long_mask"] = arr(o.hist_long_mask, {HISTORY_MAX}).attr("astype")("bool");
+  d["obs_history"] = arr(o.obs_history, {HISTORY, HISTORY_COLS});
+  d["obs_history_mask"] = arr(o.obs_history_mask, {HISTORY}).attr("astype")("bool");
   d["card_known"] = arr(o.card_known, {MAX_CARDS});
   d["known_code"] = arr(o.known_code, {MAX_CARDS});
   d["priv_code"] = arr(o.priv_code, {MAX_CARDS});
@@ -291,6 +293,8 @@ PYBIND11_MODULE(YGOENV_MODULE, m) {
         d["history_mask"] = view(self, o, o[0].history_mask.data(), {HISTORY}, "bool");
         d["hist_long"] = view(self, o, o[0].hist_long.data(), {HISTORY_MAX, HISTORY_COLS}, "int32");
         d["hist_long_mask"] = view(self, o, o[0].hist_long_mask.data(), {HISTORY_MAX}, "bool");
+        d["obs_history"] = view(self, o, o[0].obs_history.data(), {HISTORY, HISTORY_COLS}, "int32");
+        d["obs_history_mask"] = view(self, o, o[0].obs_history_mask.data(), {HISTORY}, "bool");
         d["card_known"] = view(self, o, o[0].card_known.data(), {MAX_CARDS}, "uint8");
         d["known_code"] = view(self, o, o[0].known_code.data(), {MAX_CARDS}, "int32");
         d["priv_code"] = view(self, o, o[0].priv_code.data(), {MAX_CARDS}, "int32");

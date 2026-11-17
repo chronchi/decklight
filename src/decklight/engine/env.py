@@ -32,6 +32,8 @@ class PyEnv:
             self.duel.close()
         self.duel = self.engine.new_duel(self.config)
         self.history: list[O.HistoryEntry] = []
+        self.ohistory: list[tuple[O.HistoryEntry, bool]] = []  # (entry, is_event): decisions + public events, in order
+        self._events_seen = 0
         self.choices: list[int] = []  # agent choices (auto steps excluded): the replay
         self.decisions = 0  # all single choices, auto ones included
         self.truncated = 0  # decisions whose option list was cut at MAX_OPTIONS
@@ -86,8 +88,16 @@ class PyEnv:
 
     # --- internals ---
 
+    def obs_history(self, me: int) -> list[O.HistoryEntry]:
+        """What a client seated at `me` has recorded: its own decisions and the opponent's public events
+        (`engine.events`; NOTEBOOK 2026-11-10 12:58)."""
+        return [e for e, event in self.ohistory if (e.actor != me) == event]
+
     def _next_decision(self) -> None:
         msg = self.duel.advance()
+        events = self.duel.events
+        self.ohistory += [(e, True) for e in events[self._events_seen :]]
+        self._events_seen = len(events)
         self.dec = (
             None
             if msg is None
@@ -110,6 +120,8 @@ class PyEnv:
             self.history.append(
                 O.history_entry(self.board, opt, dec.msg.type, dec.step, self.duel.turn, self.duel.phase)
             )
+            if len(self.opts) > 1:  # a client answers singletons without recording them (stream._settle_singletons)
+                self.ohistory.append((self.history[-1], False))
         self.decisions += 1
         resp = dec.choose(index)
         if resp is not None:
@@ -133,4 +145,5 @@ class PyEnv:
         return None
 
     def _observe(self) -> Obs:
-        return O.build_obs(self.board, self.dec, self.opts, self.history, O.DuelSource(self.duel))
+        return O.build_obs(self.board, self.dec, self.opts, self.history, O.DuelSource(self.duel),
+                           self.obs_history(self.player))  # fmt: skip

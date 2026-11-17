@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 # Run an OpenCode agent on a brief in the background, with a swappable model, and log the run for benchmarking.
 #   scripts/delegate.sh <brief.md> [model] [tag]
-#   model: full opencode id (default $YGO_AGENT_MODEL or opencode-go/muse-spark-1.3-contributor)
+#   model: full opencode id (default $YGO_AGENT_MODEL or opencode/deepseek-v4.1-flash-free)
 #   tag:   run name (default: brief basename + model short name)
 # Writes data/cache/briefs/<tag>.{log,pid}; on exit appends a row to data/cache/briefs/runs.tsv:
 #   tag  model  brief  start  end  seconds  exit  status(from the "## RESULT" block)
 set -euo pipefail
 cd "$(dirname "$0")/.."
 brief=$1
-model=${2:-${YGO_AGENT_MODEL:-opencode-go/muse-spark-1.3-contributor}}
+model=${2:-${YGO_AGENT_MODEL:-opencode/deepseek-v4.1-flash-free}}
 short=${model##*/}
 tag=${3:-$(basename "$brief" .md).$short}
 dir=data/cache/briefs

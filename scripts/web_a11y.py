@@ -31,7 +31,10 @@ AXE_TAGS = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"]
 # (name, mock query, viewport) — viewport keys below.
 STATES = [
     ("lobby", "0", "phone"),
+    ("lobby-loading-bot", "38&loadingbot=1", "phone"),
+    ("lobby-loading-bot-small", "38&loadingbot=1", "small"),
     ("lobby-picker", "0&picker=you", "phone"),
+    ("lobby-pack", "0&opts=1", "phone"),
     ("main-phase", "1", "phone"),
     ("chain-prompt", "2", "phone"),
     ("select-cards", "3", "phone"),
@@ -86,7 +89,7 @@ STATES = [
     # Rules in context + undo (step 5, items 6 and 9).
     ("keywords-detail", "1&detailcode=14558128", "phone"),
     ("kw-popover", "1&detailcode=14558128&kw=quick-effect", "phone"),
-    ("rule-notes-menu", "1&gamemenu=1", "phone"),
+    ("rule-notes-settings", "1&settings=1", "phone"),
     ("practice-undo", "1&hint=1&canundo=1", "phone"),
     ("cue-rule-note", "11&cue=3&t=0.6", "phone"),
     ("keywords-small", "1&detailcode=14558128", "small"),
@@ -101,6 +104,28 @@ STATES = [
     ("primer-empty", "0&primer=null", "phone"),
     ("primer-game", "1&primer=1", "phone"),
     ("primer-small", "0&primer=1", "small"),
+    # Context bar: selected card actions, a place prompt with Cancel, a select prompt with Cancel.
+    ("context-actions", "21&menu=yh3", "phone"),
+    ("place-cancel", "22", "phone"),
+    ("select-cancel", "23", "phone"),
+    ("place-cancel-small", "22", "small"),
+    # Card-art sync in Settings: running, waiting for Wi-Fi, done.
+    ("art-running", "24&settings=1", "phone"),
+    ("art-wifi", "25&settings=1", "phone"),
+    ("art-done", "26&settings=1", "phone"),
+    ("art-running-small", "24&settings=1", "small"),
+    # The app-wide Settings screen: top, Cards with art running, over a duel.
+    ("settings", "27&settings=1", "phone"),
+    ("settings-cards", "28&settings=1", "phone"),
+    ("settings-ingame", "29&settings=1", "phone"),
+    ("settings-small", "27&settings=1", "small"),
+    # Card action panel, a pass option, and the bot-duel rock-paper-scissors dialog.
+    ("card-actions", "30", "phone"),
+    ("card-actions-small", "30", "small"),
+    ("card-actions-pass", "31", "phone"),
+    ("rps-pick", "32", "phone"),
+    ("rps-result", "33", "phone"),
+    ("rps-pick-small", "32", "small"),
 ]
 VIEWPORTS = {
     "phone": {
@@ -485,18 +510,19 @@ def keyboard_checks(page, errors) -> dict:
     if len(rings) < len(reached):
         bad = [r["cls"][:30] for r in reached if not (r["os"] != "none" and r["ow"] >= 2)][:5]
         errors.append(f"keyboard: focus ring under 2 px on {bad}")
-    # Enter on an actionable card opens its menu; Escape closes and focus returns to the card.
+    # Enter on an actionable card opens its action panel (focus moves to the
+    # first action); Escape closes it and focus returns to the card.
     page.goto(page.url, wait_until="networkidle")
     page.wait_for_timeout(300)
     page.locator(".card.actionable").first.focus()
     uid = page.evaluate("document.activeElement.getAttribute('data-uid')")
     page.keyboard.press("Enter")
     page.wait_for_timeout(250)
-    out["enter_opens_menu"] = page.evaluate("!!document.querySelector('#menu')")
-    out["focus_in_menu"] = page.evaluate("!!document.activeElement.closest('#menu')")
+    out["enter_opens_context"] = page.evaluate("!!document.querySelector('#menu[role=dialog][aria-modal=true]')")
+    out["focus_in_context"] = page.evaluate("!!document.activeElement.closest('#menu')")
     page.keyboard.press("Escape")
     page.wait_for_timeout(250)
-    out["escape_closes_menu"] = page.evaluate("!document.querySelector('#menu')")
+    out["escape_closes_context"] = page.evaluate("!document.querySelector('#menu')")
     out["focus_returned_card"] = page.evaluate("document.activeElement.getAttribute('data-uid')") == uid
     # Game menu dialog: Space opens, focus moves in, Escape closes, focus returns.
     page.locator('[data-act="gamemenu"]').first.focus()

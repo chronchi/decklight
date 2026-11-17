@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Retrain stage S (docs/retrain/plan-v2.md, plan-v3.md): honest-override search (search/honest.py) on base_r3 +
+# Retrain stage S (docs/lab/retrain/plan-v2.md, plan-v3.md): honest-override search (search/honest.py) on base_r3 +
 # value_ppo3, the final card's hppo config otherwise (k4 s4 h1, det-tries 32, skip, conf-skip 0.9), on the final
 # card's 1,488 ygo-agent deals (seeds 1000-1005), paired with the stored hppo games (shipped in data/cache/stage_s/hppo).
 # Variants: ho (both seats), ho_t1 (going first, own turn 1 searched too). Then the override replication audit

@@ -1,0 +1,27 @@
+# Prebuilt decks bundled in the app and listed in the lobby, one stem per line, in display order.
+# User (2026-11-13): "there is like 195 decks there. That's way too much ... we don't really need to bundle all of
+# that ... We should just bundle the decks that are used for fine-tuning ... Some extra few decks based on the meta
+# right now ... the list should be filtered by two things ... the decks we build and the pre-built".
+# Starters (blue-eyes, branded) are seeded into the user's decks and bundled, but are not listed here.
+atlantean-mermail-meta1
+atlantean-mermail-meta2
+blitzclique-meta1
+blitzclique-meta2
+branded-light-and-darkness-ritual-meta1
+invoked-meta1
+lunalight-meta1
+lunalight-meta2
+mitsurugi-meta1
+mitsurugi-meta2
+radiant-typhoon-meta1
+sacred-beasts-meta1
+sacred-beasts-meta2
+sky-striker-meta1
+branded-dracotail-meta1
+maliss
+ryzeal
+elfnote-meta1
+fiendsmith-elfnote-meta1
+orcust-meta1
+power-patron-artmage-meta1
+trains-meta1

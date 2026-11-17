@@ -16,7 +16,7 @@ Question file (JSON list):
      "swaps": [[out_name_or_code, in_name_or_code, n]], "kind": "real"|"neg_control"|"pos_control"}
 `n` (copies, default all) may be omitted per swap.
 
-    uv run python scripts/tech_ab.py --questions docs/techcards/questions-2026-10-16.json \\
+    uv run python scripts/tech_ab.py --questions docs/lab/techcards/questions-2026-10-16.json \\
         --pilot greedy --opp greedy --n-opp-decks 2 --seeds 2 --out data/cache/tech-smoke
 
 Splitting across processes (vast): --only <id> --seed0 <s> --seeds <b> writes one

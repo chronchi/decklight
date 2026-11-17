@@ -54,7 +54,8 @@ class League:
     def __init__(self, p_self: float, p_ygoagent: float, league_size: int,
                  rng, ema_rate: float = EMA_RATE,
                  fixed: dict[str, object] | None = None, p_fixed: float = 0.0,
-                 p_greedy: float = 0.0, ga_ygo_share: float = 0.0) -> None:
+                 p_greedy: float = 0.0, ga_ygo_share: float = 0.0,
+                 bound: dict[str, object] | None = None) -> None:
         self.p_self = float(p_self)
         self.p_ygoagent = float(p_ygoagent)
         self.p_fixed = float(p_fixed)
@@ -77,12 +78,18 @@ class League:
         for name in self.fixed:
             if name in (SELF, BASE, YGO, GREEDY) or name.startswith("snap:"):
                 raise ValueError(f"league fixed name {name!r} collides with a reserved opponent")
+        # Deck-bound opponents (train_rl --deck-opps): never drawn by sample(); the Collector puts one on the
+        # opponent seat when that seat holds one of its decks. Held here so get()/record() treat them like the rest.
+        self.bound: dict[str, object] = dict(bound or {})
+        for name in self.bound:
+            if name in (SELF, BASE, YGO, GREEDY) or name.startswith("snap:") or name in self.fixed:
+                raise ValueError(f"league deck-bound name {name!r} collides with another opponent")
         self.league_size = int(league_size)
         self.rng = rng
         self.ema_rate = float(ema_rate)
         self._lock = threading.RLock()
         self.snaps: OrderedDict[str, object] = OrderedDict()
-        self.ema: dict[str, float] = {BASE: 0.5, **{n: 0.5 for n in self.fixed}}
+        self.ema: dict[str, float] = {BASE: 0.5, **{n: 0.5 for n in self.fixed}, **{n: 0.5 for n in self.bound}}
         self.added = 0  # snapshots added ever (fail-loud: >0 expected once training runs)
 
     # -- roster ------------------------------------------------------------
@@ -103,11 +110,13 @@ class League:
                 return self.snaps[name]
             except KeyError:
                 pass
-            try:
+            if name in self.fixed:
                 return self.fixed[name]
+            try:
+                return self.bound[name]
             except KeyError:
                 raise KeyError(f"league opponent {name!r} not in roster "
-                               f"(have {list(self.snaps) + list(self.fixed)})") from None
+                               f"(have {list(self.snaps) + list(self.fixed) + list(self.bound)})") from None
 
     def names(self) -> list[str]:
         with self._lock:

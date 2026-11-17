@@ -16,6 +16,7 @@ disconnect before the duel ended.
 
 from __future__ import annotations
 
+import gzip
 import json
 import socket
 import struct
@@ -151,6 +152,66 @@ _EVENT_KIND = {C.MSG_CHAINING: "chain", C.MSG_SUMMONING: "summon", C.MSG_SPSUMMO
                C.MSG_FLIPSUMMONING: "summon"}
 
 
+_PHASES = {C.PHASE_DRAW: "Draw", C.PHASE_STANDBY: "Standby", C.PHASE_MAIN1: "Main 1",
+           C.PHASE_BATTLE_START: "Battle", C.PHASE_MAIN2: "Main 2", C.PHASE_END: "End"}
+_LP_MSGS = (C.MSG_DAMAGE, C.MSG_RECOVER, C.MSG_LPUPDATE, C.MSG_PAY_LPCOST)
+
+
+def _card_name(code: int) -> str:
+    try:
+        from decklight.web.view import DB  # lazy: only the live log needs names
+        return DB.names().get(code, "") or str(code)
+    except Exception:  # names are a nicety; never break a duel over them
+        return str(code)
+
+
+class LiveLog:
+    """One stderr line per turn, phase, LP change, activation/summon and our own pick (`LIVE mm:ss ...`).
+
+    Follows a duel while it runs (the record is only written at the end). `who(p)` is "me"/"opp" from our seat.
+    """
+
+    def __init__(self, out=None) -> None:
+        self.out = out if out is not None else sys.stderr
+        self.t0 = time.monotonic()
+        self.turn = 0
+        self.lp: tuple[int, int] | None = None
+
+    def line(self, text: str) -> None:
+        m, sec = divmod(int(time.monotonic() - self.t0), 60)
+        print(f"LIVE {m:02d}:{sec:02d} {text}", file=self.out, flush=True)
+
+    def message(self, t: int, payload: bytes, seat: int | None, view) -> None:
+        """Call after `view.feed(payload)`, so LP already reflects the message."""
+        who = lambda p: "me" if p == seat else "opp"  # noqa: E731
+        if t == C.MSG_NEW_TURN and len(payload) >= 2:
+            self.turn += 1
+            self.line(f"TURN {self.turn} ({who(payload[1] & 1)})")
+        elif t == C.MSG_NEW_PHASE and len(payload) >= 3:
+            name = _PHASES.get(struct.unpack_from("<H", payload, 1)[0])
+            if name:
+                self.line(f"  phase {name}")
+        elif t in _EVENT_KIND and len(payload) >= 6:
+            (code,) = struct.unpack_from("<I", payload, 1)
+            self.line(f"  {who(payload[5])} {_EVENT_KIND[t]}s {_card_name(code)}")
+        elif t == C.MSG_WIN and len(payload) >= 2:
+            self.line(f"WIN {who(payload[1])} (reason {payload[2] if len(payload) > 2 else '?'})")
+        if t in _LP_MSGS:
+            lp = getattr(getattr(view, "state", None), "lp", None)
+            if lp is not None and seat in (0, 1) and tuple(lp) != self.lp:
+                self.lp = tuple(lp)
+                self.line(f"  LP me {lp[seat]} / opp {lp[1 - seat]}")
+
+    def pick(self, opts: list, index: int) -> None:
+        if len(opts) < 2 or not 0 <= index < len(opts):
+            return
+        o = opts[index]
+        card = getattr(o, "card", None)
+        code = getattr(card, "code", 0) or getattr(o, "code", 0)
+        kind = getattr(getattr(o, "kind", None), "name", "?").lower()
+        self.line(f"    pick {kind}{' ' + _card_name(code) if code else ''} [{index + 1}/{len(opts)}]")
+
+
 @dataclass
 class DuelRecord:
     server: str = ""
@@ -158,12 +219,17 @@ class DuelRecord:
     rps: int | None = None
     going_first: bool | None = None
     n_responses: int = 0
+    turns: int = 0
     retries: int = 0
     winner: tuple[int, int] | None = None
+    games: list = field(default_factory=list)  # one {"seat", "winner", "reason", "turns"} per duel of a match (Bo3)
     duel_end: bool = False
     packets: dict = field(default_factory=dict)
     events: dict = field(default_factory=dict)  # "chain:<code>" / "summon:<code>" counts, both players
     alerts: list = field(default_factory=list)
+    players: dict = field(default_factory=dict)  # lobby seat -> name (STOC_HS_PLAYER_ENTER)
+    chat: list = field(default_factory=list)
+    replays: list = field(default_factory=list)  # `.yrpX` file names in record_dir, one per duel  # {"t", "from", "kind", "text"}, in arrival order
     exit_code: int = TIMEOUT
 
 
@@ -192,7 +258,14 @@ class ClientSession:
         record_dir: str | Path = DEFAULT_RECORD_DIR,
         create: P.HostInfo | None = None,
         room_notes: str = "",
+        lobby_timeout_s: float | None = None,  # silence allowed before the duel starts (None: timeout_s)
+        clock_cap_s: float | None = None,  # opponent to act: wait their clock + 30 s, at most this (None: timeout_s only)
     ) -> None:
+        # Rooms with a game clock: while the server reports the opponent's clock (STOC_TIME_LIMIT), silence is allowed
+        # until their last reported clock runs out + 30 s, capped (rooms with ~12 h clocks). Before the first report
+        # (lobby, siding) the stall limit applies.
+        self.clock_cap_s = clock_cap_s
+        self.lobby_timeout_s = lobby_timeout_s
         self.host = host
         self.port = port
         self.name = name
@@ -212,10 +285,16 @@ class ClientSession:
         self.sock: socket.socket | None = None
         self.reader = P.FrameReader()
         self.record = DuelRecord(server=f"{host}:{port}")
+        self.on_end: Callable[[], None] | None = None  # called as soon as MSG_WIN/DUEL_END arrives
         self._ties = 0  # consecutive RPS ties (lockstep guard)
         self.create = create
         self.room_notes = room_notes
         self.room_id: int | None = None  # set from STOC_CREATE_GAME in create mode
+        self.live = LiveLog()
+        # every frame both ways, in order: (seconds, "in"/"out", proto, payload). Saved as <record>.stream.jsonl.gz
+        # so a duel can be rebuilt from our side even when the server sends no replay (NOTEBOOK 2026-11-03).
+        self.stream: list[tuple[float, str, int, bytes]] = []
+        self._t0 = time.monotonic()
 
     # -- socket helpers --
 
@@ -238,6 +317,7 @@ class ClientSession:
         assert self.sock is not None
         self.sock.sendall(P.pack_frame(proto, payload))
         self._count(f"C{proto:#x}")
+        self.stream.append((round(time.monotonic() - self._t0, 3), "out", proto, payload))
 
     def _note_event(self, t: int, payload: bytes) -> None:
         """Count which cards were activated / summoned (what a duel record can be audited on)."""
@@ -247,6 +327,48 @@ class ClientSession:
         (code,) = struct.unpack_from("<I", payload, 1)
         key = f"{kind}:{code}"
         self.record.events[key] = self.record.events.get(key, 0) + 1
+
+    def _note_chat(self, proto: int, payload: bytes) -> None:
+        """Keep every chat line (both packet kinds) in the record and echo it to stderr."""
+        try:
+            if proto == P.STOC_CHAT_2:
+                kind, _team, who, text = P.parse_chat2(payload)
+            else:
+                player, text = P.parse_chat(payload)
+                kind, who = "player", str(player)
+        except ValueError as e:
+            _alert(self.record.__dict__, f"bad chat packet: {e}")
+            return
+        line = {"t": round(time.time(), 1), "from": who, "kind": kind, "text": text}
+        self.record.chat.append(line)
+        print(f"CHAT [{kind}] {who}: {text}", file=sys.stderr, flush=True)
+
+    def _save_stream(self, path: Path) -> str | None:
+        """Write the frame log as gzip JSON lines: a header (deck, name, server), then {t, dir, proto, hex}."""
+        if not self.stream:
+            return None
+        head = {"server": f"{self.host}:{self.port}", "name": self.name, "main": self.main, "extra": self.extra,
+                "side": self.side, "pro_version": self.proto.pro_version,
+                "client_version": list(self.proto.client_version)}
+        with gzip.open(path, "wt", encoding="utf-8") as f:
+            f.write(json.dumps(head) + "\n")
+            for t, d, proto, payload in self.stream:
+                f.write(json.dumps({"t": t, "dir": d, "proto": proto, "hex": payload.hex()}) + "\n")
+        return path.name
+
+    def _save_replay(self, payload: bytes) -> None:
+        """Keep the server's `.yrpX` (one per duel of a match) next to the record; `play/yrp.py` reads it."""
+        if not payload:
+            _alert(self.record.__dict__, "empty STOC_NEW_REPLAY")
+            return
+        try:
+            self.record_dir.mkdir(parents=True, exist_ok=True)
+            safe = "".join(c if c.isalnum() or c in "-_" else "_" for c in self.name)[:32]
+            path = self.record_dir / f"{time.strftime('%Y%m%d-%H%M%S')}-{safe}-{len(self.record.replays)}.yrpX"
+            path.write_bytes(payload)
+            self.record.replays.append(path.name)
+        except OSError as e:
+            _alert(self.record.__dict__, f"cannot write replay: {e}")
 
     def _count(self, key) -> None:
         self.record.packets[key] = self.record.packets.get(key, 0) + 1
@@ -262,7 +384,10 @@ class ClientSession:
             return []
         if not data:
             return []
-        return self.reader.feed(data)
+        frames = self.reader.feed(data)
+        t = round(time.monotonic() - self._t0, 3)
+        self.stream.extend((t, "in", proto, payload) for proto, payload in frames)
+        return frames
 
     def close(self) -> None:
         if self.sock is not None:
@@ -315,6 +440,7 @@ class ClientSession:
             rec = dict(self.record.__dict__)
             if isinstance(rec["winner"], tuple):
                 rec["winner"] = list(rec["winner"])
+            rec["stream"] = self._save_stream(path.with_suffix(".stream.jsonl.gz"))
             path.write_text(json.dumps(rec, indent=1, default=str) + "\n")
         except OSError as e:
             print(f"ALERT edopro_client: cannot write record: {e}", file=sys.stderr, flush=True)
@@ -342,6 +468,8 @@ class ClientSession:
             if self.create is not None and is_host and ready_sent and others_ready and not start_sent:
                 self.send(P.CTOS_HS_START)
                 start_sent = True
+        if self.lobby_timeout_s is not None and self.sock is not None:
+            self.sock.settimeout(self.lobby_timeout_s)  # an idle room host: give up, don't sit for timeout_s
         while True:
             frames = self._wait()
             if frames is None:
@@ -376,6 +504,10 @@ class ClientSession:
                         _alert(rec, f"bad STOC_TYPE_CHANGE: {e}")
                         return BAD_ARGS, []
                     rec["seat"] = seat
+                    if seat == P.NETPLAYER_TYPE_OBSERVER:
+                        # the duelist seats filled as we joined: we would only watch (NOTEBOOK 2026-11-03, g4)
+                        _alert(rec, "joined as a spectator (no free duelist seat); leaving")
+                        return BAD_ARGS, []
                     if deck_sent:
                         self.send(P.CTOS_HS_READY)
                         ready_sent = True
@@ -392,6 +524,7 @@ class ClientSession:
                 elif proto == P.STOC_HS_PLAYER_ENTER:
                     try:
                         _n, _p = P.parse_hs_player_enter(payload)
+                        self.record.players[str(_p)] = _n
                     except ValueError:
                         pass
                 elif proto == P.STOC_HS_PLAYER_CHANGE:
@@ -428,10 +561,18 @@ class ClientSession:
                     self.record.seat = seat
                     self._lobby_seat = seat
                     return None, frames[i + 1 :]
+                elif (proto == P.STOC_GAME_MSG and deck_sent
+                      and payload[:1] == bytes([C.MSG_START])):
+                    # ygo-windbot starts a WindBot game with MSG_START and no STOC_DUEL_START;
+                    # the duel loop reads our seat from that message.
+                    self._lobby_seat = seat
+                    return None, frames[i:]
                 elif proto == P.STOC_DUEL_END:
                     self.record.duel_end = True
                     return OK, []
-                elif proto in (P.STOC_REPLAY, P.STOC_CHAT, P.STOC_HS_WATCH_CHANGE):
+                elif proto in (P.STOC_CHAT, P.STOC_CHAT_2):
+                    self._note_chat(proto, payload)
+                elif proto in (P.STOC_REPLAY, P.STOC_HS_WATCH_CHANGE):
                     pass  # safely ignored
                 # STOC_GAME_MSG / unknown: ignored before the duel starts.
 
@@ -456,6 +597,8 @@ class ClientSession:
 
     def _duel(self, pending: list[tuple[int, bytes]]) -> int:
         rec = self.record.__dict__
+        if self.sock is not None:
+            self.sock.settimeout(self.timeout_s)
         seat: int | None = getattr(self, "_lobby_seat", None)
         view: DecisionOnlyView | None = None
         queue: list[tuple[int, bytes]] | None = list(pending) or None
@@ -466,8 +609,9 @@ class ClientSession:
                     _alert(rec, "timed out waiting for the server mid-duel")
                     return TIMEOUT
                 if not frames:
-                    # Socket close ends the session; without DUEL_END the duel
-                    # did not finish.
+                    # Socket close ends the session; a MSG_WIN already ended the duel.
+                    if view is not None and view.winner is not None:
+                        return OK
                     _alert(rec, "server closed the connection mid-duel")
                     return OK if self.record.duel_end else TIMEOUT
             else:
@@ -482,9 +626,11 @@ class ClientSession:
                         continue
                     t = payload[0]
                     if t == C.MSG_START:
+                        self._duels = getattr(self, "_duels", 0) + 1
                         seat = payload[1] & 0xF if len(payload) >= 2 else seat
                         self.record.seat = seat
                         view = self.view_factory(seat if seat is not None else 0, self.full_deck)
+                        view.feed(payload)  # deck and extra counts: without it the opponent's deck read 0 all duel
                         continue
                     if t == C.MSG_RETRY:
                         self.record.retries += 1
@@ -492,8 +638,13 @@ class ClientSession:
                         return RETRY
                     if view is None:
                         continue  # refresh before START: nothing to answer
+                    if t == C.MSG_NEW_TURN:
+                        self.record.turns += 1
+                    elif t == C.MSG_WIN and len(payload) >= 3:
+                        self._win_reason = payload[2]  # StreamView keeps only the winner
                     self._note_event(t, payload)
                     view.feed(payload)
+                    self.live.message(t, payload, seat, view)
                     while True:
                         auto = view.take_auto()
                         if auto is None:
@@ -502,12 +653,20 @@ class ClientSession:
                         self.record.n_responses += 1
                     while view.needs_answer:
                         index = self.agent.act(view)
+                        self.live.pick(view.opts, index)
                         resp = view.take(index)
                         if resp is not None:
                             self.send(P.CTOS_RESPONSE, P.pack_response(resp))
                             self.record.n_responses += 1
                     if view.winner is not None:
+                        if len(self.record.games) < getattr(self, "_duels", 1):
+                            w, why = (view.winner if isinstance(view.winner, tuple)
+                                      else (view.winner, getattr(self, "_win_reason", None)))
+                            self.record.games.append({"seat": seat, "winner": w, "reason": why, "turns": self.record.turns})
                         self.record.winner = view.winner
+                        if self.on_end is not None:
+                            self.on_end()
+                            self.on_end = None
                 elif proto == P.STOC_REMATCH:
                     # one duel per session: decline, the server then ends the room (STOC_DUEL_END)
                     self.send(P.CTOS_REMATCH_RESPONSE, bytes([0]))
@@ -528,11 +687,15 @@ class ClientSession:
                         return RETRY
                 elif proto == P.STOC_TIME_LIMIT:
                     try:
-                        player, _secs = P.parse_time_limit(payload)
+                        player, secs = P.parse_time_limit(payload)
                     except ValueError:
                         continue
                     if player == (self.record.seat if self.record.seat is not None else seat):
                         self.send(P.CTOS_TIME_CONFIRM, P.pack_time_confirm())
+                    elif self.clock_cap_s is not None and self.sock is not None:
+                        # the server reports the opponent's clock only now and then (seen once, then 120 s of
+                        # silence after our answer), so their last reported clock holds until the next report
+                        self.sock.settimeout(max(self.timeout_s, min(secs + 30.0, self.clock_cap_s)))
                 elif proto == P.STOC_CHANGE_SIDE:
                     # Match siding: resend the same deck.
                     self.send(P.CTOS_UPDATE_DECK, P.pack_update_deck(self.main, self.extra, self.side))
@@ -540,12 +703,19 @@ class ClientSession:
                     self.record.duel_end = True
                     if view is not None and view.winner is not None:
                         self.record.winner = view.winner
+                    if self.on_end is not None:
+                        self.on_end()
+                        self.on_end = None
                     return OK
+                elif proto in (P.STOC_CHAT, P.STOC_CHAT_2):
+                    self._note_chat(proto, payload)
+                elif proto == P.STOC_NEW_REPLAY:
+                    self._save_replay(payload)
                 elif proto in (
-                    P.STOC_TP_RESULT, P.STOC_REPLAY, P.STOC_CHAT,
+                    P.STOC_TP_RESULT, P.STOC_REPLAY,
                     P.STOC_HS_PLAYER_ENTER, P.STOC_HS_PLAYER_CHANGE, P.STOC_HS_WATCH_CHANGE,
                     P.STOC_CREATE_GAME, P.STOC_JOIN_GAME, P.STOC_TYPE_CHANGE,
                     P.STOC_LEAVE_GAME, P.STOC_DUEL_START, P.STOC_WAITING_SIDE,
-                    P.STOC_WAITING_REMATCH, P.STOC_NEW_REPLAY,
+                    P.STOC_WAITING_REMATCH,
                 ):
                     pass  # counted, safely ignored

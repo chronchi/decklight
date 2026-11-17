@@ -109,5 +109,7 @@ function morphEl(live, fresh) {
   }
   // Never touch an <img> whose src is unchanged, so images never reload.
   if (live.tagName === "IMG") return;
+  // data-keep: its children are put there by script (an iframe: re-creating it reloads the whole page inside).
+  if (live.hasAttribute("data-keep")) return;
   patchChildren(live, Array.from(fresh.childNodes));
 }

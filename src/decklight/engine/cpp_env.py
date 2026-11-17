@@ -34,6 +34,8 @@ def cpp_engine(engine: Engine) -> "_ygoenv.Engine":
 
 
 def cpp_config(config: DuelConfig) -> "_ygoenv.DuelConfig":
+    if config.lp_team is not None:
+        raise ValueError("CppEnv has one starting LP: lp_team is PyEnv only")
     return _ygoenv.DuelConfig(
         main0=config.main_of(0), extra0=list(config.deck0.extra),
         main1=config.main_of(1), extra1=list(config.deck1.extra),

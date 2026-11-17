@@ -1,0 +1,9 @@
+[package]
+name = "decklight-core"
+description = "Play-time core: the core's message/query parsers and constants (port of decklight.engine.messages/query/constants), with canonical JSON for parity checks"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[dependencies]
+serde_json = { version = "1", features = ["preserve_order"] }

@@ -32,6 +32,7 @@ Exit codes: 0 duel finished; 2 bad args/catalog or server-side rejection;
 from __future__ import annotations
 
 import argparse
+import os
 import random
 import subprocess
 import sys
@@ -45,6 +46,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
+from decklight.edopro import arms
 from decklight.edopro import bots as B
 from decklight.edopro import protocol as P
 from decklight.edopro.client import ClientSession
@@ -80,7 +82,19 @@ def build_parser(kv: dict) -> argparse.ArgumentParser:
     ap.add_argument("--emb", default=None)
     ap.add_argument("--device", default=None)
     ap.add_argument("--record-dir", default="data/cache/edopro_client")
+    ap.add_argument("--arm", default=os.environ.get("DL_ARM", "p"),
+                    help="forced chain-0 arm: p (default) | top@K | rand@K (env DL_ARM)")
+    ap.add_argument("--arm-seed", type=int, default=int(os.environ.get("DL_ARM_SEED", "0")),
+                    help="arm RNG seed (env DL_ARM_SEED); rand adds the game index")
+    ap.add_argument("--arm-game-index", type=int, default=None,
+                    help="stable per-game index for the arm seed (env DL_GAME_INDEX; default: --port)")
+    ap.add_argument("--arms-log", default=os.environ.get("DL_ARMS_LOG"),
+                    help="JSON-lines file, one line per game (env DL_ARMS_LOG)")
     ap.add_argument("--timeout", type=float, default=30.0)
+    ap.add_argument("--lobby-timeout", type=float, default=None,
+                    help="seconds of lobby silence before leaving (an idle room host); default: --timeout")
+    ap.add_argument("--clock-cap", type=float, default=None,
+                    help="opponent to act: wait for their game clock + 30 s, at most this many s (default: --timeout only)")
     ap.add_argument("--debug", action="store_true", default=bool(kv.get("debug", False)))
     ap.add_argument("--serve", type=int, default=None, metavar="PORT")
     ap.add_argument("--max-duels", type=int, default=8)
@@ -156,6 +170,11 @@ def run_duel(args, catalog: dict | None = None) -> int:
     if args.device:
         cfg["device"] = args.device
     try:
+        arm_spec = arms.parse_arm(args.arm)
+    except ValueError as e:
+        print(f"bad --arm: {e}", file=sys.stderr)
+        return EXIT_ARGS
+    try:
         agent = replace(bundle, agent=agent_name).make_agent(**cfg)
     except BundleError as e:
         print(f"{e}", file=sys.stderr)
@@ -163,6 +182,12 @@ def run_duel(args, catalog: dict | None = None) -> int:
     except ValueError as e:
         print(f"cannot make agent {agent_name!r}: {e}", file=sys.stderr)
         return EXIT_ARGS
+    game_index = args.arm_game_index
+    if game_index is None:
+        game_index = int(os.environ.get("DL_GAME_INDEX", args.port))
+    agent = arms.ArmedAgent(
+        agent, arm_spec, seed=args.arm_seed, game_index=game_index, log_path=args.arms_log
+    )
     try:
         deck = bundle.load_deck()
     except (OSError, ValueError) as e:
@@ -183,8 +208,12 @@ def run_duel(args, catalog: dict | None = None) -> int:
         view_factory=lambda seat, codes: StreamView(
             {"main": list(deck.main), "extra": list(deck.extra)}, engine.cards, seat=seat),
         proto=proto, password=args.password or "", gameid=args.roomid,
-        hand=args.hand or 0, timeout_s=args.timeout, record_dir=args.record_dir,
+        hand=args.hand or 0, timeout_s=args.timeout, lobby_timeout_s=args.lobby_timeout, record_dir=args.record_dir,
+        clock_cap_s=args.clock_cap,
     )
+    if isinstance(agent, arms.ArmedAgent):
+        agent.response_counter = lambda: session.record.n_responses
+        session.on_end = lambda: agent.finalize(session.record, deck=_deck_path.stem)
     try:
         return session.run()
     except MissingCapability as e:
@@ -193,6 +222,9 @@ def run_duel(args, catalog: dict | None = None) -> int:
     except NotImplementedError as e:
         print(f"agent needs more view than the client has: {e}", file=sys.stderr)
         return EXIT_ARGS
+    finally:
+        if isinstance(agent, arms.ArmedAgent):
+            agent.finalize(session.record, deck=_deck_path.stem)
 
 
 # --- --serve mode (WindBot ServerMode) ---

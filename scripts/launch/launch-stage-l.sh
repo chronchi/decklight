@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Retrain stage L (docs/retrain/plan-v2.md §Stage L, plan-v3; user green light 2026-10-11): honest decisive window labels
+# Retrain stage L (docs/lab/retrain/plan-v2.md §Stage L, plan-v3; user green light 2026-10-11): honest decisive window labels
 # (hw) on base_r3 self-play over pool train decks, labelled by base_r3 + value_ppo3 in decisive-label mode (s4 -> s12),
 # then a replication audit (>= 0.85 sign holds at 32 fresh worlds, else the labels are not used).
 # Plan cost ~$X, ~1.5 h of search on a many-core box; capped at WCAP of search + ~40 min self-play/probe/replication.

@@ -36,6 +36,7 @@ import torch.nn.functional as F
 
 from decklight.model.bc_data import (
     KNOWN_KEYS,
+    OBS_HISTORY_KEYS,
     OBS_KEYS,
     check_eval_decks,
     eval_only_decks,
@@ -58,7 +59,8 @@ def batches(data, idx, bs, device, shuffle, rng, hist=0, hist_salient=True, know
     has_soft = "soft_idx" in data and "soft_q" in data
     for i in range(0, len(idx), bs):
         j = idx[i : i + bs]
-        obs = {k: torch.from_numpy(data[k][j]).to(device, non_blocking=True) for k in OBS_KEYS}
+        obs = {k: torch.from_numpy(data[k][j]).to(device, non_blocking=True)
+               for k in OBS_KEYS + OBS_HISTORY_KEYS if k in data}  # fmt: skip
         if known:
             for k in KNOWN_KEYS:
                 obs[k] = torch.from_numpy(data[k][j]).to(device, non_blocking=True)
@@ -437,6 +439,9 @@ def main() -> None:
     ap.add_argument("--v3", action="store_true", help="PolicyNetV3 (model/policy_v3.py: effect keys, sentences, counts)")
     ap.add_argument("--desc-strings", default=None, help="v3 effect-string table (default data/cards/emb/strings-*.npz)")
     ap.add_argument("--desc-lua", default=None, help="v3 Lua per-description table (default data/cards/lua_desc.npz)")
+    ap.add_argument("--observable-history", action="store_true",
+                    help="the student sees only the history a client sees (opponent's hidden decisions dropped; "
+                    "train = deploy, NOTEBOOK 2026-11-10 12:45); teachers keep the full history")
     ap.add_argument("--known", action="store_true", help="card-knowledge memory: feed card_known/known_code (model + shards need them)")
     ap.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     ap.add_argument("--threads", type=int, default=None, help="torch CPU threads (laptop: <= 2)")
@@ -508,9 +513,14 @@ def main() -> None:
         args.v3 = src_args.get("v3", args.v3 or False)
         args.desc_strings = src_args.get("desc_strings", args.desc_strings)
         args.desc_lua = src_args.get("desc_lua", args.desc_lua)
+        args.observable_history = bool(src_args.get("observable_history", False) or args.observable_history)
+    if args.observable_history and not all(k in data for k in OBS_HISTORY_KEYS):
+        raise SystemExit(f"--observable-history needs shards with {OBS_HISTORY_KEYS}: rebuild them (engine with events)")
     model = make_policy(args.emb, vars(args), dropout=args.dropout, card_dropout=args.card_dropout).to(device)
     if args.init:
         state = load_state(args.init)
+        if args.observable_history:  # a full-history start (X): same weights, the filter is the only change
+            state.setdefault("hist_observable", torch.ones((), dtype=torch.uint8))
         model.load_state_dict({k: v.float() if v.is_floating_point() else v for k, v in state.items()})
     ref = None
     if args.kl_init or args.soft_targets == "gumbel":
@@ -519,7 +529,7 @@ def main() -> None:
         ref = copy.deepcopy(model).eval().requires_grad_(False)
     kl_coef = args.kl_init
     if args.kl_ref:
-        ref = make_policy(args.emb, vars(args), dropout=0.0, card_dropout=0.0).to(device)
+        ref = make_policy(args.emb, vars(args), dropout=0.0, card_dropout=0.0, observable=False).to(device)
         rstate = load_state(args.kl_ref)
         ref.load_state_dict({k: v.float() if v.is_floating_point() else v for k, v in rstate.items()})
         ref.eval().requires_grad_(False)
@@ -541,7 +551,7 @@ def main() -> None:
             if ckpt not in order:
                 order.append(ckpt)
         for ckpt in order:
-            t = make_policy(args.emb, vars(args), dropout=0.0, card_dropout=0.0).to(device)
+            t = make_policy(args.emb, vars(args), dropout=0.0, card_dropout=0.0, observable=False).to(device)
             tstate = load_state(ckpt)
             t.load_state_dict({k: v.float() if v.is_floating_point() else v for k, v in tstate.items()})
             t.eval().requires_grad_(False)

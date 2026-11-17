@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Retrain stage B (docs/retrain/plan-v2.md §Stage B, plan-v3): B-v3 = PolicyNetV3 (effect strings + Lua records, long
+# Retrain stage B (docs/lab/retrain/plan-v2.md §Stage B, plan-v3): B-v3 = PolicyNetV3 (effect strings + Lua records, long
 # salient history) from scratch on B1's chosen mix (the clean arm, NOTEBOOK 2026-10-13 B1) + every anchored stage M turn.
 #   1. shards exactly as B1 (strict labels + stage D exclusions + ANCHOR_DROPS);
 #   2. train 6 epochs, --select-on last (the candidate is the last epoch). First milestone after epoch 1 (plan-v2):

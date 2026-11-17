@@ -79,17 +79,26 @@ def pick_device() -> str:
 
 
 def build(dim: int = 512, batch: int = 32, limit: int | None = None, codes: list[int] | None = None,
-          tag: str | None = None, log_every: int = 50, out_dir: Path | None = None) -> Path:  # fmt: skip
-    """Embed every card (or `codes`) and write `<out_dir or data/cards/emb>/<tag>.npz`."""
-    os.environ.setdefault("HF_HOME", str(ROOT / "data" / "cache" / "hf"))
-    from sentence_transformers import SentenceTransformer
+          tag: str | None = None, log_every: int = 50, out_dir: Path | None = None,
+          encode=None) -> Path:  # fmt: skip
+    """Embed every card (or `codes`) and write `<out_dir or data/cards/emb>/<tag>.npz`.
 
+    `encode` maps unique texts to fp16 vectors (tests pass a fake so no model loads); default: Qwen.
+    """
     texts = card_texts()
     keys = sorted(codes if codes is not None else texts)
     keys = [k for k in keys if k in texts][:limit]
-    device = pick_device()
-    print(f"device {device}", flush=True)
-    model = SentenceTransformer(MODEL, device=device, truncate_dim=dim)
+    if encode is None:
+        os.environ.setdefault("HF_HOME", str(ROOT / "data" / "cache" / "hf"))
+        from sentence_transformers import SentenceTransformer
+
+        device = pick_device()
+        print(f"device {device}", flush=True)
+        model = SentenceTransformer(MODEL, device=device, truncate_dim=dim)
+
+        def encode(texts: list[str]) -> np.ndarray:
+            return model.encode(texts, batch_size=batch, normalize_embeddings=True,
+                                convert_to_numpy=True).astype(np.float16)
     uniq: dict[str, int] = {}  # text -> row in the unique-text table
     card_rows: list[int] = []
     eff_rows: list[list[int]] = []
@@ -103,8 +112,8 @@ def build(dim: int = 512, batch: int = 32, limit: int | None = None, codes: list
     t0 = time.time()
     for i in range(0, len(table), batch):
         chunk = table[i : i + batch]
-        v = model.encode(chunk, batch_size=batch, normalize_embeddings=True, convert_to_numpy=True)
-        vecs[i : i + len(chunk)] = v.astype(np.float16)
+        v = encode(chunk)
+        vecs[i : i + len(chunk)] = np.asarray(v, dtype=np.float16)
         if (i // batch) % log_every == 0:
             done = i + len(chunk)
             rate = done / max(time.time() - t0, 1e-6)

@@ -1,6 +1,6 @@
 """Policy network v1 for behaviour cloning (PLAN Phase 4).
 
-Inputs are the raw int32 observation arrays (docs/obs_spec.md, docs/action_spec.md), batched:
+Inputs are the raw int32 observation arrays (docs/design/obs_spec.md, docs/design/action_spec.md), batched:
 cards [B,160,21] + card_mask, global [B,24], chain [B,16,5] + chain_mask, actions [B,64,10] + action_mask,
 history [B,32,13] + history_mask. Output: one logit per action slot (illegal slots = -inf).
 
@@ -41,6 +41,15 @@ def trim_obs(obs: dict[str, torch.Tensor]) -> tuple[dict[str, torch.Tensor], int
     o["history"], o["history_mask"] = o["history"][:, :lh], o["history_mask"][:, :lh]
     o["actions"], o["action_mask"] = o["actions"][:, :la], o["action_mask"][:, :la]
     return o, n_opt
+
+
+def observable_history(obs: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
+    """The history window a client sees (`obs_history`: own decisions + the opponent's public events, built by
+    `engine.events` in every env and identical to a live client's history; NOTEBOOK 2026-11-10 13:30) in place of
+    the engine's decision history (train = deploy)."""
+    if "obs_history" not in obs:
+        raise KeyError("observable-history checkpoint: the obs needs obs_history/obs_history_mask")
+    return {**obs, "history": obs["obs_history"], "history_mask": obs["obs_history_mask"]}
 
 
 N_MSGS = 64
@@ -125,6 +134,7 @@ class PolicyNet(nn.Module):
         known: bool = False,
         value: bool = False,
         q: bool = False,
+        observable: bool = False,
     ):
         """`hist`: long-memory window (obs v2, ADR 0005). 0 = v1 exactly (same parameters, old state dicts
         load with strict=True); > 0 adds a learned recency-position embedding and widens the turns-ago
@@ -139,6 +149,14 @@ class PolicyNet(nn.Module):
         (zeros at init). Illegal options are finite (never NaN); callers mask them via the logits."""
         super().__init__()
         self.hist = hist
+        # Observable history (train = deploy, NOTEBOOK 2026-11-10 12:45): the opponent's hidden decisions are dropped
+        # from the history windows before the encoder. The buffer marks the weights: loading them into a net built
+        # without `observable` fails (unexpected key) instead of silently feeding full history.
+        self.observable = bool(observable)
+        if observable and (hist or known):
+            raise ValueError("observable history covers the v1 32-entry window only (hist=0, known=False)")
+        if observable:
+            self.register_buffer("hist_observable", torch.ones((), dtype=torch.uint8))
         self.trim = (
             True  # drop batch padding before the encoder (trim_obs); False = the full fixed-size inputs
         )
@@ -283,6 +301,8 @@ class PolicyNet(nn.Module):
         """Encoder pass shared by every head: (trimmed obs, enc [B, T, d] with enc[:, 0] the global token, keep
         [B, T] (True = real token), full option count before trimming (0 when trim is off))."""
         n_opt = 0
+        if self.observable:
+            obs = observable_history(obs)
         if self.trim:
             obs, n_opt = trim_obs(obs)
         cards, glob = obs["cards"], obs["global"].long()

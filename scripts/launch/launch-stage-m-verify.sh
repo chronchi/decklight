@@ -7,15 +7,15 @@
 #   plan_turns.py --games 'data/demos/sw-v/*.jsonl' --llm-only --prompts runs/<name>/pending.jsonl
 # and launch round 2 with the same env (verified states are skipped; repairs now have a cached answer).
 # Ships the LLM cache (responses only; never the OpenCode key). CPU work: cheap GPU listings with many cores.
-# Env: NEW_GROUPS (data/cache/stage_m/groups-new.txt), OLD_GROUPS + IDS (optional), BUDGET, CAP, HOURS, MAX_DPH, MIN_CPUS.
+# Env: GAMES, BUCKETS, PER_BUCKET, OUTDIR, EXTRA_DATA (extra dirs to ship), PREFIX (job name); NEW_GROUPS (data/cache/stage_m/groups-new.txt), OLD_GROUPS + IDS (optional), BUDGET, CAP, HOURS, MAX_DPH, MIN_CPUS.
 cd "$(dirname "$0")/../.."
 NEW_GROUPS=${NEW_GROUPS-data/cache/stage_m/groups-new.txt}
 for f in $NEW_GROUPS ${OLD_GROUPS:-} ${IDS:-}; do [ -s "$f" ] || { echo "missing $f"; exit 3; }; done
-N=stage-m-$(date +%Y%m%d-%H%M); echo $N
+N=${PREFIX:-stage-m}-$(date +%Y%m%d-%H%M); echo $N
 # data/strategy: the per-deck notes are part of every prompt (without them no prompt matches the cache: stage-m-20261012-2250)
-D=(decks data/demos/sw-v data/demos/turns data/cache/llm data/cache/stage_m data/strategy)
+D=(decks data/demos/sw-v data/demos/turns data/cache/llm data/cache/stage_m data/strategy ${EXTRA_DATA:-})
 taskset -c 0-3 uv run --no-sync python scripts/vast_job.py --name $N \
-  --cmd "NEW_GROUPS='$NEW_GROUPS' OLD_GROUPS='${OLD_GROUPS:-}' IDS='${IDS:-}' BUDGET=${BUDGET:-8000} CAP=${CAP:-150m} bash scripts/vast_stage_m.sh $N" \
+  --cmd "GAMES='${GAMES:-data/demos/sw-v/*.jsonl}' BUCKETS='${BUCKETS:-second mid end}' PER_BUCKET=${PER_BUCKET:-4} OUTDIR=${OUTDIR:-data/demos/turns} NEW_GROUPS='$NEW_GROUPS' OLD_GROUPS='${OLD_GROUPS:-}' IDS='${IDS:-}' BUDGET=${BUDGET:-8000} CAP=${CAP:-150m} bash scripts/vast_stage_m.sh $N" \
   --hours "${HOURS:-3}" --max-dph "${MAX_DPH:-0.30}" --min-cpus "${MIN_CPUS:-64}" --min-gpu-ram 4 \
   --data "${D[@]}" > data/cache/briefs/$N.launcher.log 2>&1
 echo "exit $?"

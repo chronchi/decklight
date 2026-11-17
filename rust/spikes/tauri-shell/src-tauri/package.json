@@ -1,0 +1,8 @@
+{
+  "name": "s3-shell",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "tauri": "npx --yes @tauri-apps/cli@^2"
+  }
+}

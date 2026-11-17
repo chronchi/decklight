@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Search plan S0 (docs/search_plan.md): base + test-time search vs the raw base, one variant after another, each on
+# Search plan S0 (docs/plans/search_plan.md): base + test-time search vs the raw base, one variant after another, each on
 # every core. Processes are sized by measurement: one probe process runs 90 s, its GPU memory sets how many fit.
 # Env: CKPT (base best.pt), VARIANTS ("tag|search_match args;tag2|args2"), SM_ARGS (common args), VAR_CAP (default 60m),
 # PROBE_ARGS (sizing-probe variant args; default the first variant's: raw games end too fast for the 150 s probe),

@@ -32,7 +32,7 @@ sys.path.insert(0, str(ROOT / "src"))
 
 from decklight.decks import load_ydk
 
-BASE_CKPT = Path("data/cache/forge_r1/best.pt")  # the product policy (r1 since 2026-10-31; was P)
+BASE_CKPT = Path("data/cache/forge_r1/best.pt")  # the Forge base r1 (the product until Y, 2026-11-11; was P)
 BASE_VALUE = Path("data/cache/value_p2/best.pt")
 
 
@@ -54,15 +54,20 @@ def load_state(path: Path) -> dict:
     return state.get("model", state)
 
 
-def check_invariants(final: Path, base_ckpt: Path, base_value: Path) -> None:
-    """Fail loud when the fine-tune trained nothing: policy weights equal the base's, or value head equal value_p2's."""
+def check_invariants(final: Path, base_ckpt: Path, base_value: Path, value_only: bool = False) -> None:
+    """Fail loud when the fine-tune trained nothing: policy weights equal the base's, or value head equal value_p2's.
+
+    value_only (a value-head-only run on a frozen trunk): the policy must equal the base's exactly instead."""
     f = load_state(final)
     b = load_state(base_ckpt)
     v = load_state(base_value)
     f_pol = {k: v for k, v in f.items() if not k.startswith("value_head.") and not k.startswith("q_head.")}
     b_pol = {k: v for k, v in b.items() if not k.startswith("value_head.") and not k.startswith("q_head.")}
-    if set(f_pol) == set(b_pol) and all(torch.equal(f_pol[k], b_pol[k]) for k in f_pol):
+    same = set(f_pol) == set(b_pol) and all(torch.equal(f_pol[k], b_pol[k].to(f_pol[k].dtype)) for k in f_pol)
+    if same and not value_only:
         fail(f"{final} policy weights equal {base_ckpt} exactly (nothing trained)")
+    if value_only and not same:
+        fail(f"{final} policy weights differ from {base_ckpt} (a value-only run must not move the policy)")
     f_val = {k: v for k, v in f.items() if k.startswith("value_head.")}
     v_val = {k: v for k, v in v.items() if k.startswith("value_head.")}
     if f_val and set(f_val) == set(v_val) and all(torch.equal(f_val[k], v_val[k]) for k in f_val):
@@ -82,7 +87,8 @@ def check_loads(policy_pt: Path, value_pt: Path) -> None:
         fail(f"{policy_pt} / {value_pt} do not load as the product's policy/value: {e!r}")
 
 
-def export(full_state: dict, dest_dir: Path, init: Path, value_init: Path) -> tuple[Path, Path]:
+def export(full_state: dict, dest_dir: Path, init: Path, value_init: Path,
+           value_only: bool = False) -> tuple[Path, Path]:
     """Export one fp16 full state into the product layout under dest_dir.
 
     Writes dest_dir/policy/best.pt (policy, no value/q heads) and dest_dir/value/best.pt
@@ -100,7 +106,7 @@ def export(full_state: dict, dest_dir: Path, init: Path, value_init: Path) -> tu
         shutil.copyfile(m, pt.parent / "metrics.jsonl")
     torch.save({k: v for k, v in full.items() if not k.startswith(("value_head.", "q_head."))}, policy_pt)
     torch.save(full, value_pt)
-    check_invariants(value_pt, init, value_init)
+    check_invariants(value_pt, init, value_init, value_only)
     check_loads(policy_pt, value_pt)
     return policy_pt, value_pt
 
@@ -176,7 +182,7 @@ def main() -> None:
                       "round-robin over --focus-deck)")
     ap.add_argument("--out", type=Path, required=True)
     ap.add_argument("--hours", type=float, default=2.0,
-                    help="training budget; 2 h beat 0.75 h on Blue-Eyes (docs/results.md)")
+                    help="training budget; 2 h beat 0.75 h on Blue-Eyes (docs/model/results.md)")
     ap.add_argument("--iters", type=int, default=0, help="stop after this many iterations (0 = by --hours)")
     ap.add_argument("--share", type=float, default=0.5, help="share of seats holding the deck")
     ap.add_argument("--device", default=None, help="cuda (default when available) | cpu (works, very slow)")

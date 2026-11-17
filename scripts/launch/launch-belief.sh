@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Hidden-information bound, part (b) (PLAN §0a "Hidden-information bound", user 2026-10-09: "Can you write step 2 into a
-# plan and implement it and start now?"; review docs/reviews/2026-10-09-history-arch-opus.md Stage 1b): a belief head
+# plan and implement it and start now?"; review docs/lab/reviews/2026-10-09-history-arch-opus.md Stage 1b): a belief head
 # on the base_r3 trunk predicts which opponent cards are hidden (hand / face-down), vs the hypergeometric baseline the
 # determinizer uses. Variants: h128 (128 salient history entries), v1 (today's 32-entry window), nohist (no history
 # tokens: isolates history's share), frozen128 (only new parameters train: what base_r3's features already hold).

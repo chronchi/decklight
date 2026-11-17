@@ -1,0 +1,251 @@
+<title>decklight Rooms</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<style>
+/* Layout: phone screens side by side on a sumi ground, wrapping to one column; the app's own tokens (web/styles.css). */
+:root {
+  color-scheme: dark;
+  --bg: #141310; --sheet: #1c1a16; --zone: #1f1d19; --felt: #181713;
+  --text: #d6cfc0; --muted: #958f82; --faint: #5e5a51;
+  --you: #6b84a8; --accent: #b89a5e; --danger: #c47a6f;
+  --line: rgba(214, 207, 192, 0.07); --line-2: rgba(214, 207, 192, 0.13);
+  --raise: rgba(214, 207, 192, 0.035); --accent-tint: rgba(184, 154, 94, 0.08); --ink: #0f0e0c;
+  --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --r: 10px; --t: 220ms;
+}
+* { box-sizing: border-box; }
+body {
+  background: var(--bg); color: var(--text); font: 15px/1.45 var(--sans);
+  padding-block: 28px 48px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+}
+.intro { max-width: 68ch; margin: 0 auto 28px; display: grid; gap: 8px; }
+.intro h1 { font-size: 22px; font-weight: 600; margin: 0; letter-spacing: .01em; text-wrap: balance; }
+.intro p { margin: 0; color: var(--muted); }
+.intro .tag { font-size: 12px; text-transform: uppercase; letter-spacing: .12em; color: var(--accent); }
+.screens { display: flex; flex-wrap: wrap; gap: 28px; justify-content: center; }
+figure { margin: 0; display: grid; gap: 10px; width: min(360px, 100%); }
+figcaption { font-size: 13px; color: var(--muted); display: grid; gap: 2px; }
+figcaption b { color: var(--text); font-weight: 600; font-size: 14px; }
+.phone {
+  background: var(--felt); border: 1px solid var(--line-2); border-radius: 22px;
+  padding: 18px 16px 16px; min-height: 640px; display: flex; flex-direction: column; gap: 14px;
+}
+.lhead { display: flex; align-items: center; gap: 10px; }
+.lhead .mark { width: 26px; height: 18px; }
+.lhead h2 { margin: 0; font-size: 17px; font-weight: 600; letter-spacing: .02em; }
+.tabs { display: flex; gap: 6px; border-bottom: 1px solid var(--line-2); }
+.tabs button {
+  all: unset; cursor: pointer; padding: 10px 12px; min-height: 44px; box-sizing: border-box; color: var(--muted);
+  font-size: 14px; border-bottom: 2px solid transparent; display: inline-flex; align-items: center; gap: 6px;
+}
+.tabs button[aria-current="page"] { color: var(--text); border-bottom-color: var(--accent); }
+.tabs .g { font-size: 12px; color: var(--muted); }
+.row {
+  display: flex; align-items: center; gap: 10px; min-height: 48px; padding: 0 12px;
+  background: var(--sheet); border: 1px solid var(--line); border-radius: var(--r);
+}
+.row .k { color: var(--muted); font-size: 13px; width: 84px; flex: none; }
+.row .v { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chev { width: 14px; height: 14px; stroke: var(--muted); fill: none; stroke-width: 2; flex: none; }
+.host {
+  background: linear-gradient(180deg, var(--accent-tint), transparent 70%), var(--sheet);
+  border: 1px solid var(--line-2); border-radius: var(--r); padding: 14px; display: grid; gap: 10px;
+}
+.host h3, .sec h3 { margin: 0; font-size: 14px; font-weight: 600; }
+.host p, .note { margin: 0; color: var(--muted); font-size: 13px; }
+.btn {
+  all: unset; cursor: pointer; box-sizing: border-box; min-height: 44px; padding: 0 18px; border-radius: 8px;
+  display: inline-flex; align-items: center; justify-content: center; font-weight: 600; font-size: 14px;
+  background: var(--accent); color: var(--ink); justify-self: end;
+}
+.btn.quiet { background: transparent; color: var(--text); border: 1px solid var(--line-2); font-weight: 500; }
+.btn[aria-disabled="true"] { background: var(--zone); color: var(--muted); cursor: default; }
+.btn:focus-visible, .tabs button:focus-visible, .nearby button:focus-visible, input:focus-visible {
+  outline: 2px solid var(--accent); outline-offset: 2px;
+}
+.sec { display: grid; gap: 8px; }
+.sec .hd { display: flex; align-items: center; justify-content: space-between; }
+label { font-size: 13px; color: var(--muted); display: grid; gap: 4px; }
+input {
+  font: 15px var(--mono); color: var(--text); background: var(--ink); border: 1px solid var(--line-2);
+  border-radius: 8px; min-height: 44px; padding: 0 12px; width: 100%;
+}
+input::placeholder { color: var(--faint); }
+.hint { font-size: 12px; color: var(--muted); }
+.nearby { display: grid; gap: 6px; }
+.nearby button {
+  all: unset; cursor: pointer; box-sizing: border-box; display: grid; grid-template-columns: 1fr auto; gap: 2px 10px;
+  padding: 10px 12px; min-height: 56px; background: var(--sheet); border: 1px solid var(--line); border-radius: var(--r);
+}
+.nearby .nm { font-weight: 600; font-size: 14px; }
+.nearby .meta { grid-column: 1; font-size: 12px; color: var(--muted); font-family: var(--mono); }
+.nearby .go { grid-row: 1 / 3; grid-column: 2; align-self: center; color: var(--accent); font-size: 14px; font-weight: 600; }
+.icon-btn { all: unset; cursor: pointer; width: 44px; height: 44px; display: grid; place-items: center; color: var(--muted); }
+.room { background: var(--sheet); border: 1px solid var(--line-2); border-radius: var(--r); padding: 14px; display: grid; gap: 10px; }
+.room .top { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.room .title { font-weight: 600; font-size: 16px; }
+.status { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; color: var(--muted); }
+.ring { width: 14px; height: 14px; border-radius: 50%; border: 2px solid var(--accent); animation: breathe 2s ease-in-out infinite; }
+@keyframes breathe { 0%, 100% { opacity: .35; transform: scale(.85); } 50% { opacity: 1; transform: scale(1); } }
+@media (prefers-reduced-motion: reduce) { .ring { animation: none; opacity: .8; } }
+.addr { display: flex; align-items: center; gap: 8px; }
+.addr code { flex: 1; min-width: 0; font: 13px var(--mono); color: var(--text); background: var(--ink); border-radius: 6px; padding: 8px 10px; overflow-x: auto; white-space: nowrap; }
+.addr .btn { min-height: 36px; padding: 0 12px; font-size: 13px; }
+.facts { display: grid; gap: 4px; font-size: 13px; }
+.facts .rule { color: var(--text); font-variant-numeric: tabular-nums; }
+.fair { border-top: 1px solid var(--line); padding-top: 10px; display: grid; gap: 4px; }
+.seats { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.seats li { display: grid; grid-template-columns: 1fr auto; gap: 2px 10px; padding: 10px 12px; background: var(--sheet); border: 1px solid var(--line); border-radius: var(--r); }
+.seats .who { font-weight: 600; font-size: 14px; display: flex; gap: 8px; align-items: baseline; }
+.seats .who small { font-weight: 400; color: var(--muted); font-size: 12px; }
+.seats .deck { grid-column: 1; font-size: 12px; color: var(--muted); }
+.seats .st { grid-row: 1 / 3; grid-column: 2; align-self: center; font-size: 13px; }
+.st.ok { color: var(--text); }
+.st.ok::before { content: "✓ "; color: var(--accent); }
+.st.wait { color: var(--muted); }
+.seats li.open { border-style: dashed; background: transparent; }
+.you-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--you); display: inline-block; }
+.spacer { flex: 1; }
+.foot { display: grid; gap: 6px; }
+.foot .btn { justify-self: stretch; }
+.err { background: var(--sheet); border: 1px solid var(--line-2); border-left: 3px solid var(--danger); border-radius: var(--r); padding: 14px; display: grid; gap: 8px; }
+.err .t { color: var(--danger); font-weight: 600; font-size: 14px; }
+.err p { margin: 0; font-size: 14px; }
+.duelhead { display: flex; align-items: center; justify-content: space-between; gap: 10px; background: var(--sheet); border-radius: var(--r); padding: 10px 12px; }
+.duelhead .opp { font-weight: 600; }
+.duelhead .lp { font: 600 15px var(--mono); font-variant-numeric: tabular-nums; }
+.board { flex: 1; min-height: 240px; border-radius: var(--r); background:
+  repeating-linear-gradient(90deg, transparent 0 calc(20% - 4px), var(--line) calc(20% - 4px) 20%), var(--zone);
+  display: grid; place-items: center; color: var(--faint); font-size: 12px; }
+.ticker { font-size: 13px; color: var(--muted); display: flex; align-items: center; gap: 8px; }
+.menu { background: var(--sheet); border: 1px solid var(--line-2); border-radius: var(--r); display: grid; }
+.menu .mi { display: flex; justify-content: space-between; align-items: center; min-height: 48px; padding: 0 14px; border-bottom: 1px solid var(--line); font-size: 14px; }
+.menu .mi:last-child { border-bottom: 0; }
+.menu .mi.off { color: var(--muted); }
+.menu .mi.off small { font-size: 12px; }
+.menu .mi.danger { color: var(--danger); }
+.legend { max-width: 68ch; margin: 32px auto 0; display: grid; gap: 10px; color: var(--muted); font-size: 14px; }
+.legend h2 { color: var(--text); font-size: 16px; margin: 0; }
+.legend ul { margin: 0; padding-left: 18px; display: grid; gap: 6px; }
+</style>
+
+<header class="intro">
+  <span class="tag">A2b-3 · design draft for review</span>
+  <h1>Playing a person in decklight</h1>
+  <p>Host a room on your phone, join a friend by address or from the Wi-Fi list, then duel on the normal board. Same night style and tokens as the lobby. Spec: <code>docs/ui/mocks/room-ui.md</code>.</p>
+</header>
+
+<div class="screens">
+
+<figure>
+  <div class="phone" aria-label="People tab">
+    <div class="lhead">
+      <svg class="mark" viewBox="0 0 26 18" aria-hidden="true"><rect x="5" y="1" width="10" height="15" rx="1.5" fill="none" stroke="#958f82" stroke-width="1.4" transform="rotate(-14 10 9)"/><rect x="10" y="1" width="10" height="15" rx="1.5" fill="none" stroke="#d6cfc0" stroke-width="1.4" transform="rotate(10 15 9)"/><circle cx="21" cy="4" r="2.6" fill="#b89a5e"/></svg>
+      <h2>decklight</h2>
+    </div>
+    <nav class="tabs" aria-label="Lobby">
+      <button>Play</button><button aria-current="page">People</button><button>Puzzles <span class="g">12</span></button>
+    </nav>
+    <div class="row"><span class="k">Your deck</span><span class="v">Mitsurugi</span><svg class="chev" viewBox="0 0 20 20"><path d="M7 5l5 5-5 5"/></svg></div>
+    <div class="row"><span class="k">Your name</span><span class="v">Kai</span><svg class="chev" viewBox="0 0 20 20"><path d="M7 5l5 5-5 5"/></svg></div>
+    <section class="host">
+      <h3>Host a room</h3>
+      <p>Friends join you on this Wi-Fi, your hotspot or Tailscale. No internet needed.</p>
+      <span class="btn" role="button" tabindex="0">Host</span>
+    </section>
+    <section class="sec">
+      <h3>Join by address</h3>
+      <label for="addr1">Address<input id="addr1" value="192.0.2.20:7911"></label>
+      <label for="pw1">Password <input id="pw1" placeholder="optional"></label>
+      <span class="btn quiet" role="button" tabindex="0">Join</span>
+    </section>
+    <section class="sec">
+      <div class="hd"><h3>Nearby rooms</h3><button class="icon-btn" aria-label="Scan again"><svg class="chev" viewBox="0 0 20 20"><path d="M16 10a6 6 0 1 1-2-4.5M16 3v3h-3"/></svg></button></div>
+      <div class="nearby">
+        <button><span class="nm">Rin's room</span><span class="meta">1/2 · TCG · 192.0.2.31</span><span class="go">Join</span></button>
+        <button><span class="nm">EDOPro · Duel</span><span class="meta">1/2 · TCG · 192.0.2.44</span><span class="go">Join</span></button>
+      </div>
+    </section>
+  </div>
+  <figcaption><b>P1 · People tab</b>Host, join by address, or pick a room on this network. Public EDOPro lobbies stay hidden (setting off).</figcaption>
+</figure>
+
+<figure>
+  <div class="phone" aria-label="Hosting">
+    <div class="lhead" style="justify-content:space-between"><h2>Your room</h2><span class="btn quiet" role="button" tabindex="0">Close</span></div>
+    <section class="room">
+      <div class="top"><span class="title">Kai's room</span><span class="status" aria-live="polite"><span class="ring" aria-hidden="true"></span>Waiting…</span></div>
+      <p class="note">Join from decklight or EDOPro at:</p>
+      <div class="addr"><code>192.0.2.20 : 7911</code><span class="btn quiet" role="button" tabindex="0">Copy</span></div>
+      <div class="addr"><code>kai-phone : 7911</code><span class="btn quiet" role="button" tabindex="0">Copy</span></div>
+      <div class="facts"><span class="note">Rules</span><span class="rule">TCG · 8000 LP · Master Rule 5 · 5 cards</span></div>
+      <div class="fair">
+        <p class="note">Hints, win chance and undo are off in rooms.</p>
+        <p class="note">Games may be shared anonymously for research.</p>
+      </div>
+    </section>
+    <ul class="seats" aria-label="Seats">
+      <li><span class="who"><span class="you-dot" aria-hidden="true"></span>Kai <small>you · host</small></span><span class="deck">Mitsurugi</span><span class="st ok">Ready</span></li>
+      <li class="open"><span class="who">Open seat</span><span class="deck">Waiting for a player</span><span class="st wait">—</span></li>
+    </ul>
+    <div class="spacer"></div>
+    <div class="foot"><span class="btn" role="button" aria-disabled="true">Start duel</span><span class="hint">Start unlocks when both players are ready.</span></div>
+  </div>
+  <figcaption><b>P2 · Hosting</b>Every address you can be reached on, with Copy. The ring breathes slowly and stops with reduced motion.</figcaption>
+</figure>
+
+<figure>
+  <div class="phone" aria-label="Joined">
+    <div class="lhead" style="justify-content:space-between"><h2>Rin's room</h2><span class="btn quiet" role="button" tabindex="0">Leave</span></div>
+    <p class="status" aria-live="polite">Joined 192.0.2.31:7911. Waiting for Rin to start.</p>
+    <ul class="seats" aria-label="Seats">
+      <li><span class="who">Rin <small>host · EDOPro</small></span><span class="deck">Deck hidden until the duel</span><span class="st ok">Ready</span></li>
+      <li><span class="who"><span class="you-dot" aria-hidden="true"></span>Kai <small>you</small></span><span class="deck">Mitsurugi</span><span class="st ok">Ready</span></li>
+    </ul>
+    <div class="fair room">
+      <p class="note">Hints, win chance and undo are off in rooms.</p>
+      <p class="note">Games may be shared anonymously for research.</p>
+    </div>
+    <div class="err" role="alert">
+      <span class="t">Could not join Sora's room</span>
+      <p>The room uses EDOPro 41.0 and this app speaks 40.1. Update the card pack in Settings, then join again.</p>
+      <span class="btn quiet" role="button" tabindex="0">Back</span>
+    </div>
+    <p class="hint">Example error (another attempt): every error says what happened and what to do next.</p>
+  </div>
+  <figcaption><b>P3 · Joined, and a join error</b>Seats are a list with text states, never colour alone. Errors stay on screen until dismissed.</figcaption>
+</figure>
+
+<figure>
+  <div class="phone" aria-label="In the duel">
+    <div class="duelhead"><span class="opp">Rin</span><span class="lp">LP 6300</span></div>
+    <div class="board">board as today</div>
+    <div class="ticker" aria-live="polite"><span class="ring" aria-hidden="true"></span>Rin is choosing…</div>
+    <div class="menu" aria-label="Game menu">
+      <div class="mi off">Hint <small>Off in rooms</small></div>
+      <div class="mi off">Undo <small>Off in rooms</small></div>
+      <div class="mi off">What-if <small>Off in rooms</small></div>
+      <div class="mi">Duel log</div>
+      <div class="mi danger">Surrender</div>
+    </div>
+    <div class="err" role="status" style="border-left-color: var(--accent)">
+      <span class="t" style="color: var(--text)">Connection lost</span>
+      <p>Waiting for Rin to come back (30 s). If not, the duel ends as a disconnect and is saved.</p>
+    </div>
+  </div>
+  <figcaption><b>P5 · In the duel</b>The opponent's name replaces decklight; learning features are greyed with their reason; surrender is always there.</figcaption>
+</figure>
+
+</div>
+
+<section class="legend">
+  <h2>Decisions this design rests on</h2>
+  <ul>
+    <li>EDOPro's protocol is the wire format, so EDOPro desktop players join the same rooms (ADR 0010 §5).</li>
+    <li>Public EDOPro lobbies: built but off and hidden until ProjectIgnis agrees.</li>
+    <li>Rooms carry the note “Games may be shared anonymously for research”; sharing itself stays opt-in per app.</li>
+    <li>Questions for you: the tab name (“People”, or “Friends”?), and whether a duelist name is wanted at all or the device should send “decklight”.</li>
+  </ul>
+</section>

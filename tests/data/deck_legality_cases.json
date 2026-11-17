@@ -1,0 +1,87 @@
+[
+ {
+  "name": "legal standard deck",
+  "deck": {"main": [1,1,1,2,2,2,3,3,3,4,4,4,5,5,5,6,6,6,7,7,7,8,8,8,9,9,9,10,10,10,11,11,11,12,12,12,13,13,13,14], "extra": [100,101,102,103,104,105,106,107,108,109,110,111,112,113,114], "side": []},
+  "format": {"name": "Standard", "main": [40,60], "extra": [0,15], "side": [0,15], "copies": 3, "banlist": null},
+  "expect": {"ok": true, "kinds": [], "texts": []}
+ },
+ {
+  "name": "main too few",
+  "deck": {"main": [1,1,1,2,2,2,3,3,3,4,4,4,5,5,5,6,6,6,7,7,7,8,8,8,9,9,9,10,10,10,11,11,11,12,12,12,13,13], "extra": [], "side": []},
+  "format": {"name": "Standard", "main": [40,60], "extra": [0,15], "side": [0,15], "copies": 3, "banlist": null},
+  "expect": {"ok": false, "kinds": ["main_count"], "texts": ["Main 38/40 · 2 more"]}
+ },
+ {
+  "name": "main too many",
+  "deck": {"main": [1,1,1,2,2,2,3,3,3,4,4,4,5,5,5,6,6,6,7,7,7,8,8,8,9,9,9,10,10,10,11,11,11,12,12,12,13,13,13,14,14,14,15,15,15,16,16,16,17,17,17,18,18,18,19,19,19,20,20,20,21,21], "extra": [], "side": []},
+  "format": {"name": "Standard", "main": [40,60], "extra": [0,15], "side": [0,15], "copies": 3, "banlist": null},
+  "expect": {"ok": false, "kinds": ["main_count"], "texts": ["Main 62/60 · 2 too many"]}
+ },
+ {
+  "name": "extra too many",
+  "deck": {"main": [1,1,1,2,2,2,3,3,3,4,4,4,5,5,5,6,6,6,7,7,7,8,8,8,9,9,9,10,10,10,11,11,11,12,12,12,13,13,13,14], "extra": [100,101,102,103,104,105,106,107,108,109,110,111,112,113,114,115], "side": []},
+  "format": {"name": "Standard", "main": [40,60], "extra": [0,15], "side": [0,15], "copies": 3, "banlist": null},
+  "expect": {"ok": false, "kinds": ["extra_count"], "texts": ["Extra 16/15 · 1 too many"]}
+ },
+ {
+  "name": "side too many",
+  "deck": {"main": [1,1,1,2,2,2,3,3,3,4,4,4,5,5,5,6,6,6,7,7,7,8,8,8,9,9,9,10,10,10,11,11,11,12,12,12,13,13,13,14], "extra": [], "side": [200,201,202,203,204,205,206,207,208,209,210,211,212,213,214,215]},
+  "format": {"name": "Standard", "main": [40,60], "extra": [0,15], "side": [0,15], "copies": 3, "banlist": null},
+  "expect": {"ok": false, "kinds": ["side_count"], "texts": ["Side 16/15 · 1 too many"]}
+ },
+ {
+  "name": "too many copies",
+  "deck": {"main": [123,123,123,123,1,1,1,2,2,2,3,3,3,4,4,4,5,5,5,6,6,6,7,7,7,8,8,8,9,9,9,10,10,10,11,11,11,12,12,12], "extra": [], "side": []},
+  "format": {"name": "Standard", "main": [40,60], "extra": [0,15], "side": [0,15], "copies": 3, "banlist": null},
+  "names": {"123": "Ash Blossom & Joyous Spring"},
+  "expect": {"ok": false, "kinds": ["copies"], "texts": ["3 copies max: Ash Blossom & Joyous Spring ×4"]}
+ },
+ {
+  "name": "alternate arts share the copy limit",
+  "deck": {"main": [123,123,200,200,1,1,1,2,2,2,3,3,3,4,4,4,5,5,5,6,6,6,7,7,7,8,8,8,9,9,9,10,10,10,11,11,11,12,12,12], "extra": [], "side": []},
+  "format": {"name": "Standard", "main": [40,60], "extra": [0,15], "side": [0,15], "copies": 3, "banlist": null},
+  "names": {"123": "Ash Blossom & Joyous Spring"},
+  "aliases": {"200": 123},
+  "expect": {"ok": false, "kinds": ["copies"], "texts": ["3 copies max: Ash Blossom & Joyous Spring ×4"]}
+ },
+ {
+  "name": "forbidden card",
+  "deck": {"main": [123,1,1,1,2,2,2,3,3,3,4,4,4,5,5,5,6,6,6,7,7,7,8,8,8,9,9,9,10,10,10,11,11,11,12,12,12,13,13,13], "extra": [], "side": []},
+  "format": {"name": "Standard", "main": [40,60], "extra": [0,15], "side": [0,15], "copies": 3, "banlist": {"forbidden": [123], "limited": [], "semi": []}},
+  "names": {"123": "Ash Blossom & Joyous Spring"},
+  "expect": {"ok": false, "kinds": ["banlist"], "texts": ["Forbidden: Ash Blossom & Joyous Spring"]}
+ },
+ {
+  "name": "limited card twice",
+  "deck": {"main": [123,123,1,1,1,2,2,2,3,3,3,4,4,4,5,5,5,6,6,6,7,7,7,8,8,8,9,9,9,10,10,10,11,11,11,12,12,12,13,13], "extra": [], "side": []},
+  "format": {"name": "Standard", "main": [40,60], "extra": [0,15], "side": [0,15], "copies": 3, "banlist": {"forbidden": [], "limited": [123], "semi": []}},
+  "names": {"123": "Ash Blossom & Joyous Spring"},
+  "expect": {"ok": false, "kinds": ["banlist"], "texts": ["Limited (1): Ash Blossom & Joyous Spring ×2"]}
+ },
+ {
+  "name": "semi-limited card three times",
+  "deck": {"main": [123,123,123,1,1,1,2,2,2,3,3,3,4,4,4,5,5,5,6,6,6,7,7,7,8,8,8,9,9,9,10,10,10,11,11,11,12,12,12,14], "extra": [], "side": []},
+  "format": {"name": "Standard", "main": [40,60], "extra": [0,15], "side": [0,15], "copies": 3, "banlist": {"forbidden": [], "limited": [], "semi": [123]}},
+  "names": {"123": "Ash Blossom & Joyous Spring"},
+  "expect": {"ok": false, "kinds": ["banlist"], "texts": ["Semi-limited (2): Ash Blossom & Joyous Spring ×3"]}
+ },
+ {
+  "name": "two count problems at once",
+  "deck": {"main": [1,1,1,2,2,2,3,3,3,4,4,4,5,5,5,6,6,6,7,7,7,8,8,8,9,9,9,10,10,10,11,11,11,12,12,12,13,13], "extra": [100,101,102,103,104,105,106,107,108,109,110,111,112,113,114,115], "side": []},
+  "format": {"name": "Standard", "main": [40,60], "extra": [0,15], "side": [0,15], "copies": 3, "banlist": null},
+  "expect": {"ok": false, "kinds": ["main_count", "extra_count"], "texts": ["Main 38/40 · 2 more", "Extra 16/15 · 1 too many"]}
+ },
+ {
+  "name": "count and copies problems together",
+  "deck": {"main": [123,123,123,123,1,1,1,2,2,2,3,3,3,4,4,4,5,5,5,6,6,6,7,7,7,8,8,8,9,9,9,10,10,10,11,11,11,14], "extra": [], "side": []},
+  "format": {"name": "Standard", "main": [40,60], "extra": [0,15], "side": [0,15], "copies": 3, "banlist": null},
+  "names": {"123": "Ash Blossom & Joyous Spring"},
+  "expect": {"ok": false, "kinds": ["main_count", "copies"], "texts": ["Main 38/40 · 2 more", "3 copies max: Ash Blossom & Joyous Spring ×4"]}
+ },
+ {
+  "name": "empty deck",
+  "deck": {"main": [], "extra": [], "side": []},
+  "format": {"name": "Standard", "main": [40,60], "extra": [0,15], "side": [0,15], "copies": 3, "banlist": null},
+  "expect": {"ok": false, "kinds": ["main_count"], "texts": ["Main 0/40 · 40 more"]}
+ }
+]

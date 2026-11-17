@@ -9,6 +9,8 @@ dist/
 # Large or derived artifacts live outside git (master copy on this laptop, see AGENTS.md)
 data/
 runs/
+# Shared JS/Rust deck-legality vectors are source, not the large data/ tree.
+!/tests/data/
 # User bot bundles (shipped examples live in config/bots/)
 bots/*
 !bots/README.md
@@ -16,5 +18,14 @@ src/decklight/_ygoenv*.so
 
 # release: infra state and local-only files stay out of git
 data/vast_bad_machines.json
-docs/video_data_plan.md
+docs/plans/video_data_plan.md
 src/decklight/cards/cards.cdb
+
+# Rust core (ADR 0009)
+rust/**/target/
+.secrets/
+# User-made decks (decklight-serve run from the repo root writes here)
+/decks/user/
+
+# On-device models and the describe model when the server runs from the repo (laptop)
+/models/

@@ -8,11 +8,11 @@ export function negTag(by) {
 }
 
 // The actor is a shape (your dot, the bot's square seal) and a spoken name, not colour alone.
-export function logHTML(events, mock) {
+export function logHTML(events, mock, opp = "decklight") {
   if (!events || !events.length) return '<p class="emptytx">Nothing yet.</p>';
   return events.map((e) => {
     const actor = e.actor === "you" || e.actor === "bot" ? e.actor : "system";
-    const said = actor === "you" ? "You: " : actor === "bot" ? "decklight: " : "";
+    const said = actor === "you" ? "You: " : actor === "bot" ? opp + ": " : "";
     return '<div class="ev ' + actor + '"' + (e.card && e.card.uid ? ' data-detailuid="' + esc(e.card.uid) + '" role="button" tabindex="0"' : "") + ">" +
       '<span class="am" aria-hidden="true"></span>' +
       (e.card ? thumbHTML(e.card, mock) : '<span class="nothumb"></span>') + (said ? '<span class="sr-only">' + said + "</span>" : "") +

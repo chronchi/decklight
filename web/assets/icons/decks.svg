@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+  <!-- Decks: a stack seen from the front, the edges of two cards behind; the node marks the top card. -->
+  <title>Decks</title>
+  <rect x="8" y="3.5" width="11.5" height="15" rx="1.6"/>
+  <path d="M5.75 6.5v12.4a1.6 1.6 0 0 0 1.6 1.6h9.4"/>
+  <path d="M3.5 9.5v10.4a1.6 1.6 0 0 0 1.6 1.6"/>
+  <circle class="node" cx="13.75" cy="11" r="1.65" fill="currentColor" stroke="none"/>
+</svg>

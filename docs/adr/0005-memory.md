@@ -3,7 +3,7 @@
 Status: **accepted**, 2026-10-05 (user requirement: "past cards encode a lot").
 
 ## Context
-Obs v1 (docs/obs_spec.md) gives the policy the current public board plus the **last 32 decisions**, passes and zone
+Obs v1 (docs/design/obs_spec.md) gives the policy the current public board plus the **last 32 decisions**, passes and zone
 picks included, so one busy turn (30-100 decisions) already fills it. Cards revealed and then hidden again (a searched
 card shown, then held; a card bounced to the hand) are **not remembered**. Expert play depends on that information:
 what the opponent searched or still holds, which once-per-turn effects are spent, what was used earlier in the duel.

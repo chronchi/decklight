@@ -25,7 +25,7 @@ from decklight.engine.actions import Kind
 from decklight.engine.cpp_env import CppEnv
 from decklight.engine.duel import DuelConfig, Engine, Placement
 
-# obs columns (docs/obs_spec.md, docs/action_spec.md)
+# obs columns (docs/design/obs_spec.md, docs/design/action_spec.md)
 _LOC_MZONE, _LOC_SZONE = 3, 4
 _MOVERS = (Kind.TO_BATTLE, Kind.TO_MAIN2, Kind.TO_END)
 _DEMOTED = frozenset({Kind.TO_BATTLE, Kind.TO_MAIN2, Kind.TO_END, Kind.CANCEL})
@@ -129,7 +129,7 @@ def inferred_frac_of(labels: list[str]) -> float:
 
 
 def quality_guard(n: int, skipped: list[int] | None, labels: list[str]) -> str | None:
-    """Reject vacuous / over-skipped / fragment lines (docs/line_executor.md).
+    """Reject vacuous / over-skipped / fragment lines (docs/design/line_executor.md).
 
     Priority: vacuous (all steps skipped, or 0 agent choices) > too_skipped
     (>1/3 of steps skipped) > trivial (<2 executed steps). Returns the reason
@@ -192,7 +192,7 @@ def opponent_board(engine: Engine, line: ComboLine, seed: int, verified_dir: Pat
 
 def make_config(line: ComboLine, deck: Deck, seed: int = 0, engine: Engine | None = None) -> DuelConfig:
     """Puzzle start. Going first: my hand placed, deck minus those cards, opponent = same deck, empty hand.
-    Going second (docs/line_executor.md): the opponent (player 0) starts with a board from `opponent_board`
+    Going second (docs/design/line_executor.md): the opponent (player 0) starts with a board from `opponent_board`
     and passes; I am player 1 with the line's hand and draw normally on my turn 2."""
     hand, _ = effective_hand_codes(line)
     main = list(deck.main)
@@ -248,7 +248,7 @@ def _missing(line: ComboLine, deck: Deck) -> str:
 
 def apply_generics(line: ComboLine, deck: Deck, cards) -> ComboLine:
     """A copy of `line` where generic descriptions ("a Branded Spell/Trap", "Bystial") that match cards of `deck`
-    become constrained wildcards (docs/line_executor.md "Generic names"). Names that match nothing stay unresolved."""
+    become constrained wildcards (docs/design/line_executor.md "Generic names"). Names that match nothing stay unresolved."""
     line = copy.deepcopy(line)
     deck_codes = set(deck.main) | set(deck.extra)
     used: list[str] = []
@@ -285,7 +285,7 @@ def apply_generics(line: ComboLine, deck: Deck, cards) -> ComboLine:
 
 
 def _anchor(step_i: int, steps: list, kind: int, code: int) -> bool:
-    """Whether option (kind, code) starts step `step_i` (docs/line_executor.md anchor table)."""
+    """Whether option (kind, code) starts step `step_i` (docs/design/line_executor.md anchor table)."""
     s = steps[step_i]
     card = s.card_code
     if card is None:

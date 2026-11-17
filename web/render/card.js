@@ -7,9 +7,9 @@ export function imgUrl(code, size) {
   return "/img/" + code + ".jpg?size=" + (size || "small") + (TOKEN ? "&t=" + encodeURIComponent(TOKEN) : "");
 }
 
-// Card art is opt-in (settings sheet, off by default): no /img requests at
-// all unless the user switches it on. The face-down card back (code 0, the
-// server's SVG) is not card art and is unaffected (hidden cards never call here).
+// Card art is on by default (the Settings switch turns it off). The face-down
+// card back (code 0, the server's SVG) is not card art and is unaffected
+// (hidden cards never call here).
 let artOn = false;
 export function setCardArt(on) { artOn = !!on; }
 export function cardArtOn() { return artOn; }

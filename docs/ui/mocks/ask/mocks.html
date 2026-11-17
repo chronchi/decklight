@@ -1,0 +1,1001 @@
+<!doctype html>
+<!-- Ask tab + Play tab UI mocks (docs/plans/ask-tab.md step 7). Static: no app code. Served from the repo root;
+     ?v=<screen>&bar=top|bottom picks the screen. Shots: scripts/app/ask_mock_shots.py. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ask mocks</title>
+<link rel="stylesheet" href="/web/styles.css">
+<style>
+  html, body { height: 100%; margin: 0; background: var(--bg); color: var(--text); }
+  .app { position: relative; height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
+  .main { flex: 1; overflow: hidden; padding: 0 18px; display: flex; flex-direction: column; }
+  .lhead { padding-top: 18px; position: relative; }
+  .gear { position: absolute; right: 0; top: 22px; color: var(--muted); }
+  /* Top bar: the existing .ltabs. */
+  .ltabs button { font-size: 14px; }
+  /* Bottom bar: four destinations, icon + label, 56px tall, safe-area padding. */
+  .bbar { display: flex; border-top: 1px solid var(--line-2); background: var(--sheet); padding: 0 6px 10px; }
+  .bbar button { flex: 1; min-height: 56px; display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 3px; font-size: 12px; color: var(--muted); position: relative; }
+  .bbar button.sel { color: var(--text); }
+  .bbar button.sel::before { content: ""; position: absolute; top: 0; left: 30%; right: 30%; height: 2px; background: var(--accent); border-radius: 0 0 2px 2px; }
+  .bbar svg, .ico { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 1.4; stroke-linecap: round; stroke-linejoin: round; }
+  /* Sub-tabs inside Play: a quiet segmented control, both names always visible. */
+  .seg { display: flex; margin: 14px 0 10px; padding: 3px; border: 1px solid var(--line-2); border-radius: 10px; }
+  .seg button { flex: 1; min-height: 40px; border-radius: 8px; color: var(--muted); font-size: 14px; }
+  .seg button.sel { background: var(--accent-tint); color: var(--text); box-shadow: inset 0 0 0 1px rgba(184,154,94,.45); }
+  .intro { color: var(--muted); font-size: 13px; margin: 4px 0 14px; }
+  .lbl { font-size: 15px; font-weight: 600; margin: 16px 0 8px; }
+  .dpick { display: flex; align-items: center; gap: 10px; min-height: 52px; padding: 0 14px; border: 1px solid var(--line-2); border-radius: 12px; }
+  .dpick .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--you); }
+  .dpick .tag { margin-left: auto; font-size: 10px; letter-spacing: .14em; color: var(--muted); }
+  .room { display: flex; align-items: center; gap: 12px; padding: 14px; border: 1px solid var(--line-2); border-radius: 12px; margin-bottom: 8px; }
+  .room .who { font-size: 15px; } .room .meta { font-size: 12px; color: var(--muted); margin-top: 2px; }
+  .room .join { margin-left: auto; min-height: 40px; padding: 0 16px; border-radius: 10px; border: 1px solid rgba(184,154,94,.5); color: var(--accent); }
+  .cta { margin: auto 0 14px; min-height: 52px; border-radius: 14px; border: 1px solid rgba(184,154,94,.55); color: var(--accent);
+    font-size: 17px; letter-spacing: .06em; background: var(--accent-tint); width: 100%; }
+  /* Ask */
+  .askhead { display: flex; align-items: center; gap: 8px; padding: 12px 0 10px; border-bottom: 1px solid var(--line); }
+  .askhead .t { flex: 1; min-width: 0; font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .askhead .sub { font-size: 11px; color: var(--muted); }
+  .ibtn { width: 44px; height: 44px; display: grid; place-items: center; color: var(--muted); border-radius: 10px; }
+  .thread { flex: 1; overflow: hidden; padding: 14px 0 8px; display: flex; flex-direction: column; gap: 12px; }
+  .q { align-self: flex-end; max-width: 82%; padding: 10px 13px; border-radius: 14px 14px 4px 14px; background: var(--indigo-2);
+    border: 1px solid rgba(107,132,168,.28); font-size: 14.5px; line-height: 1.45; }
+  .a { font-size: 14.5px; line-height: 1.6; color: var(--text); }
+  .a p { margin: 0 0 8px; } .a b { color: var(--accent); font-weight: 500; }
+  .a ul { margin: 0 0 8px; padding-left: 18px; } .a li { margin: 2px 0; }
+  .tools { display: flex; flex-wrap: wrap; gap: 6px; }
+  .tool { display: inline-flex; align-items: center; gap: 6px; min-height: 32px; padding: 0 10px; border-radius: 16px;
+    border: 1px solid var(--line-2); font-size: 12px; color: var(--muted); }
+  .tool .ok { color: var(--accent); }
+  .tool.run { border-style: dashed; }
+  .tool.open { border-radius: 10px; flex-direction: column; align-items: stretch; padding: 8px 10px; width: 100%; box-sizing: border-box; gap: 4px; }
+  .tool.open .row { display: flex; justify-content: space-between; font-size: 12px; }
+  .tool.open .row span:last-child { color: var(--text); }
+  /* Under an answer: icon actions on the left (36 px targets), quiet info on the right, one centred row. */
+  .meta2 { font-size: 11px; color: var(--muted); display: flex; align-items: center; gap: 2px; margin: -6px 0 0 -8px; }
+  .meta2 .act { width: 36px; height: 36px; display: grid; place-items: center; border-radius: 8px; color: var(--muted); }
+  .meta2 .act .ico { width: 18px; height: 18px; }
+  .meta2 .info { margin-left: auto; font-variant-numeric: tabular-nums; }
+  /* Thinking: the decklight mark, one card lit at a time left to right, its node on the line of play turning gold,
+     with a card-game word beside it. Under reduced motion the mark holds still (the words still change, no movement). */
+  .think { display: flex; align-items: center; gap: 10px; min-height: 28px; font-size: 13px; color: var(--muted); }
+  .dmark { width: 30px; height: 22px; flex: none; overflow: visible; }
+  .dmark rect { fill: var(--bg); stroke: #5d594f; stroke-width: 12; animation: dm-card 1.8s infinite; }
+  .dmark polyline { fill: none; stroke: #6b5a39; stroke-width: 10; stroke-linecap: round; stroke-linejoin: round; }
+  .dmark circle { fill: var(--bg); stroke: #6b5a39; stroke-width: 9; animation: dm-node 1.8s infinite; }
+  .dmark .k1 { animation-delay: .6s; } .dmark .k2 { animation-delay: 1.2s; }
+  @keyframes dm-card { 0%, 40% { stroke: #e8e1d2; } 45%, 100% { stroke: #5d594f; } }
+  @keyframes dm-node { 0%, 40% { fill: #b89a5e; stroke: #b89a5e; } 45%, 100% { fill: var(--bg); stroke: #6b5a39; } }
+  .think .w { animation: dm-word .4s ease-out; }
+  @keyframes dm-word { from { opacity: 0; } to { opacity: 1; } }
+  .trail .now .node { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); flex: none; margin-left: -1px; }
+  /* Like Claude's app: one working line at the bottom of the thread, under whatever has streamed so far. */
+  .think { margin-top: 2px; }
+  @media (prefers-reduced-motion: reduce) {
+    .dmark rect, .dmark circle, .think .w { animation: none; }
+    .dmark .k2 { stroke: #e8e1d2; } .dmark circle.k2 { fill: #b89a5e; stroke: #b89a5e; }
+  }
+  .caret { display: inline-block; width: 7px; height: 15px; background: var(--accent); vertical-align: -2px; opacity: .7; }
+  .composer { display: flex; align-items: flex-end; gap: 8px; padding: 10px 0 14px; border-top: 1px solid var(--line); }
+  .composer .in { flex: 1; min-height: 44px; border-radius: 22px; border: 1px solid var(--line-2); padding: 12px 16px; font-size: 14.5px;
+    color: var(--muted); box-sizing: border-box; }
+  .send { width: 44px; height: 44px; border-radius: 50%; display: grid; place-items: center; background: var(--accent-tint);
+    border: 1px solid rgba(184,154,94,.55); color: var(--accent); }
+  .send.stop { color: var(--text); border-color: var(--line-2); background: var(--raise); }
+  .err { border: 1px solid rgba(196,122,111,.45); border-radius: 12px; padding: 12px 14px; background: rgba(181,100,90,.06); }
+  .err .h { display: flex; gap: 8px; align-items: center; color: var(--danger); font-size: 14px; }
+  .err p { margin: 6px 0 10px; font-size: 13px; color: var(--muted); line-height: 1.5; }
+  .err .acts { display: flex; gap: 8px; flex-wrap: wrap; }
+  .btn { min-height: 40px; padding: 0 14px; border-radius: 10px; border: 1px solid var(--line-2); color: var(--text); font-size: 13.5px; }
+  .btn.pri { border-color: rgba(184,154,94,.55); color: var(--accent); background: var(--accent-tint); }
+  .sugg { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
+  .sugg button { text-align: left; min-height: 48px; padding: 10px 14px; border-radius: 12px; border: 1px solid var(--line-2); font-size: 14px; color: var(--text); }
+  .sugg button span { display: block; font-size: 12px; color: var(--muted); margin-top: 2px; }
+  .empty { margin: 26px 0 6px; text-align: center; }
+  .empty .k { font-size: 22px; font-weight: 300; letter-spacing: .06em; }
+  .empty p { font-size: 13px; color: var(--muted); margin: 6px 0 0; line-height: 1.5; }
+  .note { border: 1px solid rgba(184,154,94,.35); border-radius: 12px; padding: 12px 14px; font-size: 13px; line-height: 1.5; color: var(--muted); margin-top: 14px; }
+  .note b { color: var(--text); font-weight: 500; }
+  /* Chat list */
+  .list { flex: 1; overflow: hidden; padding-top: 6px; }
+  .grp { font-size: 11px; letter-spacing: .14em; color: var(--muted); margin: 14px 0 6px; text-transform: uppercase; }
+  .chat { display: flex; align-items: center; gap: 10px; min-height: 60px; border-bottom: 1px solid var(--line); }
+  .chat .ti { font-size: 14.5px; } .chat .mi { font-size: 12px; color: var(--muted); margin-top: 3px; }
+  .chat .live { margin-left: auto; font-size: 11px; color: var(--accent); }
+  /* Settings sheet */
+  .sheet { position: absolute; inset: 0; background: var(--bg); display: flex; flex-direction: column; padding: 0 18px; }
+  .sh { display: flex; align-items: center; gap: 8px; padding: 12px 0; border-bottom: 1px solid var(--line); }
+  .sh h1 { font-size: 17px; font-weight: 500; margin: 0; flex: 1; }
+  .prov { display: flex; align-items: center; gap: 12px; min-height: 58px; border-bottom: 1px solid var(--line); }
+  .radio { width: 18px; height: 18px; border-radius: 50%; border: 1.5px solid var(--muted); display: grid; place-items: center; flex: none; }
+  .radio.on { border-color: var(--accent); } .radio.on::after { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--accent); }
+  .prov .pn { font-size: 14.5px; } .prov .pd { font-size: 12px; color: var(--muted); margin-top: 2px; }
+  .prov .kh { margin-left: auto; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .field { margin-top: 8px; }
+  .field .fl { font-size: 13px; color: var(--muted); margin-bottom: 6px; }
+  .field .fv { display: flex; align-items: center; min-height: 48px; padding: 0 14px; border: 1px solid var(--line-2); border-radius: 12px; font-size: 14.5px; gap: 10px; }
+  .field .fv .r { margin-left: auto; color: var(--muted); font-size: 12px; }
+  .help { font-size: 12px; color: var(--muted); line-height: 1.5; margin: 6px 2px 0; }
+  .help a { color: var(--accent); }
+  .rowbtns { display: flex; gap: 8px; margin-top: 10px; }
+  .sec { font-size: 15px; font-weight: 600; margin: 20px 0 6px; }
+  .ok { color: var(--accent); }
+  .bbar { --icon-fill: var(--sheet); }
+  .bbar svg { width: 24px; height: 24px; }
+  .bbar button.sel .node { fill: var(--accent); }
+  /* Icon sheet */
+  .icons { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-top: 18px; --icon-fill: var(--bg); }
+  .icons .cell { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 14px 0; border: 1px solid var(--line); border-radius: 12px; font-size: 12px; color: var(--muted); }
+  .icons .cell.sel { color: var(--text); } .icons .cell.sel .node { fill: var(--accent); }
+  .icons svg { width: 40px; height: 40px; }
+  .icons.small svg { width: 24px; height: 24px; }
+  /* Export (user 2026-11-15) */
+  .scrim, .bsheet, .dlg { z-index: 20; }
+  .xp-sec { font-size: 12px; letter-spacing: .08em; color: var(--muted); margin: 14px 0 6px; text-transform: uppercase; }
+  .xp-row { display: flex; align-items: center; gap: 12px; min-height: 58px; border-bottom: 1px solid var(--line); }
+  .xp-row .ai { width: 36px; height: 36px; border-radius: 10px; border: 1px solid var(--line-2); display: grid; place-items: center; color: var(--muted); flex: none; font-size: 10px; letter-spacing: .06em; }
+  .xp-row > div { flex: 1; } .xp-row .an { font-size: 14.5px; } .xp-row .ad { font-size: 12px; color: var(--muted); margin-top: 2px; line-height: 1.4; }
+  .xp-row.sel .ai { color: var(--accent); border-color: rgba(184,154,94,.55); background: var(--accent-tint); }
+  .xp-row.off { opacity: .55; }
+  .xp-rng { display: flex; align-items: center; gap: 8px; margin: 8px 0 2px; font-size: 14px; }
+  .xp-step { display: inline-flex; align-items: center; border: 1px solid var(--line-2); border-radius: 10px; }
+  .xp-step button { width: 40px; height: 40px; color: var(--muted); font-size: 18px; } .xp-step b { min-width: 22px; text-align: center; font-weight: 500; font-variant-numeric: tabular-nums; }
+  .xp-opt { display: flex; align-items: center; gap: 12px; min-height: 52px; border-bottom: 1px solid var(--line); font-size: 14px; }
+  .xp-opt .ad { font-size: 12px; color: var(--muted); margin-top: 2px; } .xp-opt > div { flex: 1; }
+  .xp-seg { display: flex; padding: 2px; border: 1px solid var(--line-2); border-radius: 9px; }
+  .xp-seg button { min-height: 34px; padding: 0 10px; border-radius: 7px; color: var(--muted); font-size: 12.5px; }
+  .xp-seg button.sel { background: var(--accent-tint); color: var(--text); box-shadow: inset 0 0 0 1px rgba(184,154,94,.45); }
+  .xp-foot { display: flex; align-items: center; gap: 12px; margin-top: 14px; }
+  .xp-foot .t { flex: 1; font-size: 12px; color: var(--muted); line-height: 1.4; } .xp-foot .btn { min-height: 48px; padding: 0 18px; }
+  .xp-prog { height: 6px; border-radius: 3px; background: var(--line-2); overflow: hidden; margin: 12px 0 6px; }
+  .xp-prog i { display: block; height: 100%; background: var(--accent); }
+  .xp-ready { display: flex; gap: 12px; align-items: center; padding: 12px; border: 1px solid var(--line-2); border-radius: 12px; margin-top: 10px; }
+  .xp-ready .th { width: 64px; height: 114px; border-radius: 8px; overflow: hidden; flex: none; background: var(--bg); border: 1px solid var(--line); position: relative; }
+  .xp-ready .th .x-mb { transform: scale(.17); transform-origin: 0 0; width: 376px; position: absolute; left: 0; top: 10px; }
+  .x-rh .xp-ic { margin-left: auto; width: 36px; height: 30px; display: grid; place-items: center; color: var(--muted); border-radius: 8px; align-self: center; }
+  .x-rh .xp-ic + .x-r { margin-left: 0; }
+  .xp-frame { width: 360px; margin: 0 auto; background: var(--bg); border: 1px solid var(--line-2); border-radius: 14px; padding: 14px 12px 10px; aspect-ratio: 9 / 16; display: flex; flex-direction: column; }
+  .xp-frame .ft { display: flex; align-items: baseline; gap: 8px; font-size: 13px; margin-bottom: 8px; } .xp-frame .ft .r { margin-left: auto; color: var(--muted); font-size: 12px; }
+  .xp-frame .fm { margin-top: auto; display: flex; justify-content: space-between; font-size: 10.5px; color: var(--faint); letter-spacing: .06em; }
+  /* Model sheet */
+  .scrim { position: absolute; inset: 0; background: rgba(8,7,6,.62); }
+  .bsheet { position: absolute; left: 0; right: 0; bottom: 0; max-height: 86%; background: var(--sheet); border-radius: 18px 18px 0 0;
+    border-top: 1px solid var(--line-2); padding: 8px 18px 18px; display: flex; flex-direction: column; }
+  .grab { width: 36px; height: 4px; border-radius: 2px; background: var(--faint); margin: 2px auto 10px; }
+  .bsheet h2 { font-size: 16px; font-weight: 500; margin: 0 0 4px; }
+  .ptabs { display: flex; gap: 6px; margin: 10px 0 6px; flex-wrap: wrap; }
+  .ptabs button { min-height: 36px; padding: 0 12px; border-radius: 18px; border: 1px solid var(--line-2); color: var(--muted); font-size: 13px; }
+  .ptabs button.sel { color: var(--text); border-color: rgba(184,154,94,.55); background: var(--accent-tint); }
+  .mrow { display: flex; align-items: center; gap: 12px; min-height: 56px; border-bottom: 1px solid var(--line); }
+  .mrow .mn { font-size: 14.5px; } .mrow .md2 { font-size: 12px; color: var(--muted); margin-top: 2px; }
+  .mrow .mr { margin-left: auto; font-size: 12px; color: var(--muted); text-align: right; }
+  .badge { font-size: 10px; letter-spacing: .1em; padding: 2px 6px; border-radius: 6px; border: 1px solid var(--line-2); color: var(--muted); margin-left: 6px; vertical-align: 1px; }
+  .badge.g { color: var(--accent); border-color: rgba(184,154,94,.45); }
+  .bar2 { height: 4px; border-radius: 2px; background: var(--line-2); margin-top: 6px; overflow: hidden; width: 150px; }
+  .bar2 i { display: block; height: 100%; width: 42%; background: var(--accent); }
+  /* Chat list extras */
+  .prow { display: flex; align-items: center; gap: 12px; width: 100%; min-height: 56px; margin: 8px 0 4px; padding: 0 12px; border: 1px solid var(--line-2); border-radius: 12px; text-align: left; color: var(--text); }
+  .prow .pk { font-size: 11px; letter-spacing: .12em; text-transform: uppercase; color: var(--muted); width: 72px; flex: none; }
+  .prow .pv { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+  .prow .pn { font-size: 14.5px; } .prow .ps { font-size: 12px; color: var(--muted); }
+  .prow .ico { color: var(--muted); }
+  .search { display: flex; align-items: center; gap: 8px; min-height: 44px; padding: 0 14px; border: 1px solid var(--line-2); border-radius: 22px; color: var(--muted); font-size: 14px; margin: 10px 0 0; }
+  .chat .br { font-size: 11px; color: var(--muted); border: 1px solid var(--line-2); border-radius: 6px; padding: 1px 6px; margin-left: 6px; }
+  .menu { position: absolute; background: var(--zone); border: 1px solid var(--line-2); border-radius: 12px; padding: 6px; min-width: 210px;
+    box-shadow: 0 12px 32px rgba(0,0,0,.5); }
+  .menu button { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 44px; padding: 0 10px; border-radius: 8px; font-size: 14px; color: var(--text); text-align: left; }
+  .menu button.sel { background: var(--raise); }
+  .menu button .ico { width: 18px; height: 18px; color: var(--muted); }
+  .menu .dz { color: var(--danger); }
+  .menu hr { border: 0; border-top: 1px solid var(--line); margin: 4px 0; }
+  .hl { box-shadow: 0 0 0 1.5px rgba(184,154,94,.6); }
+  /* Branch switcher */
+  .branch { display: flex; align-items: center; gap: 2px; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .branch button { width: 32px; height: 32px; display: grid; place-items: center; color: var(--muted); border-radius: 8px; }
+  .branch button .ico { width: 16px; height: 16px; }
+  .qwrap { align-self: flex-end; display: flex; flex-direction: column; align-items: flex-end; gap: 2px; max-width: 82%; }
+  .qwrap .q { max-width: 100%; }
+  .editing { border: 1px solid rgba(184,154,94,.55); border-radius: 16px; padding: 10px 14px; }
+  .editing .el { font-size: 11px; color: var(--accent); margin-bottom: 4px; letter-spacing: .04em; }
+  .editing .et { font-size: 14.5px; color: var(--text); }
+  .forkline { display: flex; align-items: center; gap: 8px; font-size: 11px; color: var(--muted); }
+  .forkline::before, .forkline::after { content: ""; flex: 1; border-top: 1px dashed var(--line-2); }
+  /* Tool trail (user 2026-11-14: smaller than the answer; current call while answering, then the last three,
+     tap for all, tap a call for its output). Drawn as the brand's line of play: a thin rule with nodes. */
+  .trail { font-size: 12px; color: var(--muted); line-height: 1.35; }
+  .trail .now { display: flex; align-items: center; gap: 8px; min-height: 24px; }
+  .trail .sum { display: flex; align-items: center; gap: 6px; min-height: 28px; color: var(--muted); font-size: 12px; }
+  .trail .sum .ico { width: 14px; height: 14px; }
+  .trail ol { list-style: none; margin: 0 0 0 3px; padding: 0 0 0 12px; border-left: 1px solid var(--line-2); }
+  .trail li { position: relative; min-height: 24px; display: flex; align-items: center; gap: 6px; }
+  .trail li::before { content: ""; position: absolute; left: -15.5px; width: 5px; height: 5px; border-radius: 50%; background: var(--bg); border: 1px solid var(--muted); }
+  .trail li.last::before { background: var(--accent); border-color: var(--accent); }
+  .trail li.err { color: var(--danger); } .trail li.err::before { border-color: var(--danger); }
+  .trail li .arg { color: var(--faint); color: #7d776b; }
+  .trail li .chev { margin-left: auto; width: 14px; height: 14px; }
+  .trail .out { margin: 2px 0 6px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--raise); font-size: 11.5px; font-variant-numeric: tabular-nums; }
+  .trail .out .row { display: flex; justify-content: space-between; gap: 10px; min-height: 18px; }
+  .trail .out .row span:last-child { color: var(--text); }
+  .trail .more { color: var(--muted); }
+  /* Rich blocks for replay and bot_view (P2 mock, 2026-11-15). A block sits in the answer, built by the app from the
+     tool's result (never drawn by the model); tap opens the full replay viewer at that point. */
+  .x-rb { border: 1px solid var(--line-2); border-radius: 12px; background: var(--raise); padding: 10px 12px 12px; }
+  .x-rb .x-rh { display: flex; align-items: baseline; gap: 8px; font-size: 13px; }
+  .x-rb .x-rh .x-k { white-space: nowrap; color: var(--muted); font-size: 11px; letter-spacing: .08em; text-transform: uppercase; }
+  .x-rb .x-rh .x-r { white-space: nowrap; margin-left: auto; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .x-rb .x-acts { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+  .x-rb .x-acts .btn { min-height: 36px; font-size: 13px; }
+  .x-res { font-size: 11px; letter-spacing: .08em; padding: 1px 6px; border-radius: 6px; border: 1px solid; }
+  .x-res.x-l { color: var(--danger); border-color: rgba(196,122,111,.45); } .x-res.x-w { color: var(--accent); border-color: rgba(184,154,94,.45); }
+  .x-spark { display: block; width: 100%; height: 54px; margin-top: 8px; }
+  .x-spark .x-y { stroke: var(--you); } .x-spark .x-o { stroke: var(--bot); } .x-spark path { fill: none; stroke-width: 1.6; }
+  .x-spark .x-g { stroke: var(--line-2); stroke-width: 1; } .x-spark text { fill: var(--muted); font-size: 9px; font-family: inherit; }
+  .x-spark .x-hot { fill: var(--accent); }
+  .x-legend { display: flex; gap: 14px; font-size: 11px; color: var(--muted); margin-top: 2px; }
+  .x-legend i { display: inline-block; width: 10px; height: 2px; vertical-align: 3px; margin-right: 5px; }
+  /* Mini board: the game's board at chat size (opponent on top, as in a duel). Cards 38 px, 5 zones a row. */
+  .x-mb { --mw: 38px; --mh: calc(var(--mw) * 86 / 59); margin-top: 8px; display: grid; gap: 4px; justify-content: center; }
+  .x-mb .x-row { display: grid; grid-template-columns: repeat(5, var(--mw)); gap: 6px; justify-content: center; }
+  .x-mb .x-z { width: var(--mw); height: var(--mh); border-radius: 4px; border: 1px solid var(--zone-line); position: relative; }
+  .x-mc { width: var(--mw); height: var(--mh); border-radius: 4px; background: var(--zone) center/cover no-repeat; position: absolute; inset: -1px;
+    filter: var(--art); box-shadow: 0 0 0 1px rgba(0,0,0,.4); transition: transform var(--t) var(--ease), opacity var(--t); }
+  .x-mc.x-back { background: linear-gradient(135deg, #2a2620, #1b1915); filter: none; box-shadow: inset 0 0 0 1px rgba(214,207,192,.12); }
+  .x-mc.x-back::after { content: ""; position: absolute; left: 50%; top: 50%; width: 9px; height: 9px; margin: -4.5px; border-radius: 50%; border: 1px solid #5d594f; }
+  .x-mc.x-def { transform: rotate(90deg) scale(.84); }
+  .x-mc.x-hl { box-shadow: 0 0 0 1.5px var(--accent), 0 0 10px rgba(184,154,94,.35); filter: none; }
+  .x-mc.x-gone { opacity: .25; filter: grayscale(1); }
+  .x-mc .x-st { position: absolute; left: 50%; bottom: -13px; transform: translateX(-50%); font-size: 9.5px; color: var(--text); font-variant-numeric: tabular-nums;
+    background: var(--ink); padding: 0 3px; border-radius: 3px; white-space: nowrap; }
+  .x-mb .x-mid { display: flex; align-items: center; justify-content: space-between; font-size: 11px; color: var(--muted); padding: 16px 2px 4px; font-variant-numeric: tabular-nums; }
+  .x-mb .x-mid .x-lp b { color: var(--text); font-weight: 500; } .x-mb .x-mid .x-ph { color: var(--accent); }
+  .x-mb .x-hand { display: flex; justify-content: center; gap: 3px; margin-top: 4px; }
+  .x-mb .x-hand .x-z { border: 0; --mw: 30px; } .x-mb .x-hand .x-mc { --mw: 30px; }
+  .x-mb .x-ohand { display: flex; justify-content: center; gap: 2px; margin-bottom: 2px; }
+  .x-mb .x-ohand span { width: 14px; height: 20px; border-radius: 2px; background: linear-gradient(135deg, #2a2620, #1b1915); box-shadow: inset 0 0 0 1px rgba(214,207,192,.12); }
+  .x-cap { display: flex; align-items: center; gap: 8px; min-height: 30px; margin-top: 6px; font-size: 13px; }
+  .x-cap .x-who { font-size: 10px; letter-spacing: .1em; padding: 1px 6px; border-radius: 6px; }
+  .x-cap .x-who.x-y { color: #9fb3d1; background: rgba(107,132,168,.14); } .x-cap .x-who.x-o { color: var(--danger); background: rgba(181,100,90,.12); }
+  .x-scrub { display: flex; align-items: center; gap: 6px; margin-top: 4px; }
+  .x-scrub .x-pp { width: 36px; height: 36px; display: grid; place-items: center; border-radius: 50%; border: 1px solid var(--line-2); color: var(--text); }
+  .x-scrub .x-dots { display: flex; gap: 5px; flex: 1; }
+  .x-scrub .x-dots i { flex: 1; height: 3px; border-radius: 2px; background: var(--line-2); }
+  .x-scrub .x-dots i.x-on { background: var(--accent); } .x-scrub .x-dots i.x-done { background: #6b5a39; }
+  .x-scrub .x-n { font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; min-width: 30px; text-align: right; }
+  /* The options at a decision: what the user could do, the bot's picks, the user's pick. */
+  .x-opts { margin-top: 10px; display: grid; gap: 6px; }
+  .x-opt { display: grid; grid-template-columns: 30px 1fr auto; gap: 10px; align-items: center; padding: 6px 8px; border-radius: 10px; border: 1px solid var(--line); }
+  .x-opt .x-th { --mw: 30px; width: 30px; height: calc(30px * 86 / 59); position: relative; }
+  .x-opt .x-th .x-mc { --mw: 30px; }
+  .x-opt .x-th.x-nocard { border: 1px dashed var(--line-2); border-radius: 4px; display: grid; place-items: center; color: var(--muted); }
+  .x-opt .x-th.x-nocard .ico { width: 16px; height: 16px; }
+  .x-opt .x-ol { font-size: 13px; line-height: 1.3; } .x-opt .x-ol .x-tags { display: flex; gap: 5px; margin-top: 3px; }
+  .x-opt .x-tag { font-size: 10px; letter-spacing: .06em; padding: 1px 5px; border-radius: 5px; border: 1px solid var(--line-2); color: var(--muted); }
+  .x-opt .x-tag.x-bot { color: var(--accent); border-color: rgba(184,154,94,.45); }
+  .x-opt .x-tag.x-you { color: #9fb3d1; border-color: rgba(107,132,168,.5); }
+  .x-opt .x-tag.x-bad { color: var(--danger); border-color: rgba(196,122,111,.45); }
+  .x-opt .x-nums { text-align: right; font-size: 12px; font-variant-numeric: tabular-nums; }
+  .x-opt .x-nums .x-w { font-size: 15px; color: var(--text); } .x-opt .x-nums .x-p { color: var(--muted); font-size: 11px; }
+  .x-opt .x-bars { grid-column: 2 / 4; height: 3px; border-radius: 2px; background: var(--line); overflow: hidden; margin-top: -2px; }
+  .x-opt .x-bars i { display: block; height: 100%; background: var(--accent); opacity: .7; }
+  .x-opt.x-you { border-color: rgba(107,132,168,.45); background: rgba(107,132,168,.06); }
+  .x-opt.x-best { border-color: rgba(184,154,94,.4); }
+  .x-gauge { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted); margin-top: 8px; }
+  .x-gauge .x-bar { flex: 1; height: 6px; border-radius: 3px; background: rgba(181,100,90,.35); overflow: hidden; }
+  .x-gauge .x-bar i { display: block; height: 100%; background: var(--you); }
+  /* Games (user 2026-11-15: the user sees everything the LLM sees): Play > Games, a game, a decision, deck odds. */
+  .g-chips { display: flex; gap: 6px; margin: 0 0 10px; flex-wrap: wrap; }
+  .g-chips button { min-height: 36px; padding: 0 12px; border-radius: 18px; border: 1px solid var(--line-2); color: var(--muted); font-size: 13px; }
+  .g-chips button.sel { color: var(--text); border-color: rgba(184,154,94,.55); background: var(--accent-tint); }
+  .g-stat { border: 1px solid var(--line-2); border-radius: 12px; background: var(--raise); padding: 12px; }
+  .g-big { display: flex; align-items: baseline; gap: 10px; } .g-big b { font-size: 26px; font-weight: 300; color: var(--text); font-variant-numeric: tabular-nums; }
+  .g-big span { color: var(--muted); font-size: 13px; }
+  .g-sr { display: grid; grid-template-columns: 1fr auto 54px; gap: 10px; align-items: center; font-size: 13px; padding: 6px 0; border-top: 1px solid var(--line); }
+  .g-sr:first-of-type { border-top: 0; } .g-sr .n { color: var(--muted); font-variant-numeric: tabular-nums; font-size: 12px; }
+  .g-sr .bar { height: 4px; border-radius: 2px; background: rgba(181,100,90,.35); overflow: hidden; } .g-sr .bar i { display: block; height: 100%; background: var(--you); }
+  .g-sub { font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); margin: 12px 0 2px; }
+  .g-row { display: grid; grid-template-columns: 44px 1fr 64px; gap: 10px; align-items: center; padding: 10px 0; border-bottom: 1px solid var(--line); min-height: 56px; }
+  .g-row .res { font-size: 10.5px; letter-spacing: .08em; text-align: center; padding: 2px 0; border-radius: 6px; border: 1px solid; }
+  .g-row .res.w { color: var(--accent); border-color: rgba(184,154,94,.45); } .g-row .res.l { color: var(--danger); border-color: rgba(196,122,111,.45); }
+  .g-row .res.s { color: var(--muted); border-color: var(--line-2); }
+  .g-row .ti { font-size: 14px; color: var(--text); } .g-row .mi { font-size: 12px; color: var(--muted); margin-top: 2px; }
+  .g-row svg { width: 64px; height: 26px; } .g-row svg path { fill: none; stroke-width: 1.4; }
+  .g-row .tag { font-size: 9.5px; letter-spacing: .08em; color: var(--muted); border: 1px solid var(--line-2); border-radius: 5px; padding: 0 4px; margin-left: 6px; vertical-align: 1px; }
+  .g-note { font-size: 12.5px; color: var(--muted); line-height: 1.45; margin: 6px 0 4px; }
+  .g-head { display: flex; align-items: center; gap: 4px; padding: 6px 0 8px; border-bottom: 1px solid var(--line); margin: 0 -4px 12px; }
+  .g-head .t { flex: 1; font-size: 15px; } .g-head .t .sub { font-size: 11.5px; color: var(--muted); }
+  .g-acts { display: flex; gap: 8px; margin: 10px 0 4px; flex-wrap: wrap; }
+  .g-acts .btn { min-height: 40px; font-size: 13px; }
+  .g-turn { display: grid; grid-template-columns: 34px 1fr auto; gap: 10px; align-items: center; min-height: 48px; border-bottom: 1px solid var(--line); font-size: 13.5px; }
+  .g-turn .tn { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; } .g-turn .who { font-size: 12px; color: var(--muted); }
+  .g-turn .lp { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; display: flex; align-items: center; gap: 4px; }
+  .g-turn.open { border-bottom: 0; }
+  .g-dec { display: grid; grid-template-columns: 30px 1fr auto; gap: 10px; align-items: center; min-height: 48px; padding: 4px 0; border-bottom: 1px solid var(--line); font-size: 13px; }
+  .g-dec .dn { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; } .g-dec .pk { color: var(--muted); font-size: 12px; margin-top: 2px; }
+  .g-dec .mk { font-size: 10px; letter-spacing: .06em; padding: 1px 5px; border-radius: 5px; border: 1px solid var(--line-2); color: var(--muted); white-space: nowrap; }
+  .g-dec .mk.bad { color: #d79a90; border-color: rgba(196,122,111,.45); }
+  .g-opt { display: grid; grid-template-columns: 30px 1fr auto; gap: 10px; align-items: center; padding: 8px; border-radius: 10px; border: 1px solid var(--line); font-size: 13px; margin-top: 6px; }
+  .g-opt .x-th { --mw: 30px; --mh: calc(30px * 86 / 59); width: 30px; height: var(--mh); position: relative; }
+  .g-opt .x-th.x-nocard { border: 1px dashed var(--line-2); border-radius: 4px; display: grid; place-items: center; color: var(--muted); }
+  .g-opt .x-th.x-nocard .ico { width: 16px; height: 16px; }
+  .g-sr.odds .bar { background: var(--line); } .g-sr.odds .bar i { background: var(--accent); opacity: .7; }
+  .g-opt.you { border-color: rgba(107,132,168,.45); background: rgba(107,132,168,.06); }
+  .g-oddsres { display: flex; align-items: baseline; gap: 10px; margin: 6px 0 2px; } .g-oddsres b { font-size: 30px; font-weight: 300; font-variant-numeric: tabular-nums; }
+  .g-pick { display: flex; flex-wrap: wrap; gap: 6px; margin: 4px 0 8px; }
+  .g-pick span { display: inline-flex; align-items: center; gap: 6px; min-height: 36px; padding: 0 10px 0 4px; border-radius: 8px; border: 1px solid var(--line-2); font-size: 13px; }
+  .g-pick span i { width: 22px; height: 32px; border-radius: 3px; background: center/cover; filter: var(--art); }
+  .g-pick span b { color: var(--muted); font-weight: 400; font-size: 12px; }
+  /* Play sequence v2 (user 2026-11-15: "activate Thunderbird ... nothing happens in the replay"): the duel board's piles
+     (GY with its top card, banished pill, deck), its chain links, the acting card with where it came from, and what moved. */
+  .y-mb .x-row { grid-template-columns: repeat(7, var(--mw)); gap: 4px; }
+  .y-pile { width: var(--mw); height: var(--mh); border-radius: 4px; border: 1px dashed var(--zone-line); position: relative; display: grid; place-items: center; font-size: 9px; color: var(--muted); letter-spacing: .06em; }
+  .y-pile .x-mc { inset: -1px; }
+  .y-pile .y-n { position: absolute; right: -4px; bottom: -6px; min-width: 16px; height: 16px; padding: 0 3px; border-radius: 8px; background: var(--sheet); border: 1px solid var(--line-2); font-size: 10px; color: var(--text); display: grid; place-items: center; font-variant-numeric: tabular-nums; z-index: 2; }
+  .y-pile .y-t { position: absolute; top: -12px; left: 0; right: 0; text-align: center; font-size: 8px; }
+  .y-pile.y-hl { border: 1px solid var(--accent); box-shadow: 0 0 10px rgba(184,154,94,.35); }
+  .y-pile.y-hl .x-mc { box-shadow: 0 0 0 1.5px var(--accent), 0 0 10px rgba(184,154,94,.35); filter: none; }
+  .y-pile .y-n, .y-pile .y-ban { z-index: 5; }
+  .y-ban { position: absolute; left: -4px; bottom: -6px; height: 16px; padding: 0 4px; border-radius: 8px; background: var(--sheet); border: 1px solid var(--line-2); font-size: 10px; color: var(--text); display: flex; align-items: center; gap: 2px; z-index: 2; }
+  .y-ban.y-hl { border-color: var(--accent); color: var(--accent); }
+  .y-ban svg { width: 9px; height: 9px; fill: none; stroke: currentColor; stroke-width: 1.4; }
+  .y-mid { display: flex; align-items: center; gap: 8px; padding: 14px 2px 4px; font-size: 11px; color: var(--muted); }
+  .y-mid .x-lp b { color: var(--text); font-weight: 500; } .y-mid .x-ph { color: var(--accent); }
+  .y-chain { display: flex; align-items: center; gap: 4px; margin: 0 auto; }
+  .y-chain .y-cl { font-size: 8.5px; letter-spacing: .1em; color: var(--muted); }
+  .y-link { --mw: 22px; --mh: calc(22px * 86 / 59); width: var(--mw); height: var(--mh); position: relative; border-radius: 3px; }
+  .y-link .x-mc { inset: 0; }
+  .y-link.y-o { box-shadow: 0 0 0 1.5px var(--danger); } .y-link.y-y { box-shadow: 0 0 0 1.5px var(--you); }
+  .y-link .y-cn { position: absolute; right: -5px; top: -6px; width: 13px; height: 13px; border-radius: 50%; background: var(--bg); border: 1px solid var(--line-2); font-size: 8.5px; display: grid; place-items: center; color: var(--text); }
+  .y-link.y-neg::after { content: ""; position: absolute; inset: 0; background: linear-gradient(135deg, transparent 46%, var(--danger) 47% 53%, transparent 54%); }
+  .y-cap { display: grid; grid-template-columns: 40px 1fr; gap: 10px; align-items: center; margin-top: 8px; min-height: 58px; }
+  .y-cap .y-act { --mw: 40px; --mh: calc(40px * 86 / 59); width: var(--mw); height: var(--mh); position: relative; }
+  .y-cap .y-act .x-mc { inset: 0; box-shadow: 0 0 0 1.5px var(--accent), 0 0 12px rgba(184,154,94,.35); filter: none; }
+  .y-cap .y-l1 { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 13.5px; }
+  .y-cap .x-who { font-size: 10px; letter-spacing: .1em; padding: 1px 6px; border-radius: 6px; }
+  .y-cap .x-who.x-y { color: #9fb3d1; background: rgba(107,132,168,.14); } .y-cap .x-who.x-o { color: var(--danger); background: rgba(181,100,90,.12); }
+  .y-from { font-size: 9.5px; letter-spacing: .08em; color: var(--muted); border: 1px solid var(--line-2); border-radius: 5px; padding: 0 5px; }
+  .y-moves { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 5px; }
+  .y-mv { display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px; color: var(--muted); }
+  .y-mv i { --mw: 14px; width: 14px; height: 20px; border-radius: 2px; background: center/cover; filter: var(--art); }
+  .y-mv b { font-weight: 400; color: var(--text); }
+  .x-fgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .x-fgrid .x-rb { padding: 8px; } .x-fgrid .x-mb { --mw: 26px; } .x-fgrid .x-mb .x-hand .x-mc, .x-fgrid .x-mb .x-hand .x-z { --mw: 20px; }
+  .x-fgrid .x-cap { font-size: 11px; min-height: 0; } .x-fgrid .x-mc .x-st { font-size: 8px; bottom: -11px; }
+  @media (prefers-reduced-motion: reduce) { .x-mc { transition: none; } }
+  /* Attach (+), on-device check, games search/select (user 2026-11-15) */
+  .composer .plusb { width: 40px; height: 40px; border-radius: 20px; border: 1px solid var(--line-2); display: grid; place-items: center; color: var(--muted); flex: none; }
+  .composer .plusb .ico { width: 20px; height: 20px; }
+  .att { display: flex; gap: 6px; flex-wrap: wrap; padding: 8px 0 0; }
+  .att span { display: inline-flex; align-items: center; gap: 6px; min-height: 32px; padding: 0 4px 0 6px; border-radius: 8px; border: 1px solid var(--line-2); font-size: 12.5px; background: var(--raise); }
+  .att span i { width: 18px; height: 26px; border-radius: 2px; background: center/cover; filter: var(--art); }
+  .att span .k { font-size: 9.5px; letter-spacing: .08em; color: var(--muted); }
+  .att span .x { width: 28px; height: 28px; display: grid; place-items: center; color: var(--muted); }
+  .q .att { padding: 0 0 6px; justify-content: flex-end; }
+  .arow { display: flex; align-items: center; gap: 14px; min-height: 60px; border-bottom: 1px solid var(--line); }
+  .arow .ai { width: 36px; height: 36px; border-radius: 10px; border: 1px solid var(--line-2); display: grid; place-items: center; color: var(--muted); flex: none; }
+  .arow .ai .ico { width: 20px; height: 20px; }
+  .arow .an { font-size: 14.5px; } .arow .ad { font-size: 12px; color: var(--muted); margin-top: 2px; }
+  .arow.off { opacity: .55; }
+  .arow > div { flex: 1; }
+  .btn.dz { display: inline-flex; align-items: center; justify-content: center; gap: 8px; }
+  .btn.dz .ico { width: 18px; height: 18px; }
+  .dcheck { border: 1px solid var(--line-2); border-radius: 12px; background: var(--raise); padding: 10px 12px; margin: 8px 0 4px; }
+  .dcheck .dh { font-size: 13px; color: var(--muted); margin-bottom: 4px; }
+  .dcheck .dr { display: flex; gap: 8px; align-items: flex-start; font-size: 13px; padding: 4px 0; }
+  .dcheck .dr .ico { width: 16px; height: 16px; flex: none; margin-top: 1px; }
+  .dcheck .dr.okk .ico { color: var(--accent); } .dcheck .dr.no .ico { color: var(--danger); }
+  .tgl { margin-left: auto; width: 40px; height: 24px; border-radius: 12px; background: var(--accent-tint); border: 1px solid rgba(184,154,94,.55); position: relative; flex: none; }
+  .tgl::after { content: ""; position: absolute; right: 3px; top: 3px; width: 16px; height: 16px; border-radius: 50%; background: var(--accent); }
+  .g-tools { display: flex; gap: 8px; align-items: center; margin: 0 0 10px; }
+  .g-tools .search { flex: 1; margin: 0; }
+  .g-tools .btn { min-height: 44px; }
+  .g-row.sel { background: var(--accent-tint); }
+  .g-row .cb { width: 22px; height: 22px; border-radius: 6px; border: 1.5px solid var(--muted); display: grid; place-items: center; }
+  .g-row.sel .cb { border-color: var(--accent); background: var(--accent); color: var(--bg); }
+  .g-row.withcb { grid-template-columns: 26px 44px 1fr 64px; }
+  .selbar { display: flex; align-items: center; gap: 10px; padding: 10px 0; border-bottom: 1px solid var(--line); margin-bottom: 6px; }
+  .selbar .t { flex: 1; font-size: 15px; }
+  .delbar { position: absolute; left: 0; right: 0; bottom: 74px; padding: 10px 18px; background: var(--sheet); border-top: 1px solid var(--line-2); display: flex; gap: 10px; }
+  .delbar .btn { flex: 1; min-height: 48px; }
+  .btn.dz { color: var(--danger); border-color: rgba(196,122,111,.5); }
+  .dlg { position: absolute; left: 24px; right: 24px; top: 34%; background: var(--sheet); border: 1px solid var(--line-2); border-radius: 16px; padding: 18px; }
+  .dlg h2 { font-size: 16px; font-weight: 500; margin: 0 0 8px; }
+  .mocklabel { position: absolute; left: 0; right: 0; bottom: 0; text-align: center; font-size: 10px; color: var(--faint); pointer-events: none; }
+</style>
+</head>
+<body>
+<div class="app" id="app"></div>
+<script>
+const qs = new URLSearchParams(location.search);
+const v = qs.get("v") || "play-bot";
+const bar = qs.get("bar") || "top";
+const I = {
+  play: '<svg class="ico" viewBox="0 0 24 24"><rect x="4" y="3.5" width="10" height="14" rx="1.5"/><path d="M10 6.5h8.5a1.5 1.5 0 0 1 1.5 1.5v11a1.5 1.5 0 0 1-1.5 1.5H10"/></svg>',
+  puzzles: '<svg class="ico" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M12 4v4M12 16v4M4 12h4M16 12h4"/></svg>',
+  decks: '<svg class="ico" viewBox="0 0 24 24"><rect x="5" y="4" width="14" height="16" rx="1.5"/><path d="M8.5 8.5h7M8.5 12h7M8.5 15.5h4"/></svg>',
+  ask: '<svg class="ico" viewBox="0 0 24 24"><path d="M5 5.5h14a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1h-8l-4 3v-3H5a1 1 0 0 1-1-1v-9a1 1 0 0 1 1-1z"/><path d="M8.5 10.5h7M8.5 13h4"/></svg>',
+  gear: '<svg class="ico" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 3v2.5M12 18.5V21M3 12h2.5M18.5 12H21M5.6 5.6l1.8 1.8M16.6 16.6l1.8 1.8M5.6 18.4l1.8-1.8M16.6 7.4l1.8-1.8"/></svg>',
+  list: '<svg class="ico" viewBox="0 0 24 24"><path d="M5 7h14M5 12h14M5 17h9"/></svg>',
+  plus: '<svg class="ico" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>',
+  send: '<svg class="ico" viewBox="0 0 24 24"><path d="M12 19V6M6.5 11.5 12 6l5.5 5.5"/></svg>',
+  stop: '<svg class="ico" viewBox="0 0 24 24"><rect x="7.5" y="7.5" width="9" height="9" rx="1.5"/></svg>',
+  back: '<svg class="ico" viewBox="0 0 24 24"><path d="M14.5 6 8.5 12l6 6"/></svg>',
+  warn: '<svg class="ico" viewBox="0 0 24 24"><path d="M12 4 3.5 19h17z"/><path d="M12 10v4M12 16.5v.5"/></svg>',
+  check: '<svg class="ico" viewBox="0 0 24 24" style="width:14px;height:14px"><path d="m6 12.5 4 4 8-9"/></svg>',
+  chev: '<svg class="ico" viewBox="0 0 24 24" style="width:18px;height:18px"><path d="m7 10 5 5 5-5"/></svg>',
+};
+const TABS = [["play", "Play"], ["puzzles", "Puzzles"], ["decks", "Decks"], ["ask", "Ask"]];
+const head = '<header class="lhead"><span class="lmark"></span><h1>decklight</h1><span class="gear">' + I.gear + '</span></header>';
+function topbar(cur) {
+  return head + '<nav class="ltabs" aria-label="Main">' + TABS.map(([k, l]) =>
+    '<button' + (k === cur ? ' class="sel" aria-current="page"' : "") + ">" + l + "</button>").join("") + "</nav>";
+}
+const TI = {};  // tab icons, loaded from web/assets/icons/*.svg
+function bottombar(cur) {
+  return '<nav class="bbar" aria-label="Main">' + TABS.map(([k, l]) =>
+    '<button' + (k === cur ? ' class="sel" aria-current="page"' : "") + ">" + TI[k] + "<span>" + l + "</span></button>").join("") + "</nav>";
+}
+function seg(cur) {
+  return '<div class="seg" role="tablist" aria-label="Play">' +
+    '<button role="tab"' + (cur === "people" ? ' class="sel" aria-selected="true"' : "") + ">Multiplayer</button>" +
+    '<button role="tab"' + (cur === "bot" ? ' class="sel" aria-selected="true"' : "") + ">Bot</button></div>";
+}
+function shell(tab, inner, opts = {}) {
+  const top = bar === "top";
+  let h = "";
+  if (top && !opts.nohead) h += '<div style="padding:0 18px">' + topbar(tab) + "</div>";
+  else if (!top && !opts.nohead) h += '<div style="padding:0 18px">' + head + "</div>";
+  h += '<div class="main">' + inner + "</div>";
+  if (!top) h += bottombar(tab);
+  if (opts.overlay) h += opts.overlay;
+  return h;
+}
+const botPanel = seg("bot") + '<p class="intro" style="margin-top:0">Duel decklight, the bot, on this device.</p>' +
+  '<div class="lbl">Your deck</div><div class="dpick"><span class="dot"></span>Blue-Eyes<span class="tag">YOURS</span>' + I.chev + "</div>" +
+  '<div class="lbl">decklight plays</div><div class="dpick"><span class="dot" style="background:var(--bot)"></span>Mitsurugi<span class="tag">PREBUILT</span>' + I.chev + "</div>" +
+  '<div class="lbl">Mode</div><div class="modecards"><button class="modecard sel"><span class="mt">Duel</span><span class="md">A normal game. Counts in your stats; no hints or take-backs.</span></button>' +
+  '<button class="modecard"><span class="mt">Practice</span><span class="md">Hints from the bot, undo and what-if replays. Not counted.</span></button></div>' +
+  '<button class="cta">Start duel</button>';
+const peoplePanel = seg("people") + '<p class="intro" style="margin-top:0">Play people on your network or with a room code.</p>' +
+  '<div class="room"><div><div class="who">Room of desktop</div><div class="meta">Same Wi-Fi · waiting for a second player</div></div><button class="join">Join</button></div>' +
+  '<div class="room"><div><div class="who">Enter a room code</div><div class="meta">From a friend outside your network</div></div><button class="join">Code</button></div>' +
+  '<button class="cta">Host a room</button>';
+
+function askHead(title, sub) {
+  return '<div class="askhead"><button class="ibtn" aria-label="Chats">' + I.list + '</button><div class="t">' + title +
+    '<div class="sub">' + sub + '</div></div><button class="ibtn" aria-label="New chat">' + I.plus + "</button></div>";
+}
+function composer(running, text) {
+  return '<div class="composer"><div class="in">' + (text || "Ask about cards, your deck or your games") + "</div>" +
+    (running ? '<button class="send stop" aria-label="Stop">' + I.stop + "</button>" : '<button class="send" aria-label="Send">' + I.send + "</button>") + "</div>";
+}
+const qAsh = '<div class="q">¿Cuántas Ash Blossom debería llevar en Branded y por qué?</div>';
+// The boot mark's geometry (web/assets/boot-mark.svg), cropped to the cards; k0..k2 = left to right.
+const DMARK = '<svg class="dmark" aria-hidden="true" viewBox="70 150 380 250">' +
+  [-20, 0, 20].map((a, i) => '<rect class="k' + i + '" x="191" y="167" width="130" height="190" rx="14" transform="rotate(' + a + ' 256 499.5)"/>').join("") +
+  '<polyline points="158.5,315.3 227.4,260.1 357.2,221.4"/>' +
+  [[158.5, 315.3], [227.4, 260.1], [357.2, 221.4]].map(([x, y], i) => '<circle class="k' + i + '" cx="' + x + '" cy="' + y + '" r="' + (i === 2 ? 20 : 15) + '"/>').join("") + "</svg>";
+// Shown while the model thinks and no tool is running; a new word every 2.5 s, picked at random, never twice in a row.
+const WORDS = ["Shuffling", "Drawing", "Reading the field", "Checking the ruling", "Counting outs", "Building the chain",
+  "Resolving the chain", "Looking at the graveyard", "Setting a card", "Searching the deck", "Thinking a turn ahead", "Weighing the hand traps"];
+const think = (w) => '<div class="think" role="status">' + DMARK + '<span class="w">' + w + '…</span></div>';
+const RETRY = '<button class="act" aria-label="Retry"><svg class="ico" viewBox="0 0 24 24"><path d="M19.5 12a7.5 7.5 0 1 1-2.2-5.3M19.5 4.5v4h-4"/></svg></button>';
+const COPY = '<button class="act" aria-label="Copy"><svg class="ico" viewBox="0 0 24 24"><rect x="8" y="8" width="11" height="11" rx="2"/><path d="M5 15V6a1 1 0 0 1 1-1h9"/></svg></button>';
+const CH = '<svg class="ico chev" viewBox="0 0 24 24"><path d="m9.5 6 6 6-6 6"/></svg>';
+const CD = '<svg class="ico chev" viewBox="0 0 24 24"><path d="m6 9.5 6 6 6-6"/></svg>';
+const CALLS = [["Searched cards", "“Ash Blossom”"], ["Card", "Ash Blossom & Joyous Spring"], ["Opened deck", "Branded"],
+  ["Searched cards", "hand traps, Branded"], ["Draw odds", "3 copies, 5 cards"], ["Draw odds", "2 copies, 5 cards"],
+  ["Draw odds", "9 starters, 5 cards"], ["Your games", "going second"]];
+const li = (c, i, n, extra) => '<li' + (i === n - 1 ? ' class="last"' : "") + ">" + c[0] + ' <span class="arg">· ' + c[1] + "</span>" + (extra || "") + "</li>";
+// Collapsed: the count, then the last three calls.
+const trailDone = '<div class="trail" role="group" aria-label="8 tool calls"><button class="sum" aria-expanded="false">8 tool calls · 6 s' + CH + '</button><ol>' +
+  CALLS.slice(-3).map((c, i) => li(c, i + 5, 8)).join("") + "</ol></div>";
+// Expanded: every call; one opened shows its output.
+const trailAll = (open) => '<div class="trail" role="group" aria-label="8 tool calls"><button class="sum" aria-expanded="true">8 tool calls · 6 s' + CD + '</button><ol>' +
+  CALLS.map((c, i) => li(c, i, 8, i === open ? CD : CH) + (i === open ? '<div class="out"><div class="row"><span>Ash Blossom, 3 of 40, 5 cards</span><span>33.8%</span></div>' +
+    '<div class="row"><span>going second, 6 cards</span><span>39.4%</span></div><div class="row"><span>deck</span><span>Branded (40)</span></div></div>' : "")).join("") + "</ol></div>";
+// While answering: the done calls fold into one line, the current call shows on its own.
+const trailNow = '<div class="trail"><button class="sum" aria-expanded="false">4 tool calls' + CH + '</button><div class="now" role="status"><span class="node"></span>Draw odds <span class="arg" style="color:#7d776b">· 3 copies, 5 cards</span>…</div></div>';
+const answerAsh = '<div class="a"><p>Lleva <b>3</b>. Con 3 copias en 40 cartas la ves en la mano inicial el <b>33,8%</b> de las veces (yendo primero, 5 cartas); con 2 baja al 23,7%.</p>' +
+  '<ul><li>Tu Branded actual tiene 2: subir a 3 cuesta un hueco de extensor.</li><li>En tus 12 partidas contra el bot, yendo segundo ganaste 1 de 4: es donde más te falta interrupción.</li></ul>' +
+  '<p>Si quieres, simulo cuántas manos abren con Ash + una starter.</p></div>' +
+  '<div class="meta2">' + RETRY + COPY + '<span class="info">deepseek-v4.1-flash · 7.2k tokens</span></div>';
+
+const screens = {
+  "play-bot": () => shell("play", botPanel),
+  "play-people": () => shell("play", peoplePanel),
+  "ask-empty": () => shell("ask", askHead("New chat", "OpenCode Go · deepseek-v4.1-flash") +
+    '<div class="thread"><div class="empty"><div class="k">Ask</div><p>Questions about cards, rulings, your decks and your games.<br>Answers use the app\'s card data and your history.</p></div>' +
+    '<div class="sugg"><button>¿Qué hace Maxx "C"?<span>Card text and rulings</span></button>' +
+    '<button>Odds of opening a starter in my Branded deck<span>Draw odds over your deck</span></button>' +
+    '<button>How do I do going second?<span>Your games against the bot</span></button></div></div>' + composer(false)),
+  "ask-nokey": () => shell("ask", askHead("New chat", "OpenCode Go · no key") +
+    '<div class="thread"><div class="empty"><div class="k">Ask</div><p>Questions about cards, rulings, your decks and your games.</p></div>' +
+    '<div class="err" role="alert" style="border-color:rgba(184,154,94,.45);background:var(--accent-tint)"><div class="h" style="color:var(--accent)">' + I.warn +
+    'No OpenCode Go key yet</div><p>Ask uses your own AI provider. Add your key in Settings; it stays in this device\'s keychain and is never shown again.</p>' +
+    '<div class="acts"><button class="btn pri">Add key</button><button class="btn">Get a key</button><button class="btn">Other provider</button></div></div></div>' + composer(false)),
+  "ask-running": () => shell("ask", askHead("¿Cuántas Ash Blossom debería llevar…", "OpenCode Go · deepseek-v4.1-flash") +
+    '<div class="thread">' + qAsh + trailNow + '<div class="a"><p>Lleva <b>3</b>. Con 3 copias en 40 cartas la ves en la mano inicial el <b>33,8%</b> de las veces</p></div>' +
+    think("Counting outs") + '</div>' + composer(true, "")),
+  "ask-thinking": () => shell("ask", askHead("¿Cuántas Ash Blossom debería llevar…", "OpenCode Go · deepseek-v4.1-flash") +
+    '<div class="thread">' + qAsh + think(qs.get("w") || "Reading the field") + '</div>' + composer(true, "")),
+  "think-frames": () => '<div style="padding:28px 22px;display:grid;gap:22px">' + WORDS.map((w) => think(w)).join("") + "</div>",
+  "tools-all": () => shell("ask", askHead("¿Cuántas Ash Blossom debería llevar…", "OpenCode Go · deepseek-v4.1-flash ▾") +
+    '<div class="thread">' + qAsh + trailAll(-1) + answerAsh + "</div>" + composer(false)),
+  "ask-answer": () => shell("ask", askHead("¿Cuántas Ash Blossom debería llevar…", "OpenCode Go · deepseek-v4.1-flash") +
+    '<div class="thread">' + qAsh + trailDone + answerAsh + "</div>" + composer(false)),
+  "ask-tool-open": () => shell("ask", askHead("¿Cuántas Ash Blossom debería llevar…", "OpenCode Go · deepseek-v4.1-flash ▾") +
+    '<div class="thread">' + qAsh + trailAll(4) + answerAsh + "</div>" + composer(false)),
+  "ask-limit": () => shell("ask", askHead("¿Y Maxx \"C\"?", "OpenCode Go · deepseek-v4.1-flash") +
+    '<div class="thread">' + qAsh + trailDone + '<div class="a"><p>Lleva <b>3</b>…</p></div><div class="q">¿Y Maxx "C"?</div>' +
+    '<div class="err" role="alert"><div class="h">' + I.warn + 'OpenCode Go limit reached</div><p>Your plan\'s 5-hour allowance is used up: try again in 6 h, or switch to another provider or model.</p>' +
+    '<div class="acts"><button class="btn pri">Switch provider</button><button class="btn">Pick a model</button></div></div></div>' + composer(false)),
+  "ask-key-bad": () => shell("ask", askHead("¿Qué hace Maxx \"C\"?", "OpenCode Go · deepseek-v4.1-flash") +
+    '<div class="thread"><div class="q">¿Qué hace Maxx "C"?</div><div class="err" role="alert"><div class="h">' + I.warn +
+    'OpenCode Go rejected the key</div><p>The key may have expired or been deleted. Replace it in Settings, then try again.</p>' +
+    '<div class="acts"><button class="btn pri">Replace key</button><button class="btn">Try again</button></div></div></div>' + composer(false)),
+  "ask-list": () => shell("ask", '<div class="askhead"><button class="ibtn" aria-label="Back">' + I.back + '</button><div class="t">Chats</div><button class="ibtn" aria-label="New chat">' + I.plus + "</button></div>" +
+    '<div class="list"><div class="grp">Today</div>' +
+    '<div class="chat"><div><div class="ti">¿Cuántas Ash Blossom debería llevar…</div><div class="mi">deepseek-v4.1-flash · 7.2k tokens</div></div><span class="live">answering…</span></div>' +
+    '<div class="chat"><div><div class="ti">Odds of opening Branded Fusion</div><div class="mi">deepseek-v4.1-flash · 21k tokens</div></div></div>' +
+    '<div class="grp">Earlier</div><div class="chat"><div><div class="ti">Why did the bot chain Called by the Grave?</div><div class="mi">glm-5.3-flash · 48k tokens</div></div></div>' +
+    '<div class="chat"><div><div class="ti">Rulings: Kashtira Fenrir vs Ash</div><div class="mi">deepseek-v4.1-flash · 12k tokens</div></div></div>' +
+    '<p class="help" style="margin-top:14px">Long press a chat to delete it. Each chat stops at 300k tokens; start a new one to keep costs down.</p></div>'),
+  "ask-settings": () => shell("ask", "", {nohead: true, overlay: '<div class="sheet"><div class="sh"><button class="ibtn" aria-label="Back">' + I.back + "</button><h1>Ask settings</h1></div>" +
+    '<div class="sec">Provider</div>' +
+    '<div class="prov"><span class="radio on"></span><div><div class="pn">OpenCode Go</div><div class="pd">Subscription, monthly allowance</div></div><span class="kh">key ••••FJuy</span></div>' +
+    '<div class="prov"><span class="radio"></span><div><div class="pn">OpenCode Zen</div><div class="pd">Pay per use, some free models</div></div><span class="kh">no key</span></div>' +
+    '<div class="prov"><span class="radio"></span><div><div class="pn">OpenRouter</div><div class="pd">Pay per use, many providers</div></div><span class="kh">no key</span></div>' +
+    '<div class="prov"><span class="radio"></span><div><div class="pn">Custom or local</div><div class="pd">Any OpenAI-compatible URL, e.g. Ollama</div></div></div>' +
+    '<div class="sec">OpenCode Go</div><div class="field"><div class="fl">API key</div><div class="fv"><span>••••••••••••FJuy</span><span class="r">saved in the keychain</span></div>' +
+    '<div class="rowbtns"><button class="btn">Replace</button><button class="btn" style="color:var(--danger)">Delete</button></div>' +
+    '<p class="help">The key is write-only: the app never shows it again. <a>Get a key at opencode.ai</a></p></div>' +
+    '<div class="field" style="margin-top:14px"><div class="fl">Model</div><div class="fv"><span>deepseek-v4.1-flash</span><span class="r">' + I.chev + "</span></div>" +
+    '<p class="help">Loaded from OpenCode Go. Answers record the model used.</p></div></div>'}),
+  "icons": () => shell("play", '<div class="lbl" style="margin-top:20px">Tab icons</div><p class="intro">24 px grid, 1.6 stroke, currentColor. The gold node is the one accent: it lights on the selected tab.</p>' +
+    '<div class="icons">' + TABS.map(([k, l], i) => '<div class="cell' + (i === 3 ? ' sel' : '') + '">' + TI[k] + l + '</div>').join("") + '</div>' +
+    '<div class="lbl">At rest and selected, actual size</div><div class="icons small">' + TABS.map(([k, l]) => '<div class="cell">' + TI[k] + l + '</div>').join("") +
+    TABS.map(([k, l]) => '<div class="cell sel">' + TI[k] + l + '</div>').join("") + '</div>'),
+  "model-go": () => shell("ask", askHead("¿Cuántas Ash Blossom debería llevar…", "OpenCode Go · deepseek-v4.1-flash ▾") + '<div class="thread">' + qAsh + trailDone + answerAsh + '</div>' + composer(false),
+    {overlay: '<div class="scrim"></div><div class="bsheet" role="dialog" aria-label="Model"><div class="grab"></div><h2>Model for this chat</h2>' +
+    '<p class="help" style="margin:0">Switching keeps the chat; the next answer uses the new model.</p>' +
+    '<div class="ptabs"><button class="sel">OpenCode Go</button><button>OpenCode Zen</button><button>OpenRouter</button><button>On this device</button></div>' +
+    '<div class="mrow"><span class="radio on"></span><div><div class="mn">deepseek-v4.1-flash<span class="badge g">TESTED</span></div><div class="md2">Fast · tools 18–20/20 in our eval</div></div><span class="mr">default</span></div>' +
+    '<div class="mrow"><span class="radio"></span><div><div class="mn">glm-5.3-flash</div><div class="md2">Fast · not evaluated yet</div></div></div>' +
+    '<div class="mrow"><span class="radio"></span><div><div class="mn">muse-spark-1.3-contributor</div><div class="md2">Slower, stronger reasoning · uses more allowance</div></div></div>' +
+    '<div class="mrow"><span class="radio"></span><div><div class="mn">qwen-coder-next</div><div class="md2">Not evaluated yet</div></div></div>' +
+    '<p class="help" style="margin-top:10px">Listed live from OpenCode Go. "Tested" means it passed our 20-question check; others may call tools less reliably.</p></div>'}),
+  "model-local": () => shell("ask", askHead("New chat", "On this device · Gemma 4 E2B ▾") + '<div class="thread"></div>' + composer(false),
+    {overlay: '<div class="scrim"></div><div class="bsheet" role="dialog" aria-label="Model"><div class="grab"></div><h2>Model for this chat</h2>' +
+    '<div class="ptabs"><button>OpenCode Go</button><button>OpenCode Zen</button><button>OpenRouter</button><button class="sel">On this device</button></div>' +
+    '<div class="grp" style="margin-top:6px">Runs on your phone · private · no key · works offline</div>' +
+    '<div class="mrow"><span class="radio on"></span><div><div class="mn">Gemma 4 E2B<span class="badge g">INSTALLED</span></div><div class="md2">Smallest · quick answers, weaker tool use</div></div><span class="mr">Remove</span></div>' +
+    '<div class="mrow"><span class="radio"></span><div><div class="mn">Gemma 4 E4B</div><div class="md2">Better answers · slower, more battery</div><div class="bar2"><i></i></div></div><span class="mr">Downloading 42%<br>Wi-Fi only</span></div>' +
+    '<div class="grp">On your network</div>' +
+    '<div class="mrow"><span class="radio"></span><div><div class="mn">Ollama · desktop</div><div class="md2">http://192.0.2.20:11434/v1 · gemma4:27b, qwen3:14b</div></div><span class="mr">Set up</span></div>' +
+    '<p class="help" style="margin-top:10px">Local models are not evaluated yet: answers may skip tools or get numbers wrong. The size is shown before any download.</p></div>'}),
+  "ask-gemma": () => shell("ask", askHead("¿Qué hace Maxx \"C\"?", "On this device · Gemma 4 E2B ▾") +
+    '<div class="thread"><div class="q">¿Qué hace Maxx "C"?</div><div class="trail"><button class="sum">1 tool call' + CH + '</button><ol><li class="last">Card <span class="arg">· Maxx “C”</span></li></ol></div>' +
+    '<div class="a"><p>Mientras está activo este turno, <b>robas 1 carta</b> cada vez que tu rival invoca de modo especial. Se activa desde la mano (efecto rápido) y solo una vez por turno.</p></div>' +
+    '<div class="meta2">' + RETRY + COPY + '<span class="info">Gemma 4 E2B · on device · 14 s</span></div>' +
+    '<div class="err" role="status" style="border-color:var(--line-2);background:var(--raise)"><div class="h" style="color:var(--muted)">' + I.warn + 'Battery saver is on</div><p>Local answers will be slower. Plug in, or switch to OpenCode Go for this chat.</p>' +
+    '<div class="acts"><button class="btn">Switch model</button><button class="btn">Dismiss</button></div></div></div>' + composer(false)),
+  "chats": () => shell("ask", '<div class="askhead"><button class="ibtn" aria-label="Back">' + I.back + '</button><div class="t">Chats</div><button class="ibtn" aria-label="New chat">' + I.plus + "</button></div>" +
+    '<div class="search">' + '<svg class="ico" viewBox="0 0 24 24" style="width:18px;height:18px"><circle cx="11" cy="11" r="6"/><path d="m20 20-4.5-4.5"/></svg>' + 'Search chats</div>' +
+    '<div class="list"><div class="grp">Today</div>' +
+    '<div class="chat"><div><div class="ti">¿Cuántas Ash Blossom debería llevar…</div><div class="mi">deepseek-v4.1-flash · 4 questions · 12k tokens<span class="br">2 branches</span></div></div><span class="live">answering…</span></div>' +
+    '<div class="chat"><div><div class="ti">¿Qué hace Maxx "C"?</div><div class="mi">Gemma 4 E2B · on device · 1 question</div></div></div>' +
+    '<div class="grp">Yesterday</div>' +
+    '<div class="chat"><div><div class="ti">Odds of opening Branded Fusion</div><div class="mi">deepseek-v4.1-flash · 6 questions · 21k tokens</div></div></div>' +
+    '<div class="chat hl"><div><div class="ti">Why did the bot chain Called by the Grave?</div><div class="mi">glm-5.3-flash · 9 questions · 48k tokens</div></div></div>' +
+    '<div class="grp">October</div>' +
+    '<div class="chat"><div><div class="ti">Rulings: Kashtira Fenrir vs Ash</div><div class="mi">deepseek-v4.1-flash · 3 questions · 12k tokens</div></div></div>' +
+    '<div class="chat"><div><div class="ti">My going-second record this week</div><div class="mi">deepseek-v4.1-flash · 2 questions · 6k tokens</div></div></div></div>' +
+    '<div class="menu" style="left:150px;top:470px" role="menu"><button role="menuitem">' + I.list + 'Open</button><button role="menuitem">' +
+    '<svg class="ico" viewBox="0 0 24 24"><path d="M5 19h4l10-10-4-4L5 15z"/></svg>Rename</button><button role="menuitem">' +
+    '<svg class="ico" viewBox="0 0 24 24"><path d="M7 4v10a4 4 0 0 0 4 4h6M7 8a3 3 0 1 0 0-.01M17 18a2 2 0 1 0 0-.01"/></svg>Copy as new chat</button><hr><button role="menuitem" class="dz">' +
+    '<svg class="ico" viewBox="0 0 24 24" style="color:var(--danger)"><path d="M5 7h14M10 7V5h4v2M7 7l1 12h8l1-12"/></svg>Delete…</button></div>'),
+  "fork-menu": () => shell("ask", askHead("¿Cuántas Ash Blossom debería llevar…", "OpenCode Go · deepseek-v4.1-flash ▾") +
+    '<div class="thread"><div class="q hl">¿Cuántas Ash Blossom debería llevar en Branded y por qué?</div>' + trailDone + answerAsh + '</div>' + composer(false),
+    {overlay: '<div class="menu" style="right:18px;top:210px" role="menu"><button role="menuitem" class="sel">' +
+    '<svg class="ico" viewBox="0 0 24 24"><path d="M5 19h4l10-10-4-4L5 15z"/></svg>Edit and resend</button><button role="menuitem">' +
+    '<svg class="ico" viewBox="0 0 24 24"><path d="M7 4v10a4 4 0 0 0 4 4h6M7 8a3 3 0 1 0 0-.01M17 18a2 2 0 1 0 0-.01"/></svg>New chat from here</button><button role="menuitem">' +
+    '<svg class="ico" viewBox="0 0 24 24"><rect x="8" y="8" width="11" height="11" rx="2"/><path d="M5 15V6a1 1 0 0 1 1-1h9"/></svg>Copy</button>' +
+    '<hr><p class="help" style="margin:4px 10px 6px">Editing keeps the old version: switch between them with ‹ ›.</p></div>'}),
+  "fork-edit": () => shell("ask", askHead("¿Cuántas Ash Blossom debería llevar…", "OpenCode Go · deepseek-v4.1-flash ▾") +
+    '<div class="thread" style="opacity:.45">' + qAsh + trailDone + answerAsh + '</div>' +
+    '<div class="composer" style="flex-direction:column;align-items:stretch"><div class="editing"><div class="el">EDITING YOUR QUESTION · sends as a new branch</div>' +
+    '<div class="et">¿Cuántas Ash Blossom debería llevar en Branded <u>si voy segundo</u>?<span class="caret"></span></div></div>' +
+    '<div class="rowbtns" style="justify-content:flex-end"><button class="btn">Cancel</button><button class="btn pri">Send</button></div></div>'),
+  "fork-branches": () => shell("ask", askHead("¿Cuántas Ash Blossom debería llevar…", "OpenCode Go · deepseek-v4.1-flash ▾") +
+    '<div class="thread"><div class="qwrap"><div class="q">¿Cuántas Ash Blossom debería llevar en Branded si voy segundo?</div>' +
+    '<div class="branch" aria-label="Question version 2 of 2"><button aria-label="Previous version">' + I.back + '</button>2 / 2<button aria-label="Next version" disabled style="opacity:.35"><svg class="ico" viewBox="0 0 24 24"><path d="m9.5 6 6 6-6 6"/></svg></button></div></div>' +
+    '<div class="trail"><button class="sum">2 tool calls' + CH + '</button><ol><li>Opened deck <span class="arg">· Branded</span></li><li class="last">Your games <span class="arg">· going second</span></li></ol></div>' +
+    '<div class="a"><p>Yendo segundo Ash pierde valor: el rival ya jugó su turno. Lleva <b>2</b> y mete <b>3 Droll &amp; Lock Bird</b> o una board breaker.</p>' +
+    '<ul><li>Yendo segundo ganaste 1 de 4 contra el bot.</li><li>En esas 4 partidas Ash solo paró 1 búsqueda.</li></ul></div>' +
+    '<div class="meta2"><span class="branch" style="margin-right:6px"><button aria-label="Previous answer">' + I.back + '</button>1 / 2<button aria-label="Next answer"><svg class="ico" viewBox="0 0 24 24"><path d="m9.5 6 6 6-6 6"/></svg></button></span>' +
+    RETRY + COPY + '<span class="info">5.1k tokens</span></div>' +
+    '<div class="forkline">version 1 of this question had a different answer</div></div>' + composer(false)),
+};
+
+// ---- P2 rich blocks (replay, bot_view): mock data shaped like the tools' results ------------------------------
+const ART = (c) => "/data/cache/pics/small/" + c + ".jpg";
+const C = {bewd: 89631139, sage: 8240199, ash: 14558127, alt: 38517737, stone: 71039903, imp: 10045474, mj: 44146295,
+  albion: 87746184, aluber: 62962630, bf: 44362883, veiler: 97268402};
+const NM = {[C.bewd]: "Blue-Eyes White Dragon", [C.sage]: "Sage with Eyes of Blue", [C.ash]: "Ash Blossom & Joyous Spring",
+  [C.alt]: "Blue-Eyes Alternative White Dragon", [C.stone]: "The White Stone of Ancients", [C.imp]: "Infinite Impermanence",
+  [C.mj]: "Mirrorjade the Iceblade Dragon", [C.albion]: "Albion the Branded Dragon", [C.aluber]: "Aluber the Jester of Despia",
+  [C.bf]: "Branded Fusion", [C.veiler]: "Effect Veiler"};
+// A card in a zone: code, or "set" (face-down), with optional stat / def / hl / gone.
+function mc(c, o = {}) {
+  if (!c) return "";
+  if (c === "set") return '<span class="x-mc x-back' + (o.def ? " x-def" : "") + '" role="img" aria-label="Set card"></span>';
+  return '<span class="x-mc' + (o.def ? " x-def" : "") + (o.hl ? " x-hl" : "") + (o.gone ? " x-gone" : "") + '" role="img" aria-label="' + NM[c] +
+    (o.st ? ", ATK " + o.st : "") + '" style="background-image:url(' + ART(c) + ')">' + (o.st ? '<span class="x-st">' + o.st + "</span>" : "") + "</span>";
+}
+const zrow = (cells) => '<div class="x-row">' + [0, 1, 2, 3, 4].map((i) => '<div class="x-z">' + (cells[i] ? mc(...[].concat(cells[i])) : "") + "</div>").join("") + "</div>";
+// f = {turn, ph, olp, ylp, oh (count), om, ost, ym, yst, yh (codes)}
+function miniBoard(f) {
+  return '<div class="x-mb" role="img" aria-label="Board: you ' + f.ylp + ' LP, opponent ' + f.olp + ' LP">' +
+    '<div class="x-ohand">' + Array.from({length: f.oh}, () => "<span></span>").join("") + "</div>" +
+    zrow(f.ost || []) + zrow(f.om || []) +
+    '<div class="x-mid"><span class="x-lp">Opp <b>' + f.olp + '</b></span><span class="x-ph">Turn ' + f.turn + " · " + f.ph + '</span><span class="x-lp">You <b>' + f.ylp + "</b></span></div>" +
+    zrow(f.ym || []) + zrow(f.yst || []) +
+    '<div class="x-hand">' + (f.yh || []).map((c) => '<div class="x-z">' + mc(c) + "</div>").join("") + "</div></div>";
+}
+// Turn 2 of "last game": Branded went first (Mirrorjade + a set card); you are Blue-Eyes.
+const OPP = {olp: 8000, oh: 3, om: [0, [C.mj, {st: 3000}]], ost: [0, 0, "set"]};
+const FRAMES = [
+  {who: "", text: "Turn 2 · you draw", f: {...OPP, turn: 2, ph: "Draw", ylp: 8000, yh: [C.sage, C.bewd, C.alt, C.stone, C.imp, C.ash]}},
+  {who: "y", text: "Normal Summons Sage with Eyes of Blue", f: {...OPP, turn: 2, ph: "Main 1", ylp: 8000, ym: [0, 0, [C.sage, {st: 0, hl: 1}]], yh: [C.bewd, C.alt, C.stone, C.imp, C.ash]}},
+  {who: "y", text: "Activates Sage: adds The White Stone of Ancients", f: {...OPP, turn: 2, ph: "Main 1", ylp: 8000, ym: [0, 0, [C.sage, {st: 0, hl: 1}]], yh: [C.bewd, C.alt, C.stone, C.stone, C.imp, C.ash]}},
+  {who: "y", text: "Special Summons Blue-Eyes Alternative White Dragon", f: {...OPP, turn: 2, ph: "Main 1", ylp: 8000, ym: [0, 0, [C.sage, {st: 0}], [C.alt, {st: 3000, hl: 1}]], yh: [C.bewd, C.stone, C.stone, C.imp, C.ash]}},
+  {who: "y", text: "Activates Blue-Eyes Alternative: destroys Mirrorjade", f: {...OPP, om: [0, [C.mj, {st: 3000, gone: 1}]], turn: 2, ph: "Main 1", ylp: 8000, ym: [0, 0, [C.sage, {st: 0}], [C.alt, {st: 3000, hl: 1}]], yh: [C.bewd, C.stone, C.stone, C.imp, C.ash]}},
+  {who: "o", text: "Mirrorjade: destroys all your monsters at the End Phase", f: {...OPP, om: [], turn: 2, ph: "End", ylp: 8000, ym: [0, 0, [C.sage, {gone: 1}], [C.alt, {st: 3000, gone: 1}]], yh: [C.bewd, C.stone, C.stone, C.imp, C.ash]}},
+];
+const fi = Math.min(FRAMES.length - 1, Math.max(0, +(qs.get("f") || 3)));
+function sequenceBlock(k, playing) {
+  const fr = FRAMES[k];
+  return '<div class="x-rb" role="group" aria-label="Turn 2, play ' + (k + 1) + " of " + FRAMES.length + '"><div class="x-rh"><span class="x-k">Turn 2</span>Your plays<span class="x-r">replay · decisions 6–11</span></div>' +
+    miniBoard(fr.f) +
+    '<div class="x-cap" aria-live="polite">' + (fr.who ? '<span class="x-who x-' + fr.who + '">' + (fr.who === "y" ? "YOU" : "OPP") + "</span>" : "") + fr.text + "</div>" +
+    '<div class="x-scrub"><button class="x-pp" aria-label="' + (playing ? "Pause" : "Play") + '">' + (playing ? '<svg class="ico" viewBox="0 0 24 24"><path d="M9 6v12M15 6v12"/></svg>' : '<svg class="ico" viewBox="0 0 24 24"><path d="M8 5.5v13l10-6.5z"/></svg>') +
+    '</button><div class="x-dots" aria-hidden="true">' + FRAMES.map((_, i) => "<i" + (i === k ? ' class="x-on"' : i < k ? ' class="x-done"' : "") + "></i>").join("") +
+    '</div><span class="x-n">' + (k + 1) + " / " + FRAMES.length + "</span></div>" +
+    '<div class="x-acts"><button class="btn">Open in replay</button><button class="btn">Bot\'s view here</button></div></div>';
+}
+// LP per turn (replay's lp_at_start + final_lp).
+function spark() {
+  const you = [8000, 8000, 8000, 5000, 5000, 1900, 0], opp = [8000, 8000, 8000, 8000, 6200, 6200, 6200];
+  const x = (i) => 6 + i * (340 / (you.length - 1)), y = (v) => 6 + (1 - v / 8000) * 40;
+  const path = (a) => "M" + a.map((v, i) => x(i).toFixed(1) + " " + y(v).toFixed(1)).join(" L");
+  return '<svg class="x-spark" viewBox="0 0 352 54" role="img" aria-label="Life points by turn: your field was wiped on turn 2; you fell from 8000 to 0 by turn 7; the opponent ended at 6200">' +
+    '<line class="x-g" x1="6" x2="346" y1="46" y2="46"/>' + you.map((_, i) => '<text x="' + (x(i) - 2) + '" y="54">' + (i + 1) + "</text>").join("") +
+    '<path class="x-o" d="' + path(opp) + '"/><path class="x-y" d="' + path(you) + '"/><circle class="x-hot" cx="' + x(1) + '" cy="' + y(8000) + '" r="3.5"/></svg>' +
+    '<div class="x-legend"><span><i style="background:var(--you)"></i>You</span><span><i style="background:var(--bot)"></i>Opponent</span><span style="margin-left:auto">● the turn this answer is about</span></div>';
+}
+const gameBlock = '<div class="x-rb" role="group" aria-label="Last game"><div class="x-rh"><span class="x-k">Last game</span><span class="x-res x-l">LOST</span><span class="x-r">7 turns · you went 2nd</span></div><div style="font-size:14px;margin-top:4px">Blue-Eyes vs Branded</div>' +
+  spark() + "</div>";
+const plusI = '<svg class="ico" viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></svg>';
+function opt(card, label, tags, w, p, cls) {
+  return '<div class="x-opt' + (cls ? " x-" + cls : "") + '"><div class="x-th' + (card ? "" : " x-nocard") + '">' + (card ? mc(card) : plusI) + '</div><div class="x-ol">' + label +
+    '<div class="x-tags">' + tags.map(([t, c]) => '<span class="x-tag x-' + c + '">' + t + "</span>").join("") + '</div></div><div class="x-nums"><div class="x-w">' + w + '%</div><div class="x-p">bot ' + p + '%</div></div>' +
+    '<div class="x-bars" aria-hidden="true"><i style="width:' + p + '%"></i></div></div>';
+}
+const botBlock = '<div class="x-rb" role="group" aria-label="Bot\'s view of decision 10"><div class="x-rh"><span class="x-k">Decision 10</span>Turn 2 · Main 1<span class="x-r">bot\'s view</span></div>' +
+  miniBoard(FRAMES[3].f) +
+  '<div class="x-gauge">Win chance before <div class="x-bar"><i style="width:44%"></i></div><b style="color:var(--text)">44%</b></div>' +
+  '<div class="x-opts">' +
+  opt(0, "Go to the Battle Phase", [["BOT'S PICK", "bot"]], 47, 52, "best") +
+  opt(C.alt, "Blue-Eyes Alternative: destroy Mirrorjade", [["YOUR PICK", "you"], ["−18 PTS · BLUNDER", "bad"]], 29, 31, "you") +
+  opt(C.stone, "Set The White Stone of Ancients", [], 41, 9) +
+  "</div><p class=\"help\" style=\"margin:8px 0 0\">Win chance looks one step ahead with the bot on both sides: an estimate, not a solved line.</p>" +
+  '<div class="x-acts"><button class="btn pri">Try the bot\'s line</button><button class="btn">Watch the turn</button></div></div>';
+const qLost = '<div class="q">Why did I lose my last game? Was turn 2 a mistake?</div>';
+const trailReplay = '<div class="trail"><button class="sum" aria-expanded="false">3 tool calls · 4 s' + CH + '</button><ol><li>Replay <span class="arg">· last game</span></li>' +
+  '<li>Replay <span class="arg">· turn 2</span></li><li class="last">Bot\'s view <span class="arg">· decision 10</span></li></ol></div>';
+const cardA = (n) => '<u style="text-decoration-color:var(--accent);text-underline-offset:3px">' + n + "</u>";
+screens["ask-replay"] = () => shell("ask", askHead("Why did I lose my last game?", "OpenCode Go · deepseek-v4.1-flash") +
+  '<div class="thread" style="overflow:auto">' + qLost + trailReplay + gameBlock +
+  '<div class="a"><p>Turn 2 decided it. You destroyed ' + cardA("Mirrorjade the Iceblade Dragon") + " with " + cardA("Blue-Eyes Alternative White Dragon") +
+  ", so its effect wiped your field in the End Phase and you entered turn 3 with nothing.</p></div>" + sequenceBlock(4, false) + "</div>" + composer(false));
+screens["ask-botview"] = () => shell("ask", askHead("Why did I lose my last game?", "OpenCode Go · deepseek-v4.1-flash") +
+  '<div class="thread" style="overflow:auto">' + botBlock +
+  '<div class="a"><p>The bot attacks instead: ' + cardA("Mirrorjade the Iceblade Dragon") + " only wipes your field when an effect of yours destroys it, so battle keeps your board. " +
+  "That line is worth about <b>18 points</b> of win chance.</p></div></div>" + composer(false));
+screens["ask-sequence"] = () => shell("ask", askHead("Why did I lose my last game?", "OpenCode Go · deepseek-v4.1-flash") +
+  '<div class="thread" style="overflow:auto">' + qLost + trailReplay + '<div id="seq">' + sequenceBlock(fi, true) + "</div></div>" + composer(false));
+screens["sequence-frames"] = () => '<div style="padding:18px"><div class="lbl" style="margin-top:0">The play sequence, frame by frame</div>' +
+  '<p class="intro">Each frame is one choice from the replay; the block plays them 1.6 s apart (or one tap at a time). Reduced motion: no slide, the frame just changes.</p>' +
+  '<div class="x-fgrid">' + FRAMES.map((fr) => '<div class="x-rb">' + miniBoard(fr.f) + '<div class="x-cap">' + (fr.who ? '<span class="x-who x-' + fr.who + '">' + (fr.who === "y" ? "YOU" : "OPP") + "</span>" : "") + fr.text + "</div></div>").join("") + "</div></div>";
+
+// ---- Play sequence v2: piles, chain, the acting card and what moved (user 2026-11-15) ---------------------------
+const BAN = '<svg viewBox="0 0 12 12"><circle cx="6" cy="6" r="4.5"/><path d="M3 9 9 3"/></svg>';
+const pile = (tag, n, top, o = {}) => '<div class="y-pile' + (o.hl ? " y-hl" : "") + '" role="img" aria-label="' + tag + " " + n + '">' + (top ? mc(top) : tag) +
+  (n ? '<span class="y-n">' + n + "</span>" : "") + (o.ban ? '<span class="y-ban' + (o.banhl ? " y-hl" : "") + '">' + BAN + o.ban + "</span>" : "") + "</div>";
+const z7 = (left, cells, right) => '<div class="x-row">' + left + [0, 1, 2, 3, 4].map((i) => '<div class="x-z">' + (cells[i] ? mc(...[].concat(cells[i])) : "") + "</div>").join("") + right + "</div>";
+const link = (c, n, who, neg) => '<span class="y-link y-' + who + (neg ? " y-neg" : "") + '">' + mc(c) + '<span class="y-cn">' + n + "</span></span>";
+// g = {turn, ph, olp, ylp, oh, om, ost, ym, yst, yh, ogy:[n, top, hl, ban, banhl], ygy:[...], odeck, ydeck, chain: [[code, who, neg]]}
+function board2(g) {
+  const gy = (a) => pile("GY", a[0], a[1], {hl: a[2], ban: a[3], banhl: a[4]});
+  return '<div class="x-mb y-mb" role="img" aria-label="Board">' +
+    '<div class="x-ohand">' + Array.from({length: g.oh}, () => "<span></span>").join("") + "</div>" +
+    z7(pile("Deck", g.odeck), g.ost || [], pile("Extra", 15)) + z7(gy(g.ogy), g.om || [], '<div></div>') +
+    '<div class="y-mid"><span class="x-lp">Opp <b>' + g.olp + "</b></span>" +
+    (g.chain && g.chain.length ? '<span class="y-chain"><span class="y-cl">CHAIN</span>' + g.chain.map((c, i) => link(c[0], i + 1, c[1], c[2])).join("") + "</span>"
+      : '<span class="x-ph" style="margin:0 auto">Turn ' + g.turn + " · " + g.ph + "</span>") +
+    '<span class="x-lp">You <b>' + g.ylp + "</b></span></div>" +
+    z7('<div></div>', g.ym || [], gy(g.ygy)) + z7(pile("Extra", 15), g.yst || [], pile("Deck", g.ydeck)) +
+    '<div class="x-hand">' + (g.yh || []).map((c) => '<div class="x-z">' + mc(c) + "</div>").join("") + "</div></div>";
+}
+function cap2(f) {
+  return '<div class="y-cap">' + (f.card ? '<span class="y-act">' + mc(f.card) + "</span>" : "<span></span>") + '<div><div class="y-l1">' +
+    (f.who ? '<span class="x-who x-' + f.who + '">' + (f.who === "y" ? "YOU" : "OPP") + "</span>" : "") + "<span>" + f.text + "</span>" +
+    (f.from ? '<span class="y-from">' + f.from + "</span>" : "") + "</div>" +
+    (f.moves ? '<div class="y-moves">' + f.moves.map(([to, c]) => '<span class="y-mv">' + to + ' <i style="background-image:url(' + ART(c) + ')"></i><b>' + NM[c] + "</b></span>").join("") + "</div>" : "") +
+    "</div></div>";
+}
+const B0 = {turn: 1, ph: "Main 1", olp: 8000, ylp: 8000, odeck: 35, ydeck: 35, yh: [C.ash, C.sage, C.bewd, C.imp, C.veiler]};
+const FR2 = [
+  {who: "o", text: "Activates Branded Fusion", from: "FROM HAND", card: C.bf,
+    g: {...B0, oh: 4, ost: [0, 0, [C.bf, {hl: 1}]], chain: [[C.bf, "o"]], ogy: [0], ygy: [0]}},
+  {who: "y", text: "Activates Ash Blossom & Joyous Spring", from: "FROM HAND", card: C.ash,
+    g: {...B0, oh: 4, ost: [0, 0, C.bf], chain: [[C.bf, "o"], [C.ash, "y"]], yh: [C.sage, C.bewd, C.imp, C.veiler], ogy: [0], ygy: [0]}},
+  {who: "", text: "The chain resolves: Branded Fusion is negated", card: 0,
+    moves: [["→ your GY", C.ash], ["→ opp's GY", C.bf]],
+    g: {...B0, oh: 4, chain: [], yh: [C.sage, C.bewd, C.imp, C.veiler], ogy: [1, C.bf, 1], ygy: [1, C.ash, 1]}},
+  {who: "o", text: "Uses the effect of Albion the Branded Dragon", from: "IN GY", card: C.albion,
+    moves: [["→ banished", C.aluber], ["→ banished", C.albion]],
+    g: {...B0, oh: 3, om: [0, 0, [C.mj, {st: 3000, hl: 1}]], chain: [], yh: [C.sage, C.bewd, C.imp, C.veiler], ogy: [1, C.bf, 0, 2, 1], ygy: [1, C.ash]}},
+];
+function seqBlock2(k) {
+  const f = FR2[k];
+  return '<div class="x-rb" role="group" aria-label="Turn 1, play ' + (k + 1) + " of " + FR2.length + '"><div class="x-rh"><span class="x-k">Turn 1</span>Opponent’s plays</div>' +
+    board2(f.g) + cap2(f) +
+    '<div class="x-scrub"><button class="x-pp" aria-label="Pause"><svg class="ico" viewBox="0 0 24 24"><path d="M9 6v12M15 6v12"/></svg></button><div class="x-dots" aria-hidden="true">' +
+    FR2.map((_, i) => "<i" + (i === k ? ' class="x-on"' : i < k ? ' class="x-done"' : "") + "></i>").join("") + '</div><span class="x-n">' + (k + 1) + " / " + FR2.length + "</span></div></div>";
+}
+screens["sequence-hand"] = () => shell("ask", askHead("Why did I lose my last game?", "OpenCode Go · deepseek-v4.1-flash") +
+  '<div class="thread" style="overflow:auto">' + seqBlock2(+(qs.get("f") || 1)) + "</div>" + composer(false));
+screens["sequence-moves"] = () => '<div style="padding:18px"><div class="lbl" style="margin-top:0">Every play shows on the board</div>' +
+  '<p class="intro">The board is the duel’s: GY with its top card, the banished pill, Deck and Extra. The card that acts is shown large beside the caption with where it acted from; ' +
+  'what moved is listed under it and its pile lights up; an open chain shows as the duel’s chain links.</p>' +
+  FR2.slice(2).map((f, i) => '<div class="x-rb" style="margin-top:10px"><div class="x-rh"><span class="x-k">Play ' + (i + 3) + " of 4</span></div>" + board2(f.g) + cap2(f) + "</div>").join("") + "</div>";
+
+// ---- Games: everything the tools read, without asking (user 2026-11-15) ---------------------------------------
+function seg3(cur) {
+  return '<div class="seg" role="tablist" aria-label="Play">' + [["people", "Multiplayer"], ["bot", "Bot"], ["games", "Games"]].map(([k, l]) =>
+    '<button role="tab"' + (cur === k ? ' class="sel" aria-selected="true"' : "") + ">" + l + "</button>").join("") + "</div>";
+}
+const lpMini = (you, opp) => {
+  const x = (i, n) => 2 + i * (60 / (n - 1)), y = (v) => 2 + (1 - v / 8000) * 22;
+  const path = (a) => "M" + a.map((v, i) => x(i, a.length).toFixed(1) + " " + y(v).toFixed(1)).join(" L");
+  return '<svg viewBox="0 0 64 26" aria-hidden="true"><path d="' + path(opp) + '" style="stroke:var(--bot);stroke-dasharray:3 2"/><path d="' + path(you) + '" style="stroke:var(--you)"/></svg>';
+};
+const gRow = (res, title, meta, you, opp, tag) => '<div class="g-row" role="button" tabindex="0"><span class="res ' + (res === "WON" ? "w" : res === "LOST" ? "l" : "s") + '">' + res + "</span>" +
+  '<div><div class="ti">' + title + (tag ? '<span class="tag">' + tag + "</span>" : "") + '</div><div class="mi">' + meta + "</div></div>" + lpMini(you, opp) + "</div>";
+const sr = (label, rec, pct, odds) => '<div class="g-sr' + (odds ? " odds" : "") + '"><span>' + label + '</span><span class="n">' + rec + '</span><span class="bar" role="img" aria-label="' + pct + (odds ? "%" : "% won") + '"><i style="width:' + pct + '%"></i></span></div>';
+const statCard = '<div class="g-stat"><div class="g-big"><b>12–9</b><span>57% won · last 30 days · practice and samples not counted</span></div>' +
+  '<div class="g-sub">Turn order</div>' + sr("Going first", "7–3", 70) + sr("Going second", "5–6", 45) +
+  '<div class="g-sub">Your decks</div>' + sr("Blue-Eyes", "8–4", 67) + sr("Branded", "4–5", 44) +
+  '<div class="g-sub">Opponents</div>' + sr("Mitsurugi (bot)", "1–4", 20) + sr("Snake-Eye (bot)", "5–2", 71) + "</div>";
+const samplesSec = '<div class="lbl">Sample games</div><p class="g-note">Example games that come with the app, so you can try the replay and the bot\'s view. They never count in your stats.</p>' +
+  gRow("SAMPLE", "Blue-Eyes vs Branded", "Bot vs bot · 4 turns · went 1st", [8000, 8000, 4100, 0], [8000, 8000, 8000, 8000], "") +
+  gRow("SAMPLE", "Blue-Eyes vs Branded", "Bot vs bot · 8 turns · went 2nd", [8000, 8000, 5000, 5000, 2300], [8000, 8000, 7600, 800, 0], "") +
+  gRow("SAMPLE", "Branded vs Blue-Eyes", "Bot vs bot · 14 turns · went 1st", [8000, 7000, 6000, 3000, 0], [8000, 8000, 5000, 5000, 5000], "") +
+  '<button class="btn" style="margin:10px 0 18px">Hide sample games</button>';
+screens["games"] = () => shell("play", '<div style="overflow:auto;margin:0 -18px;padding:0 18px">' + seg3("games") +
+  '<div class="g-chips" role="group" aria-label="Which games"><button class="sel" aria-pressed="true">All</button><button aria-pressed="false">Bot</button><button aria-pressed="false">People</button><button aria-pressed="false">Practice</button></div>' +
+  statCard + '<div class="g-acts"><button class="btn">Ask about my stats</button></div>' +
+  '<div class="lbl">Your games</div>' +
+  gRow("LOST", "Blue-Eyes vs Branded", "Bot · Duel · 7 turns · went 2nd · 2 h ago", [8000, 8000, 8000, 5000, 5000, 1900, 0], [8000, 8000, 8000, 8000, 6200, 6200, 6200]) +
+  gRow("WON", "Blue-Eyes vs Mitsurugi", "Bot · Duel · 11 turns · went 1st · yesterday", [8000, 8000, 6000, 6000, 4400, 4400, 4400], [8000, 6500, 6500, 3000, 3000, 900, 0]) +
+  gRow("WON", "Branded vs Snake-Eye", "Multiplayer · 9 turns · went 2nd · Nov 12", [8000, 8000, 5200, 5200, 5200, 3000], [8000, 8000, 8000, 4000, 1000, 0]) +
+  gRow("LOST", "Branded vs Mitsurugi", "Bot · Practice · 6 turns · went 1st · Nov 11", [8000, 8000, 3000, 3000, 0], [8000, 8000, 8000, 7000, 7000], "PRACTICE") +
+  samplesSec + "</div>");
+screens["games-empty"] = () => shell("play", '<div style="overflow:auto;margin:0 -18px;padding:0 18px">' + seg3("games") +
+  '<div class="g-stat"><div class="g-big"><b>0–0</b><span>no games yet</span></div><p class="g-note" style="margin-bottom:0">Play the bot or a friend: every game is saved here with its replay, and your win rate by deck, turn order and opponent fills in.</p>' +
+  '<div class="g-acts"><button class="btn pri">Play the bot</button></div></div>' + samplesSec + "</div>");
+const gHead = (t, sub) => '<div class="g-head"><button class="ibtn" aria-label="Back">' + I.back + '</button><div class="t">' + t + '<div class="sub">' + sub + "</div></div></div>";
+const turnRow = (n, who, plays, lp, open) => '<div class="g-turn' + (open ? " open" : "") + '" role="button" aria-expanded="' + !!open + '"><span class="tn">T' + n + "</span><span>" + who +
+  ' <span class="who">· ' + plays + '</span></span><span class="lp">' + lp + " " + (open ? CD : CH) + "</span></div>";
+const decRow = (n, txt, pick, mk) => '<div class="g-dec" role="button"><span class="dn">D' + n + '</span><div><div>' + txt + '</div><div class="pk">You: ' + pick + "</div></div>" +
+  (mk ? '<span class="mk' + (mk[1] ? " bad" : "") + '">' + mk[0] + "</span>" : CH) + "</div>";
+// On the game page the chart's mark is the open turn, and the sequence has no chat-only buttons.
+const gameCardHere = gameBlock.replace("Last game", "Game").replace("● the turn this answer is about", "● the open turn");
+const seqHere = (k) => sequenceBlock(k, false).replace(/<div class="x-acts">[\s\S]*?<\/div>/, "");
+screens["game"] = () => shell("play", '<div style="overflow:auto;margin:0 -18px;padding:0 18px">' + gHead("Blue-Eyes vs Branded", "Bot · Duel · 2 h ago") + gameCardHere +
+  '<div class="g-acts"><button class="btn">Check my decisions</button><button class="btn">Ask about this game</button></div>' +
+  '<p class="g-note">Check my decisions runs the bot\'s view on each of your 31 decisions (about 1 min) and marks the ones that lost the most.</p>' +
+  '<div class="lbl">Turns</div>' + turnRow(1, "Opponent", "6 plays", "8000 · 8000") + turnRow(2, "You", "5 plays · decisions 6–11", "8000 · 8000", true) +
+  seqHere(4) +
+  '<div style="margin-top:6px">' + decRow(6, "Normal Summon", "Sage with Eyes of Blue") + decRow(8, "Special Summon from hand", "Blue-Eyes Alternative White Dragon") +
+  decRow(10, "Main 1: what next", "Blue-Eyes Alternative: destroy Mirrorjade", ["−18 · BLUNDER", 1]) + "</div>" +
+  turnRow(3, "Opponent", "8 plays", "8000 · 8000") + turnRow(4, "You", "3 plays · decisions 12–14", "5000 · 8000") + "<div style='height:20px'></div></div>");
+screens["game-decision"] = () => shell("play", '<div style="overflow:auto;margin:0 -18px;padding:0 18px">' + gHead("Decision 10", "Turn 2 · Main 1 · Blue-Eyes vs Branded") +
+  botBlock.replace('<div class="x-acts"><button class="btn pri">Try the bot\'s line</button><button class="btn">Watch the turn</button></div>',
+    '<div class="x-acts"><button class="btn pri">Try the bot\'s line</button><button class="btn">Ask why</button></div>') +
+  '<div class="lbl">All your options here</div>' +
+  [[C.alt, "Blue-Eyes Alternative: destroy Mirrorjade", 1], [0, "Go to the Battle Phase"], [C.stone, "Set The White Stone of Ancients"], [0, "End the turn"]].map(([c, l, you]) =>
+    '<div class="g-opt' + (you ? " you" : "") + '"><div class="x-th' + (c ? "" : " x-nocard") + '">' + (c ? mc(c) : plusI) + "</div><span>" + l + "</span>" + (you ? '<span class="x-tag x-you">YOUR PICK</span>' : "<span></span>") + "</div>").join("") +
+  '<div class="g-acts" style="margin-bottom:20px"><button class="btn">‹ Decision 9</button><button class="btn">Decision 11 ›</button></div></div>');
+const pk = (c, n, k) => '<span><i style="background-image:url(' + ART(c) + ')"></i>' + n + " <b>×" + k + "</b></span>";
+screens["deck-odds"] = () => shell("decks", '<div style="overflow:auto;margin:0 -18px;padding:0 18px">' + gHead("Branded · draw odds", "40 cards in the main deck") +
+  '<div class="seg" role="tablist" aria-label="Hand"><button role="tab" class="sel" aria-selected="true">Going first · 5 cards</button><button role="tab">Going second · 6</button></div>' +
+  '<div class="g-sub">Open at least one of</div><div class="g-pick">' + pk(C.aluber, "Aluber", 3) + pk(C.bf, "Branded Fusion", 3) + '<button class="btn" style="min-height:36px">+ Add cards</button></div>' +
+  '<div class="g-stat"><div class="g-oddsres"><b>57.7%</b><span class="g-note" style="margin:0">at least one of 6 cards</span></div>' +
+  sr("None", "42.3%", 42, 1) + sr("Exactly 1", "42.3%", 42, 1) + sr("2 or more", "15.4%", 15, 1) + "</div>" +
+  '<div class="g-sub" style="margin-top:16px">And also</div><div class="g-pick">' + pk(C.ash, "Ash Blossom", 2) + '<button class="btn" style="min-height:36px">+ Add a group</button></div>' +
+  '<div class="g-stat"><div class="g-oddsres"><b>12.0%</b><span class="g-note" style="margin:0">a starter and an Ash Blossom</span></div></div>' +
+  '<div class="g-acts"><button class="btn">Ask about these odds</button></div><p class="g-note">Exact odds (hypergeometric), the same numbers Ask uses.</p></div>');
+// ---- Attach to a question, on-device Gemma check, games search and delete (user 2026-11-15) ----------------------
+const IA = {
+  deck: '<svg class="ico" viewBox="0 0 24 24"><rect x="5" y="4" width="11" height="15" rx="1.5"/><path d="M9 4.5V3.8A1 1 0 0 1 10 3h8a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1h-2"/></svg>',
+  game: '<svg class="ico" viewBox="0 0 24 24"><path d="M4 17.5 9 12l3.5 3L20 7"/><path d="M15.5 7H20v4.5"/></svg>',
+  card: '<svg class="ico" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6"/><path d="m20 20-4.5-4.5"/></svg>',
+  photo: '<svg class="ico" viewBox="0 0 24 24"><path d="M4 8.5A1.5 1.5 0 0 1 5.5 7H8l1.5-2h5L16 7h2.5A1.5 1.5 0 0 1 20 8.5v9a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 4 17.5z"/><circle cx="12" cy="13" r="3.2"/></svg>',
+  x: '<svg class="ico" viewBox="0 0 24 24" style="width:14px;height:14px"><path d="M7 7l10 10M17 7 7 17"/></svg>',
+  no: '<svg class="ico" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M8.5 8.5l7 7"/></svg>',
+  trash: '<svg class="ico" viewBox="0 0 24 24"><path d="M5 7h14M10 7V5h4v2M7 7l1 12h8l1-12"/></svg>',
+};
+function composerA(chips, text) {
+  return '<div class="composer" style="flex-direction:column;align-items:stretch">' + (chips ? '<div class="att">' + chips + "</div>" : "") +
+    '<div style="display:flex;gap:8px;align-items:center"><button class="plusb" aria-label="Attach a deck, game or card">' + I.plus + '</button><div class="in" style="flex:1">' +
+    (text || "Ask about cards, your deck or your games") + '</div><button class="send" aria-label="Send">' + I.send + "</button></div></div>";
+}
+const chip = (k, name, art) => '<span>' + (art ? '<i style="background-image:url(' + ART(art) + ')"></i>' : "") + '<b class="k">' + k + "</b>" + name +
+  '<button class="x" aria-label="Remove ' + name + '">' + IA.x + "</button></span>";
+const arow = (ico, n, d, off) => '<div class="arow' + (off ? " off" : "") + '"><span class="ai">' + ico + '</span><div><div class="an">' + n + '</div><div class="ad">' + d + "</div></div>" + CH + "</div>";
+screens["ask-attach"] = () => shell("ask", askHead("New chat", "OpenCode Go · deepseek-v4.1-flash ▾") + '<div class="thread"></div>' + composerA(""),
+  {overlay: '<div class="scrim"></div><div class="bsheet" role="dialog" aria-label="Attach"><div class="grab"></div><h2>Attach to your question</h2>' +
+  '<p class="help" style="margin:0 0 6px">The model reads what you attach first, so it does not have to search for it. Photos need a model that reads images: the provider’s model list says which (deepseek-v4.1-flash does; deepseek-v4-pro does not, so with it this row is greyed with “switch model”).</p>' +
+  arow(IA.deck, "A deck", "One of your saved decks: the list, counts and legality") +
+  arow(IA.game, "A game", "A saved game or a sample: the summary, turns and your decisions") +
+  arow(IA.card, "A card", "Search by name or effect") +
+  arow(IA.photo, "A photo of a card", "Take or pick a photo, any language: we find the card") + "</div>"});
+screens["ask-attach-game"] = () => shell("ask", askHead("New chat", "OpenCode Go · deepseek-v4.1-flash ▾") + '<div class="thread"></div>' + composerA(""),
+  {overlay: '<div class="scrim"></div><div class="bsheet" role="dialog" aria-label="Attach a game"><div class="grab"></div><h2>Attach a game</h2>' +
+  '<div class="search" style="margin:6px 0 4px"><svg class="ico" viewBox="0 0 24 24" style="width:18px;height:18px"><circle cx="11" cy="11" r="6"/><path d="m20 20-4.5-4.5"/></svg>Search by deck or opponent</div>' +
+  gRow("LOST", "Blue-Eyes vs Branded", "Bot · Duel · 7 turns · went 2nd · 2 h ago", [8000, 8000, 8000, 5000, 5000, 1900, 0], [8000, 8000, 8000, 8000, 6200, 6200, 6200]) +
+  gRow("WON", "Blue-Eyes vs Mitsurugi", "Bot · Duel · 11 turns · went 1st · yesterday", [8000, 8000, 6000, 6000, 4400, 4400, 4400], [8000, 6500, 6500, 3000, 3000, 900, 0]) +
+  gRow("SAMPLE", "Blue-Eyes vs Branded", "Bot vs bot · 4 turns · went 1st", [8000, 8000, 4100, 0], [8000, 8000, 8000, 8000]) + "</div>"});
+screens["ask-attached"] = () => shell("ask", askHead("How do I beat Branded?", "OpenCode Go · deepseek-v4.1-flash ▾") +
+  '<div class="thread"><div class="q" style="display:block"><div class="att">' + '<span><b class="k">DECK</b>Blue-Eyes</span><span><b class="k">GAME</b>vs Branded · 2 h ago</span>' + "</div>How do I beat Branded going second?</div>" +
+  '<div class="trail"><button class="sum">3 tool calls' + CH + '</button><ol><li>Attached deck <span class="arg">· Blue-Eyes</span></li><li>Attached game <span class="arg">· vs Branded</span></li><li class="last">Bot\'s view <span class="arg">· decision 10</span></li></ol></div>' +
+  '<div class="a"><p>Your loss turned on decision 10 …</p></div></div>' +
+  composerA(chip("CARD", "Ash Blossom", C.ash), "And should I side in more Ash?"));
+// Provider as a select row, not pills (user, 2026-11-15: "it should be a selection menu with search in case we add many
+// more providers"). The row opens the provider picker; picking one comes back here with its models.
+const provRow = (name, sub) => '<button class="prow" aria-haspopup="dialog" aria-label="Provider: ' + name + '"><span class="pk">Provider</span>' +
+  '<span class="pv"><span class="pn">' + name + '</span><span class="ps">' + sub + "</span></span>" + CH + "</button>";
+const pItem = (name, sub, on, tag) => '<div class="mrow"><span class="radio' + (on ? " on" : "") + '"></span><div><div class="mn">' + name +
+  (tag ? '<span class="badge g">' + tag + "</span>" : "") + '</div><div class="md2">' + sub + "</div></div></div>";
+screens["model-provider"] = () => shell("ask", askHead("New chat", "OpenCode Go · deepseek-v4.1-flash ▾") + '<div class="thread"></div>' + composer(false),
+  {overlay: '<div class="scrim"></div><div class="bsheet" role="dialog" aria-label="Model"><div class="grab"></div><h2>Model</h2>' +
+  provRow("OpenCode Go", "Key saved · subscription") +
+  '<div class="mrow"><span class="radio on"></span><div><div class="mn">deepseek-v4.1-flash</div></div><span class="mr">default</span></div>' +
+  '<div class="mrow"><span class="radio"></span><div><div class="mn">glm-5.3-flash</div></div></div>' +
+  '<div class="mrow"><span class="radio"></span><div><div class="mn">kimi-k3</div></div></div>' +
+  '<div class="mrow"><span class="radio"></span><div><div class="mn">qwen3.8-flash</div></div></div>' +
+  '<p class="help" style="margin-top:10px">Or type a model name · Providers and keys</p></div>'});
+screens["provider-pick"] = () => shell("ask", askHead("New chat", "OpenCode Go · deepseek-v4.1-flash ▾") + '<div class="thread"></div>' + composer(false),
+  {overlay: '<div class="scrim"></div><div class="bsheet" role="dialog" aria-label="Provider"><div class="grab"></div><h2>Provider</h2>' +
+  '<div class="search" style="margin:6px 0 4px"><svg class="ico" viewBox="0 0 24 24" style="width:18px;height:18px"><circle cx="11" cy="11" r="6"/><path d="m20 20-4.5-4.5"/></svg>Search providers</div>' +
+  pItem("OpenCode Go", "Key saved · subscription: monthly allowance per model", true) +
+  pItem("OpenCode Zen", "No key yet · pay per use, plus free models") +
+  pItem("OpenRouter", "No key yet · pay per use across many providers") +
+  pItem("On this device", "Gemma 4 E4B installed · offline, private") +
+  pItem("Custom or local", "Any OpenAI-compatible address, e.g. Ollama or LM Studio") + "</div>"});
+const okR = (t) => '<div class="dr okk">' + I.check + "<span>" + t + "</span></div>";
+const noR = (t) => '<div class="dr no">' + IA.no + "<span>" + t + "</span></div>";
+const localSheet = (body) => ({overlay: '<div class="scrim"></div><div class="bsheet" role="dialog" aria-label="Model"><div class="grab"></div><h2>Model for this chat</h2>' +
+  '<div class="ptabs"><button>OpenCode Go</button><button>OpenCode Zen</button><button>OpenRouter</button><button class="sel">On this device</button></div>' + body + "</div>"});
+screens["local-check"] = () => shell("ask", askHead("New chat", "OpenCode Go · deepseek-v4.1-flash ▾") + '<div class="thread"></div>' + composer(false), localSheet(
+  '<div class="dcheck"><div class="dh">This phone · Galaxy S23 Ultra</div>' + okR("GPU: Adreno 740, OpenCL found: Gemma runs on the GPU") +
+  okR("Memory: 11 GB (E4B needs about 4 GB while it answers)") + okR("Storage: 703 GB free") + "</div>" +
+  '<div class="mrow"><span class="radio"></span><div><div class="mn">Gemma 4 E4B<span class="badge g">BEST FOR THIS PHONE</span></div><div class="md2">3.7 GB · tools 16/20 in our eval · runs offline</div></div><button class="btn" style="margin-left:auto">Download</button></div>' +
+  '<div class="mrow"><span class="radio"></span><div><div class="mn">Gemma 4 E2B</div><div class="md2">Smaller and faster · tools 11/20 in our eval: often skips them</div></div><button class="btn" style="margin-left:auto">Download</button></div>' +
+  '<div class="mrow"><div class="mn">Download on Wi-Fi only</div><span class="tgl" role="switch" aria-checked="true"></span></div>' +
+  '<p class="help" style="margin-top:10px">Runs on your phone: private, no key, no allowance. The check runs again when you open this tab.</p>'));
+screens["local-downloading"] = () => shell("ask", askHead("New chat", "OpenCode Go · deepseek-v4.1-flash ▾") + '<div class="thread"></div>' + composer(false), localSheet(
+  '<div class="dcheck"><div class="dh">This phone · Galaxy S23 Ultra</div>' + okR("GPU: Adreno 740 · Memory 11 GB · Storage 703 GB free") + "</div>" +
+  '<div class="mrow"><span class="radio"></span><div><div class="mn">Gemma 4 E4B</div><div class="md2">1.6 of 3.7 GB · about 4 min left on this Wi-Fi</div><div class="bar2"><i></i></div></div><span class="mr"><button class="btn">Pause</button></span></div>' +
+  '<p class="help" style="margin-top:10px">Downloads in the background: you can leave the app or close it, and Android shows the progress in your notifications. It waits for Wi-Fi and resumes after a lost connection. When it ends, the app checks the file and loads it on the GPU the next time you ask (about 10 s).</p>'));
+screens["local-nogpu"] = () => shell("ask", askHead("New chat", "OpenCode Go · deepseek-v4.1-flash ▾") + '<div class="thread"></div>' + composer(false), localSheet(
+  '<div class="dcheck"><div class="dh">This phone · Pixel 6a</div>' + noR("GPU: no OpenCL driver found: Gemma would run on the CPU") +
+  okR("Memory: 6 GB (E4B needs about 4 GB while it answers)") + "</div>" +
+  '<div class="err" role="status" style="border-color:var(--line-2);background:var(--raise);margin-top:8px"><div class="h" style="color:var(--muted)">' + I.warn + 'Slow on this phone</div>' +
+  '<p>On the CPU the first words take about 6× longer (5.3 s vs 0.8 s on Google\'s test phone) and use 3 GB of memory. Keep OpenCode Go, or try E2B on the CPU.</p>' +
+  '<div class="acts"><button class="btn">Try E2B on the CPU</button><button class="btn">Keep OpenCode Go</button></div></div>'));
+const gSearch = (q) => '<div class="g-tools"><div class="search">' + '<svg class="ico" viewBox="0 0 24 24" style="width:18px;height:18px"><circle cx="11" cy="11" r="6"/><path d="m20 20-4.5-4.5"/></svg>' +
+  (q ? '<span style="color:var(--text)">' + q + "</span>" : "Search by deck or opponent") + '</div><button class="btn">Select</button></div>';
+const gRowCb = (on, ...a) => gRow(...a).replace('class="g-row"', 'class="g-row withcb' + (on ? " sel" : "") + '"').replace('<span class="res', '<span class="cb" role="checkbox" aria-checked="' + on + '">' + (on ? I.check : "") + '</span><span class="res');
+screens["games-search"] = () => shell("play", '<div style="overflow:auto;margin:0 -18px;padding:0 18px">' + seg3("games") + gSearch("branded") +
+  '<div class="g-chips" role="group" aria-label="Which games"><button class="sel" aria-pressed="true">All</button><button aria-pressed="false">Bot</button><button aria-pressed="false">People</button><button aria-pressed="false">Practice</button></div>' +
+  '<p class="g-note">2 of your games match “branded” (your deck or the opponent\'s).</p>' +
+  gRow("LOST", "Blue-Eyes vs Branded", "Bot · Duel · 7 turns · went 2nd · 2 h ago", [8000, 8000, 8000, 5000, 5000, 1900, 0], [8000, 8000, 8000, 8000, 6200, 6200, 6200]) +
+  gRow("WON", "Branded vs Snake-Eye", "Multiplayer · 9 turns · went 2nd · Nov 12", [8000, 8000, 5200, 5200, 5200, 3000], [8000, 8000, 8000, 4000, 1000, 0]) + "</div>");
+screens["games-select"] = () => shell("play", '<div style="overflow:auto;margin:0 -18px;padding:0 18px">' + seg3("games") +
+  '<div class="selbar"><button class="ibtn" aria-label="Cancel">' + IA.x + '</button><span class="t">3 selected</span><button class="btn">Select all 21</button></div>' +
+  gRowCb(true, "LOST", "Blue-Eyes vs Branded", "Bot · Duel · 7 turns · 2 h ago", [8000, 8000, 5000, 1900, 0], [8000, 8000, 8000, 6200, 6200]) +
+  gRowCb(false, "WON", "Blue-Eyes vs Mitsurugi", "Bot · Duel · 11 turns · yesterday", [8000, 6000, 4400, 4400], [8000, 6500, 3000, 0]) +
+  gRowCb(true, "LOST", "Branded vs Mitsurugi", "Bot · Practice · 6 turns · Nov 11", [8000, 8000, 3000, 0], [8000, 8000, 7000, 7000], "PRACTICE") +
+  gRowCb(true, "—", "Branded vs Labrynth", "Bot · Duel · 2 turns · Nov 10 · not finished", [8000, 8000], [8000, 8000]) + "</div>",
+  {overlay: '<div class="delbar"><button class="btn dz">' + IA.trash + ' Delete 3 games</button></div>'});
+screens["games-delete"] = () => screens["games-select"]().replace('<div class="delbar">', '<div class="scrim"></div><div class="dlg" role="alertdialog" aria-label="Delete 3 games">' +
+  '<h2>Delete 3 games?</h2><p class="help" style="margin:0 0 14px">They leave the list and stop counting in your stats, and Ask can no longer open them. The files go to the app\'s trash folder, so they can be recovered.</p>' +
+  '<div class="rowbtns"><button class="btn dz">Delete</button><button class="btn">Cancel</button></div></div><div class="delbar" style="display:none">');
+
+// ---- Export a game or part of it (user 2026-11-15: "it can export anything, either whole game or parts of it") ------------
+IA.share = '<svg class="ico" viewBox="0 0 24 24"><path d="M12 4v11M8 8l4-4 4 4"/><path d="M6 12v6.5A1.5 1.5 0 0 0 7.5 20h9a1.5 1.5 0 0 0 1.5-1.5V12"/></svg>';
+const gHeadX = (t, sub) => '<div class="g-head"><button class="ibtn" aria-label="Back">' + I.back + '</button><div class="t">' + t + '<div class="sub">' + sub + '</div></div>' +
+  '<button class="ibtn" aria-label="Export this game">' + IA.share + "</button></div>";
+const xpWhat = (cur) => '<div class="xp-sec">What</div><div class="ptabs" role="radiogroup" aria-label="What to export" style="margin-top:0">' +
+  [["game", "Whole game · 7 turns"], ["turn", "Turn 2"], ["range", "Turns…"], ["moment", "One play"]].map(([k, l]) =>
+    '<button role="radio" aria-checked="' + (k === cur) + '"' + (k === cur ? ' class="sel"' : "") + ">" + l + "</button>").join("") + "</div>";
+const xpRow = (sel, tag, name, desc, off) => '<div class="xp-row' + (sel ? " sel" : "") + (off ? " off" : "") + '" role="radio" aria-checked="' + !!sel + '"' + (off ? ' aria-disabled="true"' : "") + '>' +
+  '<span class="ai" aria-hidden="true">' + tag + '</span><div><div class="an">' + name + '</div><div class="ad">' + desc + '</div></div><span class="radio' + (sel ? " on" : "") + '"></span></div>';
+const xpAs = (cur, what) => '<div class="xp-sec">As</div><div role="radiogroup" aria-label="Format">' +
+  xpRow(cur === "mp4", "MP4", "Video", what === "game" ? "Plays like the replay, 1.6 s a play · about 2 min 40 s · 9 MB" : "Plays like the replay, 1.6 s a play · about 18 s · 1.2 MB") +
+  xpRow(cur === "gif", "GIF", "Animated GIF", what === "game" ? "Too long for a GIF (about 40 MB): pick a turn or a few turns" : "Loops in any chat, no sound · about 18 s · 3.5 MB", what === "game") +
+  xpRow(cur === "png", "PNG", "Image", what === "moment" ? "The board at this play, with its caption" : "One image a turn: the board after its last play") +
+  xpRow(cur === "yrp", "YRP", "EDOPro replay (.yrpX)", what === "game" ? "Open it in EDOPro: Replay, pick the file, Start. Tiny (6 KB)"
+    : what === "moment" ? "EDOPro replays always start at turn 1: this one plays up to this play and stops"
+    : "EDOPro replays always start at turn 1: this one plays turns 1–" + (what === "turn" ? "2" : "4") + " and stops") +
+  xpRow(cur === "txt", "TXT", "Text", "The plays as text, to paste anywhere") + "</div>";
+const xpHands = '<div class="xp-opt"><div>Opponent’s hand<div class="ad">As you saw it in the duel: face down until played</div></div><div class="xp-seg" role="radiogroup" aria-label="Opponent hand"><button class="sel" aria-checked="true">Hidden</button><button>Shown</button></div></div>';
+const xpSpeed = '<div class="xp-opt"><div>Speed</div><div class="xp-seg" role="radiogroup" aria-label="Speed"><button>Slow</button><button class="sel" aria-checked="true">Normal</button><button>Fast</button></div></div>';
+const xpSheet = (body) => ({overlay: '<div class="scrim"></div><div class="bsheet" role="dialog" aria-modal="true" aria-label="Export"><div class="grab"></div>' + body + "</div>"});
+const xpGame = (inner) => shell("play", '<div style="overflow:auto;margin:0 -18px;padding:0 18px">' + gHeadX("Blue-Eyes vs Branded", "Bot · Duel · 2 h ago") + gameCardHere + inner + "</div>");
+const xpFoot = (t, b) => '<div class="xp-foot"><div class="t">' + t + '</div><button class="btn pri">' + b + "</button></div>";
+screens["export-sheet"] = () => xpGame("") + xpSheet('<h2>Export</h2>' + xpWhat("game") + xpAs("mp4", "game") + xpHands + xpSpeed +
+  xpFoot("Made on this phone in about 1 min. Keep the app open while it draws (it pauses if you leave).", "Make video")).overlay;
+screens["export-range"] = () => xpGame("") + xpSheet('<h2>Export</h2>' + xpWhat("range") +
+  '<div class="xp-rng">From turn <span class="xp-step"><button aria-label="Earlier">‹</button><b>2</b><button aria-label="Later">›</button></span> to turn <span class="xp-step"><button aria-label="Earlier">‹</button><b>4</b><button aria-label="Later">›</button></span></div>' +
+  '<p class="help" style="margin:2px 2px 0">14 plays · you went 2nd, so even turns are yours</p>' +
+  xpAs("gif", "range") + xpHands + xpFoot("About 18 s · 3.5 MB", "Make GIF")).overlay;
+screens["export-moment"] = () => shell("play", '<div style="overflow:auto;margin:0 -18px;padding:0 18px">' + gHeadX("Blue-Eyes vs Branded", "Bot · Duel · 2 h ago") + seqBlock2X(2) + "</div>") +
+  xpSheet('<h2>Export</h2>' + xpWhat("moment") + '<p class="help" style="margin:0 2px">Turn 1 · play 3 of 4: “The chain resolves: Branded Fusion is negated”. Move the replay to pick another play.</p>' +
+  xpAs("png", "moment").replace(/<div class="xp-row[^"]*"[^>]*><span class="ai" aria-hidden="true">(MP4|GIF)<\/span>[\s\S]*?<\/span><\/div>/g, "") + xpHands + xpFoot("1080 × 1920 · about 400 KB", "Share or save file")).overlay;
+const seqBlock2X = (k) => seqBlock2(k).replace('Opponent’s plays</div>', 'Opponent’s plays<button class="xp-ic" aria-label="Export this turn">' + IA.share + "</button></div>");
+screens["export-making"] = () => xpGame("") + xpSheet('<h2>Making the video</h2><p class="help" style="margin:2px 2px 0">Whole game · 7 turns · 94 plays</p>' +
+  '<div class="xp-prog" role="progressbar" aria-valuenow="38" aria-valuemin="0" aria-valuemax="94" aria-label="Plays drawn"><i style="width:40%"></i></div>' +
+  '<div style="display:flex;font-size:13px"><span>38 of 94 plays · turn 3</span><span style="margin-left:auto;color:var(--muted)">about 35 s left</span></div>' +
+  '<p class="help" style="margin-top:12px">The app draws each play with the same board as the replay. If you leave the app it pauses here and carries on when you come back.</p>' +
+  '<div class="xp-foot"><div class="t"></div><button class="btn">Cancel</button></div>').overlay;
+screens["export-ready"] = () => xpGame("") + xpSheet('<h2>Video ready</h2>' +
+  '<div class="xp-ready"><div class="th" aria-hidden="true">' + board2(FR2[2].g) + '</div><div style="flex:1"><div style="font-size:14.5px">Blue-Eyes vs Branded.mp4</div>' +
+  '<div class="help" style="margin:4px 0 0">2 min 38 s · 720 × 1280 · 8.7 MB</div><div class="help" style="margin:2px 0 0">Whole game · opponent’s hand hidden</div></div></div>' +
+  '<div class="xp-foot"><div class="t">Opens Android’s share sheet: send it in a chat, or save it to Files or Drive.</div><button class="btn pri">Share or save file</button></div>').overlay;
+screens["export-failed"] = () => xpGame("") + xpSheet('<h2>Export</h2>' +
+  '<div class="err" role="alert" style="margin-top:8px"><div class="h">' + I.warn + 'This phone cannot make MP4 video</div>' +
+  '<p>Its video encoder refused H.264 at 720p (“NotSupportedError”). Make a GIF of a few turns instead, or export the EDOPro replay and record it there.</p>' +
+  '<div class="acts"><button class="btn">Make a GIF</button><button class="btn">EDOPro replay</button></div></div>').overlay;
+screens["export-many"] = () => screens["games-select"]().replace('<div class="delbar"><button class="btn dz">' + IA.trash + ' Delete 3 games</button></div>',
+  '<div class="delbar"><button class="btn">' + IA.share + ' Export 3</button><button class="btn dz">' + IA.trash + ' Delete 3</button></div>');
+screens["export-many-sheet"] = () => screens["export-many"]().replace(/<div class="delbar">[\s\S]*$/, "") + xpSheet('<h2>Export 3 games</h2>' +
+  '<div class="xp-sec">As</div><div role="radiogroup" aria-label="Format">' +
+  xpRow(true, "YRP", "EDOPro replays (.yrpX)", "One file per game, sent together · 18 KB") +
+  xpRow(false, "TXT", "Text", "All three games’ plays in one text") +
+  xpRow(false, "MP4", "Video", "One game at a time: open the game and export it there", true) + "</div>" +
+  xpFoot("“Branded vs Labrynth” did not finish: its replay stops where the game stopped.", "Share or save files")).overlay;
+screens["export-frame"] = () => '<div style="padding:18px"><div class="lbl" style="margin-top:0">What the video and GIF look like</div>' +
+  '<p class="intro">One frame per play, drawn with the replay’s board (GY, banished, Deck, Extra, the chain) and caption; 9:16 so it fills a phone in any chat. The title names the decks and the turn; the bottom line says who played what.</p>' +
+  '<div class="xp-frame"><div class="ft"><b style="font-weight:500">Blue-Eyes vs Branded</b><span class="r">Turn 1 · play 4 of 4</span></div>' +
+  board2(FR2[3].g) + cap2(FR2[3]) + '<div class="fm"><span>YOU · BLUE-EYES  ·  OPP · BRANDED</span><span>DECKLIGHT</span></div></div></div>';
+Promise.all(TABS.map(([k]) => fetch("/web/assets/icons/" + k + ".svg").then((r) => r.text()).then((t) => { TI[k] = t; }))).then(() => {
+  document.getElementById("app").innerHTML = (screens[v] || screens["play-bot"])() +
+    '<div class="mocklabel">mock · ' + v + " · tab bar " + bar + "</div>";
+  if (v === "ask-sequence" && !qs.has("f")) {
+    let k = 0;
+    setInterval(() => { k = (k + 1) % FRAMES.length; document.getElementById("seq").innerHTML = sequenceBlock(k, true); }, 1600);
+  }
+  if (qs.has("t")) document.getAnimations().forEach((a) => { a.pause(); a.currentTime = +qs.get("t"); });
+});
+document.querySelector(".lmark") && (document.querySelector(".lmark").innerHTML = "");
+</script>
+</body>
+</html>

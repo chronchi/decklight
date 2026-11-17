@@ -20,6 +20,8 @@ from decklight.engine import constants as C
 from decklight.engine import messages as M
 from decklight.engine import ocgapi as api
 from decklight.engine import query as Q
+from decklight.engine.events import EVENT_MSGS as _EVENT_MSGS
+from decklight.engine.events import public_events
 from decklight.engine.knowledge import HandMemory
 from decklight.engine.resources import CORE_LIB, CardData, index_scripts, load_cards
 
@@ -58,6 +60,8 @@ class DuelConfig:
     seed: int
     flags: int = TCG_FLAGS
     lp: int = 8000
+    # Per-team starting LP (team 0, team 1) instead of `lp` (puzzle starts with uneven LP; PyEnv only, CppEnv refuses it).
+    lp_team: tuple[int, int] | None = None
     hand: int = 5
     draw: int = 1
     # Puzzle start: cards placed before the start (use hand=0 to skip the opening draw). The deck is
@@ -67,6 +71,16 @@ class DuelConfig:
     # std::shuffle): the core itself never shuffles at duel start. False = the .ydk order, which every record
     # made before 2026-10-04 used (opening hand = the last 5 listed cards, usually traps/hand traps).
     shuffle: bool = True
+    # The core's 4 x u64 seed state, used instead of seed_words(seed) when set: replays of records made elsewhere
+    # (EDOPro/Multirole .yrpX store the state, not our u64 seed; ADR 0010).
+    seed_state: tuple[int, int, int, int] | None = None
+    # The order the teams' cards are added to the core. It changes the duel (card ids, hence selection orders):
+    # Multirole adds room team 0 first, which is core team 1 when room team 1 goes first (ADR 0010).
+    team_order: tuple[int, int] = (0, 1)
+    # EDOPro/Multirole add every main-deck card at sequence 0 (deck order = list order, card ids in list order);
+    # we pass the list index, so core field::add_card puts the second card at the bottom (sequence 1 = deck
+    # bottom). Replays made by EDOPro servers need their way (NOTEBOOK 2026-11-01 "A2b-2").
+    edopro_add: bool = False
 
     def main_of(self, team: int) -> list[int]:
         """Team `team`'s main deck in the order it is added to the duel (the top card is the last one)."""
@@ -184,6 +198,8 @@ class Duel:
         self.engine, self.config, lib = engine, config, engine.lib
         self.responses: list[bytes] = []
         self.trace: list[bytes] = []  # every raw message, in order (determinism golden)
+        self.events: list = []  # public history events of both players (engine.events), in order
+        self.chain_len = 0  # open chain links as a client counts them (CHAINING / SOLVED / CHAIN_END)
         self.log: list[tuple[int, str]] = []
         self.pending: M.Select | None = None
         self.winner: int | None = None  # 0/1, 2 = draw; None while running
@@ -193,7 +209,7 @@ class Duel:
         self.first_player: int | None = None
         self.phase = 0
         self._ended = False
-        # Card-knowledge memory (docs/obs_spec.md v2 annex): per hand seq, whether the other
+        # Card-knowledge memory (docs/design/obs_spec.md v2 annex): per hand seq, whether the other
         # player knows the card's identity. Seeded with puzzle-setup hands (no messages announce
         # them); everything else arrives via MSG_MOVE / DRAW / CONFIRM_CARDS / SHUFFLE_HAND.
         setup_hands: list[list[int]] = [[], []]
@@ -209,12 +225,14 @@ class Duel:
             lambda payload, s, t: self.log.append((t, s.decode(errors="replace")))
         )
         opts = api.OCG_DuelOptions()
-        for i, w in enumerate(seed_words(config.seed)):
+        for i, w in enumerate(
+            config.seed_state if config.seed_state is not None else seed_words(config.seed)
+        ):
             opts.seed[i] = w
         opts.flags = config.flags
-        for team in (opts.team1, opts.team2):
+        for k, team in enumerate((opts.team1, opts.team2)):
             team.startingLP, team.startingDrawCount, team.drawCountPerTurn = (
-                config.lp,
+                config.lp if config.lp_team is None else config.lp_team[k],
                 config.hand,
                 config.draw,
             )
@@ -229,8 +247,9 @@ class Duel:
         for name in Engine.SYSTEM_SCRIPTS:
             if not self._load_script(name):
                 raise ScriptError(f"cannot load {name}: {self.log[-3:]}")
-        for team, deck in ((0, config.deck0), (1, config.deck1)):
-            self._add_cards(team, C.LOCATION_DECK, config.main_of(team))
+        for team in config.team_order:
+            deck = config.deck0 if team == 0 else config.deck1
+            self._add_cards(team, C.LOCATION_DECK, config.main_of(team), config.edopro_add)
             self._add_cards(team, C.LOCATION_EXTRA, deck.extra)
         for pl in config.setup:
             self._place(pl)
@@ -250,12 +269,12 @@ class Duel:
             return 0
         return int(self.engine.lib.OCG_LoadScript(duel, data, len(data), name) == 1)
 
-    def _add_cards(self, team: int, location: int, codes: Sequence[int]) -> None:
+    def _add_cards(self, team: int, location: int, codes: Sequence[int], at_top: bool = False) -> None:
         info = api.OCG_NewCardInfo()
         info.team = info.con = team
         info.duelist, info.loc, info.pos = 0, location, C.POS_FACEDOWN_DEFENSE
         for seq, code in enumerate(codes):
-            info.code, info.seq = code, seq
+            info.code, info.seq = code, 0 if at_top else seq
             self.engine.lib.OCG_DuelNewCard(self._handle, ctypes.byref(info))
 
     def _place(self, pl: Placement) -> None:
@@ -295,6 +314,12 @@ class Duel:
                         self.first_player = self.turn_player
                 elif t == C.MSG_NEW_PHASE:
                     self.phase = M.parse_one(raw).phase
+                elif t == C.MSG_CHAINING:
+                    self.chain_len += 1
+                elif t == C.MSG_CHAIN_SOLVED:
+                    self.chain_len = max(0, self.chain_len - 1)
+                elif t == C.MSG_CHAIN_END:
+                    self.chain_len = 0
                 elif t == C.MSG_WIN:
                     win = M.parse_one(raw)
                     self.winner, self.win_reason = win.player, win.reason
@@ -302,6 +327,9 @@ class Duel:
                     break
                 elif t in M.SELECT_TYPES:
                     self.pending = M.parse_one(raw)
+                if t in _EVENT_MSGS:
+                    self.events += public_events(raw, self.turn, self.phase, self.turn_player, self.chain_len > 0,
+                                                 self._mzone_code)  # fmt: skip
             if status == api.DUEL_STATUS_END:
                 self._ended = True
             elif status == api.DUEL_STATUS_AWAITING and self.pending is None and not self._ended:
@@ -309,6 +337,11 @@ class Duel:
         if self.pending is not None:
             self._guard_knowledge()
         return self.pending
+
+    def _mzone_code(self, con: int, seq: int) -> int:
+        cards = self.query_location(con, C.LOCATION_MZONE)
+        c = cards[seq] if 0 <= seq < len(cards) else None
+        return c.code if c is not None else 0
 
     def _guard_knowledge(self) -> None:
         """Resync guard: at every decision the tracked hand lengths must match the core's."""

@@ -279,3 +279,16 @@ def test_fake_page_end_to_end_selection():
     assert len(recs) == 2
     picked = fm.select(recs, per_archetype=2)
     assert len(picked) == 2
+
+
+def test_vanilla_monsters_need_no_script():
+    """Upstream has no Lua for Normal Monsters (Blue-Eyes White Dragon): all 163 Primite Blue-Eyes lists were
+    rejected as no_script until 2026-11-10."""
+    from decklight.engine import constants as C
+
+    bd = _load("build_decks")
+    db = SimpleNamespace(cards={1: SimpleNamespace(type=C.TYPE_MONSTER | C.TYPE_NORMAL),
+                                2: SimpleNamespace(type=C.TYPE_MONSTER | C.TYPE_NORMAL | C.TYPE_PENDULUM),
+                                3: SimpleNamespace(type=C.TYPE_MONSTER | C.TYPE_EFFECT)})  # fmt: skip
+    assert bd.scripted(db, 1, 1) and not bd.scripted(db, 2, 2) and not bd.scripted(db, 3, 3)
+    assert bd.scripted(db, 3, 89631139) is False  # no c89631139.lua upstream: the exemption is by type only

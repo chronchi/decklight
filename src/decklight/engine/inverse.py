@@ -139,7 +139,9 @@ def _sort_path(dec: A.Decision, auto_single: bool, resp: bytes) -> list[int] | N
     order = [0] * n
     for i, r in enumerate(resp):
         order[r] = i
-    wants = [(lambda o, c=c: o.kind == A.Kind.SORT and o.card == msg.cards[c]) for c in order[:-1]]
+    # A single card is one pick; the last of several cards is implied and not picked.
+    picks = order[:-1] if n > 1 else order
+    wants = [(lambda o, c=c: o.kind == A.Kind.SORT and o.card == msg.cards[c]) for c in picks]
     return _follow(dec, auto_single, wants, resp)
 
 

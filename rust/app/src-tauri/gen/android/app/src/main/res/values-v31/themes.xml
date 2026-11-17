@@ -1,0 +1,23 @@
+<resources xmlns:tools="http://schemas.android.com/tools">
+    <!-- System splash (API 31+): the decklight mark on the night colour; MainActivity fades it out. -->
+    <style name="Theme.decklight_app" parent="Theme.Material3.Dark.NoActionBar">
+        <item name="android:windowBackground">@color/night</item>
+        <item name="android:windowSplashScreenBackground">@color/night</item>
+        <item name="android:windowSplashScreenAnimatedIcon">@drawable/splash_mark</item>
+        <item name="android:windowSplashScreenIconBackgroundColor">@color/night</item>
+        <item name="android:statusBarColor">@color/night</item>
+        <item name="android:navigationBarColor">@color/night</item>
+    </style>
+    <!-- The splash for the next launch after Settings → Appearance (MainActivity.applyTheme, API 33+): Light, and
+         System, which follows the phone's dark mode through the -night resources. -->
+    <style name="Theme.decklight_app.SplashLight">
+        <item name="android:windowSplashScreenBackground">@color/paper</item>
+        <item name="android:windowSplashScreenAnimatedIcon">@drawable/splash_mark_light</item>
+        <item name="android:windowSplashScreenIconBackgroundColor">@color/paper</item>
+    </style>
+    <style name="Theme.decklight_app.SplashSystem">
+        <item name="android:windowSplashScreenBackground">@color/splash_system</item>
+        <item name="android:windowSplashScreenAnimatedIcon">@drawable/splash_mark_system</item>
+        <item name="android:windowSplashScreenIconBackgroundColor">@color/splash_system</item>
+    </style>
+</resources>

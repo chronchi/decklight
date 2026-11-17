@@ -26,7 +26,9 @@ import numpy as np
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "src"))
 
-from decklight.model.bc_data import OBS_KEYS  # noqa: E402
+from decklight.model.bc_data import OBS_HISTORY_KEYS, OBS_KEYS  # noqa: E402
+
+KEYS = tuple(OBS_KEYS) + tuple(OBS_HISTORY_KEYS)  # obs_history: observable-trunk value nets (value v2)
 
 
 def game_rows(dirs: list[Path], max_games: int, seed: int):
@@ -35,7 +37,13 @@ def game_rows(dirs: list[Path], max_games: int, seed: int):
     return rows[:max_games] if max_games else rows
 
 
+DECK_DIRS: list[Path] = []  # --deck-dir, searched first
+
+
 def deck_paths(names: list[str]) -> list[Path]:
+    for d in DECK_DIRS:
+        if all((d / f"{n}.ydk").exists() for n in names):
+            return [d / f"{n}.ydk" for n in names]
     ddir = ROOT / ("decks/gauntlet" if (ROOT / "decks/gauntlet" / f"{names[0]}.ydk").exists() else "decks/pool")
     return [ddir / f"{n}.ydk" for n in names]
 
@@ -65,7 +73,7 @@ def states(rows, stride: int, seed: int):
             last_turn = turn
             if ts or k % stride == off:
                 z = 1.0 if int(env.player) == w else -1.0
-                yield {kk: np.array(obs[kk]) for kk in OBS_KEYS}, z, ts, int(g[5]) == 1, gi
+                yield {kk: np.array(obs[kk]) for kk in KEYS}, z, ts, int(g[5]) == 1, gi
             obs = env.step(int(c))
 
 
@@ -87,7 +95,9 @@ def main() -> int:
     ap.add_argument("--device", default="cuda")
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--out", type=Path, required=True)
+    ap.add_argument("--deck-dir", type=Path, action="append", default=[], help="extra .ydk dirs (e.g. a card's decks)")
     a = ap.parse_args()
+    DECK_DIRS.extend(a.deck_dir)
 
     from decklight.eval.value import ValueNet
 
@@ -102,7 +112,7 @@ def main() -> int:
     def flush() -> None:
         if not obs_buf:
             return
-        batch = {k: np.stack([o[k] for o in obs_buf]) for k in OBS_KEYS}
+        batch = {k: np.stack([o[k] for o in obs_buf]) for k in KEYS}
         for n, net in nets.items():
             vals[n].append(net.values(batch))
         obs_buf.clear()

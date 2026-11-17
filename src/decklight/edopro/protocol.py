@@ -108,6 +108,7 @@ STOC_WAITING_REMATCH = 0xF2
 STOC_REPLAY = 0x17
 STOC_TIME_LIMIT = 0x18
 STOC_CHAT = 0x19
+STOC_CHAT_2 = 0xF3  # EDOPro/Multirole chat with the sender's name (gframe/network.h STOC_Chat2)
 STOC_HS_PLAYER_ENTER = 0x20
 STOC_HS_PLAYER_CHANGE = 0x21
 STOC_HS_WATCH_CHANGE = 0x22
@@ -284,7 +285,7 @@ def pack_update_deck(main: list[int], extra: list[int], side: list[int]) -> byte
 
 
 def pack_hand_choice(res: int) -> bytes:
-    """CTOS_HAND_RESULT payload: the RPS throw (1 rock / 2 scissors / 3 paper)."""
+    """CTOS_HAND_RESULT payload: the RPS throw (1 scissors / 2 rock / 3 paper)."""
     if res not in (1, 2, 3):
         raise ValueError(f"RPS throw must be 1/2/3, got {res!r}")
     return bytes([res])
@@ -324,10 +325,18 @@ def pack_hand_result(res1: int, res2: int) -> bytes:
 
 
 def parse_join_game(payload: bytes) -> HostInfo:
-    """STOC_JOIN_GAME payload -> HostInfo (raises ValueError when short)."""
-    if len(payload) < _HOSTINFO_FMT.size:
+    """STOC_JOIN_GAME payload -> HostInfo (raises ValueError when short).
+
+    WindBot's older 56-byte HostInfo has no deck limits; its missing fields read 0
+    (the client does not use them), so we accept it instead of rejecting the room.
+    """
+    if len(payload) < 56:
         raise ValueError(f"join-game packet too short: {len(payload)}")
+    payload = payload + bytes(max(0, _HOSTINFO_FMT.size - len(payload)))
     return HostInfo.unpack(payload)
+
+
+NETPLAYER_TYPE_OBSERVER = 7  # gframe/network.h: STOC_TYPE_CHANGE seat value of a spectator
 
 
 def parse_type_change(payload: bytes) -> tuple[int, bool]:
@@ -343,6 +352,25 @@ def parse_hs_player_enter(payload: bytes) -> tuple[str, int]:
     if len(payload) < 41:
         raise ValueError(f"player-enter packet too short: {len(payload)}")
     return decode_name(payload[:40]), payload[40]
+
+
+CHAT2_TYPES = ("duelist", "observer", "system", "system_error", "system_shout")
+
+
+def parse_chat(payload: bytes) -> tuple[int, str]:
+    """STOC_CHAT payload -> (player, text): u16 player, u16 msg[256]."""
+    if len(payload) < 2:
+        raise ValueError(f"chat packet too short: {len(payload)}")
+    return int.from_bytes(payload[:2], "little"), decode_name(payload[2:])
+
+
+def parse_chat2(payload: bytes) -> tuple[str, bool, str, str]:
+    """STOC_CHAT_2 payload -> (type, is_team, sender, text): u8 type, u8 is_team, u16 name[20], u16 msg[256]."""
+    if len(payload) < 42:
+        raise ValueError(f"chat2 packet too short: {len(payload)}")
+    t = payload[0]
+    kind = CHAT2_TYPES[t] if t < len(CHAT2_TYPES) else str(t)
+    return kind, bool(payload[1]), decode_name(payload[2:42]), decode_name(payload[42:])
 
 
 def parse_hs_player_change(payload: bytes) -> tuple[int, str]:
@@ -443,5 +471,6 @@ class FrameReader:
 
 
 def rps_beats(a: int, b: int) -> bool:
-    """1 rock beats 2 scissors beats 3 paper beats 1 (generic_duel.cpp HandResult)."""
-    return (a, b) in ((1, 2), (2, 3), (3, 1))
+    """Whether throw `a` beats `b`: 1 scissors, 2 rock, 3 paper (EDOPro `windbot_panel.cpp`; `generic_duel.cpp`
+    HandResult lets the opposing player choose turn order on (1, 2), (2, 3), (3, 1))."""
+    return (a, b) in ((2, 1), (3, 2), (1, 3))

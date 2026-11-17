@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Retrain stage M play-out anchor (docs/retrain/plan-v3.md §Stage M; plan cost $X): run after the stage M sweep
+# Retrain stage M play-out anchor (docs/lab/retrain/plan-v3.md §Stage M; plan cost $X): run after the stage M sweep
 # (scripts/launch/run-stage-m.sh) finishes. Ships the turn records only (no OpenCode key: the LLM never runs on vast).
 cd "$(dirname "$0")/../.."
 [ "$(cat data/demos/turns/*/*.jsonl 2>/dev/null | wc -l)" -gt 0 ] || { echo "no turn records"; exit 3; }

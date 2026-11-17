@@ -35,6 +35,15 @@ from decklight.engine.duel import DuelConfig, Engine
 ROOT = Path(__file__).resolve().parents[1]
 POOL = ROOT / "decks" / "pool"
 SCRIPTS = ROOT / "third_party" / "CardScripts" / "official"
+
+
+def scripted(engine, code: int, canon: int) -> bool:
+    """The engine can play `code`: its script exists, or it is a vanilla Normal Monster (upstream has no script for
+    those; the core plays them without one, e.g. Blue-Eyes White Dragon, NOTEBOOK 2026-11-10)."""
+    if (SCRIPTS / f"c{code}.lua").exists() or (SCRIPTS / f"c{canon}.lua").exists():
+        return True
+    cd = engine.cards.get(code)
+    return cd is not None and bool(cd.type & C.TYPE_MONSTER and cd.type & C.TYPE_NORMAL and not cd.type & C.TYPE_PENDULUM)
 EXTRA_T = C.TYPE_FUSION | C.TYPE_SYNCHRO | C.TYPE_XYZ | C.TYPE_LINK
 MODEL = "opencode/muse-spark-1.3-contributor-free"
 
@@ -134,7 +143,7 @@ def validate_codes(
         per_card[canon] += 1
         if engine.cards.get(code) is None:
             problems.append(f"{code}: missing from the engine card DB")
-        elif not (SCRIPTS / f"c{code}.lua").exists() and not (SCRIPTS / f"c{canon}.lua").exists():
+        elif not scripted(engine, code, canon):
             problems.append(f"{names.names.get(code, code)}: no engine script for it (replace it)")
     for canon, n in per_card.items():
         if n > 3:
@@ -173,7 +182,7 @@ def ground(engine: Engine, names: CardNames, d: dict) -> tuple[Deck | None, list
                 continue
             code = codes[0]
             canon = names.alias.get(code, 0) or code
-            if not (SCRIPTS / f"c{code}.lua").exists() and not (SCRIPTS / f"c{canon}.lua").exists():
+            if not scripted(engine, code, canon):
                 problems.append(f"no engine script for {name} (not supported by our engine; replace it)")
                 continue
             cd = engine.cards.get(code)

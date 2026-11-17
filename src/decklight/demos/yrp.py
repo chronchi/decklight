@@ -26,17 +26,12 @@ from types import SimpleNamespace
 
 from decklight.engine import constants as C
 from decklight.engine.duel import Duel, DuelConfig, Engine, canonical_trace, seed_words
+from decklight.play.yrp import edopro_main
 
 REPLAY_YRP1 = 0x31707279
 REPLAY_LUA64, REPLAY_NEWREPLAY, REPLAY_64BIT_DUELFLAG, REPLAY_EXTENDED_HEADER = 0x10, 0x20, 0x100, 0x200
 CLIENT_VERSION = 41 | (0 << 8) | (11 << 16) | (0 << 24)  # EDOPro 41.0, core 11.0 (edopro/gframe/config.h)
 _HEADER = struct.Struct("<6I8sQ4Q")
-
-
-def edopro_main(main: Sequence[int]) -> list[int]:
-    """Our add order -> EDOPro's (all at sequence 0) giving the same deck: index 1 went to the bottom."""
-    m = list(main)
-    return [m[1], m[0], *m[2:]] if len(m) > 1 else m
 
 
 def _name(s: str) -> bytes:
@@ -128,7 +123,7 @@ def parse_yrp(data: bytes) -> Yrp:
 class _EdoproDuel(Duel):
     """A Duel set up the way EDOPro's old replay mode does: every card added at sequence 0, in file order."""
 
-    def _add_cards(self, team: int, location: int, codes: Sequence[int]) -> None:
+    def _add_cards(self, team: int, location: int, codes: Sequence[int], at_top: bool = False) -> None:  # always seq 0
         from decklight.engine import ocgapi as api
 
         info = api.OCG_NewCardInfo()

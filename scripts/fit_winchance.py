@@ -14,7 +14,7 @@ a game are correlated, so one split is too noisy to trust. The stored map is
 fit on 100% of the games once the gate passes.
 
 Writes ``src/decklight/web/winchance_calib.json`` (committed) and writes the
-report fresh to ``docs/annotations/2026-10-16-hppo-p2/winchance-calibration.md``
+report fresh to ``docs/lab/annotations/2026-10-16-hppo-p2/winchance-calibration.md``
 (one report per run, never appended).
 
 Invariants (exit 2): a game with no winner; the join dropping > 1% of games;

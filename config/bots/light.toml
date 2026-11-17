@@ -1,0 +1,4 @@
+name = "light"
+description = "Product default policy (no search) on the Magistus/Invoked/Fairy Tail pack list f10, legal on EDOPro 0TCG 2026.10 as is."
+agent = "raw"
+deck = "decks/custom/light-magistus-f10-tcg2026-10.ydk"

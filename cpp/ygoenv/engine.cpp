@@ -54,13 +54,28 @@ const std::string* Engine::script(const std::string& name) {
     auto it = cache_.find(name);
     if (it != cache_.end()) return it->second.get();
   }
+  std::string code;
   auto path = script_paths.find(name);
-  if (path == script_paths.end()) return nullptr;
-  std::ifstream f(path->second, std::ios::binary);
-  if (!f) return nullptr;
-  std::ostringstream ss;
-  ss << f.rdbuf();
-  std::string code = precompile ? compile_lua(ss.str(), name) : ss.str();
+  if (path != script_paths.end()) {
+    std::ifstream f(path->second, std::ios::binary);
+    if (!f) return nullptr;
+    std::ostringstream ss;
+    ss << f.rdbuf();
+    code = precompile ? compile_lua(ss.str(), name) : ss.str();
+  } else {
+    auto range = script_ranges.find(name);
+    if (range == script_ranges.end()) return nullptr;
+    std::ifstream f(range->second.path, std::ios::binary);
+    if (!f) return nullptr;
+    f.seekg(static_cast<std::streamoff>(range->second.offset), std::ios::beg);
+    if (!f) return nullptr;
+    std::string data(range->second.len, '\0');
+    if (!data.empty()) {
+      f.read(data.data(), static_cast<std::streamsize>(data.size()));
+      if (static_cast<size_t>(f.gcount()) != data.size()) return nullptr;
+    }
+    code = precompile ? compile_lua(data, name) : std::move(data);
+  }
   std::unique_lock lock(mu_);
   auto& slot = cache_[name];
   if (!slot) slot = std::make_unique<std::string>(std::move(code));
@@ -116,8 +131,12 @@ bool Duel::load_script(const std::string& name) {
 
 Duel::Duel(Engine& engine, const DuelConfig& config) : engine(engine), config(config) {
   OCG_DuelOptions opts{};
-  auto seed = seed_words(config.seed);
-  std::copy(seed.begin(), seed.end(), opts.seed);
+  if (config.seed_state_set) {
+    std::copy(std::begin(config.seed_state), std::end(config.seed_state), opts.seed);
+  } else {
+    auto seed = seed_words(config.seed);
+    std::copy(seed.begin(), seed.end(), opts.seed);
+  }
   opts.flags = config.flags;
   for (auto* team : {&opts.team1, &opts.team2}) {
     team->startingLP = config.lp;
@@ -136,10 +155,11 @@ Duel::Duel(Engine& engine, const DuelConfig& config) : engine(engine), config(co
   if (status != OCG_DUEL_CREATION_SUCCESS) throw std::runtime_error("OCG_CreateDuel failed: " + std::to_string(status));
   for (const char* name : {"constant.lua", "utility.lua"})
     if (!load_script(name)) throw std::runtime_error(std::string("cannot load ") + name);
-  add_cards(0, LOCATION_DECK, config.main0);
-  add_cards(0, LOCATION_EXTRA, config.extra0);
-  add_cards(1, LOCATION_DECK, config.main1);
-  add_cards(1, LOCATION_EXTRA, config.extra1);
+  for (int i = 0; i < 2; ++i) {
+    uint8_t team = config.team_order[i] & 1;
+    add_cards(team, LOCATION_DECK, team == 0 ? config.main0 : config.main1);
+    add_cards(team, LOCATION_EXTRA, team == 0 ? config.extra0 : config.extra1);
+  }
   for (const auto& pl : config.setup) {
     uint32_t pos;
     switch (pl.location) {
@@ -182,6 +202,10 @@ std::unique_ptr<Duel> Duel::clone_duel() const {
   out->first_player = first_player;
   out->phase = phase;
   out->select_hint = select_hint;
+  out->record_trace = record_trace;
+  out->trace = trace;
+  out->events = events;
+  out->chain_len = chain_len;
   for (int p = 0; p < 2; ++p) {
     out->hand_known_[p] = hand_known_[p];
     out->hand_codes_[p] = hand_codes_[p];
@@ -204,7 +228,7 @@ void Duel::add_cards(uint8_t team, uint32_t location, const std::vector<uint32_t
   info.pos = POS_FACEDOWN_DEFENSE;
   for (uint32_t seq = 0; seq < codes.size(); ++seq) {
     info.code = codes[seq];
-    info.seq = seq;
+    info.seq = (config.edopro_add && location == LOCATION_DECK) ? 0 : seq;
     OCG_DuelNewCard(handle_, &info);
   }
 }
@@ -240,6 +264,7 @@ const Bytes* Duel::advance() {
       const uint8_t* m = buf + pos;
       pos += size;
       if (!size) continue;
+      if (record_trace) trace.emplace_back(m, m + size);
       uint8_t t = m[0];
       track_message(m, size);  // card-knowledge memory sees every message, CONTINUE and AWAITING
       if (t == MSG_RETRY) throw std::runtime_error("core rejected response at step " + std::to_string(responses.size()));
@@ -264,7 +289,16 @@ const Bytes* Duel::advance() {
         pending_.assign(m, m + size);
         has_pending_ = true;
       }
+      if (t == MSG_CHAINING) ++chain_len;
+      else if (t == MSG_CHAIN_SOLVED) chain_len = chain_len > 0 ? chain_len - 1 : 0;
+      else if (t == MSG_CHAIN_END) chain_len = 0;
+      emit_events(m, size);
     }
+    for (const auto& f : attack_fix_) {  // attacker codes, queried after the batch like Python's Duel
+      auto cards = query_location(static_cast<uint8_t>(f[1]), LOCATION_MZONE);
+      if (f[2] < cards.size() && cards[f[2]]) events[f[0]][2] = static_cast<int32_t>(cards[f[2]]->code);
+    }
+    attack_fix_.clear();
     if (status == OCG_DUEL_STATUS_END) ended = true;
     else if (status == OCG_DUEL_STATUS_AWAITING && !has_pending_ && !ended)
       throw std::runtime_error("core is awaiting a response but sent no select message");
@@ -451,6 +485,14 @@ static size_t parse_card(const uint8_t* buf, size_t pos, CardState& c) {
   }
 }
 
+Bytes Duel::query_location_raw(uint8_t controller, uint32_t location, uint32_t flags) const {
+  OCG_QueryInfo info{flags, controller, location, 0, 0};
+  uint32_t length = 0;
+  auto* buf = static_cast<const uint8_t*>(OCG_DuelQueryLocation(handle_, &length, &info));
+  if (!buf || !length) return {};
+  return Bytes(buf, buf + length);
+}
+
 std::vector<std::optional<CardState>> Duel::query_location(uint8_t controller, uint32_t location) {
   OCG_QueryInfo info{CARD_FLAGS, controller, location, 0, 0};
   uint32_t length = 0;
@@ -475,7 +517,7 @@ std::vector<std::optional<CardState>> Duel::query_location(uint8_t controller, u
   return out;
 }
 
-Bytes Duel::query_field() {
+Bytes Duel::query_field() const {
   uint32_t length = 0;
   auto* buf = static_cast<const uint8_t*>(OCG_DuelQueryField(handle_, &length));
   return Bytes(buf, buf + length);

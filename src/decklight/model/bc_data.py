@@ -1,6 +1,6 @@
 """BC training data: replay demo records into observation shards, load them, split by line.
 
-A shard is one `.npz` per record file with the stacked observation arrays (docs/obs_spec.md) plus
+A shard is one `.npz` per record file with the stacked observation arrays (docs/design/obs_spec.md) plus
 `action` (chosen index), `weight` (stated 1.0 / inferred 0.5), `line` (base line id: the variant suffix `#h<k>` and deck
 tags stripped, so all hand variants of one line land in the same split), `deck` and `src`. Shards are temporary
 training artifacts (AGENTS.md storage rules): rebuild them from the records, never commit them.
@@ -27,14 +27,18 @@ OBS_KEYS = (
     "history_mask",
 )
 
-# Card-knowledge memory (obs v2, docs/obs_spec.md): stored in shards when the env produced it.
+# Card-knowledge memory (obs v2, docs/design/obs_spec.md): stored in shards when the env produced it.
 KNOWN_KEYS = ("card_known", "known_code")
+
+# Observable history (train = deploy, NOTEBOOK 2026-11-10): the v1 window a live client records (own decisions +
+# the opponent's public events), stored when the env produced it; `train_bc --observable-history` needs it.
+OBS_HISTORY_KEYS = ("obs_history", "obs_history_mask")
 
 # Gumbel-style soft targets (train_bc --soft-targets): per-sample search candidates and their
 # selection scores. Fixed width K (current search data: k <= 4 candidates); -1-padded indices.
 SOFT_K = 8
 
-# Option-row columns (docs/action_spec.md): 0 kind, 1 card row, 2 code, 3 effect_code,
+# Option-row columns (docs/design/action_spec.md): 0 kind, 1 card row, 2 code, 3 effect_code,
 # 4 effect_idx, 5 arg, 6 msg, 7 location, 8 controller, 9 step.
 PLACE_KIND = 19
 _SINGLETON_KINDS = frozenset({11, 17, 18})  # PASS, FINISH, CANCEL: never equivalent to anything else
@@ -186,6 +190,8 @@ def _shard_one(job: tuple[str, str, str]) -> tuple[str, int]:
     cols: dict[str, list] = {k: [] for k in OBS_KEYS}
     known_cols: dict[str, list] = {k: [] for k in KNOWN_KEYS}
     has_known: bool | None = None  # all samples of one file either carry the keys or not
+    oh_cols: dict[str, list] = {k: [] for k in OBS_HISTORY_KEYS}
+    has_oh: bool | None = None
     action, weight, line, deck, kind, equiv = [], [], [], [], [], []
     soft_idx_rows: list = []  # per-sample search candidates (option indices, -1 padded to SOFT_K)
     soft_q_rows: list = []  # per-sample selection scores aligned with soft_idx (0 padded)
@@ -206,6 +212,14 @@ def _shard_one(job: tuple[str, str, str]) -> tuple[str, int]:
         if hk:
             for k in KNOWN_KEYS:
                 known_cols[k].append(obs[k])
+        ho = all(k in obs for k in OBS_HISTORY_KEYS)
+        if has_oh is None:
+            has_oh = ho
+        elif ho != has_oh:
+            raise ValueError(f"mixed obs with/without {OBS_HISTORY_KEYS} in one file: {src_file}")
+        if ho:
+            for k in OBS_HISTORY_KEYS:
+                oh_cols[k].append(obs[k])
         equiv.append(equivalent_mask(obs["actions"], a, obs.get("action_mask")))
         alt = meta.get("alt")
         if alt:
@@ -251,6 +265,8 @@ def _shard_one(job: tuple[str, str, str]) -> tuple[str, int]:
     if has_known:
         extra.update({k: np.stack(v).astype({"card_known": np.uint8, "known_code": np.int32}[k])
                       for k, v in known_cols.items()})
+    if has_oh:
+        extra.update({k: np.stack(v) for k, v in oh_cols.items()})
     if has_log:
         extra.update({
             "hlog": np.concatenate(hlog_rows) if hlog_rows else np.zeros((0, 14), np.int32),
@@ -368,6 +384,8 @@ def load_shards(shard_dir: Path) -> dict[str, np.ndarray]:
         all(k in p for k in KNOWN_KEYS) for p in parts
     ):
         raise ValueError(f"mixed shards with and without {KNOWN_KEYS} in one directory: rebuild them together")
+    if any(OBS_HISTORY_KEYS[0] in p for p in parts) and not all(all(k in p for k in OBS_HISTORY_KEYS) for p in parts):
+        raise ValueError(f"mixed shards with and without {OBS_HISTORY_KEYS} in one directory: rebuild them together")
     if "hlog" in parts[0]:  # offset each file's record-relative rows into the concatenated log
         off, starts, ends = 0, [], []
         for p in parts:

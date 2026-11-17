@@ -40,11 +40,19 @@ struct CardData {
   uint32_t lscale = 0, rscale = 0, link_marker = 0;
 };
 
+// A script stored inside a packed file (CardScripts.pack): read [offset, offset + len) from `path`.
+struct ScriptRange {
+  std::string path;
+  uint64_t offset = 0;
+  uint32_t len = 0;
+};
+
 class Engine {
  public:
   std::unordered_map<uint32_t, CardData> cards;
   std::vector<uint32_t> sorted_codes;  // for the ANNOUNCE_CARD fallback
   std::unordered_map<std::string, std::string> script_paths;
+  std::unordered_map<std::string, ScriptRange> script_ranges;  // packed scripts, next to script_paths
   bool precompile = true;  // cache scripts as Lua bytecode
 
   void add_card(CardData cd);
@@ -68,6 +76,17 @@ struct DuelConfig {
   uint64_t flags = DUEL_MODE_MR5 | DUEL_TCG_SEGOC_NONPUBLIC;
   uint32_t lp = 8000, hand = 5, draw = 1;
   std::vector<Placement> setup;
+  // Replays made elsewhere store the core's 4 x u64 seed state, not our u64 seed (ADR 0010). When
+  // seed_state_set is true it replaces seed_words(seed).
+  bool seed_state_set = false;
+  uint64_t seed_state[4] = {0, 0, 0, 0};
+  // The order the teams' cards are added to the core; it changes the duel (card ids). Multirole
+  // adds room team 0 first, which is core team 1 when room team 1 goes first (ADR 0010).
+  uint8_t team_order[2] = {0, 1};
+  // EDOPro/Multirole add every main-deck card at sequence 0 (deck order = list order, card ids in list
+  // order); we pass the list index, so core field::add_card puts the second card at the bottom (sequence 1).
+  // Replays made by EDOPro servers need their way (NOTEBOOK 2026-11-01 "A2b-2").
+  bool edopro_add = false;
 };
 
 struct CardState {
@@ -112,19 +131,27 @@ class Duel {
   const Bytes* advance();
   void respond(const Bytes& response);
 
-  std::vector<std::optional<CardState>> query_location(uint8_t controller, uint32_t location);
-  Bytes query_field();
-  std::vector<DebugCard> cards_debug();  // every card of both players (DECK/HAND/MZONE/SZONE/GRAVE/REMOVED/EXTRA)
+    std::vector<std::optional<CardState>> query_location(uint8_t controller, uint32_t location);
+    Bytes query_field() const;
+    std::vector<DebugCard> cards_debug();  // every card of both players (DECK/HAND/MZONE/SZONE/GRAVE/REMOVED/EXTRA)
+    Bytes query_location_raw(uint8_t controller, uint32_t location, uint32_t flags) const;
+    const Bytes* pending_msg() const { return has_pending_ ? &pending_ : nullptr; }
 
-  Engine& engine;
-  DuelConfig config;
+    Engine& engine;
+    DuelConfig config;
+    bool record_trace = false;  // opt-in raw message trace; training paths leave it off
+    std::vector<Bytes> trace;   // every raw message in order, exactly like Python Duel.trace
    std::vector<Bytes> responses;
    std::vector<std::string> errors;
    bool ended = false;
    int winner = -1, win_reason = 0;
    int turn = 0, turn_player = 0, first_player = -1, phase = 0;
+   // Public history events of both players, in order (src/decklight/engine/events.py public_events; NOTEBOOK
+   // 2026-11-10 14:30): option row (10) + actor, turn, phase, public, the history_log layout.
+   std::vector<std::array<int32_t, 14>> events;
+   int chain_len = 0;  // open chain links as a client counts them (CHAINING / CHAIN_SOLVED / CHAIN_END)
    uint64_t select_hint = 0;  // HINT_SELECTMSG sent just before the pending select message (0 = none)
-   // Card-knowledge memory (docs/obs_spec.md v2 annex): per hand seq, whether the other player
+   // Card-knowledge memory (docs/design/obs_spec.md v2 annex): per hand seq, whether the other player
    // knows the card's identity (+ the true codes, for the shuffle realignment). Lockstep with
    // HandMemory in src/decklight/engine/knowledge.py.
    std::vector<uint8_t> hand_known_[2];
@@ -140,6 +167,8 @@ class Duel {
    Bytes pending_;
    bool has_pending_ = false;
    void add_cards(uint8_t team, uint32_t location, const std::vector<uint32_t>& codes);
+   void emit_events(const uint8_t* m, uint32_t size);  // public_events of one message into `events`
+   std::vector<std::array<uint32_t, 3>> attack_fix_;   // (event index, con, seq): attacker codes, after the batch
    void track_message(const uint8_t* m, uint32_t size);  // fold one raw message into hand_known_
    void guard_knowledge();  // resync guard: lengths vs queried hand sizes at every decision
   bool load_script(const std::string& name);
@@ -236,6 +265,9 @@ struct Obs {
   std::array<uint8_t, HISTORY> history_mask{};
   std::array<int32_t, HISTORY_MAX * HISTORY_COLS> hist_long{};
   std::array<uint8_t, HISTORY_MAX> hist_long_mask{};
+  // What a client records (own decisions + the opponent's public events): the observable history window.
+  std::array<int32_t, HISTORY * HISTORY_COLS> obs_history{};
+  std::array<uint8_t, HISTORY> obs_history_mask{};
   void clear() { *this = Obs{}; }
 };
 
@@ -309,19 +341,47 @@ class Env {
    ReplayKeysResult replay_keys(const std::vector<std::array<int32_t, 8>>& keys,
                                 const std::vector<int>& ranks, Obs& obs);
 
-   bool done() const { return duel_->ended; }
-   int winner() const { return duel_->winner; }
-   int player() const { return dec_->player; }
-   int num_options() const { return static_cast<int>(opts_.size()); }
-   const Duel& duel() const { return *duel_; }
+    bool done() const { return duel_->ended; }
+    int winner() const { return duel_->winner; }
+    int player() const { return dec_->player; }
+    int num_options() const { return static_cast<int>(opts_.size()); }
+    const Duel& duel() const { return *duel_; }
+    void set_record_trace(bool on) {
+      record_trace_ = on;
+      if (duel_) duel_->record_trace = on;
+    }
+    bool has_duel() const { return static_cast<bool>(duel_); }
+    bool has_decision() const { return static_cast<bool>(dec_); }
+    int msg_type() const { return dec_ ? dec_->msg_type : -1; }
+    int dec_player() const { return dec_ ? dec_->player : -1; }
+    int dec_step() const { return dec_ ? dec_->step : -1; }
+    // Monotonic id of the pending decision object (increments for every new core message; a
+    // multi-step selection keeps its id), like DuelSession.current_prompt_id.
+    int64_t dec_seq() const { return dec_seq_; }
+    const std::vector<CardRef>& selected() const {
+      static const std::vector<CardRef> kEmpty;
+      return dec_ ? dec_->selected : kEmpty;
+    }
+    const std::vector<Option>& options() const { return opts_; }
+    const Bytes* pending_msg() const {
+      if (!duel_) return nullptr;
+      return duel_->pending_msg();
+    }
+    const std::vector<int>& get_choices() const { return choices; }
     int knowledge_resyncs() const { return duel_->knowledge_resyncs(); }
     int history_len() const { return static_cast<int>(history_.size()); }
     std::vector<DebugCard> cards() { return duel_->cards_debug(); }
    // A full, independent copy at the current decision (Rust build only; the C++
    // build throws std::runtime_error("clone needs the Rust core")). VecEnv is untouched.
    std::unique_ptr<Env> clone() const;
+   // A copy of the pending Decision with independent pick state (nullptr when none). The engine,
+   // card DB and message stay shared and untouched, so cloning is cheap.
+   std::unique_ptr<Decision> clone_decision() const { return dec_ ? dec_->clone() : nullptr; }
    // All recorded entries in absolute form: stored row (10) + actor, turn, phase, public.
    std::vector<std::array<int32_t, HLOG_COLS>> history_log() const;
+   // The observation from `viewer`'s side at the current position (A4 hints and review: the value
+   // net must never see the other seat's hand). Pending decision: its options; game over: none.
+   void fill_obs_as(Obs& obs, int viewer);
 
   std::vector<int> choices;
   int decisions = 0, truncated = 0;
@@ -332,11 +392,18 @@ class Env {
   bool auto_single_;
   std::unique_ptr<Duel> duel_;
   std::unique_ptr<Decision> dec_;
+  int64_t dec_seq_ = 0;
   std::unique_ptr<Board> board_;
   std::vector<Option> opts_;
   std::vector<HistoryEntry> history_;
+  std::vector<HistoryEntry> ohist_;    // decisions + the duel's public events, in order (obs_history)
+  std::vector<uint8_t> ohist_event_;   // per ohist_ entry: 1 = public event, 0 = decision
+  size_t events_seen_ = 0;             // duel_->events consumed into ohist_
+  void pull_events();
+  void clear_ohist() { ohist_.clear(); ohist_event_.clear(); events_seen_ = 0; }
   Prof prof_;
-   bool prof_on_ = false;
+  bool record_trace_ = false;
+    bool prof_on_ = false;
    // E5b light replay path: when true, intermediate replay steps skip the full Board and
    // record history entries from per-option card queries (exactly equivalent; see env.cpp).
    // Set only inside replay()/replay_keys() via LightScope (RAII: always cleared on exit),
@@ -364,6 +431,7 @@ class Env {
    // effects to settle(); only the Obs fill is skipped.
    bool settle_fast();
    void fill_obs(Obs& obs);
+   void fill_history(Obs& obs, int me) const;
 };
 
 }  // namespace ygo

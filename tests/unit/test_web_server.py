@@ -702,6 +702,12 @@ def test_surrender_resync_takeover(tmp_path, engine):
                 if last["result"] is not None:
                     break
             assert last["result"] == {"winner": "bot", "reason": "surrender"}
+            # The surrendered game is over although its env is not done: no second surrender, no move
+            # (2026-11-02: both used to go through, and the second surrender wrote a second record).
+            ws2.send_json({"t": "surrender"})
+            assert json.loads(ws2.receive_text()) == {"t": "error", "text": "no active game (send new_game first)"}
+            ws2.send_json({"t": "choose", "prompt": first["prompt"]["id"], "index": 0})
+            assert json.loads(ws2.receive_text()) == {"t": "error", "text": "no active game (send new_game first)"}
     subs = [p for p in (tmp_path / "runs").iterdir() if p.is_dir()]
     assert len(subs) == 1
     rec = json.loads((subs[0] / "game.jsonl").read_text())
@@ -2406,3 +2412,46 @@ def test_new_game_random_ignores_model(tmp_path, engine):
         )
         first = _wait_prompt(ws)
         assert first["model_label"] == "Base model"
+
+
+def _stream_transcript(tmp_path, engine, seed: int) -> list[dict]:
+    """One game against StreamBot with a fixed duel seed, the client also on a splitmix stream: every frame."""
+    from decklight.edopro.bot import StreamBot
+
+    app = create_app(
+        token=TOKEN,
+        engine=engine,
+        make_opponent=lambda mode: StreamBot(seed),
+        record_root=tmp_path / "runs",
+        pics_dir=tmp_path / "pics",
+        fixed_seed=seed,
+    )
+    me = StreamBot(seed ^ 0xA5A5)
+    frames: list[dict] = []
+    with _client(app).websocket_connect(f"/ws?t={TOKEN}") as ws:
+        frames.append(json.loads(ws.receive_text()))
+        _new_game(
+            ws, (FIXTURES / "BlueEyes.ydk").read_text(), (FIXTURES / "Branded.ydk").read_text(), first="me"
+        )
+        while True:
+            msg = json.loads(ws.receive_text())
+            assert msg.get("t") != "error", msg
+            if msg.get("thinking") is not None:  # timer-driven ticker frames are not part of the transcript
+                continue
+            frames.append(msg)
+            assert len(frames) < 20000, "game did not finish"
+            if msg.get("result") is not None:
+                return frames
+            if msg.get("prompt") is not None:
+                n = len(msg["prompt"]["options"])
+                ws.send_json({"t": "choose", "prompt": msg["prompt"]["id"], "index": me._next() % n})
+
+
+def test_fixed_seed_transcript_is_deterministic(tmp_path, engine):
+    """A2c parity gate precondition: the same seed + opponent + client stream gives the same frames, twice."""
+    a = _stream_transcript(tmp_path / "a", engine, 77)
+    b = _stream_transcript(tmp_path / "b", engine, 77)
+    assert len(a) > 20 and a[-1]["result"] is not None
+    assert a == b
+    c = _stream_transcript(tmp_path / "c", engine, 78)
+    assert c != a  # the seed reaches the duel

@@ -10,11 +10,33 @@
 <link rel="apple-touch-icon" href="assets/decklight-icon-180.png">
 <link rel="manifest" href="manifest.webmanifest">
 <title>decklight</title>
+<script>
+// The saved theme before the first paint (Settings → Appearance; app.js applyTheme keeps it current), so a light
+// choice never flashes the dark background. The Android web view reports the wrong scheme: ask the app's bridge.
+(function () {
+  try {
+    var b = window.DecklightTheme, m = null;
+    try { m = localStorage.getItem("ygo-theme"); } catch (e) { /* the app's saved choice below */ }
+    m = m || (b && b.mode());
+    var sys = b ? b.system() : (matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark");
+    if ((m === "system" ? sys : m) === "light") {
+      document.documentElement.dataset.theme = "light"; document.documentElement.style.background = "#f5f1e8";
+    }
+  } catch (e) { /* dark */ }
+})();
+</script>
 <link rel="stylesheet" href="styles.css">
+<link rel="stylesheet" href="features/deckbuilder/deckbuilder.css">
+<link rel="stylesheet" href="features/ask/ask.css">
+<link rel="stylesheet" href="features/games/games.css">
 </head>
 <body>
+<!-- First paint: the splash mark and the wordmark (same geometry as the app's startup page, rust/app lib.rs),
+     until the first screen renders. The mark is web/assets/boot-mark.svg, inlined so it shows with no request. -->
+<div id="boot" role="status" aria-label="Loading decklight"><svg class="bootmark" aria-hidden="true" focusable="false" xmlns="http://www.w3.org/2000/svg" viewBox="-115 -97.5 740 740"><defs><radialGradient id="bt-glow"><stop offset="0" stop-color="#b89a5e" stop-opacity="0.5"/><stop offset="1" stop-color="#b89a5e" stop-opacity="0"/></radialGradient><radialGradient id="bt-cardglow"><stop offset="0" stop-color="#b89a5e" stop-opacity="0.10"/><stop offset="1" stop-color="#b89a5e" stop-opacity="0"/></radialGradient></defs><circle cx="337.2" cy="276.3" r="175.0" fill="url(#bt-cardglow)"/><g transform="rotate(-20 256.0 499.5)"><rect x="191.0" y="167.0" width="130.0" height="190.0" rx="12.5" class="e1" fill="#141310" stroke="#7a756a" stroke-width="6.00"/></g><g transform="rotate(0 256.0 499.5)"><rect x="191.0" y="167.0" width="130.0" height="190.0" rx="12.5" class="e2" fill="#141310" stroke="#958f82" stroke-width="6.00"/></g><g transform="rotate(20 256.0 499.5)"><rect x="191.0" y="167.0" width="130.0" height="190.0" rx="12.5" class="e3" fill="#141310" stroke="#d6cfc0" stroke-width="7.50"/></g><polyline class="pth" points="158.5,315.3 227.4,260.1 357.2,221.4" fill="none" stroke="#b89a5e" stroke-width="8.25" stroke-linecap="round" stroke-linejoin="round"/><circle class="nd" cx="158.5" cy="315.3" r="9.38" fill="#141310" stroke="#b89a5e" stroke-width="5.70"/><circle class="nd" cx="227.4" cy="260.1" r="9.38" fill="#141310" stroke="#b89a5e" stroke-width="5.70"/><circle cx="357.2" cy="221.4" r="65.0" fill="url(#bt-glow)"/><circle class="st" cx="357.2" cy="221.4" r="13.8" fill="#b89a5e"/></svg><div class="bootword" aria-hidden="true">decklight</div></div>
 <div id="banner" hidden></div>
 <div id="layout">
+  <aside id="readside" aria-label="Card"></aside>
   <main id="app"></main>
   <aside id="logside" aria-label="Game log"></aside>
 </div>

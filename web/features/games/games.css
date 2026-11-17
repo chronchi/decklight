@@ -1,0 +1,192 @@
+/* Games (Play > Games): docs/ui/mocks/ask/mocks.html games, game, game-decision (the g-* mock styles). The blocks
+   (game card, play sequence, bot's view) are the chat's ab-* styles in features/ask/ask.css. */
+.gm { padding-bottom: 24px; }
+.gm-chips { display: flex; gap: 6px; margin: 12px 0 10px; flex-wrap: wrap; }
+.gm-chips button { min-height: 36px; padding: 0 12px; border-radius: 18px; border: 1px solid var(--line-2); color: var(--muted); font-size: 13px; }
+.gm-chips button.sel { color: var(--text); border-color: rgba(var(--accent-rgb), 0.55); background: var(--accent-tint); }
+.gm-stat { border: 1px solid var(--line-2); border-radius: 12px; background: var(--raise); padding: 12px; }
+.gm-big { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.gm-big b { font-size: 26px; font-weight: 300; color: var(--text); font-variant-numeric: tabular-nums; }
+.gm-big span { color: var(--muted); font-size: 13px; }
+.gm-sub { font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); margin: 12px 0 2px; }
+.gm-sr { display: grid; grid-template-columns: 1fr auto 54px; gap: 10px; align-items: center; font-size: 13px; padding: 6px 0; border-top: 1px solid var(--line); }
+.gm-sub + .gm-sr { border-top: 0; }
+.gm-sr > span:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.gm-n { color: var(--muted); font-variant-numeric: tabular-nums; font-size: 12px; }
+.gm-bar { height: 4px; border-radius: 2px; background: rgba(var(--bot-rgb), 0.35); overflow: hidden; }
+.gm-bar i { display: block; height: 100%; background: var(--you); }
+/* #lobby h3 { margin: 0 } outranks a bare .gm-lbl: the section labels sat flush under the stats box (user 2026-11-15:
+   "it feels too close and there's no separation"). */
+#lobby h3.gm-lbl { margin: 24px 0 6px; }
+.gm-lbl { font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted); font-weight: 400; margin: 20px 0 4px; }
+.gm-row { display: grid; grid-template-columns: 52px 1fr 64px; gap: 10px; align-items: center; width: 100%; text-align: left;
+  padding: 10px 0; border-bottom: 1px solid var(--line); min-height: 56px; color: inherit; }
+.gm-res { font-size: 10.5px; letter-spacing: 0.08em; text-align: center; padding: 2px 0; border-radius: 6px; border: 1px solid; }
+.gm-res.gm-w { color: var(--accent); border-color: rgba(var(--accent-rgb), 0.45); }
+.gm-res.gm-l { color: var(--danger); border-color: rgba(var(--danger-rgb), 0.45); }
+.gm-res.gm-s, .gm-res.gm-u { color: var(--muted); border-color: var(--line-2); }
+.gm-tx { display: flex; flex-direction: column; min-width: 0; }
+.gm-ti { font-size: 14px; color: var(--text); }
+.gm-mi { font-size: 12px; color: var(--muted); margin-top: 2px; }
+.gm-row svg { width: 64px; height: 26px; }
+.gm-row svg path { fill: none; stroke-width: 1.4; }
+.gm-y { stroke: var(--you); }
+.gm-o { stroke: var(--bot); stroke-dasharray: 3 2; }
+.gm-tag { font-size: 9.5px; letter-spacing: 0.08em; color: var(--muted); border: 1px solid var(--line-2); border-radius: 5px; padding: 0 4px; margin-left: 6px; vertical-align: 1px; }
+.gm-note { font-size: 12.5px; color: var(--muted); line-height: 1.45; margin: 6px 0 4px; }
+.gm-acts { display: flex; gap: 8px; margin: 10px 0 4px; flex-wrap: wrap; }
+/* A game's actions: equal tiles under the game card, Watch in the accent (mock D, 2026-11-16). */
+.gm-tiles { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: 8px; margin: 12px 0 6px; }
+.gm-tile { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; min-height: 72px; padding: 8px 6px;
+  border: 1px solid var(--line-2); border-radius: 12px; color: var(--text); font-size: 13px; line-height: 1.25; text-align: center; }
+.gm-tile .ak-ico { width: 20px; height: 20px; color: var(--muted); }
+.gm-tile small { display: block; font-size: 11.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.gm-tile.pri { border-color: rgba(var(--accent-rgb), .55); background: var(--accent-tint); color: var(--accent); }
+.gm-tile.pri .ak-ico { color: var(--accent); }
+.gm-tile:disabled { color: var(--muted); }
+.gm-more, .gm-hide { margin: 12px 0 6px; }
+.gm-show { margin: 16px 0; }
+.gm-minor { margin: 2px 0 12px; min-height: 40px; }
+.gm-head { display: flex; align-items: center; gap: 4px; padding: 10px 0 8px; border-bottom: 1px solid var(--line); margin: 0 -4px 12px; }
+.gm-ht { flex: 1; min-width: 0; }
+.gm-ht h2 { font-size: 15px; font-weight: 400; margin: 0; }
+.gm-hs { font-size: 11.5px; color: var(--muted); }
+.gm-q { font-size: 13.5px; margin: 0 0 8px; }
+.gm-turn { display: grid; grid-template-columns: 34px 1fr auto; gap: 10px; align-items: center; width: 100%; text-align: left;
+  min-height: 48px; border-bottom: 1px solid var(--line); font-size: 13.5px; color: inherit; }
+.gm-turn.open { border-bottom: 0; }
+.gm-tn { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+.gm-who { font-size: 12px; color: var(--muted); }
+.gm-lp { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; display: flex; align-items: center; gap: 4px; }
+.gm-decs { margin: 6px 0 10px; }
+.gm-dec { display: grid; grid-template-columns: 30px 1fr auto; gap: 10px; align-items: center; width: 100%; text-align: left;
+  min-height: 48px; padding: 4px 0; border-bottom: 1px solid var(--line); font-size: 13px; color: inherit; }
+.gm-dn { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+.gm-pk { color: var(--muted); font-size: 12px; margin-top: 2px; }
+.gm-mk { font-size: 10px; letter-spacing: 0.06em; padding: 1px 5px; border-radius: 5px; border: 1px solid var(--line-2); color: var(--muted); white-space: nowrap; }
+.gm-mk.bad { color: var(--bot-text); border-color: rgba(var(--danger-rgb), 0.45); }
+.gm-opt { display: grid; grid-template-columns: 30px 1fr auto; gap: 10px; align-items: center; padding: 8px; border-radius: 10px;
+  border: 1px solid var(--line); font-size: 13px; margin-top: 6px; }
+.gm-opt.you { border-color: rgba(var(--you-rgb), 0.45); background: rgba(var(--you-rgb), 0.06); }
+.gm-th { --mw: 30px; --mh: calc(30px * 86 / 59); width: 30px; height: var(--mh); position: relative; display: grid; place-items: center; }
+.gm-th.none { border: 1px dashed var(--line-2); border-radius: 4px; color: var(--muted); }
+.gm-th.none .ak-ico { width: 16px; height: 16px; }
+.gm-nav { justify-content: space-between; margin-bottom: 20px; }
+.gm .ak-ico { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.75; stroke-linecap: round; stroke-linejoin: round; }
+/* Search, Select and Delete (mocks games-search, games-select, games-delete). */
+.gm-tools { display: flex; gap: 8px; align-items: center; margin: 12px 0 0; }
+.gm-search { flex: 1; display: flex; align-items: center; gap: 8px; min-height: 44px; padding: 0 14px; border-radius: 22px; border: 1px solid var(--line-2); color: var(--muted); }
+.gm-search:focus-within { border-color: rgba(var(--accent-rgb), 0.55); }
+.gm-search input { flex: 1; min-width: 0; background: none; border: 0; color: var(--text); font: inherit; font-size: 14px; outline: none; }
+.gm-search input::placeholder { color: var(--muted); }
+.gm-tools .ak-btn { min-height: 44px; }
+.gm-selbar { display: flex; align-items: center; gap: 10px; padding: 10px 0; border-bottom: 1px solid var(--line); margin: 6px 0 4px; }
+.gm-selt { flex: 1; font-size: 15px; }
+.gm-row.gm-pick { grid-template-columns: 24px 52px 1fr 64px; }
+.gm-row.gm-pick.sel { background: var(--accent-tint); }
+.gm-cb { width: 22px; height: 22px; border-radius: 6px; border: 1.5px solid var(--muted); display: grid; place-items: center; }
+.gm-row.sel .gm-cb { border-color: var(--accent); background: var(--accent); color: var(--bg); }
+.gm-cb .ak-ico { width: 16px; height: 16px; stroke-width: 2.4; }
+.gm-delbar { position: sticky; bottom: 0; padding: 10px 0 12px; background: var(--bg); border-top: 1px solid var(--line-2); margin-top: 16px; }
+.gm-dz { color: var(--danger); border-color: rgba(var(--danger-rgb), 0.5); display: inline-flex; align-items: center; justify-content: center; gap: 8px; }
+.gm-dz:disabled { opacity: 0.5; }
+.gm-scrim { position: fixed; inset: 0; background: rgba(var(--shade-rgb), calc(0.55 * var(--shade-k))); z-index: 40; animation: fade var(--t); }
+.gm-dlg { position: fixed; left: 24px; right: 24px; top: 30%; max-width: 420px; margin: 0 auto; z-index: 41; background: var(--sheet); border: 1px solid var(--line-2); border-radius: 16px; padding: 18px;
+  animation: fade var(--t) var(--ease); }
+.gm-dlg h2 { font-size: 16px; font-weight: 500; margin: 0 0 8px; }
+.gm-lblrow { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 24px 0 6px; }
+.gm-lblrow .gm-lbl, .gm-lblrow .gm-note { margin: 0; }
+.gm-selb { min-height: 44px; flex: none; }
+.gm-row { -webkit-touch-callout: none; user-select: none; }
+/* Export sheet (export.js; mocks export-*) */
+.gm-sheet { position: fixed; left: 0; right: 0; bottom: 0; max-height: 88%; overflow-y: auto; z-index: 41; background: var(--sheet); border-radius: 18px 18px 0 0;
+  border-top: 1px solid var(--line-2); padding: 8px 18px calc(18px + env(safe-area-inset-bottom)); max-width: 560px; margin: 0 auto;
+  animation: up 240ms var(--ease); }
+.gm-sheet .grab { width: 36px; height: 4px; border-radius: 2px; background: var(--faint); margin: 2px auto 10px; }
+.gm-sheet h2 { font-size: 16px; font-weight: 500; margin: 0 0 4px; color: var(--text); }
+.gx-sec { font-size: 12px; letter-spacing: .08em; color: var(--muted); margin: 14px 0 6px; text-transform: uppercase; }
+.gx-chips { display: flex; gap: 6px; flex-wrap: wrap; }
+.gx-chips button { min-height: 40px; padding: 0 14px; border-radius: 20px; border: 1px solid var(--line-2); color: var(--muted); font-size: 13.5px; }
+.gx-chips button.sel { color: var(--text); border-color: rgba(var(--accent-rgb), .55); background: var(--accent-tint); }
+.gx-row { display: flex; align-items: center; gap: 12px; width: 100%; min-height: 58px; border-bottom: 1px solid var(--line); text-align: left; color: var(--text); padding: 6px 0; }
+.gx-row:disabled { opacity: .55; }
+.gx-ai { width: 36px; height: 36px; border-radius: 10px; border: 1px solid var(--line-2); display: grid; place-items: center; color: var(--muted); flex: none; font-size: 10px; letter-spacing: .06em; }
+.gx-row.sel .gx-ai { color: var(--accent); border-color: rgba(var(--accent-rgb), .55); background: var(--accent-tint); }
+.gx-tx { flex: 1; display: flex; flex-direction: column; } .gx-an { font-size: 14.5px; }
+.gx-ad { display: block; font-size: 12px; color: var(--muted); margin-top: 2px; line-height: 1.4; }
+.gx-radio { width: 18px; height: 18px; border-radius: 50%; border: 1.5px solid var(--muted); display: grid; place-items: center; flex: none; }
+.gx-radio.on { border-color: var(--accent); } .gx-radio.on::after { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--accent); }
+.gx-rng { display: flex; align-items: center; gap: 8px; margin: 10px 0 2px; font-size: 14px; flex-wrap: wrap; }
+.gx-step { display: inline-flex; align-items: center; border: 1px solid var(--line-2); border-radius: 10px; }
+.gx-step button { width: 44px; height: 44px; color: var(--muted); font-size: 18px; } .gx-step button:disabled { opacity: .4; }
+.gx-step b { min-width: 22px; text-align: center; font-weight: 500; font-variant-numeric: tabular-nums; }
+.gx-opt { display: flex; align-items: center; gap: 12px; min-height: 52px; border-bottom: 1px solid var(--line); font-size: 14px; color: var(--text); }
+.gx-opt > span:first-child { flex: 1; }
+.gx-seg { display: flex; padding: 2px; border: 1px solid var(--line-2); border-radius: 9px; flex: none; }
+.gx-seg button { min-height: 40px; padding: 0 10px; border-radius: 7px; color: var(--muted); font-size: 12.5px; }
+.gx-seg button.sel { background: var(--accent-tint); color: var(--text); box-shadow: inset 0 0 0 1px rgba(var(--accent-rgb), .45); }
+.gx-foot { display: flex; align-items: center; gap: 10px; margin-top: 14px; }
+.gx-foot > span { flex: 1; margin: 0; } .gx-foot .ak-btn { min-height: 48px; padding: 0 16px; flex: none; }
+.gx-prog { height: 6px; border-radius: 3px; background: var(--line-2); overflow: hidden; margin: 12px 0 6px; }
+.gx-prog i { display: block; height: 100%; background: var(--accent); }
+.gx-ready { padding: 12px; border: 1px solid var(--line-2); border-radius: 12px; margin-top: 10px; }
+.gx-again { display: block; margin: 12px auto 0; min-height: 44px; }
+.gx-rn { font-size: 14.5px; color: var(--text); word-break: break-word; }
+.gm-delbar { display: flex; gap: 10px; } .gm-delbar .ak-btn { flex: 1; min-height: 48px; display: inline-flex; align-items: center; justify-content: center; gap: 8px; }
+.gm-head .gm-xp { margin-left: auto; }
+.ab-rh .gm-xpi { margin-left: auto; width: 40px; height: 36px; display: grid; place-items: center; color: var(--muted); border-radius: 8px; align-self: center; }
+.ab-rh .gm-xpi + .ab-r { margin-left: 0; }
+/* An exported frame (export.js frameHTML), drawn off screen at 360 x 640 CSS px. */
+
+/* Watch (watch.js): the play screen (lib/player.js) on the whole screen and one bar of controls over its bottom, hidden
+   while the game plays (user 2026-11-16 chose "The combination" of docs/ui/mocks/watchbar: the replay board was smaller
+   than the duel's). */
+#watch { position: fixed; inset: 0; z-index: 60; background: var(--bg); color: var(--text);
+  padding: env(safe-area-inset-top) 0 env(safe-area-inset-bottom); }
+#watch:focus { outline: none; }
+#watch .w-stage { position: absolute; inset: env(safe-area-inset-top) 0 env(safe-area-inset-bottom); }
+/* While the bar is hidden, a tap anywhere brings it back (the board's frame would take the tap otherwise). */
+#watch .w-tap { display: none; position: absolute; inset: 0; z-index: 2; }
+#watch.hidebar .w-tap { display: block; }
+#watch .w-msg:empty { display: none; }
+/* The Export sheet's host: its sheet and scrim are fixed, so the host takes no room (it took 24 px above the board). */
+#watch .w-sheet { position: absolute; width: 0; height: 0; }
+#watch .w-msg { position: absolute; left: 16px; right: 16px; top: 40%; z-index: 4; }
+#watch .w-card { max-width: 420px; margin: 0 auto; padding: 16px; border: 1px solid var(--line-2); border-radius: 12px; background: var(--sheet);
+  font-size: 14px; color: var(--muted); text-align: center; }
+#watch .w-card b { color: var(--text); font-weight: 500; } #watch .w-card p { margin: 6px 0 12px; }
+#watch .w-acts { display: flex; gap: 8px; justify-content: center; }
+#watch .w-bar { position: absolute; left: 0; right: 0; bottom: env(safe-area-inset-bottom); z-index: 3; padding: 8px 8px 10px;
+  border-top: 1px solid var(--line); background: var(--bg); box-shadow: 0 -12px 24px var(--bg); transition: opacity 200ms; }
+#watch.hidebar .w-bar { opacity: 0; pointer-events: none; }
+#watch .w-bar:empty { display: none; }
+/* What is left of the bar while it is hidden: a thin progress line at the bottom edge. */
+#watch .w-line { position: absolute; left: 0; right: 0; bottom: env(safe-area-inset-bottom); height: 2px; z-index: 3;
+  background: var(--line-2); opacity: 0; transition: opacity 200ms; pointer-events: none; }
+#watch.hidebar .w-line { opacity: 1; }
+#watch .w-line > i { position: absolute; inset: 0 auto 0 0; background: var(--accent); opacity: .75; }
+@media (prefers-reduced-motion: reduce) { #watch .w-bar, #watch .w-line { transition: none; } }
+/* Two lines (user 2026-11-16: the speed button ran off a 360 px screen): the progress and where we are, then the
+   controls spread over the width, Close at the far left and Export at the far right. */
+#watch .w-meta { display: flex; align-items: center; gap: 10px; margin: 0 8px 4px; }
+#watch .w-prog { position: relative; flex: 1; height: 3px; border-radius: 2px; background: var(--line-2); }
+#watch .w-prog > i { position: absolute; inset: 0 auto 0 0; border-radius: 2px; background: var(--accent); opacity: .75; }
+#watch .w-row { display: flex; align-items: center; justify-content: space-between; gap: 2px; }
+#watch .w-btn { min-width: 44px; min-height: 44px; border: 0; border-radius: 10px; background: none; color: var(--text);
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px; font-size: 14px; }
+#watch .w-btn:disabled { color: var(--faint); }
+#watch .w-btn.w-play { border: 1px solid rgba(var(--accent-rgb), .6); background: var(--accent-tint); color: var(--accent); }
+#watch .w-x, #watch .w-xp { color: var(--muted); }
+/* Nine controls share the row: 44 px each where they fit, narrower (33 px at 320) where they do not. */
+#watch .w-row .w-btn { flex: 1 1 0; min-width: 0; max-width: 52px; }
+#watch .w-ico { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+#watch .w-ico.w-fill { fill: currentColor; stroke: none; }
+#watch .w-pos { flex: none; font-size: 12.5px; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+#watch .w-sp { color: var(--muted); font-size: 13px; font-variant-numeric: tabular-nums; }
+#watch .w-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+/* Two panes (wide screens): the list beside the open game, each scrolling on its own. */
+.gm.two { display: grid; grid-template-columns: minmax(300px, 400px) minmax(0, 1fr); gap: 28px; align-items: start; }
+.gm.two .gm-pane { min-width: 0; }
+.gm.two .gm-ppage { position: sticky; top: 0; max-height: calc(100dvh - 24px); overflow-y: auto; padding: 0 4px 24px; }
+.gm-row.cur { background: var(--accent-tint); box-shadow: inset 2px 0 0 var(--accent); }

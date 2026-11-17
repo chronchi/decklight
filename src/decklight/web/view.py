@@ -343,7 +343,9 @@ def build_view(env, human_seat: int, reveal_all: bool = False) -> dict:
             for loc in (C.LOCATION_MZONE, C.LOCATION_SZONE, C.LOCATION_HAND,
                         C.LOCATION_GRAVE, C.LOCATION_REMOVED):
                 for c in q[(p, loc)]:
-                    if (c is not None and c.controller == ch.controller
+                    # The location must match too: without it a same-code card at the same index in
+                    # another zone (e.g. a hidden hand card) stood in for the chain card (A2b-3b leak).
+                    if (c is not None and c.controller == ch.controller and c.location == ch.location
                             and c.sequence == ch.sequence and c.code == ch.code):
                         found = c
                         break

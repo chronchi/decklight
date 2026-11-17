@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Retrain stage B1 (docs/retrain/plan-v2.md §Stage B1, plan-v3; go: user 2026-10-11 "yeah, go ahead"): two B-v1s from
+# Retrain stage B1 (docs/lab/retrain/plan-v2.md §Stage B1, plan-v3; go: user 2026-10-11 "yeah, go ahead"): two B-v1s from
 # scratch (clean, clean + hw) on the stage D clean mix + stage M turns, then the raw card on 5,952 fresh deals vs
 # ygo-agent with ft-swv / ft-teach-h / base_r3 references, and holdout/new-card head-to-heads vs ft-swv.
 # Needs: the stage M sweep and its play-out anchor (ANCHOR_DROPS = jsonl {"line": id} of the turn lines it dropped).

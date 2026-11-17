@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Retrain stage D (docs/retrain/plan-v1.md §Stage D, plan-v2/v3; user green light 2026-10-11): strict re-verification of
+# Retrain stage D (docs/lab/retrain/plan-v1.md §Stage D, plan-v2/v3; user green light 2026-10-11): strict re-verification of
 # the stored LLM plans (guides, claude, planned, planned-s1..s4; ~15.9k lines, eval-only decks removed) plus 8-hand
 # expansion of the strict records, on a many-core box (CPU work; GPU listings only, NOTEBOOK 2026-10-02 23:10).
 # Only the 392 lines strict mode can change are re-verified (scripts/audit/strict_junk.py, NOTEBOOK 2026-10-11 22:15). Plan cost ~$X; expected well under.

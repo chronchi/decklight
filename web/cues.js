@@ -1,7 +1,7 @@
 // Pacing cues: plays the server's engine cues (state message `cues`) as short,
 // quiet scenes over a held board snapshot, then applies the new snapshot.
 //
-// Design (docs/web-ux-plan.md §1, night design): no flashes, no white, no glow,
+// Design (docs/plans/web-ux-plan.md §1, night design): no flashes, no white, no glow,
 // no shake. Slow fades and slides, one thin accent line per scene. Every scene
 // is a pure function of time (`at(ms)`), so it can be played in real time,
 // skipped, or frozen at any instant (mock screenshots, game_video.py frames).
@@ -223,30 +223,32 @@ export function planDurations(cues, baseChain) {
 
 // One sentence per visible scene, e.g. "decklight activates Ash Blossom, chain 2".
 export function stepText(step, names) {
+  // names: [you, opp] for replays; a room passes [null, opp] (you stay "you", the opponent gets a name).
   const opp = (names && names[1]) || "decklight";
-  const you = names ? names[0] : "You";
+  const second = !names || !names[0];
+  const you = second ? "You" : names[0];
   const mine = (r) => r && r.owner === "me";
   const who = (r) => (mine(r) ? you : opp);
   const cname = (r) => (r && r.name) || "a face-down card";
   const list = (rs) => {
-    const ns = (rs || []).map((r) => (mine(r) && !names ? "your " : "") + cname(r));
+    const ns = (rs || []).map((r) => (mine(r) && second ? "your " : "") + cname(r));
     return ns.length > 3 ? ns.slice(0, 3).join(", ") + " and " + (ns.length - 3) + " more" : ns.join(", ");
   };
   const c = step.cues[0] || {};
   switch (step.kind) {
     case "banner":
-      if (step.turn) return "Turn " + step.turn + ", " + (step.player === "me" ? (names ? you + "’s" : "your") : opp + "’s") + " turn";
+      if (step.turn) return "Turn " + step.turn + ", " + (step.player === "me" ? (second ? "your" : you + "’s") : opp + "’s") + " turn";
       return PHASE_NAME[step.phase] || step.phase || "";
     case "draw": {
       const n = step.cues.reduce((a, x) => a + (x.count || 1), 0);
-      return (c.player === "me" ? (names ? you + " draws " : "You draw ") : opp + " draws ") + n + (n === 1 ? " card" : " cards");
+      return (c.player === "me" ? (second ? "You draw " : you + " draws ") : opp + " draws ") + n + (n === 1 ? " card" : " cards");
     }
     case "moves":
       return (MOVE_LABEL[step.reason] || "Moved") + ": " + list(step.cues.map((x) => x.card));
     case "summon":
       return who(c.card) + ", " + (HOW[step.how] || "Summon") + ": " + list(step.cues.map((x) => x.card));
     case "activate":
-      return (mine(c.card) && !names ? "You activate " : who(c.card) + " activates ") + cname(c.card) + ", chain " + step.link;
+      return (mine(c.card) && second ? "You activate " : who(c.card) + " activates ") + cname(c.card) + ", chain " + step.link;
     case "solve":
       return "Chain " + step.link + " resolves";
     case "negate":
@@ -260,11 +262,11 @@ export function stepText(step, names) {
       return cname(a) + (tg ? " attacks " + cname(tg) : " attacks directly");
     }
     case "lp": {
-      const p = c.player === "me" ? (names ? you : "you") : opp;
+      const p = c.player === "me" ? (second ? "you" : you) : opp;
       const tail = typeof c.lp_after === "number" ? ", " + c.lp_after + " LP left" : "";
-      if (c.t === "damage") return (c.player === "me" && !names ? "You take " : p + " takes ") + c.amount + " damage" + tail;
-      if (c.t === "pay") return (c.player === "me" && !names ? "You pay " : p + " pays ") + c.amount + " LP" + tail;
-      if (c.t === "recover") return (c.player === "me" && !names ? "You gain " : p + " gains ") + c.amount + " LP" + tail;
+      if (c.t === "damage") return (c.player === "me" && second ? "You take " : p + " takes ") + c.amount + " damage" + tail;
+      if (c.t === "pay") return (c.player === "me" && second ? "You pay " : p + " pays ") + c.amount + " LP" + tail;
+      if (c.t === "recover") return (c.player === "me" && second ? "You gain " : p + " gains ") + c.amount + " LP" + tail;
       return typeof c.lp === "number" ? p + ": " + c.lp + " LP" : "";
     }
     case "confirm":
@@ -469,16 +471,26 @@ const NEG_FILTER = "brightness(.42) saturate(.12)";
 // ---------- the player ----------
 
 // opts: {layer, getView(), apply(msg), mock, names() -> [me, opp], speed() -> 1|2|0,
-//        pause() -> bool, textFor(code) -> string|null, onIdle()}
+//        pause() -> bool, held() -> bool, textFor(code) -> string|null,
+//        onScene(step), onIdle()}
 // The settled instant of a scene (fraction of its length): what reduced motion shows.
 const HOLD = 0.62;
 
 export function createCuePlayer(opts) {
   const layer = opts.layer;
   layer.setAttribute("aria-hidden", "true");   // visual only: the live region speaks each scene
-  layer.innerHTML = '<div class="cue-ghosts"></div><div class="cue-dim"></div><div class="cue-stage"></div>' +
+  layer.innerHTML = '<div class="cue-dim"></div><div class="cue-stage"></div>' +
     '<div class="cue-hint"></div><div class="cue-rule"></div>';
-  const ghostsEl = layer.querySelector(".cue-ghosts");
+  // Ghosts are board patches (layer 0 in docs/design/ui-attention.md), not narration: they sit in their own layer just
+  // above the board and under every surface, so a landed card never covers a reveal, a sheet or a lookup.
+  let ghostsEl = document.getElementById("cue-ghosts");
+  if (!ghostsEl) {
+    ghostsEl = document.createElement("div");
+    ghostsEl.id = "cue-ghosts";
+    ghostsEl.className = "cue-ghosts";
+    ghostsEl.setAttribute("aria-hidden", "true");
+    layer.parentNode.insertBefore(ghostsEl, layer);
+  }
   const dimEl = layer.querySelector(".cue-dim");
   const stage = layer.querySelector(".cue-stage");
   const hintEl = layer.querySelector(".cue-hint");
@@ -493,7 +505,9 @@ export function createCuePlayer(opts) {
   const st = {
     queue: [], cur: null, steps: null, si: -1, scene: null, t0: 0, raf: 0,
     waiting: false, ghosts: new Map(), hidden: new Set(), lp: {}, frozen: null,
+    heldAt: 0,   // performance.now() when a pause froze playback, 0 while running
     rules: new Set(),   // glossary ids already taught this game (rule notes)
+    once: null,         // ends the running playOnce (replay), also when reset() cuts it short
   };
 
   const ruleOn = () => (opts.ruleNotes ? !!opts.ruleNotes() : false);
@@ -793,8 +807,14 @@ export function createCuePlayer(opts) {
         (txt ? '<p>' + esc(txt) + "</p>" : ""));
       const tw = Math.min(a.w - 40, 380);
       text.style.left = (a.x + a.w / 2 - tw / 2) + "px";
-      text.style.top = (dest.y + ch + 14) + "px";
       text.style.width = tw + "px";
+      // The active surface is laid out against the whole viewport minus the bars:
+      // the card sits at a third of it and the text box is never clipped below.
+      const th = text.getBoundingClientRect().height || 0;
+      const bottom = a.y + Math.min(a.h, window.innerHeight) - 12;
+      let ty = dest.y + ch + 14;
+      if (th && ty + th > bottom) ty = Math.max(a.y + 8, bottom - th);
+      text.style.top = ty + "px";
       const rule = text.querySelector(".rule");
       // Earlier links of this chain: a quiet row above the card.
       let row = null;
@@ -1161,7 +1181,30 @@ export function createCuePlayer(opts) {
     st.steps = planSteps(seg.cues, v && v.chain);
     st.si = -1;
     seg.visible = visibleCount(st.steps);
+    live = {links: ((v && v.chain) || []).map((l) => ({card: l.card, controller: l.controller})), solving: 0};
     nextStep();
+  }
+  // The chain stack follows the animations (user 2026-11-13: "we should show the animations resolving"): the board
+  // state only arrives when a segment ends, so a chain that opens and resolves inside one segment would never show.
+  // Links are added on activate, the resolving one is marked, resolved ones leave; opts.onChain(null) hands the
+  // stack back to the board state.
+  let live = null;   // {links: [{card, controller}], solving} while a segment plays
+  function trackChain(step) {
+    if (!live) return;
+    let changed = false;
+    for (const c of step.cues || []) {
+      if (c.t === "activate" && c.card) {
+        const n = c.link || live.links.length + 1;
+        live.links = live.links.slice(0, n - 1);
+        live.links.push({card: Object.assign({uid: "cue:" + n + ":" + (c.card.code || 0), faceup: true}, c.card),
+          controller: c.card.owner === "opp" ? "bot" : "you"});
+      } else if (c.t === "chain_solving") live.solving = c.link;
+      else if (c.t === "chain_solved") { live.links = live.links.slice(0, c.link - 1); live.solving = 0; }
+      else if (c.t === "chain_end") { live.links = []; live.solving = 0; }
+      else continue;
+      changed = true;
+    }
+    if (changed && opts.onChain) opts.onChain(live.links, live.solving);
   }
   function nextStep() {
     endScene();
@@ -1169,11 +1212,13 @@ export function createCuePlayer(opts) {
     for (;;) {
       st.si += 1;
       if (st.si >= st.steps.length) { endSegment(); return; }
+      trackChain(st.steps[st.si]);
       if (st.steps[st.si].dur > 0) break;
     }
     const step = st.steps[st.si];
     st.scene = mount(step);
     st.t0 = performance.now();
+    if (opts.onScene) opts.onScene(step);
     const note = noteStep(step);
     if (opts.announce) opts.announce(stepText(step, opts.names && opts.names()) + (note ? ". " + note : ""));
     // Reduced motion: each scene is shown settled (its frame at HOLD) and only fades in and out.
@@ -1182,6 +1227,13 @@ export function createCuePlayer(opts) {
     st.scene.at(still ? step.dur * HOLD : 0);
     const tick = (now) => {
       if (!st.scene) return;
+      // A paused duel freezes the picture and the clock; resume continues it.
+      if (opts.held && opts.held()) {
+        if (!st.heldAt) st.heldAt = now;
+        st.raf = requestAnimationFrame(tick);
+        return;
+      }
+      if (st.heldAt) { st.t0 += now - st.heldAt; st.heldAt = 0; }
       const sp = opts.speed() || 1;
       const el = (now - st.t0) * sp;
       if (el >= step.dur) { stage.style.opacity = ""; nextStep(); return; }
@@ -1196,7 +1248,9 @@ export function createCuePlayer(opts) {
     st.cur = null;
     st.steps = null;
     setRule("");
-    opts.apply(seg.msg);
+    live = null;
+    if (opts.onChain) opts.onChain(null, 0);
+    opts.apply(seg.msg, {visible: seg.visible});
     clearPatches();
     const m = seg.msg || {};
     if (opts.pause() && seg.visible > 0 && !m.prompt && !m.result) {
@@ -1210,7 +1264,7 @@ export function createCuePlayer(opts) {
     pump();
   }
   function pump() {
-    if (st.cur || st.waiting || st.frozen) return;
+    if (st.cur || st.waiting || st.frozen || (opts.held && opts.held())) return;
     const seg = st.queue.shift();
     if (!seg) { layer.classList.remove("playing"); if (opts.onIdle) opts.onIdle(); return; }
     layer.classList.add("playing");
@@ -1232,8 +1286,12 @@ export function createCuePlayer(opts) {
       return true;
     },
     busy() { return !!(st.cur || st.queue.length || st.waiting); },
+    // Start whatever is queued (a resume after a client-side hold).
+    kick() { pump(); },
     playing() { return !!st.cur; },
     waiting() { return st.waiting; },
+    // A screenshot/replay freeze owns the cue layer without a live segment.
+    frozen() { return !!st.frozen; },
     resume() {
       st.waiting = false;
       hintEl.classList.remove("on");
@@ -1255,6 +1313,7 @@ export function createCuePlayer(opts) {
       st.queue = [];
       st.steps = null;
       st.waiting = false;
+      st.heldAt = 0;
       hintEl.classList.remove("on");
       setRule("");
       layer.classList.remove("waiting", "playing");
@@ -1262,6 +1321,7 @@ export function createCuePlayer(opts) {
       for (const s of segs) opts.apply(s.msg);
     },
     reset() {
+      const once = st.once;
       cancelAnimationFrame(st.raf);
       st.scene = null;
       st.cur = null;
@@ -1269,11 +1329,14 @@ export function createCuePlayer(opts) {
       st.steps = null;
       st.waiting = false;
       st.frozen = null;
+      st.heldAt = 0;
       st.rules.clear();
       hintEl.classList.remove("on");
       setRule("");
       layer.classList.remove("waiting", "playing");
       clearPatches();
+      // A replay's playback cut short (the next frame, a speed change) still ends: its caller waits on it.
+      if (once) once();
     },
     lpOverride(who) { return st.lp[who]; },
 
@@ -1312,14 +1375,23 @@ export function createCuePlayer(opts) {
       return vis.length;
     },
     // Real-time playback of one cue list over the current board (replay showFrame).
+    // It ends when the cues finish or when reset() cuts it short (2026-11-16: a cut-short playback never resolved, so
+    // Watch waited on it for good after a speed change, and play and the arrows stopped moving the board).
     playOnce(cues, baseChain) {
       api.reset();
       return new Promise((resolve) => {
-        st.queue.push({cues, msg: null, once: resolve});
-        const apply0 = opts.apply;
+        const apply0 = opts.apply, idle0 = opts.onIdle;
+        const done = () => {
+          if (st.once !== done) return;
+          st.once = null;
+          opts.apply = apply0;
+          opts.onIdle = idle0;
+          resolve();
+        };
+        st.once = done;
+        st.queue.push({cues, msg: null, once: done});
         opts.apply = (m) => { if (m) apply0(m); };
-        const idle0 = opts.onIdle;
-        opts.onIdle = () => { opts.apply = apply0; opts.onIdle = idle0; resolve(); };
+        opts.onIdle = done;
         void baseChain;
         pump();
       });

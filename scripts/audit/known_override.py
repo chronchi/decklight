@@ -1,4 +1,4 @@
-"""History-review Stage-0 measurement (docs/reviews/2026-10-09-history-arch-opus.md, appendix): at searched decisions of
+"""History-review Stage-0 measurement (docs/lab/reviews/2026-10-09-history-arch-opus.md, appendix): at searched decisions of
 300 sw-t1 records, how often a remembered opponent card exists (card_known) and whether the override rate differs; how far
 back the v1 32-entry history window reaches. Usage: taskset -c 0-3 uv run python scripts/audit/known_override.py 300
 """

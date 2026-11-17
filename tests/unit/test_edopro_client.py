@@ -92,6 +92,17 @@ def test_error_message_decoding():
 # --- 2. WindBot launch contract ---
 
 
+def test_chat_parsing():
+    # STOC_Chat2 as EDOPro's GenericDuel::Chat sends it: header + name[20] + msg incl. the NUL
+    msg = "gg wp".encode("utf-16-le") + b"\0\0"
+    kind, team, who, text = P.parse_chat2(bytes([0, 1]) + P.encode_name("Rival") + msg)
+    assert (kind, team, who, text) == ("duelist", True, "Rival", "gg wp")
+    assert P.parse_chat2(bytes([3, 0]) + P.encode_name("") + "Deck error".encode("utf-16-le"))[0] == "system_error"
+    assert P.parse_chat(struct.pack("<H", 1) + "hi".encode("utf-16-le") + b"\0\0") == (1, "hi")
+    with pytest.raises(ValueError):
+        P.parse_chat2(b"\0" * 10)
+
+
 def test_kv_parsing():
     kv, rest = B.parse_kv_args(["Name=test", "Deck=random-snake-eye", "Host=127.0.0.1",
                                 "Port=7922", "--debug"])
@@ -161,12 +172,12 @@ def _run_loopback(deal_seed: int, client_seed: int, tmp_path) -> tuple[ClientSes
     session = ClientSession(
         "127.0.0.1", port, "loopback", deck, RandomAgent(client_seed),
         view_factory=lambda seat, codes: DecisionOnlyView(seat, codes, cards=engine.cards),
-        timeout_s=120.0,
+        timeout_s=120.0, record_dir=tmp_path / "client",
     )
     code = session.run()
     thread.join(timeout=300)
     assert not thread.is_alive(), "server did not exit after the --once duel"
-    subs = [p for p in tmp_path.iterdir() if p.is_dir()]
+    subs = [p for p in tmp_path.iterdir() if p.is_dir() and p.name != "client"]
     assert len(subs) == 1
     rec = json.loads((subs[0] / "game.jsonl").read_text())
     return session, {"code": code, "record": rec}
@@ -187,12 +198,12 @@ def _run_stream_loopback(deal_seed: int, client_seed: int, tmp_path) -> tuple[Cl
         "127.0.0.1", port, "loopback", deck, RandomAgent(client_seed),
         view_factory=lambda seat, codes: StreamView({"main": main, "extra": extra},
                                                     engine.cards, seat=seat),
-        timeout_s=120.0,
+        timeout_s=120.0, record_dir=tmp_path / "client",
     )
     code = session.run()
     thread.join(timeout=300)
     assert not thread.is_alive(), "server did not exit after the --once duel"
-    subs = [p for p in tmp_path.iterdir() if p.is_dir()]
+    subs = [p for p in tmp_path.iterdir() if p.is_dir() and p.name != "client"]
     assert len(subs) == 1
     rec = json.loads((subs[0] / "game.jsonl").read_text())
     return session, {"code": code, "record": rec}
@@ -218,6 +229,15 @@ def test_loopback_full_duel_stream_view(tmp_path):
     deck = load_ydk(DECK)
     codes = {*deck.main, *deck.extra}
     assert all(k.split(":")[0] in ("chain", "summon") and int(k.split(":")[1]) in codes for k in events), events
+    # the frame log holds both directions; our responses in it match the count
+    import gzip
+    files = list(tmp_path.rglob("*.stream.jsonl.gz"))
+    assert len(files) == 1, files
+    lines = [json.loads(x) for x in gzip.open(files[0], "rt")]
+    assert lines[0]["main"] == list(deck.main)
+    frames = lines[1:]
+    assert sum(f["dir"] == "out" and f["proto"] == P.CTOS_RESPONSE for f in frames) == session.record.n_responses
+    assert sum(f["dir"] == "in" and f["proto"] == P.STOC_GAME_MSG for f in frames) > 100
 
 
 @pytest.mark.slow  # ~35 s per full random-vs-random duel; 3 seeds ≈ 2 min

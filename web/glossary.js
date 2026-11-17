@@ -1,4 +1,4 @@
-// Rules glossary (docs/web-ux-plan.md step 5, item 6): plain-language OCG/TCG
+// Rules glossary (docs/plans/web-ux-plan.md step 5, item 6): plain-language OCG/TCG
 // Master Rule terms behind the tappable card-text keywords and the cue rule
 // notes. Each entry is {id, term, aliases, short, long}:
 //   short  one plain sentence (<= 120 chars), used in cue notes;

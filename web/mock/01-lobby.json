@@ -116,5 +116,21 @@
       "name": "My pasted deck",
       "group": "user"
     }
-  ]
+  ],
+  "packs": {
+    "state": "active",
+    "id": "cards-2026-11-02",
+    "sha256": "c363ef5534eb8eb71b94fba1ee670adced93a89364aacb07d2cef3d1c99b7b59",
+    "created": "2026-11-02T10:00:00Z",
+    "cards": 12,
+    "scripts": 12,
+    "strings": 1,
+    "embeddings": 12,
+    "lua_desc": 31,
+    "previous_id": "cards-2026-10-26",
+    "message": null,
+    "alerts": [],
+    "restart_required": false
+  },
+  "pack_update_url": "https://example.invalid/decklight/cards.zip"
 }

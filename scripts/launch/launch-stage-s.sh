@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Retrain stage S (docs/retrain/plan-v2.md + plan-v3.md; user green light 2026-10-11 "yeah, go ahead"): honest-override
+# Retrain stage S (docs/lab/retrain/plan-v2.md + plan-v3.md; user green light 2026-10-11 "yeah, go ahead"): honest-override
 # search on base_r3 + value_ppo3 vs ygo-agent on the final card's 1,488 deals, paired with the stored hppo games; ho_t1
 # on the 744 going-first deals; override replication audit. ~6,700 proc-min of search (2.27 proc-min per hppo game,
 # x1.3 for adaptive samples) on ~27 procs (24 GB GPU, 32+ cores; no 48-core/32 GB offer <= $X on 2026-10-11)

@@ -4,7 +4,7 @@
 
 1. combo test: per deck, the policy pilots turn 1 alone (going first, opponent passive) on the expert lines' own hands;
    its end board (cards it controls on the field) vs the expert line's. `--samples K` adds best-of-K sampled runs
-   (temperature 1): the gap best-of-K vs greedy is the headroom search/RL can harvest (pass@k vs pass@1, Kolibri §3.2.5).
+   (temperature 1): the gap best-of-K vs greedy is the headroom search/RL can capture (pass@k vs pass@1, Kolibri §3.2.5).
 2. matches: policy vs random and greedy (both seats, all ordered deck pairs of the sample) -> win rate (Wilson CI);
    `--ygoagent` adds the ygo-agent gauntlet opponent.
 3. narrate: N games policy vs greedy written turn by turn to runs/<run>/playtest/game-<k>.txt for a human audit.
@@ -43,7 +43,7 @@ from decklight.eval.match import game_state, play_match, ring_pairs, wilson
 from decklight.eval.policies import GreedyPolicy, RandomPolicy
 
 ROOT = Path(__file__).resolve().parents[1]
-FIELD_LOCS = (3, 4)  # obs card column 1: 3 mzone, 4 szone (docs/obs_spec.md; not the OCG bit flags)
+FIELD_LOCS = (3, 4)  # obs card column 1: 3 mzone, 4 szone (docs/design/obs_spec.md; not the OCG bit flags)
 
 
 def my_field(obs) -> int:

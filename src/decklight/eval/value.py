@@ -12,7 +12,7 @@ import numpy as np
 import torch
 
 from decklight.eval.bc_policy import _run_args
-from decklight.model.bc_data import KNOWN_KEYS, OBS_KEYS
+from decklight.model.bc_data import KNOWN_KEYS, OBS_HISTORY_KEYS, OBS_KEYS
 from decklight.model.policy_v3 import make_policy
 
 
@@ -49,6 +49,7 @@ class ValueNet:
                     t[k] = torch.from_numpy(np.ascontiguousarray(obs[k])).to(self.device)
         else:
             keys = tuple(OBS_KEYS) + (tuple(KNOWN_KEYS) if self.known else ())
+            keys += tuple(OBS_HISTORY_KEYS) if getattr(self.model, "observable", False) else ()  # Y-trunk value (v2)
             t = {k: torch.from_numpy(np.ascontiguousarray(obs[k])).to(self.device) for k in keys}
         return t
 

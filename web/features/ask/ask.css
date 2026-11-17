@@ -1,0 +1,293 @@
+/* Ask tab (features/ask). Ported from docs/ui/mocks/ask/mocks.html; every class is ak-* so nothing clashes with the app. */
+#lobby.askview { position: relative; }
+#lobby.askview .lscroll { display: flex; flex-direction: column; padding-bottom: 8px; }
+.ak { display: flex; flex-direction: column; flex: 1; }
+.ak-ico { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; flex: none; }
+.ak-head { display: flex; align-items: center; gap: 4px; padding: 6px 0 8px; border-bottom: 1px solid var(--line); margin: 0 -4px; }
+.ak-ibtn { width: 44px; height: 44px; display: grid; place-items: center; color: var(--muted); border-radius: 10px; flex: none; }
+.ak-title { flex: 1; min-width: 0; margin: 0; padding: 0 4px; font-size: 15px; font-weight: 400; color: var(--text);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ak-thread { display: flex; flex-direction: column; gap: 12px; padding: 14px 0 6px; }
+.ak-turn { display: flex; flex-direction: column; gap: 12px; }
+.ak-qwrap { align-self: flex-end; display: flex; flex-direction: column; align-items: flex-end; gap: 2px; max-width: 86%; }
+.ak-q { padding: 10px 13px; border-radius: 14px 14px 4px 14px; background: var(--indigo-2); border: 1px solid rgba(var(--you-rgb), 0.28);
+  font-size: 14.5px; line-height: 1.45; color: var(--text); text-align: left; white-space: pre-wrap; overflow-wrap: anywhere; }
+.ak-a { font-size: 14.5px; line-height: 1.6; color: var(--text); overflow-wrap: anywhere; }
+.ak-a p { margin: 0 0 8px; } .ak-a p.h { font-weight: 600; margin-top: 4px; }
+.ak-a b { color: var(--accent); font-weight: 500; }
+.ak-a code { font: 13px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; background: var(--raise); padding: 1px 4px; border-radius: 4px; }
+.ak-a ul, .ak-a ol { margin: 0 0 8px; padding-left: 20px; } .ak-a li { margin: 2px 0; }
+/* Under an answer: icon actions left (36 px targets), quiet info right, one centred row. */
+.ak-meta { font-size: 11px; color: var(--muted); display: flex; align-items: center; gap: 2px; margin: -6px 0 0 -8px; }
+.ak-meta .act { width: 36px; height: 36px; display: grid; place-items: center; border-radius: 8px; color: var(--muted); }
+.ak-meta .act .ak-ico { width: 18px; height: 18px; }
+.ak-meta .info { margin-left: auto; min-width: 0; font-variant-numeric: tabular-nums; text-align: right; }
+.ak-branch { display: inline-flex; flex: none; white-space: nowrap; align-items: center; gap: 2px; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; margin-right: 6px; }
+.ak-branch button { width: 32px; height: 32px; display: grid; place-items: center; color: var(--muted); border-radius: 8px; }
+.ak-branch button:disabled { opacity: 0.35; }
+.ak-branch .ak-ico { width: 16px; height: 16px; }
+/* Thinking (user 2026-11-14): at the bottom of the thread like Claude's app; the decklight mark lights one card and
+   its node at a time, left to right, beside a card-game word. Reduced motion: the mark holds still. */
+.ak-think { display: flex; align-items: center; gap: 10px; min-height: 28px; font-size: 13px; color: var(--muted); }
+.ak-mark { width: 30px; height: 22px; flex: none; overflow: visible; }
+.ak-mark rect { fill: var(--bg); stroke: var(--mark-edge); stroke-width: 12; animation: ak-card 1.8s infinite; }
+.ak-mark polyline { fill: none; stroke: var(--mark-gold); stroke-width: 10; stroke-linecap: round; stroke-linejoin: round; }
+.ak-mark circle { fill: var(--bg); stroke: var(--mark-gold); stroke-width: 9; animation: ak-node 1.8s infinite; }
+.ak-mark .k1 { animation-delay: 0.6s; } .ak-mark .k2 { animation-delay: 1.2s; }
+@keyframes ak-card { 0%, 40% { stroke: var(--mark-hi); } 45%, 100% { stroke: var(--mark-edge); } }
+@keyframes ak-node { 0%, 40% { fill: var(--accent); stroke: var(--accent); } 45%, 100% { fill: var(--bg); stroke: var(--mark-gold); } }
+.ak-think .w { animation: ak-word 0.4s ease-out; }
+@keyframes ak-word { from { opacity: 0; } to { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) {
+  .ak-mark rect, .ak-mark circle, .ak-think .w { animation: none; }
+  .ak-mark rect.k2 { stroke: var(--mark-hi); } .ak-mark circle.k2 { fill: var(--accent); stroke: var(--accent); }
+}
+/* Tool trail (user 2026-11-14): smaller than the answer, drawn as the brand's line of play. */
+.ak-trail { font-size: 12px; color: var(--muted); line-height: 1.35; }
+.ak-trail .sum { display: flex; align-items: center; gap: 6px; min-height: 28px; color: var(--muted); font-size: 12px; }
+.ak-trail .ak-ico { width: 14px; height: 14px; }
+.ak-trail ol { list-style: none; margin: 0 0 0 3px; padding: 0 0 0 12px; border-left: 1px solid var(--line-2); }
+.ak-trail li { position: relative; }
+.ak-trail li > button { display: flex; align-items: center; gap: 6px; min-height: 26px; width: 100%; text-align: left; color: inherit; font-size: 12px; }
+.ak-trail li:not(.outli)::before { content: ""; position: absolute; left: -15.5px; top: 10px; width: 5px; height: 5px; border-radius: 50%;
+  background: var(--bg); border: 1px solid var(--muted); }
+.ak-trail li.last::before { background: var(--accent); border-color: var(--accent); }
+.ak-trail li.err { color: var(--danger); } .ak-trail li.err::before { border-color: var(--danger); }
+.ak-trail .arg { color: var(--text-3); }
+.ak-trail li > button .ak-ico { margin-left: auto; }
+.ak-trail .now { display: flex; align-items: center; gap: 8px; min-height: 26px; }
+.ak-trail .now .node { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); flex: none; margin-left: 0; }
+.ak-trail .out { margin: 2px 0 6px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--raise);
+  font-size: 11.5px; font-variant-numeric: tabular-nums; }
+.ak-trail .out .row { display: flex; justify-content: space-between; gap: 10px; min-height: 18px; }
+.ak-trail .out .row span:last-child { color: var(--text); text-align: right; overflow-wrap: anywhere; }
+.ak-trail .lim { margin-top: 4px; color: var(--muted); }
+/* Errors: what happened and what to do. */
+.ak-err { border: 1px solid rgba(var(--danger-rgb), 0.45); border-radius: 12px; padding: 12px 14px; background: rgba(var(--bot-rgb), 0.06); }
+.ak-err .h { display: flex; gap: 8px; align-items: flex-start; color: var(--danger); font-size: 13.5px; line-height: 1.45; min-width: 0;
+  overflow-wrap: anywhere; }
+.ak-err .h .ak-ico { flex: none; width: 18px; height: 18px; margin-top: 1px; }
+.ak-err.quiet { border-color: var(--line-2); background: transparent; } .ak-err.quiet .h { color: var(--muted); }
+.ak-err .acts { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+.ak-btn { min-height: 40px; padding: 0 14px; border-radius: 10px; border: 1px solid var(--line-2); color: var(--text); font-size: 13.5px; }
+.ak-btn.pri { border-color: rgba(var(--accent-rgb), 0.55); color: var(--accent); background: var(--accent-tint); }
+.ak-link { color: var(--accent); text-decoration: underline; min-height: 24px; font-size: inherit; }
+.ak-empty { margin: 26px 0 6px; text-align: center; }
+.ak-empty .k { font-size: 22px; font-weight: 300; letter-spacing: 0.06em; color: var(--text); }
+.ak-empty p { font-size: 13px; color: var(--muted); margin: 6px 0 0; line-height: 1.5; }
+.ak-sugg { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
+.ak-sugg button { text-align: left; min-height: 48px; padding: 10px 14px; border-radius: 12px; border: 1px solid var(--line-2); font-size: 14px; color: var(--text); }
+.ak-sugg button span { display: block; font-size: 12px; color: var(--muted); margin-top: 2px; }
+.ak-help { font-size: 12.5px; color: var(--muted); line-height: 1.5; margin: 8px 2px 0; }
+.ak-help a { color: var(--accent); }
+.ak-help.bad { color: var(--danger); } .ak-help.good { color: var(--accent); }
+/* Composer: sits where the Start button sits on the Bot tab. */
+.ak-composer { flex: 0 0 auto; padding: 8px 18px 10px; border-top: 1px solid var(--line); }
+/* The question box: the attachments, the question (1 to 6 lines, then it scrolls), then + , the model in use and send
+   (user 2026-11-16, after the Claude app's box). The question sizes itself (field-sizing): an inline height set by
+   script was wiped by every render, and the box flickered and cut its lines. */
+.ak-box { display: grid; grid-template-columns: 44px minmax(0, 1fr) 44px; grid-template-areas: "att att att" "q q q" "plus model send";
+  align-items: center; column-gap: 8px; padding: 4px 6px 6px; border: 1px solid var(--line-2); border-radius: 20px; background: var(--raise); }
+.ak-box:focus-within { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.ak-box .ak-att { grid-area: att; margin: 6px 6px 2px; }
+.ak-box .ak-plus { grid-area: plus; } .ak-box .ak-send { grid-area: send; }
+.ak-box textarea { grid-area: q; display: block; width: 100%; box-sizing: border-box; min-height: 44px; max-height: calc(6 * 1.4em + 16px);
+  field-sizing: content; overflow-y: auto; resize: none; border: 0; outline: none; background: none; padding: 8px 10px;
+  font: inherit; font-size: 15px; line-height: 1.4; color: var(--text); }
+.ak-model { grid-area: model; justify-self: start; max-width: 100%; min-height: 44px; display: inline-flex; align-items: center; gap: 4px;
+  padding: 0 12px 0 14px; border-radius: 22px; background: var(--raise); border: 1px solid var(--line); color: var(--muted); font-size: 13.5px; }
+.ak-model span { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ak-model svg { flex: none; width: 16px; height: 16px; }
+.ak-box textarea::placeholder { color: var(--muted); }
+.ak-send { width: 44px; height: 44px; border-radius: 50%; display: grid; place-items: center; background: var(--accent-tint);
+  border: 1px solid rgba(var(--accent-rgb), 0.55); color: var(--accent); flex: none; }
+.ak-send:disabled { opacity: 0.45; }
+.ak-send.stop { color: var(--text); border-color: var(--line-2); background: var(--raise); }
+.ak-editing { font-size: 12px; color: var(--accent); margin: 0 4px 8px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+/* Chat list */
+.ak-list { padding-top: 10px; }
+.ak-search input { width: 100%; min-height: 44px; padding: 0 16px; border: 1px solid var(--line-2); border-radius: 22px; background: transparent;
+  color: var(--text); font: inherit; font-size: 14px; box-sizing: border-box; }
+.ak-grp { font-size: 11px; letter-spacing: 0.14em; color: var(--muted); margin: 16px 0 4px; text-transform: uppercase; }
+.ak-chat { display: flex; align-items: center; gap: 6px; border-bottom: 1px solid var(--line); }
+.ak-chat .open { flex: 1; min-width: 0; min-height: 60px; display: flex; flex-direction: column; justify-content: center; text-align: left; }
+.ak-chat .ti { font-size: 14.5px; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ak-chat .mi { font-size: 12px; color: var(--muted); margin-top: 3px; }
+.ak-chat .live { color: var(--accent); }
+.ak-chat.sel .ti { color: var(--accent); }
+.ak-chat .del { min-width: 44px; height: 44px; display: grid; place-items: center; color: var(--muted); border-radius: 10px; font-size: 12.5px; }
+.ak-chat .del.arm { color: var(--danger); padding: 0 8px; border: 1px solid rgba(var(--danger-rgb), 0.5); }
+/* Settings */
+.ak-sh { display: flex; align-items: center; gap: 6px; padding: 4px 0 8px; border-bottom: 1px solid var(--line); margin-left: -8px; }
+.ak-sh h2 { font-size: 17px; font-weight: 500; margin: 0; color: var(--text); }
+.ak-sec { font-size: 15px; font-weight: 600; margin: 20px 0 6px; color: var(--text); }
+.ak-prov { display: flex; align-items: center; gap: 12px; min-height: 58px; width: 100%; border-bottom: 1px solid var(--line); text-align: left; }
+.ak-prov .pn { display: block; font-size: 14.5px; color: var(--text); } .ak-prov .pd { display: block; font-size: 12px; color: var(--muted); margin-top: 2px; }
+.ak-prov .kh { margin-left: auto; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.ak-radio { width: 18px; height: 18px; border-radius: 50%; border: 1.5px solid var(--muted); display: grid; place-items: center; flex: none; box-sizing: border-box; }
+.ak-radio.on { border-color: var(--accent); } .ak-radio.on::after { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--accent); }
+.ak-field { display: block; margin-top: 10px; }
+.ak-field .fl { display: block; font-size: 13px; color: var(--muted); margin-bottom: 6px; }
+.ak-field input { width: 100%; min-height: 48px; padding: 0 14px; border: 1px solid var(--line-2); border-radius: 12px; background: transparent;
+  color: var(--text); font: inherit; font-size: 14.5px; box-sizing: border-box; }
+.ak-field.btnf { display: flex; align-items: center; width: 100%; min-height: 48px; padding: 0 14px; border: 1px solid var(--line-2); border-radius: 12px;
+  font-size: 14.5px; color: var(--text); text-align: left; }
+.ak-field.btnf .r { margin-left: auto; color: var(--accent); font-size: 13px; }
+.ak-rowbtns { display: flex; gap: 8px; margin-top: 10px; }
+.ak-inrow { display: flex; gap: 8px; } .ak-inrow input { flex: 1; }
+/* Sheets over the tab */
+.ak-scrim { position: absolute; inset: 0; background: rgba(var(--shade-rgb), calc(0.62 * var(--shade-k))); z-index: 20; animation: fade var(--t); }
+.ak-bsheet { position: absolute; left: 0; right: 0; bottom: 0; max-height: 86%; z-index: 21; background: var(--sheet); border-radius: 18px 18px 0 0;
+  border-top: 1px solid var(--line-2); padding: 8px 18px calc(18px + env(safe-area-inset-bottom)); display: flex; flex-direction: column; box-sizing: border-box;
+  animation: up 240ms var(--ease); }
+.ak-bsheet .grab { width: 36px; height: 4px; border-radius: 2px; background: var(--faint); margin: 2px auto 10px; flex: none; }
+.ak-bsheet h2 { font-size: 16px; font-weight: 500; margin: 0 0 4px; color: var(--text); }
+.ak-bsheet > button[role="menuitem"] { display: flex; align-items: center; gap: 12px; min-height: 52px; font-size: 14.5px; color: var(--text); text-align: left; flex-wrap: wrap; }
+.ak-bsheet > button[role="menuitem"] span { flex-basis: 100%; padding-left: 34px; margin-top: -10px; font-size: 12px; color: var(--muted); }
+.ak-bsheet > button[role="menuitem"] .ak-ico { color: var(--muted); }
+.ak-ptabs { display: flex; gap: 6px; margin: 10px 0 6px; flex-wrap: wrap; }
+.ak-ptabs button { min-height: 36px; padding: 0 12px; border-radius: 18px; border: 1px solid var(--line-2); color: var(--muted); font-size: 13px; }
+.ak-ptabs button.sel { color: var(--text); border-color: rgba(var(--accent-rgb), 0.55); background: var(--accent-tint); }
+.ak-models { overflow-y: auto; min-height: 60px; flex: 1 1 auto; }
+.ak-mrow { display: flex; align-items: center; gap: 12px; min-height: 52px; width: 100%; border-bottom: 1px solid var(--line); text-align: left; }
+.ak-mrow .mn { font-size: 14.5px; color: var(--text); overflow-wrap: anywhere; }
+.ak-mrow .badge { margin-left: auto; font-size: 10px; letter-spacing: 0.1em; padding: 2px 6px; border-radius: 6px; border: 1px solid rgba(var(--accent-rgb), 0.45); color: var(--accent); }
+.ak-btn.wide { width: 100%; margin-top: 14px; display: flex; align-items: center; justify-content: center; gap: 8px; }
+.ak-btn .ak-ico { width: 18px; height: 18px; color: var(--muted); }
+/* A card name in an answer: opens the app's card details. Inline in a sentence, so it keeps the text's size. */
+.ak-card { font: inherit; color: inherit; padding: 0; text-decoration: underline; text-decoration-color: rgba(var(--accent-rgb), 0.55);
+  text-decoration-thickness: 1px; text-underline-offset: 3px; text-align: inherit; display: inline; }
+.ak-a b .ak-card { color: var(--accent); }
+/* Jump to the latest message: shown once the thread is scrolled up. */
+.ak-composer { position: relative; }
+.ak-jump[hidden] { display: none; }
+.ak-jump { position: absolute; top: -54px; left: 50%; transform: translateX(-50%); width: 44px; height: 44px; border-radius: 50%;
+  display: grid; place-items: center; background: var(--sheet); border: 1px solid var(--line-2); color: var(--text);
+  box-shadow: 0 6px 18px rgba(var(--shade-rgb), calc(0.45 * var(--shade-k))); z-index: 5; }
+/* A [[name]] the server could not match to a card: dotted, and a tap asks which card it is. */
+.ak-card.unres { text-decoration-style: dotted; text-decoration-color: var(--muted); }
+.ak-mrow .ml { display: block; font-size: 12px; color: var(--muted); margin-top: 2px; }
+/* Game blocks under an answer (blocks.js; mocks ask-replay / ask-botview / ask-sequence). Every class is ab-*. */
+.ab-blocks { display: flex; flex-direction: column; gap: 10px; }
+.ab-rb { border: 1px solid var(--line-2); border-radius: 12px; background: var(--raise); padding: 10px 12px 12px; }
+.ab-rh { display: flex; align-items: baseline; gap: 8px; font-size: 13px; color: var(--text); }
+.ab-k { white-space: nowrap; color: var(--muted); font-size: 11px; letter-spacing: .08em; text-transform: uppercase; }
+.ab-r { white-space: nowrap; margin-left: auto; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.ab-title { font-size: 14px; margin-top: 4px; color: var(--text); }
+.ab-res { font-size: 11px; letter-spacing: .08em; padding: 1px 6px; border-radius: 6px; border: 1px solid; }
+.ab-res.ab-l { color: var(--danger); border-color: rgba(var(--danger-rgb), .45); }
+.ab-res.ab-w { color: var(--accent); border-color: rgba(var(--accent-rgb), .45); }
+.ab-spark { display: block; width: 100%; height: 56px; margin-top: 8px; }
+.ab-spark path { fill: none; stroke-width: 1.6; } .ab-spark .ab-y { stroke: var(--you); } .ab-spark .ab-o { stroke: var(--bot); stroke-dasharray: 4 2; }
+.ab-spark .ab-g { stroke: var(--line-2); stroke-width: 1; } .ab-spark text { fill: var(--muted); font-size: 9px; font-family: inherit; }
+.ab-spark .ab-hot { fill: var(--accent); }
+.ab-legend { display: flex; gap: 14px; font-size: 11px; color: var(--muted); margin-top: 2px; flex-wrap: wrap; }
+.ab-legend i { display: inline-block; width: 10px; height: 2px; vertical-align: 3px; margin-right: 5px; }
+.ab-legend .ab-ly { background: var(--you); } .ab-legend .ab-lo { background: repeating-linear-gradient(90deg, var(--bot) 0 4px, transparent 4px 6px); }
+.ab-legend .ab-lh { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); vertical-align: 0; }
+.ab-legend .ab-lr { margin-left: auto; }
+
+.ab-z { width: var(--mw); height: var(--mh); border-radius: 4px; border: 1px solid var(--zone-line); position: relative; }
+.ab-mc { width: var(--mw); height: var(--mh); border-radius: 4px; background: var(--zone) center/cover no-repeat; position: absolute; inset: -1px;
+  filter: var(--art); box-shadow: 0 0 0 1px rgba(var(--shade-rgb), calc(.4 * var(--shade-k))); transition: transform var(--t) var(--ease), opacity var(--t); }
+.ab-mc.ab-noart { box-shadow: inset 0 0 0 1px var(--line-2); filter: none; }
+.ab-mc.ab-back { background: linear-gradient(135deg, var(--ph-1), var(--ph-3)); filter: none; box-shadow: inset 0 0 0 1px rgba(var(--text-rgb), .12); }
+.ab-mc.ab-back::after { content: ""; position: absolute; left: 50%; top: 50%; width: 9px; height: 9px; margin: -4.5px; border-radius: 50%; border: 1px solid var(--mark-edge); }
+.ab-mc.ab-def { transform: rotate(90deg) scale(.84); }
+.ab-mc.ab-hl { box-shadow: 0 0 0 1.5px var(--accent), 0 0 10px rgba(var(--accent-rgb), .35); filter: none; }
+.ab-mc.ab-gone { opacity: .25; filter: grayscale(1); }
+.ab-mc .ab-st { position: absolute; left: 50%; bottom: -13px; transform: translateX(-50%); font-size: 9.5px; color: var(--text); font-variant-numeric: tabular-nums;
+  background: var(--ink); padding: 0 3px; border-radius: 3px; white-space: nowrap; }
+.ab-mc.ab-def .ab-st { transform: translateX(-50%) rotate(-90deg); }
+/* A still of the play screen (lib/stills.js): the board as the duel shows it; tapping it opens Watch there. */
+.ab-still { display: block; width: min(100%, 300px); aspect-ratio: 9 / 16; margin: 8px auto 0; padding: 0; border: 1px solid var(--line-2);
+  border-radius: 10px; overflow: hidden; background: var(--bg); color: var(--muted); }
+.ab-still img { display: block; width: 100%; height: 100%; }
+.ab-still.ab-sw { display: flex; align-items: center; justify-content: center; font-size: 13px; }
+/* The live board (lib/stills.js liveBoard): the play screen itself at the still's size; a tap opens Watch there. */
+.ab-still.ab-live { position: relative; }
+.ab-live .ab-lh { position: absolute; inset: 0; overflow: hidden; }
+.ab-live .ab-lh .player { transform-origin: 0 0; pointer-events: none; }
+.ab-live .ab-ltap { position: absolute; inset: 0; width: 100%; border: 0; background: none; }
+.ab-cap { display: flex; align-items: center; gap: 8px; min-height: 30px; margin-top: 6px; font-size: 13px; color: var(--text); }
+.ab-who { font-size: 10px; letter-spacing: .1em; padding: 1px 6px; border-radius: 6px; flex: none; }
+.ab-who.ab-y { color: var(--you-text); background: rgba(var(--you-rgb), .14); } .ab-who.ab-o { color: var(--bot-text); background: rgba(var(--bot-rgb), .12); }
+.ab-scrub { display: flex; align-items: center; gap: 4px; margin-top: 4px; }
+.ab-scrub button { display: grid; place-items: center; color: var(--text); flex: none; }
+.ab-scrub .ab-pp { width: 40px; height: 40px; border-radius: 50%; border: 1px solid var(--line-2); }
+.ab-scrub .ab-sb { width: 32px; height: 40px; border-radius: 8px; color: var(--muted); }
+.ab-scrub .ab-sb:disabled { opacity: .35; }
+.ab-scrub .ak-ico { width: 18px; height: 18px; }
+.ab-scrub .ab-dots { display: flex; gap: 4px; flex: 1; margin-left: 4px; }
+.ab-scrub .ab-dots i { flex: 1; height: 3px; border-radius: 2px; background: var(--line-2); }
+.ab-scrub .ab-dots i.ab-on { background: var(--accent); } .ab-scrub .ab-dots i.ab-done { background: var(--mark-gold); }
+.ab-scrub .ab-n { font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; min-width: 38px; text-align: right; }
+.ab-note, .ab-help { font-size: 12px; color: var(--muted); margin: 8px 0 0; line-height: 1.4; }
+.ab-wait { font-size: 13px; color: var(--muted); padding: 14px 0 4px; }
+.ab-fail { font-size: 13px; color: var(--danger); padding: 10px 0 2px; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+
+.ab-opts { margin-top: 10px; display: grid; gap: 6px; }
+.ab-opt { display: grid; grid-template-columns: 30px 1fr auto; gap: 10px; align-items: center; padding: 6px 8px; border-radius: 10px; border: 1px solid var(--line); }
+.ab-th { --mw: 30px; --mh: calc(30px * 86 / 59); width: 30px; height: var(--mh); position: relative; }
+.ab-th.ab-nocard { border: 1px dashed var(--line-2); border-radius: 4px; display: grid; place-items: center; color: var(--muted); }
+.ab-th.ab-nocard .ak-ico { width: 16px; height: 16px; }
+.ab-ol { font-size: 13px; line-height: 1.3; color: var(--text); } .ab-tags { display: flex; gap: 5px; margin-top: 3px; flex-wrap: wrap; }
+.ab-tag { font-size: 10px; letter-spacing: .06em; padding: 1px 5px; border-radius: 5px; border: 1px solid var(--line-2); color: var(--muted); }
+.ab-tag.ab-bot { color: var(--accent); border-color: rgba(var(--accent-rgb), .45); }
+.ab-tag.ab-you { color: var(--you-text); border-color: rgba(var(--you-rgb), .5); }
+.ab-tag.ab-bad { color: var(--bot-text); border-color: rgba(var(--danger-rgb), .45); }
+.ab-nums { text-align: right; font-size: 12px; font-variant-numeric: tabular-nums; }
+.ab-nums .ab-w { font-size: 15px; color: var(--text); } .ab-nums .ab-p { color: var(--muted); font-size: 11px; }
+.ab-bars { grid-column: 2 / 4; height: 3px; border-radius: 2px; background: var(--line); overflow: hidden; margin-top: -2px; }
+.ab-bars i { display: block; height: 100%; background: var(--accent); opacity: .7; }
+.ab-opt.ab-mine { border-color: rgba(var(--you-rgb), .45); background: rgba(var(--you-rgb), .06); }
+.ab-opt.ab-best { border-color: rgba(var(--accent-rgb), .4); }
+.ab-gauge { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted); margin-top: 8px; }
+.ab-gauge b { color: var(--text); font-weight: 500; }
+.ab-gauge .ab-bar { flex: 1; height: 6px; border-radius: 3px; background: rgba(var(--bot-rgb), .35); overflow: hidden; }
+.ab-gauge .ab-bar i { display: block; height: 100%; background: var(--you); }
+.ab-acts { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+@media (prefers-reduced-motion: reduce) { .ab-mc { transition: none; } }
+
+/* On this device (mocks local-check / local-downloading) */
+.ak-dcheck { border: 1px solid var(--line-2); border-radius: 12px; background: var(--raise); padding: 10px 12px; margin: 8px 0 4px; }
+.ak-dcheck .dh { font-size: 13px; color: var(--muted); margin-bottom: 4px; }
+.ak-dcheck .dr { display: flex; gap: 8px; align-items: flex-start; font-size: 13px; padding: 4px 0; color: var(--text); }
+.ak-dcheck .dr .ak-ico { width: 16px; height: 16px; flex: none; margin-top: 1px; }
+.ak-dcheck .dr.ok .ak-ico { color: var(--accent); } .ak-dcheck .dr.no .ak-ico { color: var(--danger); }
+.ak-mrow.dev { gap: 10px; }
+.ak-pick { display: flex; align-items: center; gap: 12px; flex: 1; min-width: 0; min-height: 52px; text-align: left; }
+.ak-mrow .mn .badge { margin-left: 8px; }
+.ak-bar { display: block; height: 4px; border-radius: 2px; background: var(--line-2); margin-top: 6px; overflow: hidden; width: 150px; }
+.ak-bar i { display: block; height: 100%; background: var(--accent); }
+.ak-tog { justify-content: space-between; }
+/* Attach (attach.js; mocks ask-attach, ask-attach-game, ask-attached): the composer's +, its chips, the attach sheet. */
+.ak-plus { width: 44px; height: 44px; border-radius: 50%; display: grid; place-items: center; border: 1px solid var(--line-2); color: var(--muted); flex: none; }
+.ak-att { display: flex; gap: 6px; flex-wrap: wrap; margin: 0 0 8px; }
+.ak-q .ak-att { justify-content: flex-end; }
+.ak-chip { display: inline-flex; align-items: center; gap: 6px; min-height: 32px; max-width: 100%; padding: 0 4px 0 8px; border-radius: 8px;
+  border: 1px solid var(--line-2); font-size: 12.5px; color: var(--text); background: var(--raise); white-space: normal; overflow-wrap: anywhere; }
+.ak-q .ak-chip { padding-right: 8px; }
+.ak-chip i { width: 22px; height: 30px; flex: none; border-radius: 3px; background: center / cover; margin-left: -4px; }
+.ak-chip .k { font-size: 9.5px; letter-spacing: 0.08em; color: var(--muted); font-weight: 500; flex: none; }
+/* 44 px to tap, drawn inside the 32 px chip (the margins take back the extra height). */
+.ak-chip .x { width: 44px; height: 44px; margin: -6px -4px -6px -6px; display: grid; place-items: center; color: var(--muted); flex: none; }
+.ak-chip .x .ak-ico { width: 14px; height: 14px; }
+.ak-arow { display: flex; align-items: center; gap: 14px; width: 100%; min-height: 60px; padding: 6px 0; border-bottom: 1px solid var(--line); text-align: left; }
+.ak-arow:disabled { opacity: 0.45; }
+.ak-arow .ai { width: 40px; height: 40px; border-radius: 10px; display: grid; place-items: center; border: 1px solid var(--line-2); color: var(--accent); flex: none; }
+.ak-arow .an { display: block; font-size: 14.5px; color: var(--text); }
+.ak-arow .ad { display: block; font-size: 12px; color: var(--muted); margin-top: 2px; }
+.ak-arow > .ak-ico:last-child { margin-left: auto; color: var(--muted); width: 18px; height: 18px; flex: none; }
+.ak-aback { align-self: flex-start; text-decoration: none; display: inline-flex; align-items: center; gap: 4px; min-height: 44px; }
+.ak-aback .ak-ico { width: 16px; height: 16px; }
+.ak-asearch { display: block; margin: 4px 0 6px; }
+.ak-res { font-size: 10px; letter-spacing: 0.08em; color: var(--muted); width: 52px; flex: none; }
+/* The Model sheet's provider row (mock model-provider): opens the searchable provider picker. */
+.ak-prow { display: flex; align-items: center; gap: 12px; width: 100%; min-height: 56px; margin: 8px 0 4px; padding: 6px 12px; border: 1px solid var(--line-2);
+  border-radius: 12px; text-align: left; color: var(--text); flex: none; }
+.ak-prow .pk { font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); width: 72px; flex: none; }
+.ak-prow .pv { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.ak-prow .pn { font-size: 14.5px; }
+.ak-prow .ps { font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
+.ak-prow > .ak-ico { color: var(--muted); width: 18px; height: 18px; flex: none; }

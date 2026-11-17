@@ -1,4 +1,4 @@
-"""Observation arrays for the player to act (docs/obs_spec.md). Reference implementation for the C++ env."""
+"""Observation arrays for the player to act (docs/design/obs_spec.md). Reference implementation for the C++ env."""
 
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -15,7 +15,7 @@ MAX_CARDS, CARD_COLS = 160, 21
 MAX_CHAIN, CHAIN_COLS = 16, 5
 MAX_OPTIONS, ACTION_COLS = 64, 10
 HISTORY, HISTORY_COLS = 32, 13
-HISTORY_MAX = 512  # long salient window (obs v2, docs/obs_spec.md); v1 HISTORY stays the reference
+HISTORY_MAX = 512  # long salient window (obs v2, docs/design/obs_spec.md); v1 HISTORY stays the reference
 HLOG_COLS = 14  # history_log: stored option row (10) + actor, turn, phase, public
 GLOBAL_COLS = 24
 
@@ -198,7 +198,7 @@ class Board:
         return out, mask
 
     def knowledge(self, memory) -> tuple[np.ndarray, np.ndarray]:
-        """Card-knowledge memory (obs v2, docs/obs_spec.md): per card row, `card_known` uint8 [160]
+        """Card-knowledge memory (obs v2, docs/design/obs_spec.md): per card row, `card_known` uint8 [160]
         (1 = opponent's hidden card whose identity I remember, 2 = my own hidden card the
         opponent knows, else 0) and `known_code` int32 [160] (the remembered passcode for
         `card_known == 1` rows, else 0)."""
@@ -327,12 +327,13 @@ def history_array(
     return out, mask
 
 
-def build_obs(board: Board, dec: Decision, opts: Sequence[Option],
-                history: Sequence[HistoryEntry], source) -> dict[str, np.ndarray]:
+def build_obs(board: Board, dec: Decision, opts: Sequence[Option], history: Sequence[HistoryEntry], source,
+              obs_history: Sequence[HistoryEntry] | None = None) -> dict[str, np.ndarray]:
     """The policy input for one pending decision: every view builds it through this
     function, so a network client sees the same arrays as the engine seat (up to what
     the filtered stream cannot reconstruct). `source` is a board source (turn, phase,
-    first_player, turn_player, memory)."""
+    first_player, turn_player, memory). `obs_history`: what a client sees (own decisions + the opponent's public
+    events, `engine.events`); a client's own history already is that, so it defaults to `history`."""
     cards, card_mask = board.cards(dec.selected)
     card_known, known_code = board.knowledge(source.memory)
     chain, chain_mask = board.chain_array()
@@ -341,6 +342,7 @@ def build_obs(board: Board, dec: Decision, opts: Sequence[Option],
     hist_long, hist_long_mask = history_array(
         history, board.me, source.turn, n=HISTORY_MAX, salient=True
     )
+    obs_hist, obs_hist_mask = history_array(history if obs_history is None else obs_history, board.me, source.turn)
     return {
         "cards": cards, "card_mask": card_mask,
         "card_known": card_known, "known_code": known_code,
@@ -349,6 +351,7 @@ def build_obs(board: Board, dec: Decision, opts: Sequence[Option],
         "actions": actions, "action_mask": action_mask,
         "history": history_arr, "history_mask": history_mask,
         "hist_long": hist_long, "hist_long_mask": hist_long_mask,
+        "obs_history": obs_hist, "obs_history_mask": obs_hist_mask,
     }  # fmt: skip
 
 

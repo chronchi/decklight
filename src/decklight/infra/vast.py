@@ -20,7 +20,7 @@ REMOTE_DIR = "/workspace/ygo-zero"
 SSH_OPTS = ["-o", "StrictHostKeyChecking=no", "-o", "UserKnownHostsFile=/dev/null", "-o", "LogLevel=ERROR",
             "-o", "ConnectTimeout=20", "-o", "ServerAliveInterval=30"]  # fmt: skip
 # Shipped to the instance: tracked files + submodules, minus anything large or derived.
-EXCLUDES = [".git", ".venv", "data", "runs", "build", "__pycache__", "*.so", ".pytest_cache", ".ruff_cache"]
+EXCLUDES = [".git", ".venv", "data", "runs", "build", "target", "__pycache__", "*.so", ".pytest_cache", ".ruff_cache"]  # target: rust/target (GBs)
 
 
 class VastError(RuntimeError):
@@ -105,6 +105,7 @@ class JobSpec:
     gpu: bool = True
     num_gpus: int = 1
     extra_query: str = ""
+    min_compute_cap: int = 750  # CPU-only jobs on a GPU box (A3c) pass 0: no torch kernels needed, cheaper boxes
     setup: str = "bash scripts/vast_setup.sh"
     data_paths: tuple[str, ...] = ()  # extra repo paths to ship despite EXCLUDES (e.g. "data/demos/lines")
     min_mb_s: float = 15.0  # measured download speed a host must reach (0 = skip the check); vast's inet_down lies
@@ -152,7 +153,8 @@ def find_offer(
     q = (f"reliability>0.98 rentable=true verified=true disk_space>={spec.disk_gb} inet_down>=200 "
          f"cpu_cores_effective>={spec.min_cpus} dph<={spec.max_dph}")  # fmt: skip
     # compute_cap>=750: the cu128 torch wheels have no kernels for sm_70 (V100 → "no kernel image", ddpsmoke 2026-10-07)
-    q += f" num_gpus={spec.num_gpus} gpu_ram>={spec.min_gpu_ram_gb} compute_cap>=750" if spec.gpu else " num_gpus=0"
+    q += f" num_gpus={spec.num_gpus} gpu_ram>={spec.min_gpu_ram_gb}" if spec.gpu else " num_gpus=0"
+    q += f" compute_cap>={spec.min_compute_cap}" if spec.gpu and spec.min_compute_cap else ""
     q += f" {spec.extra_query}" if spec.extra_query else ""
     offers = [
         o
@@ -344,7 +346,16 @@ def pull_results(host: str, port: int, name: str) -> Path:
     dest.mkdir(parents=True, exist_ok=True)
     remote = f"cd {REMOTE_DIR}/runs/{shlex.quote(name)} 2>/dev/null && tar czf - . || true"
     pipe = f"ssh {' '.join(SSH_OPTS)} -p {port} root@{host} {shlex.quote(remote)} | tar xzf - -C {shlex.quote(str(dest))}"
-    subprocess.run(pipe, shell=True, check=False)
+    # a pull that brings nothing back is retried (tsoj-arms-20261107-0124: ssh refused at the end, the silent empty pull
+    # was followed by the destroy and 504 games were lost)
+    for attempt in range(6):
+        subprocess.run(pipe, shell=True, check=False)
+        if any(f.name != "launcher.log" for f in dest.iterdir()):
+            break
+        print(f"pull brought nothing back (attempt {attempt + 1}/6); retrying in 30 s", flush=True)
+        time.sleep(30)
+    else:
+        print(f"ALERT pull failed: runs/{name} is empty", flush=True)
     return dest
 
 

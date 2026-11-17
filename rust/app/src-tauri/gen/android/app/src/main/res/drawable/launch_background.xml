@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Shown from the tap until the web view's first frame on API 30 (API 31+ uses the system splash, values-v31). -->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:drawable="@color/night" />
+    <item android:width="288dp" android:height="288dp" android:gravity="center" android:drawable="@drawable/splash_mark" />
+</layer-list>

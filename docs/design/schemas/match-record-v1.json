@@ -1,0 +1,147 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/chronchi/decklight/docs/design/schemas/match-record-v1.json",
+  "title": "decklight match record v1",
+  "description": "One duel. ADR 0010. Additive within v1: readers ignore unknown fields. u64 values are decimal strings (JS loses integers above 2^53).",
+  "type": "object",
+  "required": ["format", "id", "created", "app", "engine", "cards", "rules", "kind", "engine_seed", "decks", "seats", "mode", "result"],
+  "properties": {
+    "format": {"const": "decklight.match/1"},
+    "id": {"type": "string", "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$", "description": "UUIDv7"},
+    "created": {"type": "string", "format": "date-time", "description": "UTC, ISO 8601, at the start of the duel"},
+    "app": {"type": "string", "description": "product name/version, e.g. decklight-app/0.3.0 or decklight-web/0.2.2"},
+    "engine": {
+      "type": "object",
+      "required": ["core"],
+      "properties": {
+        "core": {"type": "string", "description": "ygopro-core commit"},
+        "patches": {"type": "string", "description": "sha256 of our core patches, if any"},
+        "protocol": {"type": "string", "description": "EDOPro client version when played over the EDOPro protocol, e.g. 41.0.11.0"}
+      }
+    },
+    "cards": {
+      "type": "object",
+      "required": ["pack", "sha256"],
+      "properties": {
+        "pack": {"type": "string", "description": "card pack id (A5), e.g. 2026-11-01"},
+        "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$", "description": "of the pack manifest; the replayer loads exactly this pack. 64 zeros = unknown (a server's cards)"},
+        "server": {"type": "boolean", "description": "true when the cards ran on a remote server (Multirole); then the pack is the server's if known, else ours at play time"}
+      }
+    },
+    "rules": {
+      "type": "object",
+      "required": ["duel_flags", "start_lp", "start_hand", "draw_count"],
+      "properties": {
+        "duel_flags": {"$ref": "#/$defs/u64"},
+        "start_lp": {"type": "integer"},
+        "start_hand": {"type": "integer"},
+        "draw_count": {"type": "integer"},
+        "extra_cards": {"type": "array", "items": {"type": "integer"}, "description": "EDOPro extra-rule cards added to the duel, if any"}
+      }
+    },
+    "kind": {"enum": ["full", "seat"], "description": "full: replays exactly in the engine; seat: one seat's filtered stream, stats only"},
+    "engine_seed": {"type": "array", "items": {"$ref": "#/$defs/u64"}, "minItems": 4, "maxItems": 4, "description": "the core's xoshiro256** state, as .yrp stores it"},
+    "seed": {"$ref": "#/$defs/u64", "description": "our u64 seed when we created the duel (seed_words expands it into engine_seed)"},
+    "first": {"type": "integer", "enum": [0, 1], "description": "the seat that went first"},
+    "add_order": {"type": "array", "items": {"type": "integer", "enum": [0, 1]}, "minItems": 2, "maxItems": 2, "uniqueItems": true, "description": "the order the teams' cards were added to the core (default [0, 1]); it changes the duel. Multirole adds room team 0 first"},
+    "deck_add": {"enum": ["edopro"], "description": "how main-deck cards were added to the core. Absent: ours (the list index as the sequence, so the second card goes to the bottom). \"edopro\": every card at sequence 0 like EDOPro/Multirole, so the list is the deck bottom to top and card ids follow it"},
+    "decks": {
+      "type": "array", "minItems": 2, "maxItems": 2,
+      "items": {
+        "type": "object",
+        "required": ["main", "extra"],
+        "properties": {
+          "main": {"$ref": "#/$defs/codes", "description": "in the order added to the core (after any shuffle)"},
+          "extra": {"$ref": "#/$defs/codes"},
+          "side": {"$ref": "#/$defs/codes"},
+          "name": {"type": "string"},
+          "hash": {"type": "string", "description": "sha256 of the sorted main+extra codes, for stats across shuffles"}
+        }
+      }
+    },
+    "seats": {
+      "type": "array", "minItems": 2, "maxItems": 2,
+      "items": {
+        "type": "object",
+        "required": ["type"],
+        "properties": {
+          "type": {"enum": ["human", "bot", "remote"]},
+          "player": {"type": "string", "description": "anonymous random id per install; never a name or account"},
+          "model": {"type": "string", "description": "bot: bundle id + sha256 of the weights"},
+          "bot_mode": {"enum": ["random", "raw", "search", "honest"]},
+          "client": {"enum": ["decklight", "edopro", "unknown"], "description": "remote: the opponent's client, if known"},
+          "assists": {
+            "type": "object",
+            "description": "learning features that were on for this seat",
+            "properties": {
+              "hints": {"type": "boolean"}, "winchance": {"type": "boolean"}, "search": {"type": "boolean"}, "undo": {"type": "boolean"}
+            }
+          }
+        }
+      }
+    },
+    "mode": {"enum": ["practice", "match", "puzzle", "primer", "study", "lan", "online", "selfplay"]},
+    "practice": {"type": "boolean", "description": "web practice game (hints/undo allowed)"},
+    "hints_used": {"type": "integer", "minimum": 0, "description": "practice hints asked this game"},
+    "undos": {"type": "integer", "minimum": 0, "description": "practice undos this game (carries across undos)"},
+    "what_if": {
+      "type": "object",
+      "required": ["source", "k", "option"],
+      "properties": {
+        "source": {"type": "string", "description": "record id the what-if started from"},
+        "k": {"type": "integer"},
+        "option": {"type": "integer"},
+        "turn": {"type": "integer"}
+      }
+    },
+    "puzzle": {
+      "type": "object",
+      "required": ["id"],
+      "properties": {"id": {"type": "string"}}
+    },
+    "puzzle_result": {"enum": ["solved", "failed"], "description": "how the puzzle ended"},
+    "responses": {
+      "type": "array",
+      "description": "kind=full: every response in order. kind=seat: this seat's responses.",
+      "items": {
+        "type": "object",
+        "required": ["seat", "r"],
+        "properties": {
+          "seat": {"type": "integer", "enum": [0, 1]},
+          "r": {"type": "string", "pattern": "^([0-9a-f]{2})*$", "description": "raw OCG response bytes, hex"},
+          "opt": {"type": ["array", "null"], "items": {"type": "integer"}, "description": "our env option indices that produced r (cross-check), null if unknown"},
+          "ms": {"type": "integer", "description": "thinking time in milliseconds"}
+        }
+      }
+    },
+    "messages": {
+      "type": "array",
+      "description": "kind=seat only: the filtered core messages this seat received, hex, in order",
+      "items": {"type": "string", "pattern": "^([0-9a-f]{2})*$"}
+    },
+    "viewer": {"type": "integer", "enum": [0, 1], "description": "kind=seat: the seat whose view this is"},
+    "result": {
+      "type": "object",
+      "required": ["winner", "turns"],
+      "properties": {
+        "winner": {"type": ["integer", "null"], "enum": [0, 1, null], "description": "null for a draw or an unfinished duel"},
+        "reason": {"type": "integer", "description": "MSG_WIN reason"},
+        "turns": {"type": "integer"},
+        "surrendered": {"type": "boolean"},
+        "disconnected": {"type": "boolean"}
+      }
+    },
+    "source": {"enum": ["engine", "yrpx", "converted"], "description": "how the record was made: our engine, a server .yrpX, or a conversion from an older decklight record"},
+    "events": {"type": "array", "description": "derived, regenerable: canonical messages (A1b canon form); dropped on sharing"},
+    "annotations": {"type": "object", "description": "derived: hints shown, win chance per turn; dropped on sharing"},
+    "transcript": {"type": "string", "description": "derived: plain-text game for people and LLMs; dropped on sharing"}
+  },
+  "allOf": [
+    {"if": {"properties": {"kind": {"const": "full"}}}, "then": {"required": ["responses"]}},
+    {"if": {"properties": {"kind": {"const": "seat"}}}, "then": {"required": ["messages", "responses", "viewer"]}}
+  ],
+  "$defs": {
+    "u64": {"type": "string", "pattern": "^(0|[1-9][0-9]{0,19})$"},
+    "codes": {"type": "array", "items": {"type": "integer", "minimum": 0}}
+  }
+}

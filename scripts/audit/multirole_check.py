@@ -38,6 +38,7 @@ sys.path.insert(0, str(ROOT / "src"))
 
 from decklight.edopro import protocol as P
 from decklight.edopro.client import ClientSession
+from decklight.engine.duel import TCG_FLAGS
 from decklight.play.bundle import discover_bundles
 from decklight.play.stream import StreamView
 
@@ -84,7 +85,8 @@ def one_duel(args, n: int, host_bundle, out: Path, custom: set[int]) -> dict:
         view_factory=lambda seat, codes: StreamView(
             {"main": list(deck.main), "extra": list(deck.extra)}, cards, seat=seat),
         password=args.password, timeout_s=args.timeout, record_dir=rec_host,
-        create=P.HostInfo(rule=args.rule, start_lp=8000), room_notes=note,
+        create=P.HostInfo(rule=args.rule, start_lp=8000, duel_flag_low=TCG_FLAGS & 0xFFFFFFFF,
+                          duel_flag_high=TCG_FLAGS >> 32), room_notes=note,
     )
     result: dict = {}
     t = threading.Thread(target=lambda: result.__setitem__("host_exit", session.run()), daemon=True)

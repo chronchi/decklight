@@ -1,6 +1,6 @@
 """Render search_match game records as Markdown a human can review (engine replay only, no model; laptop-safe).
 
-    uv run python scripts/render_showcase.py runs/<job>/<variant>/games-0.jsonl --idx 12 --out docs/showcase/g1.md \
+    uv run python scripts/render_showcase.py runs/<job>/<variant>/games-0.jsonl --idx 12 --out docs/model/showcase/g1.md \
         --label0 "Our AI (P + search)" --label1 "ygo-agent" --title "Game 1"
 
 Per game: the decks and who goes first, the result, then turn by turn:

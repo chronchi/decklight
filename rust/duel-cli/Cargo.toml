@@ -1,0 +1,11 @@
+[package]
+name = "duel-cli"
+description = "Seeded random duels through ygoenv-sys; prints one JSON line per game with an FNV-1a hash of every observation (cross-checked against Python CppEnv by scripts/app/duel_hash.py)"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[dependencies]
+decklight-cards = { path = "../decklight-cards" }
+ygoenv-sys = { path = "../ygoenv-sys" }
+sha2 = "0.10"

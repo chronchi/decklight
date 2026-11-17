@@ -55,23 +55,63 @@ function rowHTML(opt, mock, selected, pickNo, expanded, hint) {
   if (hint) cls.push("hinted");
   // Option rows are themselves <button>s, so keywords here are spans (nested
   // buttons are invalid and break the row); tapping one opens the rule popover.
-  const eff = opt.effect ? '<span class="ef">' + kwHTML(esc(opt.effect), "span") + "</span>" : "";
+  const [lb, effect] = splitLabel(opt.label || opt.verb, opt.effect);
+  const eff = effect ? '<span class="ef">' + kwHTML(esc(effect), "span") + "</span>" : "";
   const th = opt.card ? thumbHTML(opt.card, mock) : "";
   const info = opt.card && !isHidden(opt.card) ? infoBtn(opt.index, opt.card.name) : "";
   const aria = hintAriaLabel(opt, hint);
   return '<div class="optw' + (info ? " hasinfo" : "") + '"><button class="' + cls.join(" ") + '" data-opt="' + opt.index + '"' +
     (selected ? ' aria-pressed="true"' : "") +
     (aria ? ' aria-label="' + esc(aria) + '"' : "") + ">" + th +
-    '<span class="tx"><span class="lb">' + esc(opt.label || opt.verb) + "</span>" + eff + "</span>" +
+    '<span class="tx"><span class="lb">' + esc(lb) + "</span>" + eff + "</span>" +
     hintBadgeHTML(hint) +
     (pickNo ? '<span class="pick"><span class="sr-only">picked </span>' + pickNo + "</span>" : "") + "</button>" + info + "</div>";
 }
 
-function headHTML(prompt, mock, sub, hintBtn) {
-  const ask = prompt.card ? thumbHTML(prompt.card, mock, "ask") : "";
+// A row says its effect once: 'Activate X ("text")' over the same text loses the quote,
+// and a label that is the effect line itself drops the line.
+const normText = (t) => String(t || "").replace(/\s+/g, " ").trim().toLowerCase();
+function splitLabel(label, effect) {
+  if (!effect) return [label, effect];
+  const m = /^([\s\S]*?) \("([\s\S]*)"\)$/.exec(label);
+  if (m && normText(effect).startsWith(normText(m[2]))) return [m[1], effect];
+  if (normText(label) === normText(effect)) return [label, ""];
+  return [label, effect];
+}
+
+// Rows that would read the same (copies of a card in different places) say where each card is.
+const ZONE_WORDS = {hand: "in hand", deck: "in the Deck", gy: "in the GY", banished: "banished", extra: "in the Extra Deck",
+  mzone: "on the field", emz: "on the field", szone: "on the field", field: "on the field"};
+function placeTwins(rows) {
+  const n = {};
+  for (const o of rows) n[o.label] = (n[o.label] || 0) + 1;
+  return rows.map((o) => {
+    const w = o.where;
+    if (n[o.label] < 2 || !w || !ZONE_WORDS[w.zone]) return o;
+    const [lb, effect] = splitLabel(o.label || o.verb, o.effect);
+    return Object.assign({}, o, {label: lb + " · " + (w.side === "bot" ? "opponent's, " : "") + ZONE_WORDS[w.zone], effect});
+  });
+}
+
+function headHTML(prompt, mock, sub, hintBtn, title) {
+  // The card a prompt is about gets the same ⓘ as the option rows, and its
+  // thumbnail is tappable to the same detail. Face-down cards get neither.
+  const c = prompt.card;
+  const about = c && !isHidden(c);
+  const label = about ? esc("About " + (c.name || "card")) : "";
+  const thumb = c ? thumbHTML(c, mock, "ask") : "";
+  // data-detailcard="-1" resolves to the prompt's own card (detailCardForOpt),
+  // not another board card that happens to share the uid in a mock or a copy.
+  const ask = about
+    ? '<button class="askbtn" data-detailcard="-1" aria-label="' + label + '">' + thumb + "</button>"
+    : thumb;
+  const info = about
+    ? '<button class="infobtn askinfo" data-detailcard="-1" aria-label="' + label +
+      '"><span aria-hidden="true">ⓘ</span></button>'
+    : "";
   return '<div class="grab"></div><div class="stitle">' + ask + '<div class="tt"><span class="t">' +
-    esc(prompt.text || "") + "</span>" + (sub ? '<span class="sub">' + esc(sub) + "</span>" : "") + "</div>" +
-    (hintBtn || "") + "</div>";
+    esc(title != null ? title : (prompt.text || "")) + "</span>" + (sub ? '<span class="sub">' + esc(sub) + "</span>" : "") + "</div>" +
+    info + (hintBtn ? '<span class="sbtns">' + hintBtn + "</span>" : "") + "</div>";
 }
 
 // Bottom-sheet body per prompt kind. Returns "" for idle/battle (no sheet: cards glow instead).
@@ -83,12 +123,13 @@ export function sheetHTML(prompt, mock, sel, expanded, extra) {
   const ex = extra || {};
   const hintByIndex = ex.hintByIndex || {};
   const hintBtn = (ex.showHint
-    ? '<button class="hintbtn" data-act="hint" aria-label="Ask the bot for a hint">Hint</button>'
+    ? '<button class="hintbtn" data-act="hint" aria-label="Ask the bot for a hint"' + (ex.hintBusy ? " disabled" : "") + ">" + (ex.hintLoading ? "Asking…" : "Hint") + "</button>"
     : "") +
     (ex.showUndo
       ? '<button class="hintbtn" data-act="undo" aria-label="Undo your last decision"' +
         (ex.undoEnabled ? "" : ' disabled aria-disabled="true"') + ">Undo</button>"
       : "");
+  const foot = () => footHTML(prompt, sel, hintByIndex, {canCancel: ex.canCancel, cancelDisabled: ex.cancelDisabled});
   if (prompt.kind === "position") {
     const cards = opts.filter((o) => o.verb !== "pass").map((o) => {
       const def = /def/i.test(o.label || "");
@@ -105,12 +146,19 @@ export function sheetHTML(prompt, mock, sel, expanded, extra) {
         hintBadgeHTML(hint) + "</button>" +
         infoBtn(o.index, base.name) + "</div>";
     }).join("");
-    return headHTML(prompt, mock, "", hintBtn) + '<div class="sbody"><div class="posrow">' + cards + "</div></div>" + footHTML(prompt, sel, hintByIndex);
+    return headHTML(prompt, mock, "", hintBtn) + '<div class="sbody"><div class="posrow">' + cards + "</div></div>" + foot();
   }
   if (prompt.kind === "card") {
     const picks = opts.filter((o) => o.verb === "select" || o.verb === "unselect");
     const done = picks.filter((o) => o.verb === "unselect").map((o) => o.index);
-    const sub = prompt.min === prompt.max ? "Pick " + prompt.min : "Pick " + prompt.min + "–" + prompt.max;
+    let sub = prompt.min === prompt.max ? "Pick " + prompt.min : "Pick " + prompt.min + "–" + prompt.max;
+    // "Select the card(s) to Tribute (pick 1–2)" + "Pick 1–2" → "Select 1–2 cards to Tribute".
+    let title = (prompt.text || "").replace(/\s*\(pick [^)]*\)$/, "");
+    if (title.includes("the card(s)")) {
+      const n = prompt.min === prompt.max ? (prompt.min === 1 ? "1 card" : prompt.min + " cards") : prompt.min + "–" + prompt.max + " cards";
+      title = title.replace("the card(s)", n);
+      sub = "";
+    }
     const grid = picks.map((o) => {
       const at = done.indexOf(o.index);
       const info = o.card && !isHidden(o.card) ? infoBtn(o.index, o.card.name) : "";
@@ -123,25 +171,30 @@ export function sheetHTML(prompt, mock, sel, expanded, extra) {
         '<span class="cname">' + esc((o.card && o.card.name) || o.label) + sr +
         "</span></button>" + info + "</div>";
     }).join("");
-    return headHTML(prompt, mock, sub, hintBtn) + '<div class="sbody"><div class="selectgrid">' + grid + "</div></div>" +
-      footHTML(prompt, sel, hintByIndex);
+    return headHTML(prompt, mock, sub, hintBtn, title) + '<div class="sbody"><div class="selectgrid">' + grid + "</div></div>" +
+      foot();
   }
   let body = "";
   if (prompt.kind === "announce") {
     body = '<div class="announce"><input type="search" placeholder="Name a card…" aria-label="Name a card"></div>';
   }
-  body += opts.filter((o) => o.verb !== "finish" && o.verb !== "cancel" && !SECONDARY.includes(o.verb)).map((o) =>
+  // "Add 1 … to your hand?" over a Yes row that repeats it: the row says just Yes.
+  const asked = normText(prompt.text);
+  const rows = opts.filter((o) => o.verb !== "finish" && o.verb !== "cancel" && !SECONDARY.includes(o.verb))
+    .map((o) => o.effect && asked.includes(normText(o.effect)) ? Object.assign({}, o, {effect: null}) : o);
+  body += placeTwins(rows).map((o) =>
     rowHTML(o, mock, sel.includes(o.index), sel.indexOf(o.index) + 1 || null, expanded === o.index, hintByIndex[o.index] || null)).join("");
-  return headHTML(prompt, mock, "", hintBtn) + '<div class="sbody">' + body + "</div>" + footHTML(prompt, sel, hintByIndex);
+  return headHTML(prompt, mock, "", hintBtn) + '<div class="sbody">' + body + "</div>" + foot();
 }
 
-function footHTML(prompt, sel, hintByIndex) {
+function footHTML(prompt, sel, hintByIndex, extra) {
   const opts = prompt.options || [];
   const hb = hintByIndex || {};
+  const ex = extra || {};
   const rest = opts.filter((o) => SECONDARY.includes(o.verb));
   const fin = opts.find((o) => o.verb === "finish");
   const cancel = opts.find((o) => o.verb === "cancel");
-  if (!rest.length && !fin && !cancel) return "";
+  if (!rest.length && !fin && !cancel && !ex.canCancel) return "";
   const obtn = (o) => {
     const hint = hb[o.index] || null;
     const aria = hintAriaLabel(o, hint);
@@ -150,7 +203,10 @@ function footHTML(prompt, sel, hintByIndex) {
   };
   let h = '<div class="sfoot">';
   for (const o of rest) h += obtn(o);
-  if (cancel) h += obtn({index: cancel.index, label: cancel.label || "Cancel", verb: "cancel"});
+  if (ex.canCancel) {
+    h += '<button class="bigbtn" data-act="cancel" aria-label="Cancel this action"' +
+      (ex.cancelDisabled ? ' disabled aria-disabled="true"' : "") + ">Cancel</button>";
+  } else if (cancel) h += obtn({index: cancel.index, label: cancel.label || "Cancel", verb: "cancel"});
   if (fin) {
     const n = opts.filter((o) => o.verb === "unselect").length;   // the env offers finish only when it is legal
     h += '<button class="bigbtn primary" data-opt="' + fin.index + '">Confirm' +
@@ -169,15 +225,16 @@ export function pileSheetHTML(pile, cards, mock, names) {
     "</span>" +
     '<span class="cname">' + esc((c && c.name) || "Face-down") + "</span></button>").join("");
   return '<div class="grab"></div><div class="stitle"><div class="tt"><span class="t">' + esc(pileTitle(pile, names)) +
-    '</span><span class="sub">' + (cards || []).length + " cards · newest first</span></div></div>" +
+    '</span><span class="sub">' + (cards || []).length + (pile === "chain:all" ? " links" : " cards · newest first") + "</span></div></div>" +
     '<div class="sbody">' + (cells ? '<div class="selectgrid">' + cells + "</div>" : '<p class="emptytx">Empty</p>') +
     '</div><div class="sfoot"><button class="bigbtn" data-act="closepile">Close</button></div>';
 }
 
 export function pileTitle(pile, names) {
   const [kind, who] = (pile || "").split(":");
-  const owner = names ? (who === "bot" ? names[1] + "’s " : names[0] + "’s ")
-    : who === "bot" ? "decklight's " : "Your ";
+  if (kind === "chain") return "Chain";
+  const owner = who === "bot" ? (names && names[1] ? names[1] + "’s " : "decklight's ")
+    : names && names[0] ? names[0] + "’s " : "Your ";
   return owner + ({gy: "Graveyard", banished: "banished cards", extra: "Extra Deck"}[kind] || kind);
 }
 
@@ -211,9 +268,9 @@ export function infoHTML(info, events, mock, hint, names) {
   const evs = (events || []).slice(-8);
   const rows = evs.map((e) => {
     const actor = e.actor === "you" || e.actor === "bot" ? e.actor : "system";
-    const who = actor === "you" ? (names ? names[0] : "You") : actor === "bot" ? (names ? names[1] : "Bot") : "";
+    const who = actor === "you" ? ((names && names[0]) || "You") : actor === "bot" ? ((names && names[1]) || "Bot") : "";
     return '<div class="ev ' + actor + '"' + (e.card && e.card.uid ? ' data-focusuid="' + esc(e.card.uid) + '" role="button" tabindex="0"' : "") + ">" +
-      '<span class="who">' + esc(who) + "</span>" +
+      '<span class="who">' + (who ? '<i class="mk ' + actor + '" aria-hidden="true"></i><span class="sr-only">' + esc(who) + "</span>" : "") + "</span>" +
       '<span class="et">' + esc(e.text || "") + (e.neg ? negTag(e.neg) : "") + "</span></div>";
   }).join("");
   return '<div class="feed" data-act="log"><div class="evs" role="log" aria-label="Latest moves">' + rows + "</div>" +

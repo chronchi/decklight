@@ -282,3 +282,31 @@ def test_bot_interface_still_random(engine):
     b1, b2 = RandomBot(7), RandomBot(7)
     assert [b1.next_choice(env) for _ in range(3)] == [b2.next_choice(env) for _ in range(3)]
     assert RandomBot(7).rps() in (1, 2, 3)
+
+
+# --- 5. prefix (undo / what-if): next_bot skips the prefix's bot choices ---
+
+def test_prefix_next_bot_returns_live_choices_only(engine):
+    """A driver started from a prefix holding bot decisions hands the host only bot choices made after the prefix
+    (before the fix, the first next_bot returned the prefix's first bot choice: a stale move)."""
+    rng = random.Random(3)
+    ref = ProductDriver(engine, _cfg(), bot_seat=0, base_logits=_tiny_forward(), value=None, search_kwargs={},
+                        game_seed=0, ws_seed=0, fast=True,
+                        human_fn=lambda obs: rng.randrange(int(obs["action_mask"].sum())))
+    ref.start()
+    ref.join(timeout=600)
+    res = ref.res
+    ref.close()
+    assert res is not None and res.winner in (0, 1)
+    bot_at = [k for k, a in enumerate(res.actors) if a == 0]
+    assert len(bot_at) >= 4, "too few bot decisions for the test"
+    cut = bot_at[1] + 1  # the prefix holds two bot choices
+    drv = ProductDriver(engine, _cfg(), bot_seat=0, base_logits=_tiny_forward(), value=None, search_kwargs={},
+                        game_seed=0, ws_seed=0, fast=True, prefix=res.choices[:cut],
+                        human_fn=lambda obs: rng.randrange(int(obs["action_mask"].sum())))
+    drv.start()
+    c = drv.next_bot(timeout=None)
+    k = drv._bot_delivered - 1  # the played entry just delivered
+    drv.close()
+    assert k >= cut, f"delivered played[{k}], inside the {cut}-choice prefix"
+    assert drv.played[k] == (c, 0)

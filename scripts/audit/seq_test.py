@@ -8,8 +8,8 @@ schedule order, looking only after each complete block of deals. At
 rule. Always prints the fixed-sample paired diff with 95% CI overall and
 per seat.
 
-    python scripts/audit/seq_test.py A_DIR B_DIR --prereg docs/prereg/sprt-default.json
-    python scripts/audit/seq_test.py --simulate --prereg docs/prereg/sprt-default.json
+    python scripts/audit/seq_test.py A_DIR B_DIR --prereg docs/lab/prereg/sprt-default.json
+    python scripts/audit/seq_test.py --simulate --prereg docs/lab/prereg/sprt-default.json
 
 Exit codes: 0 decided (accept_H1 / accept_H0 / truncated_pass /
 truncated_fail), 10 more deals needed (continue), 2 data error (< 90%

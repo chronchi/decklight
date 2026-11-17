@@ -26,6 +26,6 @@ taskset -c 0-3 uv run --no-sync python scripts/vast_job.py --name $N \
   --hours "$HH" --max-dph "${MAX_DPH:-0.30}" --min-cpus "${MIN_CPUS:-24}" --min-gpu-ram "${MIN_GPU_RAM:-22}" \
   --reserve "${RESERVE:-0.10}" \
   --extra-query "compute_cap>=800 cpu_ram>=${MIN_RAM:-64} gpu_name!=CMP_170HX ${EXTRA_Q:-}" \
-  --data decks data/cards/emb data/cards/lua_desc.npz data/models data/cache/P data/cache/value_p2 data/cache/x4b_D data/forge/packs \
+  --data decks data/cards/emb data/cards/lua_desc.npz data/models data/cache/P data/cache/x_window data/cache/value_p2 data/cache/x4b_D data/forge/packs \
   > data/cache/briefs/$N.launcher.log 2>&1
 echo "exit $?"

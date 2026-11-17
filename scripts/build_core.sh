@@ -4,14 +4,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SRC="$ROOT/third_party/ygopro-core"
 OUT="$ROOT/build/core"
-[ -f "$SRC/lua/src/lua.h" ] || git -C "$SRC" submodule update --init --depth 1
-if ! grep -q QUERY_CARDID "$SRC/ocgapi_constants.h"; then
-    git -C "$SRC" apply "$ROOT/third_party/patches/ygopro-core-query-cardid.patch"
-fi
-# two heap-use-after-free fixes (NOTEBOOK 2026-10-15 23:30: field::reset_phase iterator, reset effects freed too early)
-if ! grep -q "reset effects are no longer freed here" "$SRC/processor.cpp"; then
-    git -C "$SRC" apply "$ROOT/third_party/patches/ygopro-core-uaf-fixes.patch"
-fi
+"$ROOT/scripts/patch_core.sh"  # Lua submodule + third_party/patches
 cd "$ROOT"
 if [ ! -f "$OUT/build.ninja" ]; then
     uv run --group dev meson setup "$OUT" "$SRC" --buildtype=release -Ddefault_library=shared -Db_ndebug=true

@@ -1,0 +1,242 @@
+/* Deck builder and the card search component (docs/design/deck-builder.md). Night palette from styles.css; every target is
+   44 px or larger; states are shown with text, marks or outlines as well as colour (WCAG 2.2 AA). */
+
+/* ---- Decks tab ---- */
+.dbtop { display: flex; gap: 10px; margin: 18px 0 8px; }
+.dbrows { list-style: none; margin: 8px 0 0; padding: 0; }
+.dbrow {
+  width: 100%; display: flex; align-items: center; gap: 12px; text-align: left;
+  min-height: 72px; padding: 8px 4px; border-bottom: 1px solid var(--line);
+}
+.dbtx { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.dbtx .nm { font-size: 15px; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dbtx .ln, .dbtx .lg { font-size: 12px; color: var(--muted); }
+.dbchev { width: 18px; height: 18px; flex: 0 0 auto; fill: none; stroke: var(--muted); stroke-width: 1.4; stroke-linecap: round; }
+.dbok { color: var(--muted); }
+.dbok::before { content: "✓ "; color: var(--accent); }
+.dbbad { color: var(--danger); }
+.dbbad::before { content: "! "; font-weight: 600; }
+.dbcover, .csch-th, .dbcdart {
+  position: relative; flex: 0 0 auto; width: 40px; aspect-ratio: 59 / 86; border-radius: var(--radius-card);
+  overflow: hidden; background: var(--zone); box-shadow: inset 0 0 0 1px var(--line-2);
+}
+.dbcover img, .csch-th img, .dbcdart img, .dbcard img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+/* Without art the frame keeps a quiet kind stripe at the top (the name is always text beside it). */
+.k-monster { --kind: #8a6f4a; } .k-spell { --kind: #4f7a6c; } .k-trap { --kind: #7a5068; } .k-unknown { --kind: var(--faint); }
+.dbcover::before, .csch-th::before, .dbcdart::before, .dbcard::before {
+  content: ""; position: absolute; left: 0; right: 0; top: 0; height: 5px; background: var(--kind); opacity: 0.75;
+}
+
+/* ---- Editor ---- */
+#lobby.dbedit { position: relative; }
+.dbhead {
+  display: flex; align-items: center; gap: 4px; min-height: 56px; padding: 4px 6px;
+  padding-top: max(4px, env(safe-area-inset-top)); border-bottom: 1px solid var(--line); flex: 0 0 auto;
+}
+.dbtitle {
+  flex: 1; min-width: 0; min-height: 44px; padding: 0 8px; border-radius: 8px; font-size: 17px; font-weight: 300;
+  letter-spacing: 0.02em; color: var(--text); background: transparent; border: 1px solid transparent;
+}
+.dbtitle:hover, .dbtitle:focus { border-color: var(--line-2); background: rgba(var(--well-rgb), calc(0.5 * var(--well-k))); }
+.dbexport { min-height: 44px; padding: 0 12px; border-radius: 10px; color: var(--accent); font-size: 14px; }
+.dbsub {
+  flex: 0 0 auto; display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; padding: 8px 18px 10px;
+  font-size: 13px; color: var(--muted);
+}
+.dbsub .ct { color: var(--text); }
+.dbsub .sv { margin-left: auto; font-size: 12px; }
+.dbsub .sv.bad { color: var(--danger); }
+.dbseg { flex: 0 0 auto; display: flex; gap: 6px; padding: 0 14px 10px; border-bottom: 1px solid var(--line); }
+.dbseg button {
+  flex: 1; min-height: 44px; border-radius: 10px; font-size: 14px; color: var(--muted); border: 1px solid var(--line-2);
+}
+.dbseg button.sel { color: var(--accent); border-color: rgba(var(--accent-rgb), 0.6); background: var(--accent-tint); }
+.dbbody { padding: 6px 14px 24px; }
+.dbsec h3 {
+  margin: 22px 4px 8px; font-size: 12px; font-weight: 500; font-variant-caps: all-small-caps; letter-spacing: 0.14em;
+  color: var(--muted); display: flex; align-items: baseline; gap: 8px;
+}
+.dbcount { font-variant-caps: normal; letter-spacing: 0; color: var(--text); font-weight: 400; }
+.dbempty { margin: 0 4px 6px; font-size: 13px; color: var(--muted); }
+.dbgrid { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(62px, 1fr)); gap: 8px; }
+.dbtile { min-width: 0; }
+.dbcard {
+  position: relative; display: block; width: 100%; aspect-ratio: 59 / 86; border-radius: var(--radius-card);
+  overflow: hidden; background: var(--zone); box-shadow: inset 0 0 0 1px var(--line-2);
+}
+/* The name shows when there is no art; over art it stays readable on a dark plate at the bottom. */
+.dbname {
+  position: absolute; left: 0; right: 0; bottom: 0; padding: 14px 4px 4px; font-size: 9.5px; line-height: 1.2;
+  color: var(--text); text-align: left; overflow-wrap: anywhere; hyphens: auto; -webkit-hyphens: auto;
+  display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden;
+  background: linear-gradient(to top, rgba(var(--panel-rgb), 0.92) 55%, rgba(var(--panel-rgb), 0));
+}
+.dbn {
+  position: absolute; top: 4px; right: 4px; min-width: 22px; padding: 1px 5px; border-radius: 6px; font-size: 12px;
+  font-weight: 600; color: var(--text); background: var(--neg-case); box-shadow: 0 0 0 1px var(--line-2);
+}
+.dbtile.sel .dbcard { box-shadow: 0 0 0 2px var(--accent); }
+.dbtile.sel .dbcard::after {
+  content: "✓"; position: absolute; left: 4px; top: 6px; font-size: 12px; color: var(--accent);
+}
+.dbpick {
+  display: flex; align-items: center; gap: 4px; margin: 8px 0 2px; padding: 4px 4px 4px 12px; border-radius: 12px;
+  background: var(--raise); box-shadow: inset 0 0 0 1px var(--line-2);
+}
+.dbpick .nm { flex: 1; min-width: 0; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dbtext { min-height: 44px; padding: 0 10px; border-radius: 10px; font-size: 13px; color: var(--accent); }
+
+/* ---- Card search (shared component) ---- */
+.dbresults { padding-bottom: 12px; }
+.csch-status { margin: 6px 4px 4px; font-size: 12px; color: var(--muted); }
+.csch-list { list-style: none; margin: 0; padding: 0; }
+.csch-r { display: flex; align-items: center; gap: 6px; border-bottom: 1px solid var(--line); }
+.csch-open { flex: 1; min-width: 0; display: flex; align-items: center; gap: 12px; text-align: left; padding: 8px 4px; min-height: 64px; }
+.csch-tx { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.csch-tx .nm { font-size: 14px; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.csch-tx .ln { font-size: 12px; color: var(--muted); }
+.csch-why {
+  font-size: 12px; line-height: 1.4; color: var(--muted); border-left: 2px solid var(--line-2); padding-left: 8px; margin-top: 3px;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+}
+.csch-n { font-size: 13px; color: var(--accent); min-width: 26px; text-align: right; }
+.csch-add { color: var(--accent); box-shadow: inset 0 0 0 1px rgba(var(--accent-rgb), 0.5); }
+.csch-note { margin: 14px 4px; padding: 14px 16px; border-radius: 12px; background: var(--raise); font-size: 14px; line-height: 1.55; }
+.csch-note p { margin: 0 0 10px; }
+.csch-note .bigbtn { width: 100%; }
+.csch-bar {
+  position: relative; flex: 0 0 auto; padding: 8px 10px; padding-bottom: max(8px, env(safe-area-inset-bottom));
+  border-top: 1px solid var(--line); background: var(--bg);
+}
+.csch-chiprow { display: flex; align-items: flex-start; gap: 6px; }
+/* The kinds scroll; Filters stays pinned at the right end. */
+.csch-chips { flex: 1; min-width: 0; display: flex; gap: 6px; overflow-x: auto; padding: 0 28px 8px 2px; scrollbar-width: none;
+  /* Soft right edge: chips fade out before the Filters chip instead of being cut under it; the end padding lets the
+     last chip scroll fully clear of the fade (user 2026-11-13). */
+  -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent);
+  mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent); }
+.csch-chiprow > .csch-fbtn { flex: 0 0 auto; margin-right: 2px; }
+.csch-row { display: flex; gap: 6px; align-items: stretch; }
+.csch-mode {
+  flex: 0 0 auto; min-height: 44px; padding: 0 8px 0 10px; border-radius: 10px; display: inline-flex; align-items: center; gap: 4px;
+  font-size: 12px; color: var(--muted); border: 1px solid var(--line-2); max-width: 40%;
+}
+.csch-mode span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.csch-mode .chev { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.4; flex: 0 0 auto; }
+.csch-in {
+  flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; padding: 0 12px; min-height: 44px; border-radius: 10px;
+  border: 1px solid var(--line-2); background: rgba(var(--well-rgb), calc(0.5 * var(--well-k)));
+}
+.csch-in svg { width: 16px; height: 16px; flex: 0 0 auto; fill: none; stroke: var(--muted); stroke-width: 1.5; stroke-linecap: round; }
+.csch-in input { flex: 1; min-width: 0; background: transparent; border: 0; color: var(--text); font-size: 15px; height: 42px; }
+.csch-clear { flex: 0 0 auto; width: 44px; height: 44px; margin-right: -12px; display: grid; place-items: center; }
+.csch-clear svg { width: 16px; height: 16px; fill: none; stroke: var(--muted); stroke-width: 1.5; stroke-linecap: round; }
+.csch-in input::-webkit-search-cancel-button { display: none; }
+/* The field's own border is the focus ring (2 px accent), so the input inside draws none. */
+.csch-in:focus-within { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.csch-in input:focus, .csch-in input:focus-visible { outline: none; }
+.csch-go { flex: 0 0 auto; min-height: 44px; padding: 0 14px; border-radius: 10px; color: var(--accent);
+  border: 1px solid rgba(var(--accent-rgb), 0.6); background: var(--accent-tint); }
+.csch-menu {
+  position: absolute; left: 10px; right: 10px; bottom: calc(100% - 4px); z-index: 2; padding: 6px; border-radius: 12px;
+  background: var(--sheet); box-shadow: 0 0 0 1px var(--line-2), 0 -12px 30px rgba(var(--shade-rgb), calc(0.5 * var(--shade-k)));
+}
+.csch-mi { width: 100%; display: flex; flex-direction: column; gap: 3px; text-align: left; padding: 10px 12px; border-radius: 10px; min-height: 56px; }
+.csch-mi .mt { font-size: 14px; color: var(--text); }
+.csch-mi .md { font-size: 12px; line-height: 1.45; color: var(--muted); }
+.csch-mi.sel { background: var(--accent-tint); }
+.csch-mi.sel .mt { color: var(--accent); }
+.csch-mi.sel .mt::before { content: "✓ "; }
+
+/* ---- Sheets ---- */
+.dbscrim { position: fixed; inset: 0; z-index: calc(var(--z-lookup) - 1); background: rgba(var(--shade-rgb), calc(0.55 * var(--shade-k))); animation: fade var(--t); }
+.dbsheet {
+  position: fixed; z-index: var(--z-lookup); left: 50%; bottom: 0; transform: translateX(-50%);
+  width: min(100%, 560px); max-height: 88dvh; display: flex; flex-direction: column; background: var(--sheet);
+  border-radius: 16px 16px 0 0; box-shadow: 0 0 0 1px var(--line-2), 0 -18px 40px rgba(var(--shade-rgb), calc(0.55 * var(--shade-k)));
+  padding-bottom: env(safe-area-inset-bottom); animation: up 240ms var(--ease);
+}
+.dbsheet .mhead { display: flex; align-items: center; gap: 4px; min-height: 56px; padding: 4px 6px 4px 18px; border-bottom: 1px solid var(--line); }
+.dbsheet .mtitle { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 15px; color: var(--text); }
+.dbsheet .mbody { flex: 1; min-height: 0; overflow-y: auto; padding: 14px 18px; }
+.dbfoot { flex: 0 0 auto; display: flex; flex-wrap: wrap; gap: 8px; padding: 10px 14px 14px; border-top: 1px solid var(--line); }
+.dbfoot .primary:not(.bigbtn) {
+  flex: 1; min-height: 50px; border-radius: 12px; font-size: 15px; color: var(--accent);
+  border: 1px solid rgba(var(--accent-rgb), 0.6); background: var(--accent-tint);
+}
+.dbfoot .primary:disabled { opacity: 0.4; }
+.dbfoot .primary.danger { color: var(--danger); border-color: rgba(var(--danger-rgb), 0.6); background: rgba(var(--bot-rgb), 0.08); }
+.dbfoot .linkbtn { flex-basis: 100%; min-height: 44px; }
+.dbfoot .iconbtn { box-shadow: inset 0 0 0 1px var(--line-2); color: var(--text); }
+.dbhelp { margin: 0 0 12px; font-size: 13px; line-height: 1.5; color: var(--muted); }
+.dbydk {
+  width: 100%; min-height: 180px; padding: 10px 12px; border-radius: 10px; resize: vertical;
+  font: 13px/1.5 ui-monospace, "SFMono-Regular", Menlo, monospace; color: var(--text);
+  background: rgba(var(--well-rgb), calc(0.6 * var(--well-k))); border: 1px solid var(--line-2);
+}
+.dbnote { margin: 10px 0 0; font-size: 13px; color: var(--accent); min-height: 1.5em; }
+.dblabel { display: block; margin: 4px 0 6px; font-size: 12px; color: var(--muted); }
+.dbfield {
+  width: 100%; min-height: 44px; padding: 0 12px; margin-bottom: 14px; border-radius: 10px; font-size: 15px;
+  color: var(--text); background: rgba(var(--well-rgb), calc(0.6 * var(--well-k))); border: 1px solid var(--line-2);
+}
+.dbmenu { display: flex; flex-direction: column; }
+.dbmenu button { min-height: 52px; text-align: left; padding: 0 6px; font-size: 15px; border-bottom: 1px solid var(--line); }
+.dbmenu button.danger { color: var(--danger); }
+.dbcd { display: flex; gap: 14px; align-items: flex-start; margin-bottom: 12px; }
+.dbcdart { width: 74px; }
+.dbcd .ln { margin: 2px 0 6px; font-size: 13px; color: var(--muted); }
+.dbinmain { margin: 0; font-size: 13px; color: var(--accent); }
+.dbcdtext { margin: 0; font-size: 14px; line-height: 1.6; white-space: pre-line; }
+@media (prefers-reduced-motion: reduce) { .dbsheet, .dbscrim { animation: none; } }
+
+/* ---- "Describe a card" download (Settings > Cards; features/describe). Aligned with the Card pack panel above. ---- */
+#settings .dmpanel { margin-top: 26px; }
+.dmnote { margin: 4px 0 8px; font-size: 12.5px; line-height: 1.5; color: var(--muted); }
+.dmline { margin: 6px 0 2px; font-size: 13px; color: var(--text); }
+.dmok { color: var(--accent); margin-right: 2px; }
+.dmerr { color: var(--danger); }
+.dmpanel .artbar { margin: 8px 0 8px; }
+.dmpanel .artbtns { margin: 6px 0 0; }
+
+/* Search busy state: centred in the results area; Stop replaces Search in the bar. */
+.csch-go.stop { display: inline-flex; align-items: center; gap: 6px; color: var(--text);
+  border-color: rgba(var(--text-rgb), 0.35); background: transparent; }
+.csch-go.stop svg { width: 14px; height: 14px; fill: currentColor; }
+.csch-busy { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px;
+  min-height: 40vh; color: var(--muted); font-size: 13px; animation: csch-in 0.2s ease-out 0.3s both; }
+.csch-spin { width: 36px; height: 36px; border-radius: 50%; border: 3px solid rgba(var(--accent-rgb), 0.2);
+  border-top-color: var(--accent); animation: csch-rot 0.9s linear infinite; }
+@keyframes csch-rot { to { transform: rotate(360deg); } }
+@keyframes csch-in { from { opacity: 0; } to { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .csch-spin { animation: none; border-color: var(--accent); opacity: 0.6; } }
+
+/* Card sheet: one stepper row per deck part the card can go in. */
+.dbsecrow { flex: 1 1 100%; display: flex; align-items: center; gap: 10px; }
+.dbsecrow .nm { flex: 1; font-size: 15px; color: var(--text); }
+.dbsecrow .n { min-width: 28px; text-align: center; font-size: 16px; font-variant-numeric: tabular-nums; color: var(--text); }
+.dbsecrow .iconbtn:disabled { opacity: 0.35; }
+
+/* Search row: two labelled add buttons, the deck parts this card can go in. */
+.csch-adds { flex: 0 0 auto; display: flex; gap: 6px; }
+/* Sized to content (user picked these over fixed-width columns, 2026-11-13). */
+.csch-add2 { display: inline-flex; align-items: center; gap: 3px; min-height: 44px; min-width: 44px; padding: 0 9px 0 6px;
+  border-radius: 10px; font-size: 13px; color: var(--accent); background: transparent;
+  box-shadow: inset 0 0 0 1px rgba(var(--accent-rgb), 0.5); }
+.csch-add2 svg { width: 16px; height: 16px; stroke: currentColor; stroke-width: 1.8; fill: none; }
+.csch-add2 b { font-weight: 600; margin-left: 4px; padding: 1px 6px; border-radius: 8px; background: var(--accent-tint);
+  font-variant-numeric: tabular-nums; }
+.csch-add2:disabled { opacity: 0.35; }
+
+/* Filters: a chip after the kinds opens the full filter sheet. */
+.csch-fbtn { display: inline-flex; align-items: center; gap: 6px; }
+.csch-fbtn svg { width: 16px; height: 16px; stroke: currentColor; stroke-width: 1.8; fill: none; stroke-linecap: round; }
+.csch-fbtn b { font-weight: 600; padding: 0 6px; border-radius: 8px; background: var(--accent-tint); font-variant-numeric: tabular-nums; }
+.fsec { margin: 4px 0 20px; }
+.fchips { display: flex; flex-wrap: wrap; gap: 8px; }
+.frow { display: flex; align-items: center; gap: 10px; color: var(--muted); font-size: 13px; }
+.frow input { width: 96px; min-height: 44px; padding: 0 12px; border-radius: 10px; border: 1px solid var(--line-2);
+  background: rgba(var(--well-rgb), calc(0.5 * var(--well-k))); color: var(--text); font-size: 15px; }
+.frow input:focus-visible { outline: none; border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.dbfoot .bigbtn:disabled { opacity: 0.4; }
+.csch-fbtn.on::before { content: none; display: none; }  /* the count says it is on; saves width */

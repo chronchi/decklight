@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Retrain stage 0f (docs/retrain/plan-v3.md; model v3 effect-key input): embed every card str1..16 + system string
+# Retrain stage 0f (docs/lab/retrain/plan-v3.md; model v3 effect-key input): embed every card str1..16 + system string
 # (21,039 keys, 11,511 unique texts) with Qwen3-Embedding-0.6B d512 -> runs/<name>/strings-qwen3-0.6b-d512.npz.
 # Embeddings never run on the laptop (user 2026-10-11). ~11.5k short texts: minutes on any GPU; cheapest box.
 cd "$(dirname "$0")/../.."

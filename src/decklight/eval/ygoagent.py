@@ -1,6 +1,6 @@
 """ygo-agent 0546 checkpoint as a gauntlet opponent.
 
-Adapts our observation/action spec (``docs/obs_spec.md``, ``docs/action_spec.md``) to the feature
+Adapts our observation/action spec (``docs/design/obs_spec.md``, ``docs/design/action_spec.md``) to the feature
 packing ygo-agent's TFLite model expects. All lookup tables below are copied from
 ``../ygo-agent/ygoinf/ygoinf/features.py`` (and the column layouts from
 ``../ygo-agent/docs/feature_engineering.md``); ygo-agent is never imported at runtime.

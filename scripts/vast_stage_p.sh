@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Retrain stage P + Pc (docs/retrain/plan-v1.md §Stage P, plan-v2 §Stage P/Pc, plan-v3 change 2026-10-13): PPO with the
+# Retrain stage P + Pc (docs/lab/retrain/plan-v1.md §Stage P, plan-v2 §Stage P/Pc, plan-v3 change 2026-10-13): PPO with the
 # ppo1 recipe (lr 4e-5, mb 1024, p-bc 0.3 vs the frozen init, KL 0.1 to the init, new value head, GAE 0.95) from B-v1,
 # a fixed 560 iterations, the last iteration is the candidate. Training decks: pool minus holdout + gauntlet (train_rl).
 #   First milestone at it160 (eval_ckpt: 672 games vs B-v1, 1,488 vs ygo-agent on fixed deals, games saved):
@@ -9,9 +9,11 @@
 #   Pc card (seeds 3000+): P and base_r3 raw vs ygo-agent on the same 5,952 deals (paired), raw head-to-heads P vs
 #   base_r3 on holdout (seeds 4, ~2,176 games) and new-card decks (seeds 6, ~2,184), principle audit both seats.
 # Env: INIT (data/cache/bv1/best.pt), SMOKE_ITERS (6), REF (card reference, data/cache/base_r3/best.pt; stage P3 uses P), DEAL0 (3000), ITERS (560),
-#      MS_IT (160), RL_EXTRA (extra train_rl flags), RL_HOURS (5.5), GA_SEEDS (24), VAR_CAP (60m), SMOKE=1.
+#      MS_IT (160), MS_MIN (0.50; milestone stop threshold vs B-v1), RL_EXTRA (extra train_rl flags), RL_HOURS (5.5), GA_SEEDS (24), VAR_CAP (60m), SMOKE=1,
+#      LINE_EVAL_STARTS (held-out combo-line starts: adds the line card, scripts/audit/line_eval.py), LINE_REPEATS (4).
 # Usage: bash scripts/vast_stage_p.sh <name>. Do NOT run on the laptop (vast GPU only).
 set -uo pipefail
+export PYTHONUNBUFFERED=1  # progress checkable at any time (AGENTS, 2026-11-05)
 export PATH="$HOME/.local/bin:$PATH"
 NAME="$1"; OUT="runs/$NAME"; mkdir -p "$OUT/ms"
 alert() { echo "ALERT $*" | tee -a "$OUT/ALERT"; }
@@ -30,6 +32,7 @@ export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 T0=$SECONDS
 tick() { echo "$(date +%T) $1 $((SECONDS - T0)) s" | tee -a "$OUT/PROGRESS"; }
 INIT=${INIT:-data/cache/bv1/best.pt}; REF=${REF:-data/cache/base_r3/best.pt}; ITERS=${ITERS:-560}; MS_IT=${MS_IT:-160}
+MS_MIN=${MS_MIN:-0.50}
 [ -s "$INIT" ] && [ -s "$(dirname "$INIT")/metrics.jsonl" ] || { alert "missing $INIT or its metrics.jsonl"; exit 3; }
 MSE=(--eval-seeds 18 --ga-seeds 6); RLX=(); export YGO_NAN_DEBUG="$OUT/nan"  # saves the first skipped non-finite minibatch
 if [ "${SMOKE:-0}" = 1 ]; then ITERS=${SMOKE_ITERS:-6}; MS_IT=4; MSE=(--eval-seeds 1 --ga-seeds 1); RLX=(--rollout 4096 --envs 64 --eval-seeds 1 --value-warmup 1); fi
@@ -71,10 +74,11 @@ milestone() {
   local ck; ck=$(printf "%s/rl/iter-%04d.pt" "$OUT" "$MS_IT")
   evalck "$ck" "$MS_IT" "i$MS_IT" && waste "i$MS_IT" || { alert "milestone eval/audit failed: $(tail -1 "$OUT/ms/i$MS_IT.txt")"; return 1; }
   until [ -f "$OUT/ms/REF_DONE" ]; do sleep 20; done  # not `wait`: milestone runs in a subshell (stage P3 smoke 2)
-  uv run --no-sync python - "$OUT" "$MS_IT" <<'EOF'
+  uv run --no-sync python - "$OUT" "$MS_IT" "$MS_MIN" <<'EOF'
 import json, math, sys
 from pathlib import Path
 o, it = Path(sys.argv[1]), int(sys.argv[2])
+ms_min = float(sys.argv[3])
 ev = json.loads((o / f"ms/i{it}.jsonl").read_text().splitlines()[-1])["eval"]
 recs = [json.loads(x) for x in (o / "rl/metrics.jsonl").read_text().splitlines() if '"kl_bc"' in x]
 kl = [r["kl_bc"] for r in recs if it - 10 < r["iter"] <= it]
@@ -87,8 +91,8 @@ print(f"milestone it{it}: vs init {ev['vs_bc']['wr']} n={ev['vs_bc']['n']} {ev['
       f"{ev['vs_ygoagent']['wr']} n={ev['vs_ygoagent']['n']}; kl_bc mean {kl_m:.4f}; own-T1 HT games cand {pw} vs init {bw} "
       f"(ygo-agent {yw}, bound {bound:.0f}); interrupts P {p['s']['interrupt_opp']['rate']} ygo-agent {p['ya']['interrupt_opp']['rate']}")
 bad = []
-if ev["vs_bc"]["wr"] < 0.50:
-    bad.append(f"vs init {ev['vs_bc']['wr']} < 0.50")
+if ev["vs_bc"]["wr"] < ms_min:
+    bad.append(f"vs init {ev['vs_bc']['wr']} < {ms_min:.2f}")
 if not kl or kl_m > 0.1:
     bad.append(f"kl_bc mean {kl_m:.4f} > 0.1 (or missing)")
 if pw > bw + 2 * math.sqrt(max(bw, 1)):
@@ -165,4 +169,21 @@ for line in (o / "paired-base.txt").read_text().splitlines()[1:]:
         m = float(line.split("B-A ")[1].split(" pp")[0]); se = float(line.split("SE ")[1].split(")")[0])
         print(f"Pc ladder {line.split(':')[0]}: P - base_r3 {m:+.1f} pp, lower 90% {m - 1.645 * se:+.1f}")
 EOF
+# 3. Combo-line card (opponent-turn plan step 2, gate 3b): candidate vs REF on held-out line starts, paired
+if [ -n "${LINE_EVAL_STARTS:-}" ]; then
+  mkdir -p "$OUT/line"; LR=${LINE_REPEATS:-4}; LX=(); [ "${SMOKE:-0}" = 1 ] && LX=(--max-starts 2) && LR=1
+  RT=$(free -m | awk '/Mem/{print $2}'); LJ=$(( J < RT * 8 / 10 / 900 ? J : RT * 8 / 10 / 900 )); [ "$LJ" -lt 1 ] && LJ=1
+  LP=()
+  for i in $(seq 0 $((LJ - 1))); do
+    timeout "${VAR_CAP:-60m}" uv run --no-sync python scripts/audit/line_eval.py --starts "$LINE_EVAL_STARTS" \
+      --ckpt "$OUT/P/best.pt" --vs-ckpt "$REF" --repeats "$LR" --shard "$i/$LJ" "${LX[@]}" --out "$OUT/line/s$i.json" \
+      > "$OUT/line/s$i.txt" 2>&1 || echo "line shard $i exit $?" >> "$OUT/line/fail.txt" &
+    LP+=($!)
+  done
+  wait "${LP[@]}"  # not a bare wait: the usage.txt logger is a never-ending child (hung smoke 2026-11-04)
+  [ -s "$OUT/line/fail.txt" ] && alert "line_eval: $(tr '\n' ' ' < "$OUT/line/fail.txt" | cut -c1-200)"
+  uv run --no-sync python scripts/audit/line_eval.py --starts "$LINE_EVAL_STARTS" --merge "$OUT"/line/s*.json \
+    --out "$OUT/line/summary.json" > "$OUT/line/summary.txt" 2>&1 || alert "line_eval merge: $(tail -1 "$OUT/line/summary.txt")"
+  echo "$(date +%T) combo-line card (cand - REF): $(tail -1 "$OUT/line/summary.txt" | cut -c1-400)" >> "$OUT/PROGRESS"
+fi
 true

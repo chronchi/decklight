@@ -287,6 +287,21 @@ def test_check_invariants_trained_passes(tmp_path):
     ft.check_invariants(final, base, val)  # no raise
 
 
+def test_check_invariants_value_only(tmp_path):
+    ft = _load("finetune_deck")
+    base, val, frozen, moved = (tmp_path / f"{n}.pt" for n in ("base", "value", "frozen", "moved"))
+    _ckpt(base, 1.0, 0.0)
+    _ckpt(val, 1.0, 2.0)
+    _ckpt(frozen, 1.0, 2.5)  # policy == base (frozen), head trained
+    _ckpt(moved, 1.5, 2.5)
+    ft.check_invariants(frozen, base, val, value_only=True)  # no raise
+    with pytest.raises(SystemExit):
+        ft.check_invariants(moved, base, val, value_only=True)
+    _ckpt(frozen, 1.0, 2.0)  # head == the value init exactly
+    with pytest.raises(SystemExit):
+        ft.check_invariants(frozen, base, val, value_only=True)
+
+
 # --- Part D: deck_card deals ---
 
 

@@ -1,0 +1,10 @@
+[package]
+name = "ygoenv-sys"
+description = "EDOPro's ygopro-core (C++, with Lua 5.4 built as C++) and decklight's C++ env, built from source for any target, behind a C ABI (cpp/ygoenv/capi.h)"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+links = "ygoenv"
+
+[build-dependencies]
+cc = { version = "1.2", features = ["parallel"] }

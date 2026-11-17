@@ -1,0 +1,602 @@
+[
+ {
+  "code": 703897,
+  "kind": "one",
+  "q": "counter trap that negates effects while you control a link monster"
+ },
+ {
+  "code": 703897,
+  "kind": "two",
+  "q": "counter trap negates effects and banishes itself to search a dark machine"
+ },
+ {
+  "code": 1475311,
+  "kind": "one",
+  "q": "draw two cards then remove a dark monster from your hand"
+ },
+ {
+  "code": 1475311,
+  "kind": "two",
+  "q": "draws two cards and banishes a dark monster or empties your hand"
+ },
+ {
+  "code": 5431722,
+  "kind": "one",
+  "q": "negates the effect of a face up spell"
+ },
+ {
+  "code": 5431722,
+  "kind": "two",
+  "q": "negates a face up spell and recycles a card from grave to deck"
+ },
+ {
+  "code": 5851097,
+  "kind": "one",
+  "q": "continuous trap that stops both players from special summoning"
+ },
+ {
+  "code": 5851097,
+  "kind": "two",
+  "q": "blocks all special summons and destroys itself when a card hits the grave"
+ },
+ {
+  "code": 6325660,
+  "kind": "one",
+  "q": "hand trap that banishes a monster after their hand effect"
+ },
+ {
+  "code": 6325660,
+  "kind": "two",
+  "q": "banishes an opponent's monster and stops you using four attributes"
+ },
+ {
+  "code": 8491308,
+  "kind": "one",
+  "q": "link one monster that can attack directly"
+ },
+ {
+  "code": 8491308,
+  "kind": "two",
+  "q": "attacks directly and sends a card from deck to grave after damage"
+ },
+ {
+  "code": 10045474,
+  "kind": "one",
+  "q": "hand trap that negates a monster when your field is empty"
+ },
+ {
+  "code": 10045474,
+  "kind": "two",
+  "q": "negates a face up monster and locks its column if set"
+ },
+ {
+  "code": 11765832,
+  "kind": "one",
+  "q": "fusion monster that doubles the battle damage it deals"
+ },
+ {
+  "code": 11765832,
+  "kind": "two",
+  "q": "doubles battle damage and draws a card when sent to grave"
+ },
+ {
+  "code": 13332685,
+  "kind": "one",
+  "q": "ritual monster that lowers all opposing monsters attack"
+ },
+ {
+  "code": 13332685,
+  "kind": "two",
+  "q": "summons from deck by revealing itself and returns after being tributed"
+ },
+ {
+  "code": 15291624,
+  "kind": "one",
+  "q": "fusion monster that stops the opponent searching their deck"
+ },
+ {
+  "code": 15291624,
+  "kind": "two",
+  "q": "blocks all searches and protects itself by banishing a thunder from grave"
+ },
+ {
+  "code": 17782288,
+  "kind": "one",
+  "q": "discard a spell or trap to summon a level 2 from the extra deck"
+ },
+ {
+  "code": 17782288,
+  "kind": "two",
+  "q": "a continuous spell that discards spells or traps and summons from the extra deck"
+ },
+ {
+  "code": 24092792,
+  "kind": "one",
+  "q": "opponents can only attack the monster in your center zone"
+ },
+ {
+  "code": 24092792,
+  "kind": "two",
+  "q": "a card that forces attacks into your center monster and revives by attribute"
+ },
+ {
+  "code": 24224830,
+  "kind": "one",
+  "q": "banish a monster from the opponent graveyard to negate its effects"
+ },
+ {
+  "code": 24224830,
+  "kind": "two",
+  "q": "banishes a graveyard monster and stops all copies of its name"
+ },
+ {
+  "code": 24508238,
+  "kind": "one",
+  "q": "discard this card to banish a card from the opponent graveyard"
+ },
+ {
+  "code": 24508238,
+  "kind": "two",
+  "q": "a hand trap that discards itself and banishes from the graveyard"
+ },
+ {
+  "code": 24749710,
+  "kind": "one",
+  "q": "search a monster that supports a specific ritual spell then discard"
+ },
+ {
+  "code": 24749710,
+  "kind": "two",
+  "q": "adds a ritual helper and summons a different high level monster ignoring conditions"
+ },
+ {
+  "code": 26202165,
+  "kind": "one",
+  "q": "searches a monster with 1500 or less attack when sent to the graveyard"
+ },
+ {
+  "code": 26202165,
+  "kind": "two",
+  "q": "searches a low attack monster when it dies and locks that name"
+ },
+ {
+  "code": 30983281,
+  "kind": "one",
+  "q": "summons a level 2 or lower tuner from the graveyard when synchro summoned"
+ },
+ {
+  "code": 30983281,
+  "kind": "two",
+  "q": "revives a low level tuner and can tribute itself to summon another dragon"
+ },
+ {
+  "code": 31833038,
+  "kind": "one",
+  "q": "link monster that steals an attacked monster by placing it in its arrow"
+ },
+ {
+  "code": 31833038,
+  "kind": "two",
+  "q": "untargetable by monster effects and steals monsters it battles with its arrows"
+ },
+ {
+  "code": 31849106,
+  "kind": "one",
+  "q": "makes all monsters banished instead of going to the graveyard this turn"
+ },
+ {
+  "code": 31849106,
+  "kind": "two",
+  "q": "a trap that turns graveyard sends into banishes and affects both players this turn"
+ },
+ {
+  "code": 31924889,
+  "kind": "one",
+  "q": "synchro monster that destroys cards by removing spell counters"
+ },
+ {
+  "code": 31924889,
+  "kind": "two",
+  "q": "a spellcaster synchro that gains attack from spell counters and pops cards"
+ },
+ {
+  "code": 32807846,
+  "kind": "one",
+  "q": "spell that searches a low level warrior from deck"
+ },
+ {
+  "code": 32807846,
+  "kind": "two",
+  "q": "a low level warrior tutor and easy deck thinning spell"
+ },
+ {
+  "code": 33166263,
+  "kind": "one",
+  "q": "fusion monster that changes every monster's attribute on the field"
+ },
+ {
+  "code": 33166263,
+  "kind": "two",
+  "q": "a fusion using other fusions and an attribute-changing quick effect"
+ },
+ {
+  "code": 33760966,
+  "kind": "one",
+  "q": "fusion monster that bounces monsters back to the hand"
+ },
+ {
+  "code": 33760966,
+  "kind": "two",
+  "q": "uses monsters from hand as fusion material and revives itself from grave"
+ },
+ {
+  "code": 35261759,
+  "kind": "one",
+  "q": "draw two cards by banishing ten from the top"
+ },
+ {
+  "code": 35261759,
+  "kind": "two",
+  "q": "draw two by banishing ten face down and once per turn"
+ },
+ {
+  "code": 36637374,
+  "kind": "one",
+  "q": "discard one card to search or defense summon a monster"
+ },
+ {
+  "code": 36637374,
+  "kind": "two",
+  "q": "discard to search or summon and protects fusion monsters from destruction"
+ },
+ {
+  "code": 37432075,
+  "kind": "one",
+  "q": "fusion spell that can use banished monsters as material"
+ },
+ {
+  "code": 37432075,
+  "kind": "two",
+  "q": "fusion summon using controlled monsters and recycles banished cards into grave"
+ },
+ {
+  "code": 40366667,
+  "kind": "one",
+  "q": "hand-usable trap that negates special summon effects"
+ },
+ {
+  "code": 40366667,
+  "kind": "two",
+  "q": "a hand-usable summon negate and it locks light earth wind monster effects"
+ },
+ {
+  "code": 41999284,
+  "kind": "one",
+  "q": "link one monster that sets an attacking monster's attack to zero"
+ },
+ {
+  "code": 41999284,
+  "kind": "two",
+  "q": "a level one link that revives itself by tributing a level one"
+ },
+ {
+  "code": 42302563,
+  "kind": "one",
+  "q": "synchro that becomes three thousand attack in the center"
+ },
+ {
+  "code": 42302563,
+  "kind": "two",
+  "q": "a synchro that revives a small monster and reduces levels by three"
+ },
+ {
+  "code": 43871165,
+  "kind": "one",
+  "q": "pendulum monster that destroys itself to summon an xyz from extra"
+ },
+ {
+  "code": 43871165,
+  "kind": "two",
+  "q": "a pendulum pop effect and a monster that banishes three to xyz summon"
+ },
+ {
+  "code": 44362883,
+  "kind": "one",
+  "q": "a fusion spell that uses materials straight from the deck"
+ },
+ {
+  "code": 44362883,
+  "kind": "two",
+  "q": "sends materials from deck for a fusion and locks extra deck to fusions"
+ },
+ {
+  "code": 45171524,
+  "kind": "one",
+  "q": "tribute a reptile to search and revive in one card"
+ },
+ {
+  "code": 45171524,
+  "kind": "two",
+  "q": "searches a reptile theme monster and revives one after taking damage"
+ },
+ {
+  "code": 48739627,
+  "kind": "one",
+  "q": "checks the top of the opponent's deck and moves it"
+ },
+ {
+  "code": 48739627,
+  "kind": "two",
+  "q": "dumps a monster from deck and changes type and attribute from grave"
+ },
+ {
+  "code": 48835607,
+  "kind": "one",
+  "q": "a link monster that recycles itself from the graveyard"
+ },
+ {
+  "code": 48835607,
+  "kind": "two",
+  "q": "a link monster that searches a spell and revives itself"
+ },
+ {
+  "code": 49238328,
+  "kind": "one",
+  "q": "banishes extra deck cards randomly to draw cards"
+ },
+ {
+  "code": 49238328,
+  "kind": "two",
+  "q": "draws by banishing extra deck cards and stops all other draws"
+ },
+ {
+  "code": 54757758,
+  "kind": "one",
+  "q": "protects all monsters sharing its attribute from targeting"
+ },
+ {
+  "code": 54757758,
+  "kind": "two",
+  "q": "a fusion that changes its attribute and shields monsters of that attribute"
+ },
+ {
+  "code": 55285840,
+  "kind": "one",
+  "q": "steals the top of the opponent's deck as material"
+ },
+ {
+  "code": 55285840,
+  "kind": "two",
+  "q": "an xyz that steals opponent's top deck and detaches types for bonus effects"
+ },
+ {
+  "code": 55393975,
+  "kind": "one",
+  "q": "turns into a continuous spell that burns when opponent activates"
+ },
+ {
+  "code": 55393975,
+  "kind": "two",
+  "q": "a synchro that banishes across columns and becomes a burning spell"
+ },
+ {
+  "code": 63288573,
+  "kind": "one",
+  "q": "recovers a spell from the graveyard when link summoned"
+ },
+ {
+  "code": 63288573,
+  "kind": "two",
+  "q": "a link monster that recycles spells and grows with each spell in grave"
+ },
+ {
+  "code": 63767246,
+  "kind": "one",
+  "q": "negates a spell and steals it as material"
+ },
+ {
+  "code": 63767246,
+  "kind": "two",
+  "q": "an xyz that negates spells and takes the attack for other xyz monsters"
+ },
+ {
+  "code": 70780151,
+  "kind": "one",
+  "q": "synchro that gains life equal to the atk of monsters it destroys"
+ },
+ {
+  "code": 70780151,
+  "kind": "two",
+  "q": "synchro that heals by battle damage and negates spells targeting psychics"
+ },
+ {
+  "code": 70902743,
+  "kind": "one",
+  "q": "synchro that destroys all defense position monsters after attacking one"
+ },
+ {
+  "code": 70902743,
+  "kind": "two",
+  "q": "synchro that destroys defense position monsters and punishes your monsters that skip attacking"
+ },
+ {
+  "code": 73580471,
+  "kind": "one",
+  "q": "synchro that nukes the entire field when it is summoned"
+ },
+ {
+  "code": 73580471,
+  "kind": "two",
+  "q": "synchro that wipes the board when summoned and repositions defense monsters to zero attack"
+ },
+ {
+  "code": 73898890,
+  "kind": "one",
+  "q": "extra deck monster that recycles a ritual from grave while removing a field card"
+ },
+ {
+  "code": 73898890,
+  "kind": "two",
+  "q": "link that recycles rituals from grave and tributes itself to revive a ritual"
+ },
+ {
+  "code": 74820316,
+  "kind": "one",
+  "q": "banishes itself from grave to send a card on the field to grave"
+ },
+ {
+  "code": 74820316,
+  "kind": "two",
+  "q": "link that recycles banished cards and takes control of an enemy monster"
+ },
+ {
+  "code": 76774528,
+  "kind": "one",
+  "q": "synchro that pops one of your cards and one opponent card together"
+ },
+ {
+  "code": 76774528,
+  "kind": "two",
+  "q": "synchro that destroys two cards at once and revives a monster when destroyed"
+ },
+ {
+  "code": 78010363,
+  "kind": "one",
+  "q": "monster that searches a low defense monster when it is sent to the graveyard"
+ },
+ {
+  "code": 78010363,
+  "kind": "two",
+  "q": "searches when sent to grave and finds a monster with low defense"
+ },
+ {
+  "code": 78397661,
+  "kind": "one",
+  "q": "synchro that banishes itself to summon a low level monster from deck or grave"
+ },
+ {
+  "code": 78397661,
+  "kind": "two",
+  "q": "synchro that dodges itself to summon and recycles a level 8 fusion"
+ },
+ {
+  "code": 79606837,
+  "kind": "one",
+  "q": "synchro that banishes any monster sent from hand or deck to the graveyard"
+ },
+ {
+  "code": 79606837,
+  "kind": "two",
+  "q": "synchro that negates by tributing itself and adds a ritual when sent to grave"
+ },
+ {
+  "code": 80208225,
+  "kind": "one",
+  "q": "spell that banishes a monster and a spell or trap from the opponent's graveyard"
+ },
+ {
+  "code": 80208225,
+  "kind": "two",
+  "q": "a spell that banishes two cards from the enemy grave and draws a card"
+ },
+ {
+  "code": 80565021,
+  "kind": "one",
+  "q": "places a field spell from deck and summons an extra deck monster"
+ },
+ {
+  "code": 80565021,
+  "kind": "two",
+  "q": "activates from hand on the opponent's first turn and locks extra deck to synchros"
+ },
+ {
+  "code": 80845034,
+  "kind": "one",
+  "q": "fetches a themed monster from deck or graveyard to hand"
+ },
+ {
+  "code": 80845034,
+  "kind": "two",
+  "q": "fetches a themed monster from deck or grave and recycles a spell to draw"
+ },
+ {
+  "code": 84477320,
+  "kind": "one",
+  "q": "revives a themed monster from grave then returns one you control to hand"
+ },
+ {
+  "code": 84477320,
+  "kind": "two",
+  "q": "revives a monster and sets a themed spell or trap when fused"
+ },
+ {
+  "code": 90448279,
+  "kind": "one",
+  "q": "detaches two materials to send every other card on the field to grave"
+ },
+ {
+  "code": 90448279,
+  "kind": "two",
+  "q": "stacks on any xyz that battled and detaches two to wipe the board"
+ },
+ {
+  "code": 95515789,
+  "kind": "one",
+  "q": "quick effect fusion summons using monsters from hand or field"
+ },
+ {
+  "code": 95515789,
+  "kind": "two",
+  "q": "special summons itself while a specific monster is out and fuses on either turn"
+ },
+ {
+  "code": 97045737,
+  "kind": "one",
+  "q": "negates an effect that adds a card from deck to hand"
+ },
+ {
+  "code": 97045737,
+  "kind": "two",
+  "q": "a trap activated from hand that negates searches and locks three attributes"
+ },
+ {
+  "code": 97462632,
+  "kind": "one",
+  "q": "discards itself to set a quick play spell or trap from deck"
+ },
+ {
+  "code": 97462632,
+  "kind": "two",
+  "q": "whole tribute for a level eight ritual and discards itself for damage protection"
+ },
+ {
+  "code": 97631303,
+  "kind": "one",
+  "q": "sends spells and traps to the graveyard to draw that many"
+ },
+ {
+  "code": 97631303,
+  "kind": "two",
+  "q": "pitching backrow for draws and summoning a classic spellcaster from the grave"
+ },
+ {
+  "code": 98127546,
+  "kind": "one",
+  "q": "steals an opponent's monster as material for a link summon"
+ },
+ {
+  "code": 98127546,
+  "kind": "two",
+  "q": "links using an opponent's monster and negates all their face up monster effects"
+ },
+ {
+  "code": 98978921,
+  "kind": "one",
+  "q": "summons a low level normal monster from hand to its arrow"
+ },
+ {
+  "code": 98978921,
+  "kind": "two",
+  "q": "made from a normal monster and special summons low level normal monsters from hand"
+ }
+]

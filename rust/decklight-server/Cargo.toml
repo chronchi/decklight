@@ -1,0 +1,66 @@
+[package]
+name = "decklight-server"
+description = "decklight web server in Rust: HTTP + WebSocket protocol, random/raw bots, match record v1 (A2c)"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[lib]
+name = "decklight_server"
+path = "src/lib.rs"
+
+[[bin]]
+name = "decklight-serve"
+path = "src/bin/decklight-serve.rs"
+
+[[bin]]
+name = "raw_dump"
+path = "src/bin/raw_dump.rs"
+
+[[bin]]
+name = "describe_encode"
+path = "src/bin/describe_encode.rs"
+
+[dependencies]
+ygoenv-sys = { path = "../ygoenv-sys" }
+decklight-core = { path = "../decklight-core" }
+decklight-cards = { path = "../decklight-cards" }
+decklight-view = { path = "../decklight-view" }
+decklight-record = { path = "../decklight-record" }
+decklight-onnx = { path = "../decklight-onnx" }
+decklight-search = { path = "../decklight-search" }
+decklight-edopro = { path = "../decklight-edopro" }
+libc = "0.2"
+libloading = "0.8"
+axum = { version = "0.8", features = ["ws"] }
+tokio = { version = "1", features = ["full"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+rusqlite = { version = "0.42", features = ["bundled"] }
+flate2 = "1.1"
+ureq = { version = "2.12", default-features = false, features = ["tls"] }
+sha2 = "0.10"
+tokenizers = { version = "0.22", default-features = false, features = ["fancy-regex"] }
+ort = { version = "=2.0.0-rc.15", default-features = false, features = ["load-dynamic", "ndarray", "api-31", "half"] }
+ndarray = "0.17"
+half = "2"
+sha1 = "0.10"
+base64 = "0.22"
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
+futures-util = "0.3"
+
+# Ask API keys (docs/plans/ask-tab.md §Decisions 2): the OS credential store per platform, never a plain file.
+[dependencies.keyring-core]
+version = "1"
+
+[target.'cfg(all(unix, not(any(target_os = "macos", target_os = "ios", target_os = "android"))))'.dependencies]
+zbus-secret-service-keyring-store = { version = "1", features = ["crypto-rust"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+apple-native-keyring-store = { version = "1", features = ["keychain"] }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+windows-native-keyring-store = "1"
+
+[target.'cfg(target_os = "android")'.dependencies]
+android-native-keyring-store = "1"

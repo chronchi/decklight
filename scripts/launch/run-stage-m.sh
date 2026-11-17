@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Retrain stage M (docs/retrain/plan-v3.md §Stage M; user 2026-10-11 "I want to be comprehensive from the beginning,
+# Retrain stage M (docs/lab/retrain/plan-v3.md §Stage M; user 2026-10-11 "I want to be comprehensive from the beginning,
 # going first, going second, mid-game, end-game"): muse plans our whole turn from sampled sw-v self-play states of every
 # pool train deck (4 states per bucket per deck), verified strictly. Laptop, background; LLM calls are network-bound,
 # so 8 workers; engine work stays on cores 0-3. Chunks of 10 decks so results land as it goes (plan_turns writes at the

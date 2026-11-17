@@ -9,7 +9,7 @@ Writes src/decklight/web/deck_coverage.json, read by the web server's deck list:
 - related: at least RELATED share of its non-staple distinct cards appear in one archetype's training lists (staple =
   in >= 8% of lobby decks: hand traps, generic extra deck). Its own gain was never measured.
 - other decks get no entry: the release only kept itself close to the earlier model on them.
-Gains are the raw-policy release tables of docs/results.md (r0 - P, r1 - r0), one per archetype.
+Gains are the raw-policy release tables of docs/model/results.md (r0 - P, r1 - r0), one per archetype.
 
     uv run python scripts/build_deck_coverage.py            # writes the JSON, prints the table
 """
@@ -28,7 +28,7 @@ LOBBY_DIRS = [ROOT / "decks" / "pool", ROOT / "decks" / "newcards"]  # = server.
 OUT = ROOT / "src" / "decklight" / "web" / "deck_coverage.json"
 # (folder glob of training lists, release, opponent the gain is measured against)
 TRAIN_SETS = [("decks/x4b/train/*/*.ydk", "r0", "P"), ("decks/forge/f*/train/*/*.ydk", "r1", "r0")]
-# docs/results.md "Release r0" (r0 - P) and "Release r1" (r1 - r0) tables, raw policy, 95% CI.
+# docs/model/results.md "Release r0" (r0 - P) and "Release r1" (r1 - r0) tables, raw policy, 95% CI.
 GAINS = {
     "branded-light-and-darkness-ritual": (6.6, 4.5, 8.7), "invoked": (17.6, 14.8, 20.4),
     "radiant-typhoon": (22.4, 19.4, 25.4), "sacred-beasts": (13.1, 10.6, 15.5),

@@ -1,0 +1,27 @@
+[package]
+name = "decklight-search"
+description = "Deterministic building blocks of the product search (CPython random, loop guard, selection, honest rule, determinizer), bit-identical to the Python oracle"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[lib]
+name = "decklight_search"
+path = "src/lib.rs"
+
+[[bin]]
+name = "search_parts_dump"
+path = "src/bin/search_parts_dump.rs"
+
+[[bin]]
+name = "product_games"
+path = "src/bin/product_games.rs"
+
+[dependencies]
+decklight-core = { path = "../decklight-core" }
+decklight-cards = { path = "../decklight-cards" }
+decklight-onnx = { path = "../decklight-onnx" }
+ygoenv-sys = { path = "../ygoenv-sys" }
+sha2 = "0.10"
+flate2 = "1.1"
+serde_json = "1"

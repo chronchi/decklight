@@ -1,4 +1,4 @@
-# Audit from docs/reviews/2026-10-09-search-plan-opus.md (Opus 5.5 subagent, 2026-10-09). Run from ygo-zero/: python3 scripts/audit/harness_pairh.py
+# Audit from docs/lab/reviews/2026-10-09-search-plan-opus.md (Opus 5.5 subagent, 2026-10-09). Run from ygo-zero/: python3 scripts/audit/harness_pairh.py
 import json,glob,collections
 e2={}
 for f in glob.glob('runs/e2-20261007-2129/raw/games-*.jsonl'):

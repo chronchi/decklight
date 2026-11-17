@@ -438,7 +438,73 @@ void write_history_row(int32_t* o, const HistoryEntry& e, int me, int turn) {
   o[12] = e.phase;
 }
 
+// ---------------------------------------------------------------- public events
+
+// src/decklight/engine/events.py public_events, line for line (the live client's history_from_message keeps the
+// opponent's events; parity: scripts/audit/obs_parity.py, tests/engine/test_cpp_env.py).
+void Duel::emit_events(const uint8_t* m, uint32_t size) {
+  auto u32 = [m](uint32_t off) { uint32_t v; std::memcpy(&v, m + off, 4); return v; };
+  auto push = [this](int32_t kind, uint32_t con, uint32_t loc, uint32_t code, uint64_t desc, int32_t arg, int actor,
+                     bool pub, int32_t msg_type) {
+    events.push_back({kind, -1, static_cast<int32_t>(code), i32(desc >> 20), static_cast<int32_t>(desc & 0xFFFFF), arg,
+                      msg_type, loc_id(loc), static_cast<int32_t>(con) ^ actor, 0, actor, turn, phase, pub ? 1 : 0});
+  };
+  auto place = [&push](uint32_t con, uint32_t loc, uint32_t seq) {
+    int32_t zone = static_cast<int32_t>(loc == LOCATION_MZONE ? seq : seq + 8);
+    push(PLACE, con, loc, 0, 0, zone, static_cast<int>(con), false, MSG_SELECT_PLACE);
+  };
+  const uint8_t t = m[0];
+  if ((t == MSG_SUMMONING || t == MSG_SPSUMMONING) && size >= 15) {
+    uint32_t con = m[5], loc = m[6], seq = u32(7);
+    if (chain_len == 0) {
+      push(t == MSG_SUMMONING ? SUMMON : SPSUMMON, con, loc, u32(1), 0, 0, static_cast<int>(con), true,
+           MSG_SELECT_IDLECMD);
+      place(con, loc, seq);
+    }
+  } else if (t == MSG_FLIPSUMMONING && size >= 15) {
+    uint32_t con = m[5], loc = m[6];
+    push(REPOS, con, loc, u32(1), 0, 0, static_cast<int>(con), true, MSG_SELECT_IDLECMD);
+  } else if (t == MSG_SET && size >= 15) {
+    uint32_t con = m[5], loc = m[6], seq = u32(7);
+    push(loc == LOCATION_MZONE ? MSET : SSET, con, loc, 0, 0, 0, static_cast<int>(con), false, MSG_SELECT_IDLECMD);
+    place(con, loc, seq);
+  } else if (t == MSG_CHAINING && size >= 29) {
+    uint32_t con = m[5], loc = m[6], pos = u32(11);
+    uint64_t desc;
+    std::memcpy(&desc, m + 21, 8);
+    push(ACTIVATE, con, loc, u32(1), desc, 0, m[15], (pos & POS_FACEUP) != 0, MSG_CHAINING);
+  } else if (t == MSG_ATTACK && size >= 21) {
+    uint32_t con = m[1], loc = m[2], seq = u32(3);
+    bool direct = m[12] == 0 && m[11] == 0 && u32(13) == 0;
+    attack_fix_.push_back({static_cast<uint32_t>(events.size()), con, seq});
+    push(ATTACK, con, loc, 0, 0, direct ? 1 : 0, static_cast<int>(con), true, MSG_SELECT_BATTLECMD);
+  } else if (t == MSG_POS_CHANGE && size >= 10) {
+    uint32_t cc = m[5], cl = m[6], cp = m[9];
+    if (chain_len == 0) push(REPOS, cc, cl, u32(1), 0, 0, static_cast<int>(cc), (cp & POS_FACEUP) != 0, MSG_SELECT_IDLECMD);
+  } else if (t == MSG_NEW_PHASE && size >= 3) {
+    uint16_t ph;
+    std::memcpy(&ph, m + 1, 2);
+    int32_t kind = 0, msg_type = 0;
+    if (ph == PHASE_BATTLE_START) kind = TO_BATTLE, msg_type = MSG_SELECT_IDLECMD;
+    else if (ph == PHASE_MAIN2) kind = TO_MAIN2, msg_type = MSG_SELECT_BATTLECMD;
+    else if (ph == PHASE_END) kind = TO_END, msg_type = MSG_SELECT_BATTLECMD;
+    if (kind) push(kind, turn_player, 0, 0, 0, 0, turn_player, true, msg_type);
+  }
+}
+
 // ---------------------------------------------------------------- Env
+
+void Env::pull_events() {
+  const auto& ev = duel_->events;
+  for (; events_seen_ < ev.size(); ++events_seen_) {
+    const auto& r = ev[events_seen_];
+    HistoryEntry e;
+    std::copy(r.begin(), r.begin() + ACTION_COLS, e.row.begin());
+    e.actor = r[10], e.turn = r[11], e.phase = r[12], e.is_public = r[13] != 0;
+    ohist_.push_back(e);
+    ohist_event_.push_back(1);
+  }
+}
 
 Env::Env(Engine& engine, DuelConfig config, bool auto_single)
     : engine_(engine), config_(std::move(config)), auto_single_(auto_single) {}
@@ -447,7 +513,10 @@ bool Env::reset(Obs& obs) {
   board_.reset();
   dec_.reset();
   duel_ = std::make_unique<Duel>(engine_, config_);
+  duel_->record_trace = record_trace_;
+  duel_->trace.clear();
   history_.clear();
+  clear_ohist();
   choices.clear();
   decisions = truncated = 0;
   next_decision();
@@ -463,14 +532,19 @@ bool Env::step(int index, Obs& obs) {
 
 std::unique_ptr<Env> Env::clone() const {
   auto out = std::make_unique<Env>(engine_, config_, auto_single_);
+  out->record_trace_ = record_trace_;
   out->duel_ = duel_->clone_duel();
   if (dec_) out->dec_ = dec_->clone();
   if (board_) out->board_ = std::make_unique<Board>(*board_);
   out->opts_ = opts_;
   out->history_ = history_;
+  out->ohist_ = ohist_;
+  out->ohist_event_ = ohist_event_;
+  out->events_seen_ = events_seen_;
   out->choices = choices;
   out->decisions = decisions;
   out->truncated = truncated;
+  out->dec_seq_ = dec_seq_;
   return out;
 }
 
@@ -493,6 +567,7 @@ void Env::next_decision() {
     Span s(prof_.advance_us, prof_on_);
     msg = duel_->advance();
   }
+  pull_events();
   if (!msg) {
     dec_.reset();
     return;
@@ -503,6 +578,7 @@ void Env::next_decision() {
     if (prof_on_) ++prof_.declares;
     return known_codes(p);
   });
+  ++dec_seq_;
 }
 
 std::set<uint32_t> Env::known_codes(int p) {
@@ -528,6 +604,10 @@ void Env::take(int index, bool record) {
       history_.push_back(light_history(opt, dec_->msg_type, dec_->step, duel_->turn, duel_->phase, cache));
     } else {
       history_.push_back(history_entry(*board_, opt, dec_->msg_type, dec_->step, duel_->turn, duel_->phase));
+    }
+    if (opts_.size() > 1) {  // a client answers singletons without recording them (stream._settle_singletons)
+      ohist_.push_back(history_.back());
+      ohist_event_.push_back(0);
     }
   }
   ++decisions;
@@ -577,7 +657,10 @@ void Env::fill_obs(Obs& obs) {
     std::copy(row.begin(), row.end(), &obs.actions[i * ACTION_COLS]);
     obs.action_mask[i] = 1;
   }
-  int me = dec_->player;
+  fill_history(obs, dec_->player);
+}
+
+void Env::fill_history(Obs& obs, int me) const {
   size_t n = std::min<size_t>(history_.size(), HISTORY);
   for (size_t i = 0; i < n; ++i) {
     const auto& e = history_[history_.size() - 1 - i];
@@ -591,6 +674,34 @@ void Env::fill_obs(Obs& obs) {
     write_history_row(&obs.hist_long[m * HISTORY_COLS], e, me, duel_->turn);
     obs.hist_long_mask[m++] = 1;
   }
+  size_t k = 0;  // what a client sees: our decisions and the opponent's public events (most recent first)
+  for (size_t i = ohist_.size(); i-- > 0 && k < HISTORY;) {
+    const auto& e = ohist_[i];
+    if ((e.actor != me) != (ohist_event_[i] != 0)) continue;
+    write_history_row(&obs.obs_history[k * HISTORY_COLS], e, me, duel_->turn);
+    obs.obs_history_mask[k++] = 1;
+  }
+}
+
+void Env::fill_obs_as(Obs& obs, int viewer) {
+  if (!duel_) throw std::runtime_error("observe_as: no duel");
+  if (viewer != 0 && viewer != 1) throw std::runtime_error("observe_as: viewer must be 0 or 1");
+  // Mirrors review.human_obs_dict: the board from `viewer`'s side whoever is to act. At a pending
+  // decision the options are that decision's (rows built from viewer's board); after the end there
+  // is no selection, no option and msg_type 0.
+  obs.clear();
+  Board b(*duel_, viewer);
+  static const std::vector<CardRef> kNone;
+  bool pending = dec_ && !duel_->ended;
+  b.fill(obs, *duel_, pending ? dec_->msg_type : 0, pending ? dec_->selected : kNone);
+  if (pending) {
+    for (size_t i = 0; i < opts_.size(); ++i) {
+      auto row = b.option_row(opts_[i], dec_->msg_type, dec_->step);
+      std::copy(row.begin(), row.end(), &obs.actions[i * ACTION_COLS]);
+      obs.action_mask[i] = 1;
+    }
+  }
+  fill_history(obs, viewer);
 }
 
 bool Env::settle(Obs& obs) {
@@ -606,7 +717,10 @@ bool Env::replay(const std::vector<int>& choices, Obs& obs) {
   board_.reset();
   dec_.reset();
   duel_ = std::make_unique<Duel>(engine_, config_);
+  duel_->record_trace = record_trace_;
+  duel_->trace.clear();
   history_.clear();
+  clear_ohist();
   this->choices.clear();
   decisions = truncated = 0;
   next_decision();
@@ -635,7 +749,10 @@ Env::ReplayKeysResult Env::replay_keys(const std::vector<std::array<int32_t, 8>>
   board_.reset();
   dec_.reset();
   duel_ = std::make_unique<Duel>(engine_, config_);
+  duel_->record_trace = record_trace_;
+  duel_->trace.clear();
   history_.clear();
+  clear_ohist();
   choices.clear();
   decisions = truncated = 0;
   next_decision();

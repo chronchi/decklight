@@ -29,6 +29,7 @@ def main() -> None:
     ap.add_argument("--min-gpu-ram", type=float, default=6)
     ap.add_argument("--max-inet-cost", type=float, default=0.02, help="max host download billing ($/GB)")
     ap.add_argument("--setup", default=None, help="replace the box setup (default: scripts/vast_setup.sh)")
+    ap.add_argument("--min-compute-cap", type=int, default=750, help="0 = any GPU (CPU-only work on a GPU box)")
     args = ap.parse_args()
     if args.cleanup:
         print("destroyed:", vast.destroy_strays())
@@ -45,6 +46,7 @@ def main() -> None:
         extra_query=args.extra_query,
         min_gpu_ram_gb=args.min_gpu_ram,
         max_inet_down_cost=args.max_inet_cost,
+        min_compute_cap=args.min_compute_cap,
     )
     if args.setup is not None:
         spec.setup = args.setup

@@ -1,4 +1,4 @@
-"""Parallel helpers for the demo pipeline (docs/workflow.md cheap wins).
+"""Parallel helpers for the demo pipeline (docs/lab/workflow.md cheap wins).
 
 - scripts/verify_lines.py + scripts/expand_lines.py: ``map_ordered`` runs jobs in
   worker processes; results come back in serial (input) order.

@@ -117,7 +117,7 @@ def parse_location(buf: bytes, controller: int, location: int) -> list[CardState
             out.append(None)
             pos += 2
         else:
-            card = CardState(controller, location, seq)
+            card = CardState(controller, location, seq, owner=controller)  # hidden records carry no QUERY_OWNER
             pos = parse_card(buf, pos, card)
             out.append(card)
         seq += 1

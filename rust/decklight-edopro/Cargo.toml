@@ -1,0 +1,38 @@
+[package]
+name = "decklight-edopro"
+description = "Offline EDOPro protocol core: framing/structs, per-seat filter, response inverse, decisions from raw messages, .yrpX (A2b-1)"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[lib]
+name = "decklight_edopro"
+path = "src/lib.rs"
+
+[[bin]]
+name = "edopro_dump"
+path = "src/bin/edopro_dump.rs"
+
+[[bin]]
+name = "edopro-host"
+path = "src/bin/edopro_host.rs"
+
+[[bin]]
+name = "edopro-join"
+path = "src/bin/edopro_join.rs"
+
+[[bin]]
+name = "stream_frames"
+path = "src/bin/stream_frames.rs"
+
+[dependencies]
+ygoenv-sys = { path = "../ygoenv-sys" }
+decklight-core = { path = "../decklight-core" }
+decklight-cards = { path = "../decklight-cards" }
+decklight-record = { path = "../decklight-record" }
+decklight-view = { path = "../decklight-view" }
+lzma-rust2 = { version = "0.15", default-features = false, features = ["std", "encoder"] }
+sha2 = "0.10"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+flate2 = "1.1"

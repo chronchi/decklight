@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Retrain stage M, split mode (docs/retrain/plan-v3.md §Stage M; user 2026-10-12 "Agreed with 1 and 2"): verify muse's
+# Retrain stage M, split mode (docs/lab/retrain/plan-v3.md §Stage M; user 2026-10-12 "Agreed with 1 and 2"): verify muse's
 # turn plans on a many-core box from the laptop's LLM cache (data/cache/llm, shipped; no OpenCode key here, the LLM never
 # runs on vast). The laptop sweep verified ~4 min of one core per state and took ~7 h per 10-deck chunk (NOTEBOOK
 # 2026-10-12 21:00).
@@ -10,7 +10,8 @@
 # that had no cached answer in runs/<name>/pending.jsonl (the laptop answers them with --llm-only --prompts, then a
 # second round with the same NEW_GROUPS/IDS finishes the repairs; states already verified are skipped).
 # First milestone: the first process to finish must have verified > 0 of > 10 states, else stop.
-# Env: NEW_GROUPS, OLD_GROUPS, IDS, BUDGET (8000), CAP (150m). Usage: bash scripts/vast_stage_m.sh <name>. Vast only.
+# Env: NEW_GROUPS, OLD_GROUPS, IDS, BUDGET (8000), CAP (150m); GAMES, BUCKETS, PER_BUCKET, OUTDIR (defaults: stage M's
+# sw-v games, all buckets, 4, data/demos/turns; the going-second starts of scripts/audit/second_starts.py use their own). Usage: bash scripts/vast_stage_m.sh <name>. Vast only.
 set -uo pipefail
 export PATH="$HOME/.local/bin:$PATH"
 NAME="$1"; OUT="runs/$NAME"; mkdir -p "$OUT/logs"
@@ -30,7 +31,9 @@ tick() { echo "$(date +%T) $1 $((SECONDS - T0)) s" | tee -a "$OUT/PROGRESS"; }
 # RAM: a process holds the 1,445 sw-v games plus one engine (360 MB RSS measured on the laptop); 600 MB each + 20%
 RTOT=$(free -m | awk '/Mem/{print $2}'); NP=$(( J < RTOT * 8 / 10 / 600 ? J : RTOT * 8 / 10 / 600 )); [ "$NP" -lt 1 ] && NP=1
 echo "cores $J, ram ${RTOT}MB -> $NP procs" | tee "$OUT/sizing.txt"
-A=(--games 'data/demos/sw-v/*.jsonl' --per-bucket 4 --budget "${BUDGET:-8000}" --cache-only --out-dir data/demos/turns)
+TD=${OUTDIR:-data/demos/turns}
+A=(--games "${GAMES:-data/demos/sw-v/*.jsonl}" --per-bucket "${PER_BUCKET:-4}" --buckets ${BUCKETS:-second mid end}
+   --budget "${BUDGET:-8000}" --cache-only --out-dir "$TD")
 run_proc() {  # one process slot: its NEW_GROUPS share, then its IDS share; each with the job's time cap
   local p=$1
   if [ -s "${NEW_GROUPS:-}" ]; then
@@ -66,8 +69,8 @@ cat "$OUT"/logs/fail-*.txt > "$OUT/logs/fail.txt" 2>/dev/null
 cat "$OUT"/pending/p*.jsonl > "$OUT/pending.jsonl" 2>/dev/null
 grep -h "^ALERT" "$OUT"/logs/*.txt >> "$OUT/ALERT" 2>/dev/null
 mkdir -p "$OUT/turns"
-for f in data/demos/turns/*/*.p*.jsonl; do [ -s "$f" ] && { mkdir -p "$OUT/turns/$(basename "$(dirname "$f")")"; cp "$f" "$OUT/turns/$(basename "$(dirname "$f")")/"; }; done
-cp data/demos/turns/report.p*.json "$OUT/logs/" 2>/dev/null
+for f in "$TD"/*/*.p*.jsonl; do [ -s "$f" ] && { mkdir -p "$OUT/turns/$(basename "$(dirname "$f")")"; cp "$f" "$OUT/turns/$(basename "$(dirname "$f")")/"; }; done
+cp "$TD"/report.p*.json "$OUT/logs/" 2>/dev/null
 NV=$(cat "$OUT"/turns/*/*.jsonl 2>/dev/null | wc -l); NS=$(grep -h "states to plan" "$OUT"/logs/*.txt | awk '{s+=$2} END {print s+0}')
 NPEND=$(wc -l < "$OUT/pending.jsonl" 2>/dev/null || echo 0)
 tick "verified $NV of $NS states; $NPEND repair prompts pending"

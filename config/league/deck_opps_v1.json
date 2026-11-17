@@ -1,0 +1,162 @@
+[
+ {
+  "name": "atlantean-mermail",
+  "ckpt": "data/cache/deck_opps/atlantean-mermail/best.pt",
+  "decks": [
+   "decks/x4b/train/atlantean-mermail/atlantean-mermail-meta1.ydk",
+   "decks/x4b/train/atlantean-mermail/atlantean-mermail-meta2.ydk",
+   "decks/x4b/train/atlantean-mermail/atlantean-mermail-v1.ydk"
+  ],
+  "source": "x4b"
+ },
+ {
+  "name": "branded-light-and-darkness-ritual",
+  "ckpt": "data/cache/deck_opps/branded-light-and-darkness-ritual/best.pt",
+  "decks": [
+   "decks/x4b/train/branded-light-and-darkness-ritual/branded-light-and-darkness-ritual-meta1.ydk",
+   "decks/x4b/train/branded-light-and-darkness-ritual/branded-light-and-darkness-ritual-v1.ydk",
+   "decks/x4b/train/branded-light-and-darkness-ritual/branded-light-and-darkness-ritual-v2.ydk"
+  ],
+  "source": "x4b"
+ },
+ {
+  "name": "invoked",
+  "ckpt": "data/cache/deck_opps/invoked/best.pt",
+  "decks": [
+   "decks/x4b/train/invoked/invoked-meta1.ydk",
+   "decks/x4b/train/invoked/invoked-v1.ydk",
+   "decks/x4b/train/invoked/invoked-v2.ydk"
+  ],
+  "source": "x4b"
+ },
+ {
+  "name": "radiant-typhoon",
+  "ckpt": "data/cache/deck_opps/radiant-typhoon/best.pt",
+  "decks": [
+   "decks/x4b/train/radiant-typhoon/radiant-typhoon-meta1.ydk",
+   "decks/x4b/train/radiant-typhoon/radiant-typhoon-v1.ydk",
+   "decks/x4b/train/radiant-typhoon/radiant-typhoon-v3.ydk"
+  ],
+  "source": "x4b"
+ },
+ {
+  "name": "sacred-beasts",
+  "ckpt": "data/cache/deck_opps/sacred-beasts/best.pt",
+  "decks": [
+   "decks/x4b/train/sacred-beasts/sacred-beasts-meta1.ydk",
+   "decks/x4b/train/sacred-beasts/sacred-beasts-meta2.ydk",
+   "decks/x4b/train/sacred-beasts/sacred-beasts-v1.ydk"
+  ],
+  "source": "x4b"
+ },
+ {
+  "name": "elfnote",
+  "ckpt": "data/cache/deck_opps/elfnote/best.pt",
+  "decks": [
+   "decks/forge/f0/train/elfnote/elfnote-f59.ydk",
+   "decks/forge/f0/train/elfnote/elfnote-f61.ydk",
+   "decks/forge/f0/train/elfnote/elfnote-v1.ydk"
+  ],
+  "source": "runs/forge-f0-20261029-1408"
+ },
+ {
+  "name": "fiendsmith-yummy",
+  "ckpt": "data/cache/deck_opps/fiendsmith-yummy/best.pt",
+  "decks": [
+   "decks/forge/f0/train/fiendsmith-yummy/fiendsmith-yummy-f3.ydk",
+   "decks/forge/f0/train/fiendsmith-yummy/fiendsmith-yummy-f4.ydk",
+   "decks/forge/f0/train/fiendsmith-yummy/fiendsmith-yummy-f5.ydk"
+  ],
+  "source": "runs/forge-f0-20261029-1408"
+ },
+ {
+  "name": "mitsurugi",
+  "ckpt": "data/cache/deck_opps/mitsurugi/best.pt",
+  "decks": [
+   "decks/forge/f0/train/mitsurugi/mitsurugi-f20.ydk",
+   "decks/forge/f0/train/mitsurugi/mitsurugi-meta1.ydk",
+   "decks/forge/f0/train/mitsurugi/mitsurugi-meta2.ydk"
+  ],
+  "source": "runs/forge-f0-20261029-1408"
+ },
+ {
+  "name": "sky-striker",
+  "ckpt": "data/cache/deck_opps/sky-striker/best.pt",
+  "decks": [
+   "decks/forge/f0/train/sky-striker/sky-striker-f27.ydk",
+   "decks/forge/f0/train/sky-striker/sky-striker-f28.ydk",
+   "decks/forge/f0/train/sky-striker/sky-striker-meta1.ydk"
+  ],
+  "source": "runs/forge-f0-20261029-1408"
+ },
+ {
+  "name": "blitzclique",
+  "ckpt": "data/cache/deck_opps/blitzclique/best.pt",
+  "decks": [
+   "decks/forge/f2/train/blitzclique/blitzclique-f23.ydk",
+   "decks/forge/f2/train/blitzclique/blitzclique-meta1.ydk",
+   "decks/forge/f2/train/blitzclique/blitzclique-meta2.ydk"
+  ],
+  "source": "runs/forge-round-20261029-2133"
+ },
+ {
+  "name": "ignister-maliss",
+  "ckpt": "data/cache/deck_opps/ignister-maliss/best.pt",
+  "decks": [
+   "decks/forge/f2/train/ignister-maliss/ignister-maliss-f10.ydk",
+   "decks/forge/f2/train/ignister-maliss/ignister-maliss-f6.ydk",
+   "decks/forge/f2/train/ignister-maliss/ignister-maliss-f8.ydk"
+  ],
+  "source": "runs/forge-round-20261029-2133"
+ },
+ {
+  "name": "kewl-tune",
+  "ckpt": "data/cache/deck_opps/kewl-tune/best.pt",
+  "decks": [
+   "decks/forge/f2/train/kewl-tune/kewl-tune-f43.ydk",
+   "decks/forge/f2/train/kewl-tune/kewl-tune-f44.ydk",
+   "decks/forge/f2/train/kewl-tune/kewl-tune-f45.ydk"
+  ],
+  "source": "runs/forge-round-20261029-2133"
+ },
+ {
+  "name": "lunalight",
+  "ckpt": "data/cache/deck_opps/lunalight/best.pt",
+  "decks": [
+   "decks/forge/f2/train/lunalight/lunalight-f6.ydk",
+   "decks/forge/f2/train/lunalight/lunalight-meta1.ydk",
+   "decks/forge/f2/train/lunalight/lunalight-meta2.ydk"
+  ],
+  "source": "runs/forge-round-20261029-2133"
+ },
+ {
+  "name": "magistus-invoked-fairy-tail",
+  "ckpt": "data/cache/deck_opps/magistus-invoked-fairy-tail/best.pt",
+  "decks": [
+   "decks/forge/f2/train/magistus-invoked-fairy-tail/magistus-invoked-fairy-tail-f6.ydk",
+   "decks/forge/f2/train/magistus-invoked-fairy-tail/magistus-invoked-fairy-tail-f7.ydk",
+   "decks/forge/f2/train/magistus-invoked-fairy-tail/magistus-invoked-fairy-tail-f9.ydk"
+  ],
+  "source": "runs/forge-round-20261029-2133"
+ },
+ {
+  "name": "power-patron-artmage",
+  "ckpt": "data/cache/deck_opps/power-patron-artmage/best.pt",
+  "decks": [
+   "decks/forge/f2/train/power-patron-artmage/power-patron-artmage-f18.ydk",
+   "decks/forge/f2/train/power-patron-artmage/power-patron-artmage-f19.ydk",
+   "decks/forge/f2/train/power-patron-artmage/power-patron-artmage-f20.ydk"
+  ],
+  "source": "runs/forge-round-20261029-2133"
+ },
+ {
+  "name": "trains",
+  "ckpt": "data/cache/deck_opps/trains/best.pt",
+  "decks": [
+   "decks/forge/f2/train/trains/trains-f2.ydk",
+   "decks/forge/f2/train/trains/trains-f3.ydk",
+   "decks/forge/f2/train/trains/trains-f4.ydk"
+  ],
+  "source": "runs/forge-round-20261029-2133"
+ }
+]

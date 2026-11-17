@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Retrain stage M play-out anchor (docs/retrain/plan-v3.md §Stage M): scripts/turn_anchor.py over every stage M turn
+# Retrain stage M play-out anchor (docs/lab/retrain/plan-v3.md §Stage M): scripts/turn_anchor.py over every stage M turn
 # record (data/demos/turns), base_r3 + value_ppo3, 8 samples per arm, horizon 2. Processes sized from a 120 s probe
 # (min(cores, GPU memory, RAM)); records split by line-id hash. Fails loud on a bucket kept-share < 0.3 (plan: drop and
 # investigate that bucket) or 0 records.

@@ -1,0 +1,8 @@
+[workspace] # standalone spike, not part of rust/ workspace (brief S3)
+members = ["src-tauri"]
+
+[profile.release]
+opt-level = "z"
+codegen-units = 1
+lto = true
+panic = "abort"

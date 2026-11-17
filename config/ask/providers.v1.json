@@ -1,0 +1,56 @@
+{
+  "version": 1,
+  "doc": "Ask provider presets (docs/plans/ask-tab.md §Provider presets). One OpenAI-compatible client; each preset has its own key in the OS credential store under its id. `keys_url` is where the user gets or replaces a key (shown with key errors); `session_header` sends x-opencode-session per chat (OpenCode Go refuses requests without it, NOTEBOOK 2026-11-14 11:28). `custom` takes any base URL, including a local Ollama / LM Studio / llama-server, and may need no key. `device` runs the model on the phone's GPU through LiteRT-LM (rust/decklight-server/src/ask/ondevice.rs); its models are downloaded under On this device, not fetched from a URL.",
+  "presets": [
+    {
+      "id": "opencode-go",
+      "name": "OpenCode Go",
+      "base_url": "https://opencode.ai/inference/go/openai/v1",
+      "default_model": "deepseek-v4.1-flash",
+      "keys_url": "https://opencode.ai/console/account#api-keys",
+      "session_header": true,
+      "needs_key": true,
+      "note": "Subscription: monthly allowance per model, 20% per 5 h, 50% per week."
+    },
+    {
+      "id": "opencode-zen",
+      "name": "OpenCode Zen",
+      "base_url": "https://opencode.ai/inference/openai/v1",
+      "default_model": "deepseek-v4.1-flash-free",
+      "keys_url": "https://opencode.ai/console/account#api-keys",
+      "session_header": true,
+      "needs_key": true,
+      "note": "Pay per use, plus free models with an account-wide quota."
+    },
+    {
+      "id": "openrouter",
+      "name": "OpenRouter",
+      "base_url": "https://openrouter.ai/api/v1",
+      "default_model": "",
+      "keys_url": "https://openrouter.ai/keys",
+      "session_header": false,
+      "needs_key": true,
+      "note": "Pay per use across many providers."
+    },
+    {
+      "id": "custom",
+      "name": "Custom or local",
+      "base_url": "",
+      "default_model": "",
+      "keys_url": "",
+      "session_header": false,
+      "needs_key": false,
+      "note": "Any OpenAI-compatible /v1 endpoint, such as Ollama (http://127.0.0.1:11434/v1) or LM Studio."
+    },
+    {
+      "id": "device",
+      "name": "On this device",
+      "base_url": "",
+      "default_model": "gemma-4-e4b",
+      "keys_url": "",
+      "session_header": false,
+      "needs_key": false,
+      "note": "Gemma 4 E4B on the phone's GPU: offline, private, slower and less accurate than the cloud models."
+    }
+  ]
+}

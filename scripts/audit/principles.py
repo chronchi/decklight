@@ -1,4 +1,4 @@
-"""Principle audit of training data and games (retrain plan v2 §3.1 / stage D; docs/play_principles.md).
+"""Principle audit of training data and games (retrain plan v2 §3.1 / stage D; docs/design/play_principles.md).
 
 Engine replay only (laptop OK under `taskset -c 0-3`). Card classes come from the engine's Lua scripts and are used for
 auditing only; the policy never sees a rule. A "hand trap" here = a monster with a Quick Effect whose range includes the
@@ -43,7 +43,7 @@ from decklight.engine.actions import Kind  # noqa: E402
 from decklight.engine.duel import Engine  # noqa: E402
 
 QUICK, HAND = 0x100 | 0x400, 0x2
-LOC_HAND = 2  # obs/action location numbering (docs/obs_spec.md)
+LOC_HAND = 2  # obs/action location numbering (docs/design/obs_spec.md)
 DRAW_STANDBY = (0x1, 0x2)
 
 

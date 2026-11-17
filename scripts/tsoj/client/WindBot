@@ -1,0 +1,34 @@
+#!/usr/bin/env bash
+# tsoj's ygo-windbot starts this once per game (<dir>/WindBot Key=Value...).
+# We play the seat with decklight's raw policy through the EDOPro protocol (DL_AGENT=remote: the PPO learner
+# over DL_POLICY_SOCK, writing episodes to DL_EPISODE_DIR; decklight.rl.remote). DL_CKPT: raw policy checkpoint.
+set -euo pipefail
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT="$(cd "$HERE/../../.." && pwd)"
+
+DECK=""; HOST="127.0.0.1"; PORT=""
+for arg in "$@"; do
+  case "$arg" in
+    Deck=*) DECK="${arg#Deck=}" ;;
+    Host=*) HOST="${arg#Host=}" ;;
+    Port=*) PORT="${arg#Port=}" ;;
+  esac
+done
+[ -n "$DECK" ] && [ -n "$PORT" ] || { echo "WindBot wrapper: missing Deck= or Port=" >&2; exit 2; }
+
+YDK="$ROOT/scripts/tsoj/decks/$DECK.ydk"
+[ -f "$YDK" ] || { echo "WindBot wrapper: no deck $YDK (book name $DECK)" >&2; exit 2; }
+
+for v in DL_CKPT DL_EPISODE_DIR DL_POLICY_SOCK; do  # this script runs in its own directory: relative paths land here
+  p="${!v:-}"; [ -z "$p" ] || [ "${p#/}" != "$p" ] || { echo "WindBot wrapper: $v=$p is not absolute" >&2; exit 2; }
+done
+
+TAG="${DL_TAG:-smoke}"
+LOGDIR="$ROOT/runs/tsoj-arms/$TAG/logs"
+RECORDS="$ROOT/runs/tsoj-arms/$TAG/records"
+mkdir -p "$LOGDIR" "$RECORDS"
+exec env PYTHONUNBUFFERED=1 OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 \
+  uv run --no-sync --project "$ROOT" python -u "$ROOT/scripts/edopro_join.py" \
+  --name P --deckfile "$YDK" --host "$HOST" --port "$PORT" --agent "${DL_AGENT:-raw}" \
+  --timeout 600 --record-dir "$RECORDS" ${DL_CKPT:+--ckpt "$DL_CKPT"} \
+  2> "$LOGDIR/$DECK-$PORT.log"

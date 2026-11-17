@@ -1,0 +1,399 @@
+{
+  "version": 1,
+  "about": "Ask tab tools (v1 set plus P2 replay and bot_view) (docs/plans/ask-tab.md). Each tool is read-only and returns {summary, ref, block}: summary is compact JSON for the model, ref points at the source (card codes, deck id, record ids), block is what the app renders. Schemas follow the OpenAI function format.",
+  "limits": {
+    "tool_calls_per_answer": 8,
+    "rows_per_result": 20
+  },
+  "tools": [
+    {
+      "name": "search_cards",
+      "version": 1,
+      "cost": "fast",
+      "maps_to": "cards_search (docs/design/api/cards-and-decks.md)",
+      "description": "Find cards by name (fuzzy), effect text, or a plain description of what a card does. Use it before naming any card you are not sure of. Returns at most `limit` rows with code, name, one-line stats and the matching effect sentence.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "text": {
+            "type": "string",
+            "description": "Name, effect words, or a description such as \"a light tuner that searches\"."
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "names_text",
+              "describe"
+            ],
+            "description": "names_text (default) for names and effect words; describe for a description of what the card does."
+          },
+          "filters": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "kind": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "monster",
+                    "spell",
+                    "trap"
+                  ]
+                }
+              },
+              "attribute": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "EARTH",
+                    "WATER",
+                    "FIRE",
+                    "WIND",
+                    "LIGHT",
+                    "DARK",
+                    "DIVINE"
+                  ]
+                }
+              },
+              "race": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "Monster type, e.g. Dragon, Spellcaster, Beast-Warrior."
+              },
+              "level": {
+                "type": "array",
+                "items": {
+                  "type": "integer"
+                },
+                "minItems": 2,
+                "maxItems": 2,
+                "description": "[min, max] Level/Rank/Link rating."
+              },
+              "atk": {
+                "type": "array",
+                "items": {
+                  "type": "integer"
+                },
+                "minItems": 2,
+                "maxItems": 2
+              },
+              "def": {
+                "type": "array",
+                "items": {
+                  "type": "integer"
+                },
+                "minItems": 2,
+                "maxItems": 2
+              },
+              "st_type": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "normal",
+                    "quickplay",
+                    "continuous",
+                    "equip",
+                    "field",
+                    "ritual",
+                    "counter"
+                  ]
+                }
+              },
+              "frame": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "normal",
+                    "effect",
+                    "ritual",
+                    "fusion",
+                    "synchro",
+                    "xyz",
+                    "pendulum",
+                    "link",
+                    "token"
+                  ]
+                }
+              },
+              "extra_only": {
+                "type": "boolean"
+              }
+            }
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 20,
+            "default": 10
+          }
+        },
+        "required": [
+          "text"
+        ]
+      },
+      "result": {
+        "summary": "{total, rows: [{code, name, line, snippet}]}",
+        "ref": "{cards: [code, ...]}",
+        "block": "card_rows (tap opens the card sheet)"
+      }
+    },
+    {
+      "name": "card",
+      "version": 1,
+      "cost": "fast",
+      "maps_to": "card_get",
+      "description": "Full text and stats of one card by its code. Use it to quote or explain an effect; never paraphrase a card you have not read with this tool.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "code"
+        ]
+      },
+      "result": {
+        "summary": "{code, name, kind, line, text, archetypes}",
+        "ref": "{cards: [code]}",
+        "block": "card_sheet"
+      }
+    },
+    {
+      "name": "deck",
+      "version": 1,
+      "cost": "fast",
+      "maps_to": "deck_list / deck_get (legality included)",
+      "description": "The user's saved decks. Without `id`, lists them (id, name, counts, legal or not). With `id`, returns the list grouped by card with copies, and the legality problems.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Deck id from the list. Omit to list all decks."
+          }
+        },
+        "required": []
+      },
+      "result": {
+        "summary": "list: {decks: [{id, name, main, extra, side, legal}]}; one: {id, name, main: [{code, name, n}], extra: [...], side: [...], legal: {ok, problems: [text]}}",
+        "ref": "{deck: id} or {decks: [id, ...]}",
+        "block": "deck_card (opens the deck)"
+      }
+    },
+    {
+      "name": "deck_odds",
+      "version": 1,
+      "cost": "fast",
+      "maps_to": "new: exact multivariate hypergeometric",
+      "description": "Exact chance that an opening hand holds at least `min` cards from each group. Give `deck` to count copies from a saved deck, or `deck_size` and each group's `copies` for a hypothetical. Going first draws 5, going second 6.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "deck": {
+            "type": "string",
+            "description": "Saved deck id; copies come from its Main Deck."
+          },
+          "deck_size": {
+            "type": "integer",
+            "minimum": 40,
+            "maximum": 60,
+            "description": "Used when no deck is given."
+          },
+          "hand": {
+            "type": "integer",
+            "enum": [
+              5,
+              6
+            ],
+            "default": 5
+          },
+          "groups": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 4,
+            "items": {
+              "type": "object",
+              "properties": {
+                "label": {
+                  "type": "string",
+                  "description": "Optional; defaults to \"group N\"."
+                },
+                "codes": {
+                  "type": "array",
+                  "items": {
+                    "type": "integer"
+                  },
+                  "description": "Cards in this group (copies counted from `deck`). Required for every group when `deck` is given."
+                },
+                "copies": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "description": "Copies in the group when no deck is given.",
+                  "maximum": 60
+                },
+                "min": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "default": 1
+                },
+                "exact": {
+                  "type": "boolean",
+                  "default": false,
+                  "description": "true: exactly `min`, not at least."
+                }
+              },
+              "required": []
+            }
+          }
+        },
+        "required": [
+          "groups"
+        ]
+      },
+      "result": {
+        "summary": "{p, hand, deck_size, groups: [{label, copies, min, exact}], p_each: [..], unit: percent}",
+        "ref": "{deck: id}",
+        "block": "odds (p as a percentage plus each group's own chance)"
+      },
+      "errors": "a non-whole or out-of-range number, a code not in the deck, groups that share a code, `copies` with a saved deck, copies > deck_size, sum of mins > hand"
+    },
+    {
+      "name": "my_stats",
+      "version": 1,
+      "cost": "fast",
+      "maps_to": "new: queries over records/index.sqlite (columns me, first, won, my_deck, opp_deck, opp_type; games where no seat is ours (me = -1) are left out)",
+      "description": "The user's own game results: win rate and counts, optionally filtered and grouped (by deck, opponent deck, going first or second, mode, or month). Use for any question about how the user has been doing. Bot games only for now; say so when it matters.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "deck": {
+            "type": "string",
+            "description": "The user's deck name (as recorded)."
+          },
+          "opponent_deck": {
+            "type": "string"
+          },
+          "opponent": {
+            "type": "string",
+            "enum": [
+              "bot",
+              "remote"
+            ],
+            "description": "bot = our bot; remote = a person over the network (EDOPro rooms, LAN)."
+          },
+          "mode": {
+            "type": "string",
+            "description": "The bot's strength in bot games: product (full), fast, random."
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "duel",
+              "practice",
+              "puzzle",
+              "all"
+            ],
+            "description": "duel (the default: practice games and puzzles are not counted, as the app says), practice, puzzle, or all."
+          },
+          "since": {
+            "type": "string",
+            "description": "ISO date."
+          },
+          "group_by": {
+            "type": "string",
+            "enum": [
+              "deck",
+              "opponent_deck",
+              "first",
+              "mode",
+              "kind",
+              "month"
+            ]
+          }
+        },
+        "required": []
+      },
+      "result": {
+        "summary": "{games, wins, losses, unknown, win_rate (percent of decided games, null when none), opponents_counted, note, group_by?, groups?: [{key, games, wins, losses, unknown, win_rate}]}",
+        "ref": "{records: [id, ...] (newest first, at most 50)}",
+        "block": "stats_chart (bars per group, n shown on each bar)"
+      }
+    },
+    {
+      "name": "replay",
+      "version": 1,
+      "cost": "fast",
+      "maps_to": "new: the match record (ADR 0010) replayed through the engine; the user's view only",
+      "description": "The user's saved games, replayed. Without `record`, lists the latest games (id, decks, who went first, result) and the sample games that ship with the app (`samples`, ids sample-1 to sample-3: example games, never the user's; say so when you use one). With `record` (an id from the list, or \"last\"), returns the game turn by turn: what each player did as the user saw it, and the numbers of the user's decisions. Add `turn` for every event and decision of one turn (options and the pick), or `decision` for the board at that decision (both fields, hand, graveyards, chain, the options and what the user picked). The opponent's hidden cards stay hidden.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "record": {
+            "type": "string",
+            "description": "Game id from the list (a sample game's id too), or \"last\" for the user's newest game."
+          },
+          "turn": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "One turn in full."
+          },
+          "decision": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "A decision number from the game's log: the board there."
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 20,
+            "description": "How many games to list (default 10)."
+          }
+        },
+        "required": []
+      },
+      "result": {
+        "summary": "list: {games: [{id, when, mode, your_deck, opponent_deck, opponent, you_went, result, turns}], samples: [{id, sample, ...}]}; game: {id, ..., your_decisions, final_lp, log: [{turn, player, lp_at_start, events, your_decisions}]}; turn: {turn, player, lp_at_start, events, your_decisions: [{decision, phase, prompt, options, you_picked}]}; decision: {decision, of, turn, phase, your_turn, you: {lp, hand, monsters, spells_traps, graveyard, banished, deck, extra_deck}, opponent: {... hand as a count}, chain, options, you_picked}",
+        "ref": "{record: id}",
+        "block": "replay_board (later)"
+      }
+    },
+    {
+      "name": "bot_view",
+      "version": 1,
+      "cost": "slow",
+      "maps_to": "practice hint (Ask the bot) on a saved decision: policy top 3 + one-step-lookahead win chance",
+      "description": "What the bot would have done at one of the user's past decisions: its top 3 options with its probability and an estimated win chance for each, the user's own pick with the same numbers, and the win chance before the decision. Use it to judge a play (\"was this a mistake?\"); find the decision number with replay first. Takes a few seconds.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "record": {
+            "type": "string",
+            "description": "Game id from replay's list, or \"last\"."
+          },
+          "decision": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Decision number from replay."
+          }
+        },
+        "required": [
+          "record",
+          "decision"
+        ]
+      },
+      "result": {
+        "summary": "{id, decision, turn, phase, prompt, win_chance_now, bot_top: [{option, bot_prob, win_chance}], you_picked: {option, bot_prob, win_chance}, note}",
+        "ref": "{record: id, decision}",
+        "block": "bot_view (later)"
+      }
+    }
+  ]
+}

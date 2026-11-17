@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- The web client's night background (the bg token in web/styles.css): launch, splash and icon background. -->
+    <color name="night">#FF141310</color>
+    <!-- The light theme's background (web/styles.css light theme bg token). -->
+    <color name="paper">#FFF5F1E8</color>
+    <!-- The System choice's splash: paper by day, night with the phone in dark mode (values-night). -->
+    <color name="splash_system">#FFF5F1E8</color>
+</resources>

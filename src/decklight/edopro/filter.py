@@ -111,7 +111,9 @@ def filtered_message(raw: bytes, viewer: int) -> bytes | None:
             return raw
         loc = raw[11]  # first card's location (code u32, controller u8, location u8)
         if loc in (C.LOCATION_DECK, C.LOCATION_EXTRA):
-            return raw if viewer == player else None
+            # a viewer also sees its own cards revealed this way (e.g. its Extra Deck)
+            own = all(raw[10 + 10 * i] == viewer for i in range(count))
+            return raw if viewer == player or own else None
         return raw
     if t in (C.MSG_SHUFFLE_HAND, C.MSG_SHUFFLE_EXTRA):
         player = raw[1]
@@ -126,6 +128,13 @@ def filtered_message(raw: bytes, viewer: int) -> bytes | None:
         _prev = _loc(raw, 5)
         con, loc, _seq, pos = _loc(raw, 15)
         if viewer == con:
+            return raw
+        # a card returned from the hand to the Deck/Extra Deck as a cost or material is
+        # shown first (the ygo-arbiter does this), so scripts can see the return.
+        _pcon, ploc, _pseq, _ppos = _prev
+        reason = _u32(raw, 25) if len(raw) >= 29 else 0
+        if ploc == C.LOCATION_HAND and loc & (C.LOCATION_DECK + C.LOCATION_EXTRA) and (
+                reason & (C.REASON_COST | C.REASON_MATERIAL)):
             return raw
         if not (loc & (C.LOCATION_GRAVE + C.LOCATION_OVERLAY)) and (
             (loc & (C.LOCATION_DECK + C.LOCATION_HAND)) or (pos & _FACEDOWN)

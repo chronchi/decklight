@@ -4,8 +4,14 @@
 //   bot S/T:     [Deck] [S5..S1] [Extra]    bot monster: [GY] [M5..M1] [Field]
 import {cardHTML, thumbHTML, esc, isHidden} from "./card.js";
 
-function slotHTML(card, ctx, extraCls) {
+// zp: {index, label} when a "choose a zone" prompt lets you tap this slot.
+function slotHTML(card, ctx, extraCls, zp) {
   const cls = "slot" + (extraCls ? " " + extraCls : "") + (card ? "" : " empty");
+  if (zp) {
+    return '<button class="' + cls + ' zpick" data-opt="' + zp.index + '" aria-label="' + esc(zp.label) + '">' +
+      (card ? cardHTML(card, Object.assign({}, ctx, {kb: false})) : '<span class="zmark" aria-hidden="true"></span>') +
+      (zp.hint ? '<span class="hintbadge" aria-hidden="true">' + zp.hint.rank + " · " + zp.hint.pct + "%</span>" : "") + "</button>";
+  }
   if (!card) return '<div class="' + cls + '"></div>';
   return '<div class="' + cls + '">' + cardHTML(card, ctx) + "</div>";
 }
@@ -69,9 +75,10 @@ export function sideHTML(side, opts) {
     kb: true,
     hint: (c && c.uid && hb[c.uid]) || null,
   });
-  const m = side.mzone.map((c) => slotHTML(c, ctx(c, "m")));
-  const s = side.szone.map((c) => slotHTML(c, ctx(c, "s")));
-  const field = slotHTML(side.field, ctx(side.field, "f"), "side fieldz");
+  const zp = opts.zpick || {m: {}, s: {}};
+  const m = side.mzone.map((c, i) => slotHTML(c, ctx(c, "m"), "", zp.m[i]));
+  const s = side.szone.map((c, i) => slotHTML(c, ctx(c, "s"), "", zp.s[i]));
+  const field = slotHTML(side.field, ctx(side.field, "f"), "side fieldz", zp.f);
   const gy = gyHTML(side, who, opts.mock);
   if (opts.mirror) {
     return '<div class="zrow" data-row="szone">' + deckHTML(side, who) + s.slice().reverse().join("") + extraHTML(side, who) + "</div>" +
@@ -100,7 +107,7 @@ export function midHTML(view, opts) {
   const at = PHASES.findIndex(([k]) => k === view.phase);
   const track = PHASES.map((_, i) => '<i class="' + (i < at ? "done" : i === at ? "cur" : "") + '"></i>').join("");
   const name = at >= 0 ? PHASES[at][1] : view.phase;
-  const emzSlot = (mine, theirs) => {
+  const emzSlot = (mine, theirs, zp) => {
     const c = mine || theirs;
     const hb = opts.hint || {};
     const ctx = {
@@ -110,17 +117,17 @@ export function midHTML(view, opts) {
       rot: !!(c && (c.pos === "def" || c.pos === "set")),
       hint: (c && c.uid && hb[c.uid]) || null,
     };
-    return slotHTML(c, ctx, "emz" + (theirs && !mine ? " bot" : ""));
+    return slotHTML(c, ctx, "emz" + (theirs && !mine ? " bot" : ""), zp);
   };
   const you = view.you.emz || [null, null];
   const bot = view.bot.emz || [null, null];
   return (
     '<div class="phase ' + (yours ? "you" : "bot") + '">' +
-    '<span class="who">' + (names ? esc(names[yours ? 0 : 1]) + "’s turn" : (yours ? "Your turn" : "Bot's turn")) + "</span>" +
+    '<span class="sr-only">' + (names && names[yours ? 0 : 1] ? esc(names[yours ? 0 : 1]) + "’s turn" : (yours ? "Your turn" : "Bot's turn")) + "</span>" +
     '<span class="pname">' + esc(name) + "</span>" +
     '<span class="track" aria-hidden="true">' + track + "</span></div>" +
-    emzSlot(you[0], bot[1]) + emzSlot(you[1], bot[0]) +
-    '<div class="turnno"><span>Turn</span><b>' + view.turn + "</b></div>"
+    emzSlot(you[0], bot[1], (opts.zpick || {}).left) + emzSlot(you[1], bot[0], (opts.zpick || {}).right) +
+    '<div class="turnno"><span><i class="mk ' + (yours ? "you" : "bot") + '" aria-hidden="true"></i>Turn</span><b>' + view.turn + "</b></div>"
   );
 }
 
@@ -171,13 +178,27 @@ export function barHTML(side, who, opts) {
   let right = "";
   if (who === "bot") {
     if (opts.thinking) {
-      right += '<span class="think"><span class="pulse"></span>thinking ' +
+      // A person (room duel) is "choosing"; the bot is "thinking".
+      right += '<span class="think"><span class="pulse"></span>' + (opts.thinking.who ? "choosing " : "thinking ") +
         Math.max(0, Math.round(opts.thinking.seconds || 0)) + "s</span>";
     }
     const n = (side.hand || []).length;
-    right += '<span class="handcount" aria-label="Bot hand ' + n + '"><i></i><i></i><b>' + n + "</b></span>";
-    right += '<button class="iconbtn" data-act="gamemenu" aria-label="Game menu">' +
-      '<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 6h12M4 10h12M4 14h12"/></svg></button>';
+    right += '<span class="handcount" aria-label="' + esc(opts.name || "Bot") + ' hand ' + n + '"><i></i><i></i><b>' + n + "</b></span>";
+    if (opts.pauseShow) {
+      // Lucide "pause" / "play" (lucide.dev), ISC licence.
+      right += '<button class="iconbtn pausebtn" data-act="pausetoggle" aria-pressed="' + (opts.paused ? "true" : "false") +
+        '" aria-label="' + (opts.paused ? "Resume" : "Pause") + '">' +
+        (opts.paused
+          ? '<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><polygon points="6 3 20 12 6 21 6 3"/></svg>'
+          : '<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="14" y="4" width="4" height="16" rx="1"/><rect x="6" y="4" width="4" height="16" rx="1"/></svg>') +
+        "</button>";
+    }
+    // Watch's player (opts.noMenu) has no game menu: Watch's own bar holds a replay's controls (speed, Export, close),
+    // and the duel's rows (Surrender, Back to lobby, the bot) mean nothing in a replay.
+    if (!opts.noMenu) {
+      right += '<button class="iconbtn" data-act="gamemenu" aria-label="Game menu">' +
+        '<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 6h12M4 10h12M4 14h12"/></svg></button>';
+    }
   } else {
     right += opts.phaseBtns || "";
     right += '<button class="iconbtn" data-act="log" aria-label="Open log">' +
@@ -195,15 +216,15 @@ export function barHTML(side, who, opts) {
 // Small thumbnail used by the chain strip.
 // Chain links: the controller is a shape (your number in a circle, the bot's in a square seal)
 // as well as a colour; a negated link keeps a slash. Spoken as one line per link.
-export function chainHTML(chain, mock, negated) {
+export function chainHTML(chain, mock, negated, opp = "decklight", solving = 0) {
   if (!chain || !chain.length) return "";
   return '<span class="clabel" aria-hidden="true">Chain</span>' + chain.map((link, i) => {
     const c = link.card;
     const newest = i === chain.length - 1 ? " new" : "";
     const neg = negated && negated.has(i + 1);
     const bot = link.controller === "bot";
-    const said = "Chain " + (i + 1) + ": " + ((c && c.name) || "a card") + ", " + (bot ? "decklight" : "yours") + (neg ? ", negated" : "");
-    return '<div class="link ' + (bot ? "bot" : "you") + newest + (neg ? " neg" : "") + '" role="img" aria-label="' + esc(said) + '"' +
+    const said = "Chain " + (i + 1) + ": " + ((c && c.name) || "a card") + ", " + (bot ? opp + "'s" : "yours") + (neg ? ", negated" : "");
+    return '<div class="link ' + (bot ? "bot" : "you") + newest + (neg ? " neg" : "") + (solving === i + 1 ? " solving" : "") + '" role="img" aria-label="' + esc(said) + '"' +
       (c && c.uid ? ' data-uid="' + esc(c.uid) + '"' : "") + ' title="' + esc(((c && c.name) || "") + (neg ? " (negated)" : "")) + '">' +
       thumbHTML(c, mock) + '<span class="cn">' + (i + 1) + "</span>" +
       (neg ? '<span class="negx"></span>' : "") + "</div>";

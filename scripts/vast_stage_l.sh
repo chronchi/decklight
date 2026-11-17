@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Retrain stage L (docs/retrain/plan-v2.md §Stage L, plan-v3): honest decisive window labels (hw).
+# Retrain stage L (docs/lab/retrain/plan-v2.md §Stage L, plan-v3): honest decisive window labels (hw).
 # 1. self-play by base_r3 vs itself (league self:1) on pool train decks only (gen_selfplay excludes decks/pool/HOLDOUT
 #    and kewl-tune; newcards/gauntlet are other dirs), both seats, all turns;
 # 2. decisive-label search over those games (scripts/gen_window.py --ho 1 --windows all): chain windows on either turn

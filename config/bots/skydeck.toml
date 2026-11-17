@@ -1,0 +1,4 @@
+name = "skydeck"
+description = "Product default policy (no search) on a Sky Striker list legal under EDOPro 0TCG 2026.10."
+agent = "raw"
+deck = "decks/custom/skydeck-tcg2026-10.ydk"

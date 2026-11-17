@@ -25,6 +25,7 @@ from decklight.edopro.product_bot import product_to_host
 from decklight.engine import constants as C
 from decklight.engine.duel import DuelConfig, Engine
 from decklight.engine.env import PyEnv
+from decklight.engine.query import CardState
 from decklight.play import agents as AG
 from decklight.play.stream import StreamState, StreamView, deck_card_state, history_from_message
 from decklight.play.view import EngineView
@@ -87,8 +88,9 @@ def _resolve_cfg(engine, rec):
     order = ("gauntlet", "pool", "newcards") if ygoagent else ("pool", "newcards", "gauntlet")
     cands = []
     for name in rec["decks"]:
-        paths = [p for d in order for p in (ROOT / "decks" / d).glob("*.ydk")
-                 if p.stem.lower() == name.lower()]
+        paths = [
+            p for d in order for p in (ROOT / "decks" / d).glob("*.ydk") if p.stem.lower() == name.lower()
+        ]
         assert paths, f"deck {name} not found"
         cands.append(paths)
     for p0 in cands[0]:
@@ -101,8 +103,12 @@ def _resolve_cfg(engine, rec):
                     if obs is None:
                         break
                     obs = env.step(int(c))
-                if (obs is None and env.done and env.winner == rec["winner"]
-                        and [e.actor for e in env.history] == rec["actors"]):
+                if (
+                    obs is None
+                    and env.done
+                    and env.winner == rec["winner"]
+                    and [e.actor for e in env.history] == rec["actors"]
+                ):
                     return cfg
             except (IndexError, ValueError):
                 continue
@@ -166,8 +172,7 @@ def _stream_game(rec, seat):
             assert st.decision is not None and st.needs_answer
             assert [o.kind for o in st.opts] == [o.kind for o in env.opts]
             ta, sa = truth_obs[ti], st.obs()
-            for k in ("cards", "card_mask", "global", "chain", "chain_mask",
-                      "actions", "action_mask"):
+            for k in ("cards", "card_mask", "global", "chain", "chain_mask", "actions", "action_mask"):
                 assert ta[k].shape == sa[k].shape, k
                 assert (ta[k] == sa[k]).all(), f"{k} differs at step {i}"
             acts = ta["actions"]
@@ -242,9 +247,15 @@ def test_history_from_message_table():
     assert [(r.row[0], r.row[2], r.public) for r in rows] == [(5, 0, False), (19, 0, False)]
 
     desc = (7 << 20) | 9
-    raw = (bytes([C.MSG_CHAINING]) + struct.pack("<I", 102) + _loc(1, C.LOCATION_SZONE, 1, 1)
-           + bytes([1, C.LOCATION_SZONE]) + struct.pack("<I", 2) + struct.pack("<Q", desc)
-           + struct.pack("<I", 1))
+    raw = (
+        bytes([C.MSG_CHAINING])
+        + struct.pack("<I", 102)
+        + _loc(1, C.LOCATION_SZONE, 1, 1)
+        + bytes([1, C.LOCATION_SZONE])
+        + struct.pack("<I", 2)
+        + struct.pack("<Q", desc)
+        + struct.pack("<I", 1)
+    )
     (row,) = history_from_message(st, raw)
     assert (row.row[0], row.row[2], row.row[3], row.row[4], row.public) == (6, 102, 7, 9, True)
 
@@ -267,11 +278,88 @@ def test_history_from_message_table():
     assert history_from_message(st, bytes([C.MSG_SUMMONING]) + struct.pack("<I", 1) + _loc(0, 4, 0)) == []
     st.chain.append(None)
     assert history_from_message(st, bytes([C.MSG_SUMMONING]) + struct.pack("<I", 1) + _loc(1, 4, 0)) == []
-    assert history_from_message(st, bytes([C.MSG_POS_CHANGE]) + struct.pack("<I", 1) + bytes([1, 4, 0, 1, 4])) == []
+    assert (
+        history_from_message(st, bytes([C.MSG_POS_CHANGE]) + struct.pack("<I", 1) + bytes([1, 4, 0, 1, 4]))
+        == []
+    )
     st.chain.clear()
     st.turn_player = 0
     assert history_from_message(st, bytes([C.MSG_NEW_PHASE]) + struct.pack("<H", C.PHASE_BATTLE_START)) == []
     assert history_from_message(st, bytes([C.MSG_DRAW, 1, 0, 0, 0, 0])) == []
+
+
+# --- 3b. tracker fixes (A2b-3b) ---
+
+
+def _db(*codes, attack=1800, defense=1200):
+    from types import SimpleNamespace
+
+    card = SimpleNamespace(
+        type=C.TYPE_MONSTER | C.TYPE_EFFECT,
+        level=4,
+        attribute=C.ATTRIBUTE_LIGHT,
+        race=1,
+        attack=attack,
+        defense=defense,
+        lscale=0,
+        rscale=0,
+        link_marker=0,
+    )
+    return {code: card for code in codes}
+
+
+def test_overlay_attach_and_detach_track_the_holder():
+    st = StreamState([10, 10], [20], {}, seat=0)
+    holder = CardState(0, C.LOCATION_EXTRA, 0, code=20)
+    st.feed(F.encode_update_data(0, C.LOCATION_EXTRA, [holder], False))
+    # xyz material: to.location carries the holder's zone | OVERLAY, to.position the index
+    attach = (
+        bytes([C.MSG_MOVE])
+        + struct.pack("<I", 10)
+        + _loc(0, C.LOCATION_MZONE, 0)
+        + _loc(0, C.LOCATION_EXTRA | C.LOCATION_OVERLAY, 0, 0)
+        + struct.pack("<I", 0)
+    )
+    st.feed(attach)
+    assert st.query_location(0, C.LOCATION_EXTRA)[0].overlay == (10,)
+    detach = (
+        bytes([C.MSG_MOVE])
+        + struct.pack("<I", 10)
+        + _loc(0, C.LOCATION_EXTRA | C.LOCATION_OVERLAY, 0, 0)
+        + _loc(0, C.LOCATION_GRAVE, 0, C.POS_FACEUP)
+        + struct.pack("<I", 0)
+    )
+    st.feed(detach)
+    assert st.query_location(0, C.LOCATION_EXTRA)[0].overlay == ()
+    assert st.query_location(0, C.LOCATION_GRAVE)[0].code == 10
+
+
+def test_set_then_pos_change_fills_card_db_stats():
+    st = StreamState([99], [], _db(99), seat=0)
+    st.feed(
+        bytes([C.MSG_MOVE])
+        + struct.pack("<I", 0)
+        + _loc(0, C.LOCATION_HAND, 0)
+        + _loc(0, C.LOCATION_SZONE, 0, 10)
+        + struct.pack("<I", 0)
+    )
+    st.feed(
+        bytes([C.MSG_POS_CHANGE])
+        + struct.pack("<I", 99)
+        + bytes([0, C.LOCATION_SZONE, 0, 10, C.POS_FACEUP_ATTACK])
+    )
+    card = st.query_location(0, C.LOCATION_SZONE)[0]
+    assert card.code == 99 and card.type & C.TYPE_MONSTER
+    assert (card.attack, card.defense, card.level) == (1800, 1200, 4)
+
+
+def test_own_deck_excludes_a_hidden_own_card_held_by_the_opponent():
+    st = StreamState([10, 20], [], _db(10, 20), seat=0)
+    assert len(st._own_deck()) == 2
+    # our card, face-down under the opponent's control: owner 0, code hidden (0)
+    hidden = CardState(1, C.LOCATION_MZONE, 0, code=0, owner=0)
+    st.feed(F.encode_update_data(1, C.LOCATION_MZONE, [hidden], False))
+    assert len(st._own_deck()) == 1
 
 
 # --- 4. agents ---
@@ -288,11 +376,10 @@ def test_raw_agent_registered(monkeypatch):
             n = next(iter(batch.values())).shape[0]
             return np.tile(np.asarray(self.z, np.float32), (n, 1))
 
+    monkeypatch.setattr("decklight.search.product.resolve_product_paths", lambda *a: ("ckpt", None, "emb"))
     monkeypatch.setattr(
-        "decklight.search.product.resolve_product_paths", lambda *a: ("ckpt", None, "emb")
-    )
-    monkeypatch.setattr(
-        "decklight.search.product.load_policy", lambda ckpt, emb, device="cpu", **k: FakePolicy([0.1, 0.5, 0.3])
+        "decklight.search.product.load_policy",
+        lambda ckpt, emb, device="cpu", **k: FakePolicy([0.1, 0.5, 0.3]),
     )
     agent = AG.make_agent("raw", ckpt="x", emb="y")
     assert agent.needs == frozenset()
@@ -361,13 +448,36 @@ def test_deck_card_state_matches_engine():
         hand = Counter(c.code for c in env.duel.query_location(0, C.LOCATION_HAND) if c)
         rest = list((Counter(deck.main) - hand).elements())
         want = sorted(
-            (c.code, c.type, c.level, c.rank, c.attribute, c.race, c.attack, c.defense,
-             c.base_attack, c.base_defense, c.status & STATUS_OBS_MASK)
-            for c in env.duel.query_location(0, C.LOCATION_DECK) if c
+            (
+                c.code,
+                c.type,
+                c.level,
+                c.rank,
+                c.attribute,
+                c.race,
+                c.attack,
+                c.defense,
+                c.base_attack,
+                c.base_defense,
+                c.status & STATUS_OBS_MASK,
+            )
+            for c in env.duel.query_location(0, C.LOCATION_DECK)
+            if c
         )
         got = sorted(
-            (c.code, c.type, c.level, c.rank, c.attribute, c.race, c.attack, c.defense,
-             c.base_attack, c.base_defense, c.status & STATUS_OBS_MASK)
+            (
+                c.code,
+                c.type,
+                c.level,
+                c.rank,
+                c.attribute,
+                c.race,
+                c.attack,
+                c.defense,
+                c.base_attack,
+                c.base_defense,
+                c.status & STATUS_OBS_MASK,
+            )
             for c in (deck_card_state(code, engine.cards, 0, i) for i, code in enumerate(rest))
         )
         assert got == want
@@ -378,8 +488,12 @@ def test_refresh_packet_matches_host_query():
     cfg = DuelConfig(_deck("blue-eyes"), _deck("blackwing"), seed=7)
     env = PyEnv(engine, cfg, auto_single=False)
     env.reset()
-    for ref in (("loc", 0, C.LOCATION_MZONE), ("loc", 1, C.LOCATION_HAND),
-                ("loc", 0, C.LOCATION_EXTRA), ("single", 0, C.LOCATION_HAND, 0)):
+    for ref in (
+        ("loc", 0, C.LOCATION_MZONE),
+        ("loc", 1, C.LOCATION_HAND),
+        ("loc", 0, C.LOCATION_EXTRA),
+        ("single", 0, C.LOCATION_HAND, 0),
+    ):
         for viewer in (0, 1):
             p = F.refresh_packet(env.duel, ref, viewer)
             cards = env.duel.query_location(ref[1], ref[2])
@@ -392,3 +506,16 @@ def test_refresh_packet_matches_host_query():
                 assert p == F.encode_update_data(ref[1], ref[2], cards, public)
             else:
                 assert p == F.encode_update_card(ref[1], ref[2], ref[3], cards[ref[3]], public)
+
+
+def test_take_after_our_deck_sort_demotes_known_positions():
+    """Our answer to a SORT_CARD of our deck top forgets the positions (a recorded game crashed here)."""
+    from types import SimpleNamespace
+    view = StreamView([1, 1], {1: None}, seat=0)
+    view.state.deck_seqs, view.state.deck_stat = {0: 1}, {0: 0}
+    view._dec = SimpleNamespace(choose=lambda i: b"\x00")
+    view._opts = [SimpleNamespace(card=None, kind=None)]
+    view._record = lambda opt: None
+    view._clear_deck_after = True
+    assert view.take(0) == b"\x00"
+    assert view.state.deck_seqs == {} and not view._clear_deck_after

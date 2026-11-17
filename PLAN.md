@@ -3,11 +3,17 @@
 Goal: give the system a `.ydk`; it learns to pilot that deck at (eventually) beyond-pro level,
 and a *new* deck should need little or no extra training. Planned 2026-10-01.
 
+## 00. Master plan (2026-11-10, user-approved; supersedes the sections below where they differ)
+`docs/plans/2026-11-09-master-plan.md`: signal from Forge at scale (archetypes of any era, forbidden cards allowed) distilled
+into the base, and from human games; then league PPO with the specialists as opponents; cycles of specialists → distil →
+league with a +2 pp stop rule (3–4 cycles within \$X with the efficiency levers); search v2 on the Rust core; final exam.
+Base = X. Why: NOTEBOOK 2026-11-10 entries (what paid brought new information; what failed reshuffled existing signal).
+
 ## 0a. Next steps after the strategy review (2026-10-08 — user-agreed; supersedes the M-order below where they differ)
 
 Why: since base_r3 (vs ygo-agent 42.3%) ~10 attempts were neutral or worse; they all trained, selected and judged
 against base_r3 itself, and the RL league's ygo-agent games mostly used decks ygo-agent cannot read (bug).
-Reviews: `docs/reviews/2026-10-08-{opus-5.5,muse-spark-1.3}.md`; decisions: NOTEBOOK 2026-10-08 03:20–04:40.
+Reviews: `docs/lab/reviews/2026-10-08-{opus-5.5,muse-spark-1.3}.md`; decisions: NOTEBOOK 2026-10-08 03:20–04:40.
 
 0. **E0 (laptop, $X):** deck-aware league (ygo-agent only on gauntlet-vs-gauntlet episodes, fixed extra opponents,
    per-opponent win rates) + paired ygo-agent gate on ~744 deals (sign test) as the primary acceptance metric.
@@ -22,7 +28,7 @@ Reviews: `docs/reviews/2026-10-08-{opus-5.5,muse-spark-1.3}.md`; decisions: NOTE
    greedy) plus Kolibri **pass-rate curriculum** (§3.2.2.5: train on positions the agent sometimes solves) and
    **hinted self-distillation** (OPSD §3.2.1.4: on failures show the expert/search line in context, distil hinted →
    unhinted). If search does not beat ygo-agent, this becomes step 2.
-   Gaps filled from the muse league-plan check (`docs/reviews/2026-10-08-league-plan-muse.md`; the plan above stands,
+   Gaps filled from the muse league-plan check (`docs/lab/reviews/2026-10-08-league-plan-muse.md`; the plan above stands,
    these are additions):
    - **Opponent shares made explicit:** ygo-agent ≈ 25% of episodes, all gauntlet pairs (`--ga-episode-share 0.5
      --ga-ygo-share 0.5`); self 30%; ft-swv (base_r2) fixed 10%; greedy 5%; the rest base_r3 + snapshots (PFSP). Do
@@ -58,7 +64,7 @@ banked winning lines directly memorises them (trained hard starts 0.10 → 0.58)
 starts. Proposed (awaiting the user): the product is base_r3 + search; spend on the search, not on policy training.
 
 **Plan after step 3 (2026-10-09, user: "Ok I approve except the scale up, for now let's focus on everything else";
-review `docs/reviews/2026-10-09-search-plan-opus.md`, NOTEBOOK 08:10):** the product is base_r3 + honest search.
+review `docs/lab/reviews/2026-10-09-search-plan-opus.md`, NOTEBOOK 08:10):** the product is base_r3 + honest search.
 - P0 ($X): `search_match --opp ygoagent` reproduces the card's ygo-agent games move for move (≥ 99% of the 744 deals;
   the two harnesses disagree at ygo-agent chain windows today); per-sample rollout scores logged per searched decision.
 - P1 (~$X): E2 re-run (raw + search) on the old 744 deals vs the fixed ygo-agent = the new reference.
@@ -85,7 +91,7 @@ review `docs/reviews/2026-10-09-search-plan-opus.md`, NOTEBOOK 08:10):** the pro
   +11.8); guards holdout 0.676, new-card 0.656; 55 s/game single-process, 1.3 s/search. $X.
 
 **Hidden-information bound (2026-10-09/10, user: "Can you write step 2 into a plan and implement it and start now?";
-review `docs/reviews/2026-10-09-history-arch-opus.md` Stage 1, NOTEBOOK 2026-10-10 00:55).** Question: is hidden-card
+review `docs/lab/reviews/2026-10-09-history-arch-opus.md` Stage 1, NOTEBOOK 2026-10-10 00:55).** Question: is hidden-card
 knowledge a real lever against ygo-agent, and does history predict hidden cards? Before any LSTM / history-aware model.
 - (a) Oracle arm (~$X): hppo's search with the true hidden state (`--honest 0`), 744 deals vs ygo-agent, paired with
   P1 hppo. Gate: oracle − honest ≥ +3 pp (p < 0.1) → hidden information is worth working on for the search.

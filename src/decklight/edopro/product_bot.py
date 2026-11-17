@@ -303,7 +303,10 @@ class ProductDriver:
         self.res = None
         self.error: BaseException | None = None
         self.finished = threading.Event()
-        self._bot_delivered = 0  # next_bot pointer into bot-actor entries of played
+        # next_bot pointer into played. The prefix is mirrored into played too (its choices are in the inflight
+        # list), but its bot choices were already played by the host: start past them (A4 2026-11-02: an undo
+        # with bot moves in its prefix handed the host stale bot choices -> "product driver diverged").
+        self._bot_delivered = len(self._prefix)
         self._thread: threading.Thread | None = None
         self._inflight: dict = {}
         self._wrap_rollouts()

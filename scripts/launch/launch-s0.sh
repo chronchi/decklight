@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Search plan S0 gate: base_r3 + test-time search vs raw base_r3 (docs/search_plan.md), 448 games per variant
+# Search plan S0 gate: base_r3 + test-time search vs raw base_r3 (docs/plans/search_plan.md), 448 games per variant
 # (8 report-card pool decks, all ordered pairs, 4 seeds, both seats). Variants: value v2 h1 / board h1 / value v2 h2.
 # Many-core box with a >=20 GB GPU (s0-2021: a T4 sat at 100% util and OOMed at 45 procs). Cap 5 h.
 cd "$(dirname "$0")/../.."

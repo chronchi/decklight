@@ -16,6 +16,12 @@
 #   ANCHOR_GAMES (256 per distilled pack, the F3 share), EPOCHS (2), LR (1e-4), CARD_SEED0 (43000), NEW_GAMES (1536),
 #   OLD_ARCHS (the 5 X4b archetypes), OLD_GAMES (768), RES_PAIRS (decks/forge/f2/pairs/reserve.pairs),
 #   RES_GAMES (3072), GA_SEEDS (24), VAR_CAP (40m),
+#   STOP_AFTER_FT (0; 1 = the cycle smoke: train the specialists, report it/s and stop; prereg 2026-11-10),
+#   STOP_AFTER_PACK (0; 1 = train + pack + validate ARCHS and stop: cycle 1 splits the fine-tunes over several boxes),
+#   ARCHS=none (no fine-tunes: verify / distill / card the PACKS_IN packs only),
+#   EXTRA_POOL (0; 1 = the SPLIT's train lists join the fine-tunes' opponent pool and its held-out lists leave it,
+#   master plan step 1), OLD_PAIRS (decks/x4b/pairs: the card's arch-<a>.pairs for OLD_ARCHS),
+#   OBS_HIST (1: the student trains on observable history, train_bc --observable-history; NOTEBOOK 2026-11-10 12:45),
 #   SMOKE (1: FT_ITERS 4, LOOK_GAMES 64, K 2, TEACH_GAMES 40, ANCHOR_GAMES 120, EPOCHS 2,
 #   every card arm --games-limit 256, PROBE_NPROC 2, the train_bc milestone only alerts).
 # Usage: bash scripts/vast_forge_round.sh <name>. Do NOT run on the laptop (vast GPU only).
@@ -32,6 +38,12 @@ NEXT_NAME=${NEXT_NAME:-r1}
 SPLIT=${SPLIT:-decks/forge/f2/split.json}
 SDIR=$(dirname "$SPLIT")
 ARCHS=${ARCHS:-$(python3 -c "import json; print(' '.join(json.load(open('$SPLIT'))['archs']))")}
+[ "$ARCHS" = none ] && ARCHS=""
+FT_EXTRA=""
+if [ "${EXTRA_POOL:-0}" = 1 ]; then
+  FT_EXTRA="-- --extra-pool $(ls "$SDIR"/train/*/*.ydk | tr '\n' ' ')--drop-pool $(ls "$SDIR"/heldout/*.ydk | xargs -n1 basename | sed 's/\.ydk$//' | tr '\n' ' ')"
+fi
+OLD_PAIRS=${OLD_PAIRS:-decks/x4b/pairs}
 PACKS_IN=${PACKS_IN:-data/forge/packs}
 FT_ITERS=${FT_ITERS:-40}; PAR=${PAR:-2}; SHARE=${SHARE:-0.5}; FT_HOURS=${FT_HOURS:-3}
 OPPS=${OPPS:-decks/x4b/opponents.txt}
@@ -69,18 +81,27 @@ export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 ( while true; do echo "$(date +%T) $(nvidia-smi --query-gpu=utilization.gpu,memory.used --format=csv,noheader,nounits 2>/dev/null | tr -d ' ') $(cut -d' ' -f1 /proc/loadavg) $(free -g | awk '/Mem/{print $3}')G"; sleep 30; done ) > "$OUT/usage.txt" 2>&1 &
 USAGE_PID=$!
 [ -f "$REL" ] || { alert "missing release $REL"; exit 3; }
+# finetune_deck bundles each specialist with the product files at the end: check them now, not after 40 iterations
+uv run --no-sync python -c "from decklight.search.product import resolve_product_paths as r; r(None, None, None)" \
+  2> "$OUT/product-check.txt" || { alert "$(tail -1 "$OUT/product-check.txt")"; exit 3; }
 [ -f "$(dirname "$REL")/metrics.jsonl" ] || { alert "missing $(dirname "$REL")/metrics.jsonl"; exit 3; }
 for a in $ARCHS; do
   n=$(ls "$SDIR/train/$a"/*.ydk 2>/dev/null | wc -l)
   [ "$n" = 3 ] || { alert "$SDIR/train/$a has $n lists, not 3"; exit 3; }
 done
 for d in "$PACKS_IN"/*/; do
+  [ -d "$d" ] || continue  # no pre-built packs (PACKS_IN empty or absent)
   uv run --no-sync python scripts/forge.py validate "$d" --release "$REL" > "$OUT/validate-$(basename "$d").txt" 2>&1 \
     || { alert "pre-built pack $d invalid: $(grep -h '^ERROR' "$OUT/validate-$(basename "$d").txt" | head -1)"; exit 3; }
 done
 
 n_arch=$(echo "$ARCHS" | wc -w)
 [ "$PAR" -gt "$n_arch" ] && PAR=$n_arch
+[ "$PAR" -lt 1 ] && PAR=1  # ARCHS=none
+# a fine-tune peaks at ~9 GB of GPU memory (c1 smoke 2026-11-10: PAR 2 OOMed a 12 GB RTX 3060 at iteration 3)
+gpu_gb=$(nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits | head -1); gpu_gb=$((gpu_gb / 1024))
+max_par=$((gpu_gb / ${FT_GPU_GB:-10})); [ "$max_par" -lt 1 ] && max_par=1
+if [ "$PAR" -gt "$max_par" ]; then alert "PAR $PAR > $max_par fine-tunes in ${gpu_gb} GB GPU memory: PAR=$max_par"; PAR=$max_par; fi
 
 # ---- 1. train specialists ----------------------------------------------------------------------------------
 watch_ft() { # <ftdir> <tag>: metrics.jsonl -> PROGRESS every 30 s + the MS_IT milestone (alert only)
@@ -110,7 +131,7 @@ ft_one() { # <arch> <slot>
   # shellcheck disable=SC2046
   if taskset -c "$lo-$hi" uv run --no-sync python scripts/finetune_deck.py --deck $(ls "$SDIR/train/$a"/*.ydk) \
       --init "$REL" --out "$dir" --iters "$FT_ITERS" --hours "$FT_HOURS" --share "$SHARE" \
-      --device cuda > "$OUT/ft-$a.log" 2>&1; then
+      --device cuda $FT_EXTRA > "$OUT/ft-$a.log" 2>&1; then
     tick "ft-$a done ($(grep -o '"iterations": [0-9]*' "$dir/FINETUNE.json"))"
   else
     alert "ft-$a failed: $(grep -h 'ALERT\|Error' "$OUT/ft-$a.log" | tail -1)"
@@ -120,7 +141,7 @@ ft_one() { # <arch> <slot>
   rm -f "$dir/rl/last.pt"  # optimizer state only; policy/ and value/ (fp16 exports) stay
 }
 
-tick "fine-tunes from $REL: $ARCHS, $FT_ITERS it each, $PAR at a time, $((J / PAR)) cores each"
+[ -n "$ARCHS" ] && tick "fine-tunes from $REL: $ARCHS, $FT_ITERS it each, $PAR at a time, $((J / PAR)) cores each"
 # each run takes a free core slot (slot-<s>.busy markers); round-robin by launch order put two runs on the same cores
 # while the other slot idled (F2 2026-10-30: lunalight and trains both on cores 0-12)
 rm -f "$OUT"/slot-*.busy
@@ -135,6 +156,24 @@ for a in $ARCHS; do
   ( ft_one "$a" "$slot"; rm -f "$OUT/slot-$slot.busy" ) &
 done
 for a in $ARCHS; do while [ ! -f "$OUT/ft-$a/DONE_FT" ]; do sleep 20; done; done
+if [ "${STOP_AFTER_FT:-0}" = 1 ]; then  # cycle smoke: timing per iteration is the result
+  for a in $ARCHS; do
+    uv run --no-sync python - "$OUT/ft-$a/rl/metrics.jsonl" "$a" <<'PY' | tee -a "$OUT/PROGRESS"
+import json, statistics as st, sys
+rows = [json.loads(l) for l in open(sys.argv[1]) if l.strip()]
+rows = [r for r in rows if "iter_s" in r]
+if not rows:
+    print(f"ALERT {sys.argv[2]}: no iterations with iter_s"); sys.exit(0)
+med = lambda k: st.median(r[k] for r in rows if k in r) if any(k in r for r in rows) else float("nan")
+print(f"SMOKE {sys.argv[2]}: {len(rows)} it, median iter_s {med('iter_s'):.1f} rollout_s {med('rollout_s'):.1f} "
+      f"update_s {med('update_s'):.1f}")
+PY
+  done
+  grep -h "^ALERT" "$OUT/PROGRESS" >> "$OUT/ALERT" 2>/dev/null
+  kill "$USAGE_PID" 2>/dev/null
+  tick "smoke done"
+  exit 0
+fi
 
 mkdir -p "$OUT/packs"
 TRAINED=""
@@ -159,6 +198,12 @@ done
 for d in "$PACKS_IN"/*/; do
   cp -r "$d" "$OUT/packs/$(basename "$d")"
 done
+if [ "${STOP_AFTER_PACK:-0}" = 1 ]; then
+  for a in $ARCHS; do [ -d "$OUT/packs/$a" ] || alert "$a: no pack"; done
+  kill "$USAGE_PID" 2>/dev/null
+  tick "packs done:$TRAINED"
+  exit 0
+fi
 PACKS=$(ls "$OUT/packs")
 [ -n "$PACKS" ] || { alert "no packs (no pre-built packs and every fine-tune failed)"; exit 3; }
 tick "packs: $PACKS (trained:$TRAINED)"
@@ -367,10 +412,11 @@ uv run --no-sync python scripts/build_bc_shards.py --glob "$OUT/pgames/*/*.jsonl
 grep -h "^ALERT" "$OUT/shards.txt" >> "$OUT/ALERT"
 tick "shards $(grep -m1 '^samples' "$OUT/shards.txt")"
 HOLD="kewl-tune $(tr '\n' ' ' < decks/pool/HOLDOUT)"
+OBS_FLAG=""; [ "${OBS_HIST:-1}" = 1 ] && OBS_FLAG="--observable-history"
 # shellcheck disable=SC2086
 uv run --no-sync python scripts/train_bc.py --shards data/cache/bc_shards_forge --emb data/cards/emb/qwen3-0.6b-d512.npz \
   --out "$OUT/$NEXT_NAME" --init "$REL" --epochs "$EPOCHS" --batch 512 --lr "$LR" --holdout $HOLD --select-on last \
-  --kinds pgame --require-kinds pgame --kl-ref-map "$OUT/kl_map.json" --kl-ref-coef 1.0 --ce-coef 0 \
+  --kinds pgame --require-kinds pgame --kl-ref-map "$OUT/kl_map.json" --kl-ref-coef 1.0 --ce-coef 0 $OBS_FLAG \
   > "$OUT/train.txt" 2>&1 &
 TP=$!
 ( seen=0; while kill -0 $TP 2>/dev/null; do  # each epoch; milestone: pack-teacher KL falls from epoch 0 to 1
@@ -407,6 +453,14 @@ cmp -s "$OUT/$NEXT_NAME/best.pt" "$REL" && { alert "$NEXT_NAME/best.pt is $REL";
 
 # ---- 4. release card (fixed n) ---------------------------------------------------------------------------------
 find decks/x4b decks/forge -name '*.ydk' -exec cp {} "$OUT/decks/" \;
+for a in $OLD_ARCHS; do  # old packs' pairs also name pool and variant lists
+  for d in $(tr ':' '\n' < "$OLD_PAIRS/arch-$a.pairs" | sort -u); do
+    [ -f "$OUT/decks/$d.ydk" ] && continue
+    f=$(find decks -name "$d.ydk" | head -1)
+    [ -n "$f" ] || { alert "old pairs deck $d not found"; exit 3; }
+    cp "$f" "$OUT/decks/"
+  done
+done
 N="--ckpt $OUT/$NEXT_NAME/best.pt"
 V=""
 for a in $ACCEPTED; do
@@ -416,9 +470,9 @@ for a in $ACCEPTED; do
 done
 # shellcheck disable=SC2086
 for a in $OLD_ARCHS; do
-  s=$(uv run --no-sync python scripts/forge_round_prep.py seeds --pairs "decks/x4b/pairs/arch-$a.pairs" --games "$OLD_GAMES")
-  V="$V;R-$a|--pairs @decks/x4b/pairs/arch-$a.pairs --seeds $s"
-  V="$V;N-$a|$N --pairs @decks/x4b/pairs/arch-$a.pairs --seeds $s"
+  s=$(uv run --no-sync python scripts/forge_round_prep.py seeds --pairs "$OLD_PAIRS/arch-$a.pairs" --games "$OLD_GAMES")
+  V="$V;R-$a|--pairs @$OLD_PAIRS/arch-$a.pairs --seeds $s"
+  V="$V;N-$a|$N --pairs @$OLD_PAIRS/arch-$a.pairs --seeds $s"
 done
 s=$(uv run --no-sync python scripts/forge_round_prep.py seeds --pairs "$RES_PAIRS" --games "$RES_GAMES")
 V="$V;R-res|--pairs @$RES_PAIRS --seeds $s"
